@@ -14,4 +14,5 @@ export default defineConfig({
     },
     server: {
         port: parseInt(env.DEV_SERVER_PORT || '5173'),
+    }
 })
