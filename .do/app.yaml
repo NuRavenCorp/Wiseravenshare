@@ -1,0 +1,56 @@
+name: wiseravenshare
+region: nyc
+
+services:
+  - name: api
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Wiseravenshare.Server/Dockerfile
+    source_dir: /
+    http_port: 10000
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    health_check:
+      http_path: /health
+    envs:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: CLIENT_ORIGIN
+        value: ${APP_URL}
+      - key: ConnectionStrings__DefaultConnection
+        value: ${db.DATABASE_URL}
+        type: SECRET
+    routes:
+      - path: /api
+      - path: /health
+      - path: /weatherforecast
+
+static_sites:
+  - name: web
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: main
+      deploy_on_push: true
+    source_dir: wiseravenshare.client
+    build_command: npm ci && npm run build
+    output_dir: dist
+    index_document: index.html
+    error_document: index.html
+    envs:
+      - key: VITE_API_URL
+        value: ${APP_URL}/api
+      - key: VITE_RAVENSIGHT_API_URL
+        value: ${APP_URL}/api/ravensight
+    routes:
+      - path: /
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    size: db-s-dev-database
+    num_nodes: 1
