@@ -22,7 +22,7 @@ services:
       - key: CLIENT_ORIGIN
         value: ${APP_URL}
       - key: ConnectionStrings__DefaultConnection
-        value: ${db.DATABASE_URL}
+        value: Host=${db.host};Port=${db.port};Database=${db.database};Username=${db.username};Password=${db.password};SSL Mode=Require;Trust Server Certificate=true
         type: SECRET
     routes:
       - path: /api
