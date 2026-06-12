@@ -1,0 +1,95 @@
+﻿:root {
+    --primary-color: #131a2f;
+    --secondary-color: #1e2a4a;
+    --accent-color: #a33a5d;
+    --highlight-color: #4f74d6;
+    --light-color: #d7e1ff;
+    --text-color: #f4f7ff;
+    --bg-color: #090f1f;
+    --card-bg: #151f3a;
+    --border-color: #2b3a66;
+    --success-color: #4caf50;
+    --warning-color: #ff9800;
+    --error-color: #f44336;
+    --urgent: #ef4444;
+    --high: #f59e0b;
+    --medium: #10b981;
+    --low: #3b82f6;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    background-image: radial-gradient(circle at 20% 0%, rgba(79, 116, 214, 0.18), transparent 45%), radial-gradient(circle at 80% 10%, rgba(163, 58, 93, 0.16), transparent 40%);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--secondary-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--highlight-color);
+    border-radius: 4px;
+}
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--light-color);
+    }
+
+/* Utility Classes */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.flex {
+    display: flex;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    gap: 20px;
+}
+
+@media (max-width: 1200px) {
+    .grid-3 {
+        grid-template-columns: 280px 1fr;
+    }
+
+    .right-column {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .grid-3 {
+        grid-template-columns: 1fr;
+    }
+
+    .left-column {
+        display: none;
+    }
+}

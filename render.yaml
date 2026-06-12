@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: wiseravenshare-api
+    env: docker
+    dockerfilePath: ./Wiseravenshare.Server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: CLIENT_ORIGIN
+        value: https://wise-raven.com
+      - key: ConnectionStrings__DefaultConnection
+        value: Host=<postgres-host>;Port=5432;Database=wiseravenshare_db;Username=wiseravenshare_user;Password=<postgres-password>;SSL Mode=Require;Trust Server Certificate=true
+
+  - type: web
+    name: wiseravenshare-app
+    env: static
+    rootDir: wiseravenshare.client
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_API_URL
+        value: https://api.wise-raven.com/api
+      - key: VITE_RAVENSIGHT_API_URL
+        value: https://api.wise-raven.com/api/ravensight

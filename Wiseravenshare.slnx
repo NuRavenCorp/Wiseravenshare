@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="wiseravenshare.client/wiseravenshare.client.esproj">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="Wiseravenshare.Server/Wiseravenshare.Server.csproj" />
+</Solution>
