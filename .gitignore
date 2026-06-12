@@ -1,0 +1,35 @@
+# Build outputs
+**/bin/
+**/obj/
+**/dist/
+**/node_modules/
+**/.vs/
+**/publish/
+**/build-verify/
+**/publish-test/
+
+# Compiled binaries / runtime artifacts at any level
+*.dll
+*.pdb
+*.exe
+*.nupkg
+*.runtimeconfig.json
+*.deps.json
+runtimes/
+
+# Secrets / env
+.env
+*.env
+__*.ENV__*
+__.ENV__*
+
+# Logs
+**/logs/
+*.log
+
+# Media uploads
+**/MediaStorage/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,29 @@
+﻿/* Dark Theme Overrides */
+.theme-dark {
+    --primary-color: #131a2f;
+    --secondary-color: #1e2a4a;
+    --accent-color: #a33a5d;
+    --highlight-color: #4f74d6;
+    --light-color: #d7e1ff;
+    --text-color: #f4f7ff;
+    --bg-color: #090f1f;
+    --card-bg: #151f3a;
+    --border-color: #2b3a66;
+}
+
+/* Light Theme */
+.theme-light {
+    --primary-color: #ffffff;
+    --secondary-color: #f7fafc;
+    --accent-color: #edf2f7;
+    --highlight-color: #4a5568;
+    --light-color: #2d3748;
+    --text-color: #1a202c;
+    --bg-color: #f7fafc;
+    --card-bg: #ffffff;
+    --border-color: #e2e8f0;
+}
+
+/* Smooth Theme Transition */
+body {
+    transition: background-color 0.3s ease, color 0.3s ease;
