@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 
 const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, onBookmark, bookmarkLabel = 'Bookmark' }) => {
@@ -6,7 +6,10 @@ const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, 
     const [commentText, setCommentText] = useState('');
     const [comments, setComments] = useState(post.comments || []);
 
-    const truthBadge = truthEngine.getTruthBadge(post.truthScore || truthEngine.getTruthScore(post.content));
+    const truthBadge = useMemo(() => {
+        const score = post.truthScore ?? truthEngine.getTruthScore(post.content || '');
+        return truthEngine.getTruthBadge(score);
+    }, [post.truthScore, post.content]);
 
     const addComment = () => {
         if (!commentText.trim()) {

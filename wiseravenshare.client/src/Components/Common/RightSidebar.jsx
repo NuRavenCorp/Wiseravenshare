@@ -3,6 +3,8 @@ import { computeTrendingTopics } from '../../Services/EngagementAlgorithms';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 
+const MAX_POSTS_FOR_SIDEBAR = 200;
+
 const seedUsers = [
     { id: 'seed-techguru', name: 'TechGuru', handle: '@techguru', avatar: 'TG' },
     { id: 'seed-truthseeker', name: 'TruthSeeker', handle: '@truthseeker', avatar: 'TS' },
@@ -14,7 +16,7 @@ const seedUsers = [
 const readPosts = () => {
     const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
     const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
-    return [...feedPosts, ...discoverPosts];
+    return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
 };
 
 const formatFollowers = (count) => {
@@ -36,6 +38,8 @@ const RightSidebar = ({ onNavigate }) => {
     ]);
 
     useEffect(() => {
+        let refreshTimer;
+
         const refreshSuggestions = () => {
             if (!user?.id) {
                 setSuggestedUsers(seedUsers.slice(0, 3).map((seed, index) => ({
@@ -110,7 +114,7 @@ const RightSidebar = ({ onNavigate }) => {
             try {
                 const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
-                const mergedPosts = [...feedPosts, ...discoverPosts];
+                const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
                 setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
             } catch (error) {
                 setTrendingTopics(computeTrendingTopics([], 6));
@@ -121,8 +125,13 @@ const RightSidebar = ({ onNavigate }) => {
         refreshSuggestions();
 
         const listener = () => {
-            refreshTrending();
-            refreshSuggestions();
+            if (refreshTimer) {
+                clearTimeout(refreshTimer);
+            }
+            refreshTimer = setTimeout(() => {
+                refreshTrending();
+                refreshSuggestions();
+            }, 120);
         };
         window.addEventListener('wiseraven:posts-updated', listener);
         window.addEventListener('wiseraven:social-updated', listener);
@@ -138,6 +147,9 @@ const RightSidebar = ({ onNavigate }) => {
 
         return () => {
             clearInterval(interval);
+            if (refreshTimer) {
+                clearTimeout(refreshTimer);
+            }
             window.removeEventListener('wiseraven:posts-updated', listener);
             window.removeEventListener('wiseraven:social-updated', listener);
         };

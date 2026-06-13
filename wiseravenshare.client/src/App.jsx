@@ -35,10 +35,10 @@ const App = () => {
     const { user, isAuthenticated, loading, login, register, logout } = useAuth();
     const { addToast } = useNotification();
 
-    useState(() => {
+    useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';
         if (localStorage.getItem(migrationKey) === 'done') {
-            return true;
+            return;
         }
 
         const isSuspiciousLongToken = (value) => {
@@ -82,8 +82,37 @@ const App = () => {
         sanitizeStoredArray('wiseBookmarks', sanitizePosts);
         sanitizeStoredArray('wiseMessagesConversations', sanitizePosts);
         localStorage.setItem(migrationKey, 'done');
-        return true;
-    });
+    }, []);
+
+    useEffect(() => {
+        const perfTrimKey = 'wisePerfTrimV2';
+        if (localStorage.getItem(perfTrimKey) === 'done') {
+            return;
+        }
+
+        const trimStoredArray = (storageKey, maxItems) => {
+            try {
+                const raw = JSON.parse(localStorage.getItem(storageKey) || '[]');
+                if (!Array.isArray(raw)) {
+                    localStorage.removeItem(storageKey);
+                    return;
+                }
+
+                if (raw.length > maxItems) {
+                    localStorage.setItem(storageKey, JSON.stringify(raw.slice(0, maxItems)));
+                }
+            } catch {
+                localStorage.removeItem(storageKey);
+            }
+        };
+
+        trimStoredArray('wiseRecentPosts', 120);
+        trimStoredArray('wiseDiscoverPosts', 120);
+        trimStoredArray('wiseBookmarks', 200);
+        trimStoredArray('wiseMessagesConversations', 80);
+        trimStoredArray('wiseLikedPosts', 200);
+        localStorage.setItem(perfTrimKey, 'done');
+    }, []);
 
     const addTruthAlert = (type, message, correction = null) => {
         const alert = {

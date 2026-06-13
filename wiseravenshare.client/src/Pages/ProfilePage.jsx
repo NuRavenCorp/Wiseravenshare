@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
 import PostCard from '../Components/Feed/PostCard.jsx';
@@ -224,6 +224,40 @@ const ProfilePage = () => {
         stopCamera();
     };
 
+    const derivedStats = useMemo(() => {
+        const handle = String(user?.handle || user?.username || '').replace(/^@/, '').toLowerCase();
+        const mentionPatterns = handle
+            ? [
+                new RegExp(`@${handle}\b`, 'i'),
+                new RegExp(`\b${handle}\b`, 'i')
+            ]
+            : [];
+
+        const allPosts = Array.isArray(posts) ? posts : [];
+        const receivedLikes = allPosts.reduce((sum, post) => {
+            const authoredByUser = post?.userId === user?.id || post?.user?.id === user?.id;
+            return authoredByUser ? sum + (Number(post?.likes) || 0) : sum;
+        }, 0);
+
+        const mentions = allPosts.reduce((sum, post) => {
+            const postText = `${post?.content || ''} ${Array.isArray(post?.comments) ? post.comments.map((comment) => comment?.content || '').join(' ') : ''}`;
+            const matched = mentionPatterns.some((pattern) => pattern.test(postText));
+            const mentionedInMetadata = post?.mentions?.some?.((mention) => {
+                const mentionHandle = String(mention?.handle || mention?.username || mention || '').replace(/^@/, '').toLowerCase();
+                return mentionHandle === handle;
+            });
+            return sum + (matched || mentionedInMetadata ? 1 : 0);
+        }, 0);
+
+        return {
+            posts: allPosts.length,
+            followers: stats.followers,
+            following: stats.following,
+            mentions,
+            likes: receivedLikes
+        };
+    }, [posts, stats.followers, stats.following, user?.handle, user?.id, user?.username]);
+
     const repliesPosts = posts.filter((p) => {
         const comments = Array.isArray(p.comments) ? p.comments : [];
         return comments.some((c) => c?.user?.id === user?.id || c?.userId === user?.id);
@@ -232,10 +266,11 @@ const ProfilePage = () => {
     const mediaPosts = posts.filter((p) => p.mediaUrl || p.youtubeUrl || p.tiktokUrl || p.podcastUrl);
 
     const tabCounts = {
-        posts: posts.length,
+        posts: derivedStats.posts,
         replies: repliesPosts.length,
         media: mediaPosts.length,
-        likes: likedPosts.length
+        likes: likedPosts.length,
+        mentions: derivedStats.mentions
     };
 
     const tabs = [
@@ -507,46 +542,61 @@ const ProfilePage = () => {
 
                 {/* Stats */}
                 <div style={{
-                    display: 'flex',
-                    gap: '30px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '12px',
                     marginTop: '20px',
                     paddingTop: '20px',
                     borderTop: '1px solid var(--border-color)'
                 }}>
-                    <div>
-                        <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{stats.posts}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--highlight-color)' }}>Posts</div>
-                    </div>
-                    <button
-                        onClick={() => setAssociationView('followers')}
-                        style={{
-                            background: associationView === 'followers' ? 'rgba(255,255,255,0.08)' : 'transparent',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '10px',
-                            padding: '10px 14px',
-                            color: 'var(--text-color)',
-                            cursor: 'pointer',
-                            textAlign: 'left'
-                        }}
-                    >
-                        <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{stats.followers}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--highlight-color)' }}>Followers</div>
-                    </button>
-                    <button
-                        onClick={() => setAssociationView('following')}
-                        style={{
-                            background: associationView === 'following' ? 'rgba(255,255,255,0.08)' : 'transparent',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '10px',
-                            padding: '10px 14px',
-                            color: 'var(--text-color)',
-                            cursor: 'pointer',
-                            textAlign: 'left'
-                        }}
-                    >
-                        <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{stats.following}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--highlight-color)' }}>Following</div>
-                    </button>
+                    {[
+                        { label: 'Posts', value: derivedStats.posts, interactive: false },
+                        { label: 'Followers', value: derivedStats.followers, interactive: true, view: 'followers' },
+                        { label: 'Following', value: derivedStats.following, interactive: true, view: 'following' },
+                        { label: 'Mentions', value: derivedStats.mentions, interactive: false },
+                        { label: 'Likes', value: derivedStats.likes, interactive: false }
+                    ].map((metric) => {
+                        const metricCard = (
+                            <>
+                                <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{metric.value}</div>
+                                <div style={{ fontSize: '14px', color: 'var(--highlight-color)' }}>{metric.label}</div>
+                            </>
+                        );
+
+                        if (metric.interactive) {
+                            return (
+                                <button
+                                    key={metric.label}
+                                    onClick={() => setAssociationView(metric.view)}
+                                    style={{
+                                        background: associationView === metric.view ? 'rgba(255,255,255,0.08)' : 'transparent',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '10px',
+                                        padding: '10px 14px',
+                                        color: 'var(--text-color)',
+                                        cursor: 'pointer',
+                                        textAlign: 'left'
+                                    }}
+                                >
+                                    {metricCard}
+                                </button>
+                            );
+                        }
+
+                        return (
+                            <div
+                                key={metric.label}
+                                style={{
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '10px',
+                                    padding: '10px 14px'
+                                }}
+                            >
+                                {metricCard}
+                            </div>
+                        );
+                    })}
                 </div>
 
                 <div style={{ marginTop: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px', border: '1px solid var(--border-color)' }}>

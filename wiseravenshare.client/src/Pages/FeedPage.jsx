@@ -6,6 +6,8 @@ import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
+const MAX_STORED_POSTS = 120;
+
 const FeedPage = ({ addTruthAlert }) => {
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
@@ -59,7 +61,7 @@ const FeedPage = ({ addTruthAlert }) => {
     }, [currentUser.id]);
 
     useEffect(() => {
-        localStorage.setItem('wiseRecentPosts', JSON.stringify(posts));
+        localStorage.setItem('wiseRecentPosts', JSON.stringify(posts.slice(0, MAX_STORED_POSTS)));
         window.dispatchEvent(new Event('wiseraven:posts-updated'));
     }, [posts]);
 
