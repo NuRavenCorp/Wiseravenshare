@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const MessagesPage = () => {
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messageInput, setMessageInput] = useState('');
+    const [isRavenDelivering, setIsRavenDelivering] = useState(false);
+    const [flightToken, setFlightToken] = useState(0);
+    const ravenTimerRef = useRef(null);
     const [conversations, setConversations] = useState([
         {
             id: 1,
@@ -33,6 +36,12 @@ const MessagesPage = () => {
         }
     ]);
 
+    useEffect(() => () => {
+        if (ravenTimerRef.current) {
+            clearTimeout(ravenTimerRef.current);
+        }
+    }, []);
+
     const sendMessage = () => {
         if (!messageInput.trim() || !selectedConversation) return;
 
@@ -48,6 +57,16 @@ const MessagesPage = () => {
                 ? { ...conv, messages: [...conv.messages, newMessage], lastMessage: messageInput }
                 : conv
         ));
+
+        setFlightToken(Date.now());
+        setIsRavenDelivering(true);
+        if (ravenTimerRef.current) {
+            clearTimeout(ravenTimerRef.current);
+        }
+        ravenTimerRef.current = setTimeout(() => {
+            setIsRavenDelivering(false);
+        }, 1400);
+
         setMessageInput('');
 
         // Simulate reply
@@ -176,7 +195,7 @@ const MessagesPage = () => {
 
             {/* Message Area */}
             {selectedConversation ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
                     <div style={{
                         padding: '20px',
                         borderBottom: '1px solid var(--border-color)',
@@ -297,6 +316,16 @@ const MessagesPage = () => {
                             <i className="fas fa-paper-plane"></i>
                         </button>
                     </div>
+
+                    {isRavenDelivering && (
+                        <div className="raven-flight-overlay" key={flightToken}>
+                            <div className="raven-flight-trail"></div>
+                            <div className="raven-flight-icon" aria-hidden="true">
+                                <i className="fas fa-crow"></i>
+                            </div>
+                            <div className="raven-flight-label">Delivering message...</div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div style={{
