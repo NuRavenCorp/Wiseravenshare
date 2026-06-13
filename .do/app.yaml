@@ -1,6 +1,7 @@
 name: wiseravenshare
 region: nyc
 
+# ── API service (ASP.NET Core / Docker) ──────────────────────────────────────
 services:
   - name: api
     github:
@@ -10,25 +11,30 @@ services:
     dockerfile_path: Wiseravenshare.Server/Dockerfile
     source_dir: /
     http_port: 10000
-    instance_size_slug: basic-xxs
+    instance_size_slug: basic-xs
     instance_count: 1
     health_check:
       http_path: /health
+      initial_delay_seconds: 20
+      period_seconds: 30
+      success_threshold: 1
+      failure_threshold: 3
     envs:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
       - key: ASPNETCORE_URLS
         value: http://0.0.0.0:10000
       - key: CLIENT_ORIGIN
-        value: ${APP_URL}
+        value: ${web.PUBLIC_URL}
       - key: ConnectionStrings__DefaultConnection
-        value: Host=${db.host};Port=${db.port};Database=${db.database};Username=${db.username};Password=${db.password};SSL Mode=Require;Trust Server Certificate=true
+        value: ${DATABASE_URL}
         type: SECRET
     routes:
       - path: /api
       - path: /health
       - path: /weatherforecast
 
+# ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
   - name: web
     github:
@@ -42,15 +48,16 @@ static_sites:
     error_document: index.html
     envs:
       - key: VITE_API_URL
-        value: ${APP_URL}/api
+        value: ${api.PUBLIC_URL}/api
       - key: VITE_RAVENSIGHT_API_URL
-        value: ${APP_URL}/api/ravensight
+        value: ${api.PUBLIC_URL}/api/ravensight
     routes:
       - path: /
 
+# ── Managed Postgres database ─────────────────────────────────────────────────
 databases:
-  - name: db
+  - name: wiseravenshare-db
     engine: PG
     version: "16"
-    size: db-s-dev-database
-    num_nodes: 1
+    production: false
+
