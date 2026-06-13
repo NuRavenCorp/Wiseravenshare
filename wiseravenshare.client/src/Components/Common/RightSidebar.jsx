@@ -26,18 +26,36 @@ const formatFollowers = (count) => {
     return `${count}`;
 };
 
-const normalizeSearchValue = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
+const normalizeSearchValue = (value) => String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '');
+
+const collapseForNameMatch = (value) => normalizeSearchValue(value).replace(/[^a-z0-9]/g, '');
 
 const profileSearchScore = (profile, query) => {
     const cleanQuery = normalizeSearchValue(query);
     if (!cleanQuery) return 0;
+    const collapsedQuery = collapseForNameMatch(query);
 
     const name = normalizeSearchValue(profile?.name);
     const handle = normalizeSearchValue(profile?.handle);
     const id = normalizeSearchValue(profile?.id);
+    const collapsedName = collapseForNameMatch(profile?.name);
+    const collapsedHandle = collapseForNameMatch(profile?.handle);
+    const collapsedId = collapseForNameMatch(profile?.id);
 
     if (name.startsWith(cleanQuery) || handle.startsWith(cleanQuery)) return 3;
     if (name.includes(cleanQuery) || handle.includes(cleanQuery)) return 2;
+
+    if (collapsedQuery) {
+        if (collapsedName.startsWith(collapsedQuery) || collapsedHandle.startsWith(collapsedQuery)) return 3;
+        if (collapsedName.includes(collapsedQuery) || collapsedHandle.includes(collapsedQuery)) return 2;
+        if (collapsedId.includes(collapsedQuery)) return 1;
+    }
+
     if (id.includes(cleanQuery)) return 1;
     return 0;
 };
