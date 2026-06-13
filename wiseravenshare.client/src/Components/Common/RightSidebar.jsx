@@ -6,6 +6,7 @@ import { socialGraphService } from '../../Services/SocialGraph';
 const MAX_POSTS_FOR_SIDEBAR = 200;
 
 const seedUsers = [
+    { id: 'seed-wiseravenshare', name: 'WiseravenShare Community', handle: '@wiseravenshare', avatar: 'WS' },
     { id: 'seed-techguru', name: 'TechGuru', handle: '@techguru', avatar: 'TG' },
     { id: 'seed-truthseeker', name: 'TruthSeeker', handle: '@truthseeker', avatar: 'TS' },
     { id: 'seed-aiexpert', name: 'AIExpert', handle: '@aiexpert', avatar: 'AE' },
@@ -25,10 +26,40 @@ const formatFollowers = (count) => {
     return `${count}`;
 };
 
+const normalizeSearchValue = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
+
+const profileSearchScore = (profile, query) => {
+    const cleanQuery = normalizeSearchValue(query);
+    if (!cleanQuery) return 0;
+
+    const name = normalizeSearchValue(profile?.name);
+    const handle = normalizeSearchValue(profile?.handle);
+    const id = normalizeSearchValue(profile?.id);
+
+    if (name.startsWith(cleanQuery) || handle.startsWith(cleanQuery)) return 3;
+    if (name.includes(cleanQuery) || handle.includes(cleanQuery)) return 2;
+    if (id.includes(cleanQuery)) return 1;
+    return 0;
+};
+
+const readStoredProfiles = () => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem('wiseUserProfiles') || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return [];
+        }
+        return Object.values(parsed).filter(Boolean);
+    } catch {
+        return [];
+    }
+};
+
 const RightSidebar = ({ onNavigate }) => {
     const [trendingTopics, setTrendingTopics] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
     const [followingIds, setFollowingIds] = useState([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
     const { user } = useAuth();
 
     const [stockData, setStockData] = useState([
@@ -155,6 +186,64 @@ const RightSidebar = ({ onNavigate }) => {
         };
     }, [user?.id]);
 
+    useEffect(() => {
+        const query = normalizeSearchValue(searchQuery);
+        if (!query) {
+            setSearchResults([]);
+            return;
+        }
+
+        const postProfiles = readPosts()
+            .map((post) => ({
+                id: post?.user?.id || post?.userId,
+                name: post?.user?.name,
+                handle: post?.user?.handle,
+                avatar: post?.user?.avatar
+            }))
+            .filter((profile) => profile?.id);
+
+        const combined = [...seedUsers, ...readStoredProfiles(), ...postProfiles];
+        const deduped = combined.reduce((acc, profile) => {
+            if (!profile?.id || acc.some((item) => item.id === profile.id)) {
+                return acc;
+            }
+
+            const normalizedProfile = {
+                id: profile.id,
+                name: profile.name || 'User',
+                handle: profile.handle || profile.username || `@${profile.id}`,
+                avatar: profile.avatar || (String(profile.name || 'U').charAt(0).toUpperCase())
+            };
+
+            socialGraphService.registerUserProfile(normalizedProfile);
+            acc.push(normalizedProfile);
+            return acc;
+        }, []);
+
+        const ranked = deduped
+            .filter((profile) => profile.id !== user?.id)
+            .map((profile) => {
+                const score = profileSearchScore(profile, query);
+                const counts = socialGraphService.getCounts(profile.id);
+                return {
+                    ...profile,
+                    score,
+                    followers: formatFollowers(counts.followers),
+                    followersCount: counts.followers,
+                    isFollowing: followingIds.includes(profile.id)
+                };
+            })
+            .filter((profile) => profile.score > 0)
+            .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                if (b.followersCount !== a.followersCount) return b.followersCount - a.followersCount;
+                return a.name.localeCompare(b.name);
+            })
+            .slice(0, 8);
+
+        setSearchResults(ranked);
+    }, [searchQuery, followingIds, user?.id]);
+
     const toggleFollow = (targetUserId) => {
         if (!user?.id || !targetUserId || targetUserId === user.id) {
             return;
@@ -190,6 +279,8 @@ const RightSidebar = ({ onNavigate }) => {
                 <input
                     type="text"
                     placeholder="Search Wise-Raven..."
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
                     style={{
                         flex: 1,
                         border: 'none',
@@ -202,6 +293,79 @@ const RightSidebar = ({ onNavigate }) => {
                     <i className="fas fa-search"></i>
                 </button>
             </div>
+
+            {searchQuery.trim().length > 0 && (
+                <div style={{
+                    background: 'var(--card-bg)',
+                    borderRadius: '12px',
+                    padding: '12px',
+                    marginBottom: '20px',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                        {searchResults.length > 0
+                            ? `${searchResults.length} people found`
+                            : 'No people found'}
+                    </div>
+                    {searchResults.map((result) => (
+                        <div
+                            key={`search-${result.id}`}
+                            style={{
+                                padding: '10px 0',
+                                borderBottom: '1px solid var(--border-color)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '12px'
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div style={{
+                                    width: '34px',
+                                    height: '34px',
+                                    borderRadius: '50%',
+                                    background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 'bold',
+                                    fontSize: '12px'
+                                }}>
+                                    {result.avatar}
+                                </div>
+                                <div>
+                                    <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{result.name}</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{result.handle}</div>
+                                    <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>{result.followers} followers</div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => toggleFollow(result.id)}
+                                style={{
+                                    background: result.isFollowing
+                                        ? 'transparent'
+                                        : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                    color: 'var(--text-color)',
+                                    border: `1px solid ${result.isFollowing ? 'var(--highlight-color)' : 'transparent'}`,
+                                    padding: '5px 10px',
+                                    borderRadius: '999px',
+                                    cursor: 'pointer',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    whiteSpace: 'nowrap'
+                                }}
+                            >
+                                {result.isFollowing ? 'Following' : 'Follow'}
+                            </button>
+                        </div>
+                    ))}
+                    {searchResults.length === 0 && (
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)', padding: '6px 0 2px' }}>
+                            Try a name or handle like "wiseravenshare" or "@wiseravenshare".
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Trending Section */}
             <div style={{
