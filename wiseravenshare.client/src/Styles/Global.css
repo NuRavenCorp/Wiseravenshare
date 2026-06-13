@@ -93,3 +93,117 @@ body {
         display: none;
     }
 }
+
+.raven-flight-overlay {
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 86px;
+    height: 34px;
+    pointer-events: none;
+    z-index: 3;
+    overflow: hidden;
+}
+
+.raven-flight-trail {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    transform: translateY(-50%);
+    background: linear-gradient(90deg, rgba(215, 225, 255, 0.05) 0%, rgba(79, 116, 214, 0.35) 42%, rgba(163, 58, 93, 0.35) 68%, rgba(215, 225, 255, 0.05) 100%);
+    animation: ravenTrailFade 1.4s ease-out forwards;
+}
+
+.raven-flight-icon {
+    position: absolute;
+    top: 50%;
+    left: -24px;
+    font-size: 18px;
+    color: var(--light-color);
+    text-shadow: 0 0 12px rgba(79, 116, 214, 0.7);
+    transform: translateY(-50%);
+    animation: ravenFlightPath 1.4s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+}
+
+.raven-flight-icon i {
+    display: inline-block;
+    animation: ravenWingFlap 0.32s ease-in-out infinite;
+}
+
+.raven-flight-label {
+    position: absolute;
+    right: 6px;
+    top: -2px;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--light-color);
+    opacity: 0;
+    animation: ravenLabelFade 1.4s ease-out forwards;
+}
+
+@keyframes ravenFlightPath {
+    0% {
+        left: -24px;
+        transform: translateY(-50%) rotate(-8deg) scale(0.92);
+        opacity: 0;
+    }
+    12% {
+        opacity: 1;
+    }
+    45% {
+        transform: translateY(-64%) rotate(-3deg) scale(1);
+    }
+    80% {
+        transform: translateY(-40%) rotate(2deg) scale(1.03);
+        opacity: 1;
+    }
+    100% {
+        left: calc(100% - 10px);
+        transform: translateY(-52%) rotate(5deg) scale(0.96);
+        opacity: 0;
+    }
+}
+
+@keyframes ravenWingFlap {
+    0% {
+        transform: rotate(0deg) scaleY(1);
+    }
+    50% {
+        transform: rotate(-7deg) scaleY(0.92);
+    }
+    100% {
+        transform: rotate(0deg) scaleY(1);
+    }
+}
+
+@keyframes ravenTrailFade {
+    0% {
+        opacity: 0;
+        transform: translateY(-50%) scaleX(0.2);
+    }
+    25% {
+        opacity: 0.9;
+        transform: translateY(-50%) scaleX(0.8);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-50%) scaleX(1);
+    }
+}
+
+@keyframes ravenLabelFade {
+    0%, 35% {
+        opacity: 0;
+        transform: translateX(8px);
+    }
+    55%, 80% {
+        opacity: 0.95;
+        transform: translateX(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+}
