@@ -3,7 +3,7 @@ import { FaVideo, FaStop, FaRedo, FaUpload, FaCamera, FaMicrophone, FaMicrophone
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
-const VideoRecorder = ({ onNotification }) => {
+const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
     const [isRecording, setIsRecording] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [recordedChunks, setRecordedChunks] = useState([]);
@@ -164,6 +164,11 @@ const VideoRecorder = ({ onNotification }) => {
     };
 
     const uploadVideo = async () => {
+        if (!canDirectUpload) {
+            onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
+            return;
+        }
+
         if (recordedChunks.length === 0) {
             onNotification('No video to upload', 'error');
             return;
@@ -446,6 +451,21 @@ const VideoRecorder = ({ onNotification }) => {
                         }}>
                             <h3 style={{ marginBottom: '15px' }}>Upload to YouTube/TikTok</h3>
 
+                            {!canDirectUpload && (
+                                <div style={{
+                                    marginBottom: '15px',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(255, 152, 0, 0.12)',
+                                    padding: '12px'
+                                }}>
+                                    <strong>Subscription required for direct upload.</strong>
+                                    <div style={{ fontSize: '13px', marginTop: '4px', color: 'var(--light-color)' }}>
+                                        Activate Creator Pro to upload recordings for ${Number(subscriptionPriceMonthly).toFixed(2)}/month.
+                                    </div>
+                                </div>
+                            )}
+
                             <div style={{ marginBottom: '15px' }}>
                                 <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
                                     Title
@@ -608,16 +628,18 @@ const VideoRecorder = ({ onNotification }) => {
 
                             <button
                                 onClick={uploadVideo}
-                                disabled={isUploading}
+                                disabled={isUploading || !canDirectUpload}
                                 style={{
                                     width: '100%',
                                     padding: '12px',
                                     borderRadius: '30px',
                                     border: 'none',
-                                    background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                    background: isUploading || !canDirectUpload
+                                        ? 'var(--accent-color)'
+                                        : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                                     color: 'white',
                                     fontWeight: 'bold',
-                                    cursor: isUploading ? 'not-allowed' : 'pointer',
+                                    cursor: isUploading || !canDirectUpload ? 'not-allowed' : 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',

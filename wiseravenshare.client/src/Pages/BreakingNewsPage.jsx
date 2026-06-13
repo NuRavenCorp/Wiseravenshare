@@ -18,7 +18,7 @@ const BreakingNewsPage = ({ onOpenArticle }) => {
                     Live critical updates and high-confidence AI summaries.
                 </div>
             </div>
-            <AINews onOpenArticle={onOpenArticle} />
+            <AINews onOpenArticle={onOpenArticle} initialCoverage="Breaking" />
         </div>
     );
 };
