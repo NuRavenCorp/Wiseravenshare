@@ -171,7 +171,8 @@ const App = () => {
         };
 
         const openArticle = (article, fromPage = currentPage) => {
-            if (isValidExternalUrl(article?.externalUrl)) {
+            const shouldRedirectExternally = fromPage !== 'ainews' && isValidExternalUrl(article?.externalUrl);
+            if (shouldRedirectExternally) {
                 window.location.assign(article.externalUrl);
                 return;
             }

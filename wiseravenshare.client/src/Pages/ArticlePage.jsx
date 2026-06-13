@@ -33,6 +33,11 @@ const ArticlePage = ({ article, onBack }) => {
         );
     }
 
+    const articleParagraphs = String(article.content || article.summary || '')
+        .split(/\n\s*\n/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
     return (
         <article style={{
             background: 'var(--card-bg)',
@@ -75,9 +80,13 @@ const ArticlePage = ({ article, onBack }) => {
                 </a>
             )}
 
-            <p style={{ lineHeight: 1.6, marginBottom: '12px' }}>
-                {article.content || article.summary}
-            </p>
+            <div style={{ display: 'grid', gap: '10px', marginBottom: '8px' }}>
+                {articleParagraphs.map((paragraph, index) => (
+                    <p key={`paragraph-${index}`} style={{ lineHeight: 1.7, margin: 0 }}>
+                        {paragraph}
+                    </p>
+                ))}
+            </div>
 
             {article.summary && article.content && (
                 <div style={{

@@ -161,12 +161,48 @@ const extractExternalUrl = (item = {}) => {
     );
 };
 
-const normalizeArticle = (article, index) => ({
-    ...article,
-    id: article.id || `ai-item-${index}`,
-    category: article.category || inferCategoryFromText(`${article.title || ''} ${article.summary || ''} ${article.content || ''}`),
-    externalUrl: extractExternalUrl(article)
-});
+const buildExpandedContent = (article = {}) => {
+    const title = article.title || 'AI update';
+    const source = article.source || 'AI Desk';
+    const summary = article.summary || 'This development is influencing how teams adopt AI in daily operations.';
+    const category = article.category || inferCategoryFromText(`${article.title || ''} ${article.summary || ''}`);
+
+    const categoryLens = {
+        Business: 'Leaders are tying adoption to measurable outcomes such as cycle time, conversion lift, and operating margin improvements.',
+        Productivity: 'Teams are reporting reduced handoff friction and shorter review loops when assistants are embedded directly in workflows.',
+        Research: 'Researchers continue to focus on robustness, calibration, and reproducibility rather than single-benchmark headline scores.',
+        Policy: 'Policy teams are emphasizing transparency, human oversight, and clearer disclosure requirements for generated content.',
+        Engineering: 'Engineering groups are prioritizing reliability patterns including guardrails, observability, fallback modes, and cost controls.',
+        Security: 'Security teams are strengthening gateway policies, prompt hardening, and outbound content checks to reduce abuse risk.',
+        Healthcare: 'Clinical and operations stakeholders are validating safety, auditability, and accountability before broad rollout.',
+        Education: 'Educators are balancing personalization benefits with curriculum consistency, fairness, and data privacy expectations.',
+        General: 'Cross-functional teams are combining governance, product design, and technical safeguards to scale usage responsibly.'
+    };
+
+    const lensText = categoryLens[category] || categoryLens.General;
+
+    return [
+        `${summary}`,
+        `${source} reports that ${title.toLowerCase()} as organizations move from pilot projects to production AI usage. ${lensText}`,
+        'In practical terms, teams are investing in clear success metrics, stronger review workflows, and better documentation so outcomes are repeatable across departments. As adoption grows, the biggest differentiator remains disciplined execution: trustworthy data, measurable feedback loops, and governance that can keep pace with product velocity.'
+    ].join('\n\n');
+};
+
+const normalizeArticle = (article, index) => {
+    const normalized = {
+        ...article,
+        id: article.id || `ai-item-${index}`,
+        category: article.category || inferCategoryFromText(`${article.title || ''} ${article.summary || ''} ${article.content || ''}`),
+        externalUrl: extractExternalUrl(article)
+    };
+
+    const hasDetailedContent = typeof normalized.content === 'string' && normalized.content.trim().length > 220;
+    if (!hasDetailedContent) {
+        normalized.content = buildExpandedContent(normalized);
+    }
+
+    return normalized;
+};
 
 const toArticleFromPost = (post, index) => ({
     id: `post-${post.id || index}`,
