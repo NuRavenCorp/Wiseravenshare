@@ -3,7 +3,7 @@ import { FaUpload, FaYoutube, FaFileVideo, FaTrash, FaCheck, FaSpinner } from 'r
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
-const VideoUploader = ({ onNotification }) => {
+const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
     const [selectedFile, setSelectedFile] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
@@ -68,6 +68,11 @@ const VideoUploader = ({ onNotification }) => {
     };
 
     const handleUpload = async () => {
+        if (!canDirectUpload) {
+            onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
+            return;
+        }
+
         if (!selectedFile) {
             onNotification('Please select a video file first', 'error');
             return;
@@ -180,6 +185,21 @@ const VideoUploader = ({ onNotification }) => {
             }}>
                 {/* Upload Area */}
                 <div>
+                    {!canDirectUpload && (
+                        <div style={{
+                            marginBottom: '12px',
+                            borderRadius: '10px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255, 152, 0, 0.12)',
+                            padding: '12px'
+                        }}>
+                            <strong>Subscription required for direct upload.</strong>
+                            <div style={{ fontSize: '13px', marginTop: '4px', color: 'var(--light-color)' }}>
+                                Activate Creator Pro to upload directly to YouTube and TikTok for ${Number(subscriptionPriceMonthly).toFixed(2)}/month.
+                            </div>
+                        </div>
+                    )}
+
                     <div style={{
                         border: `2px dashed ${selectedFile ? 'var(--success-color)' : 'var(--border-color)'}`,
                         borderRadius: '12px',
@@ -430,6 +450,7 @@ const VideoUploader = ({ onNotification }) => {
                                 <input
                                     type="checkbox"
                                     checked={videoDetails.publishToYouTube}
+                                    disabled={!canDirectUpload}
                                     onChange={(e) => setVideoDetails(prev => ({ ...prev, publishToYouTube: e.target.checked }))}
                                 />
                                 Publish directly to YouTube
@@ -441,6 +462,7 @@ const VideoUploader = ({ onNotification }) => {
                                 <input
                                     type="checkbox"
                                     checked={videoDetails.publishToTikTok}
+                                    disabled={!canDirectUpload}
                                     onChange={(e) => setVideoDetails(prev => ({ ...prev, publishToTikTok: e.target.checked }))}
                                 />
                                 Publish directly to TikTok
@@ -530,16 +552,16 @@ const VideoUploader = ({ onNotification }) => {
 
                         <button
                             onClick={handleUpload}
-                            disabled={!selectedFile || isUploading}
+                            disabled={!selectedFile || isUploading || !canDirectUpload}
                             style={{
                                 width: '100%',
                                 padding: '12px',
                                 borderRadius: '30px',
                                 border: 'none',
-                                background: !selectedFile || isUploading ? 'var(--accent-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                background: !selectedFile || isUploading || !canDirectUpload ? 'var(--accent-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                                 color: 'white',
                                 fontWeight: 'bold',
-                                cursor: !selectedFile || isUploading ? 'not-allowed' : 'pointer',
+                                cursor: !selectedFile || isUploading || !canDirectUpload ? 'not-allowed' : 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -547,7 +569,7 @@ const VideoUploader = ({ onNotification }) => {
                             }}
                         >
                             {isUploading ? <FaSpinner className="spinning" /> : <FaUpload />}
-                            {isUploading ? 'Uploading...' : 'Upload to YouTube/TikTok'}
+                            {isUploading ? 'Uploading...' : (!canDirectUpload ? 'Subscribe to Unlock Direct Upload' : 'Upload to YouTube/TikTok')}
                         </button>
                     </div>
                 </div>
