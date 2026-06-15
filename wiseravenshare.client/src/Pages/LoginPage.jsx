@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
 const LoginPage = ({ onAuth }) => {
-    const allowSignUp = String(import.meta.env.VITE_ALLOW_SIGNUP || 'false').toLowerCase() === 'true';
+    const allowSignUp = true;
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
