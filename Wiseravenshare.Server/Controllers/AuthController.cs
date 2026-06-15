@@ -144,9 +144,25 @@ public class AuthController : ControllerBase
         {
             var claimsPrincipal = tokenHandler.ValidateToken(providedToken, BuildTokenValidationParameters(), out _);
             var email = claimsPrincipal.FindFirstValue(ClaimTypes.Email);
-            if (string.IsNullOrWhiteSpace(email) || !UsersByEmail.TryGetValue(email, out var user))
+            if (string.IsNullOrWhiteSpace(email))
             {
-                return Unauthorized(new { valid = false, message = "Invalid token user." });
+                return Unauthorized(new { valid = false, message = "Invalid token claims." });
+            }
+
+            if (!UsersByEmail.TryGetValue(email, out var user))
+            {
+                // In stateless/multi-instance deployments, token may be valid even if local memory cache is cold.
+                // Reconstruct a minimal user object from token claims to keep session continuity.
+                var nameFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0];
+                user = new UserRecord
+                {
+                    Id = claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? Guid.NewGuid().ToString("N"),
+                    Email = email,
+                    Name = nameFromClaims,
+                    Handle = nameFromClaims.ToLowerInvariant().Replace(" ", string.Empty),
+                    PasswordHash = string.Empty
+                };
+                UsersByEmail.TryAdd(user.Email, user);
             }
 
             return Ok(new { valid = true, user = ToResponse(user) });
