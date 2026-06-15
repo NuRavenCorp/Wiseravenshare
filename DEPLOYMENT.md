@@ -1,6 +1,8 @@
 # Wiseravenshare Deployment Checklist
 
-This checklist covers local validation and IONOS production deployment.
+This checklist covers local validation and production deployment on DigitalOcean, with IONOS DNS pointing to the same app.
+
+Note: current authoritative nameservers for `wise-ravens.com` are DigitalOcean (`ns1.digitalocean.com`, `ns2.digitalocean.com`, `ns3.digitalocean.com`). Manage active DNS records in the DigitalOcean DNS zone.
 
 ## 1) Local Container Validation
 
@@ -46,79 +48,41 @@ Stop stack:
 docker compose down
 ```
 
-## 2) IONOS Hosting
+## 2) DigitalOcean App Platform (Primary)
 
-Use this path when deploying to an IONOS VPS or cloud server.
+Use this as the primary production path for wise-ravens.com.
 
-### Server Preparation
+### App Spec + Deploy
 
-- Install Docker Engine, Docker Compose plugin, Nginx, and Certbot.
-- Open inbound ports `80` and `443` on the server firewall.
-- Point domain DNS (`A` records for root and `www`) to the IONOS server public IP.
+- Keep [.do/app.yaml](.do/app.yaml) as the source of truth for DigitalOcean App Platform.
+- Push changes to `main` to trigger deployment (`deploy_on_push: true`).
+- Confirm both components are healthy in DO:
+  - `api` service (`/health`)
+  - `web` static site
 
-### Deploy Application
+### DigitalOcean Custom Domains
 
-Run from repository root on the IONOS server:
+- In DigitalOcean App Platform, add both custom domains:
+  - `wise-ravens.com` (primary)
+  - `www.wise-ravens.com` (alias)
+- Wait for DO to show the DNS targets for each host and SSL provisioning status.
 
-```bash
-docker compose up --build -d
-```
+## 3) IONOS DNS -> DigitalOcean
 
-Verify:
-
-```bash
-docker compose ps
-curl -s http://localhost:10000/health
-curl -s http://localhost:10000/health/db
-```
-
-### One-Command App Update
-
-After initial setup, use the deploy helper for routine releases:
-
-```bash
-cd /opt/wiseravenshare
-chmod +x ./scripts/deploy-ionos.sh
-./scripts/deploy-ionos.sh
-```
-
-Optional overrides:
-
-```bash
-BRANCH=main REPO_DIR=/opt/wiseravenshare ./scripts/deploy-ionos.sh
-```
-
-### Configure Nginx Reverse Proxy
-
-- Use [wiseravenshare.client/nginx.conf](wiseravenshare.client/nginx.conf) as the server config.
-- Ensure `proxy_pass` for `/api/` points to `http://localhost:10000/api/`.
-- Place your built frontend at `/var/www/wiseravenshare` (or adjust `root` in Nginx).
-
-### Enable TLS Certificates
-
-```bash
-sudo certbot --nginx -d wiseravenshare.com -d www.wiseravenshare.com
-```
-
-### Restart Services
-
-```bash
-sudo nginx -t
-sudo systemctl reload nginx
-docker compose restart api
-```
-
-## 3) IONOS DNS Records
-
-Create these records in IONOS DNS for your production zone:
+Create/update these records in IONOS DNS for `wise-ravens.com`:
 
 | Hostname | Type | Value | Purpose |
 | --- | --- | --- | --- |
-| `@` | `A` | Your IONOS server public IPv4 address | Canonical site host |
-| `www` | `A` | Your IONOS server public IPv4 address | `www` redirect host |
-| `api` | `A` | Your IONOS server public IPv4 address | Optional API subdomain if you later split the API off Nginx |
+| `@` | `A` | `162.159.140.98` | DO App Platform static ingress IPv4 #1 |
+| `@` | `A` | `172.66.0.96` | DO App Platform static ingress IPv4 #2 |
+| `@` | `AAAA` | `2606:4700:7::60` | DO App Platform static ingress IPv6 #1 |
+| `@` | `AAAA` | `2a06:98c1:58::60` | DO App Platform static ingress IPv6 #2 |
+| `www` | `CNAME` | `@` (or `wise-ravens.com`) | `www` alias to apex |
 
-If IONOS gives you an IPv6 address, add matching `AAAA` records for the same hosts.
+Notes:
+- If IONOS does not allow `CNAME` value as `@`, use `wise-ravens.com` as the target.
+- Remove old `api` A/CNAME records unless you intentionally keep a separate `api.wise-ravens.com` hostname.
+- Keep TTL at 300 seconds during cutover, then raise to 3600 after validation.
 
 You do not need separate DNS entries for individual site pages or SPA routes such as `/`, `/login`, `/dashboard`, `/media`, or `/settings`. Those routes are handled by the frontend router and Nginx `try_files` rule on the same apex or `www` host.
 
@@ -126,12 +90,21 @@ Important:
 - Use standard DNS records only.
 - DNS propagation can take up to 24 hours, but usually completes much sooner.
 
-## 4) Current YouTube Upload Behavior
+If delegation has already moved to DigitalOcean nameservers, apply equivalent records in the DigitalOcean DNS zone instead of IONOS.
+
+## 4) Optional IONOS VPS Path (Secondary)
+
+If you intentionally deploy on IONOS VPS instead of DO App Platform, use:
+- [scripts/setup-ionos-server.sh](scripts/setup-ionos-server.sh)
+- [scripts/deploy-ionos.sh](scripts/deploy-ionos.sh)
+- [wiseravenshare.client/nginx.conf](wiseravenshare.client/nginx.conf)
+
+## 5) Current YouTube Upload Behavior
 
 `IYouTubeService` is currently a stub implementation that returns generated YouTube-like URLs.
 No external YouTube credentials are required in the current code.
 
-## 5) Production Readiness Gates
+## 6) Production Readiness Gates
 
 Before promoting:
 - Replace placeholder DB credentials with real production Postgres values.
@@ -141,6 +114,64 @@ Before promoting:
 - Rotate any temporary credentials used during setup.
 
 Domain go-live checks:
-- `https://wiseravenshare.com` resolves and serves the static app over HTTPS.
-- `https://www.wiseravenshare.com` redirects to `https://wiseravenshare.com` (or vice versa, pick one canonical host).
-- `https://wiseravenshare.com/health` or `https://wiseravenshare.com/api/...` endpoints respond as expected through Nginx.
+- `https://wise-ravens.com` resolves and serves the static app over HTTPS.
+- `https://www.wise-ravens.com` redirects to `https://wise-ravens.com` (or vice versa, pick one canonical host).
+- `https://wise-ravens.com/health` or `https://wise-ravens.com/api/...` endpoints respond as expected through Nginx.
+
+## 7) External Day-to-Day Ops Agent
+
+For daily external operations and incident response, use:
+- [OPS_AGENT.md](OPS_AGENT.md)
+- [scripts/ops-external-daily.ps1](scripts/ops-external-daily.ps1)
+
+Run daily check:
+
+```powershell
+pwsh -File ./scripts/ops-external-daily.ps1 \
+  -Domain wise-ravens.com \
+  -WwwDomain www.wise-ravens.com \
+  -ExpectedCanonicalHost wise-ravens.com \
+  -ExpectedNameservers ns1.digitalocean.com,ns2.digitalocean.com,ns3.digitalocean.com \
+  -ApiHealthUrl https://wise-ravens.com/health
+```
+
+Interpretation:
+- Exit code `0`: pass
+- Exit code `1`: warning (drift)
+- Exit code `2`: critical failure
+
+Ubuntu direct-connect (DigitalOcean droplet):
+
+```bash
+DOMAIN=wise-ravens.com \
+WWW_DOMAIN=www.wise-ravens.com \
+EXPECTED_CANONICAL_HOST=wise-ravens.com \
+EXPECTED_NAMESERVERS_CSV=ns1.digitalocean.com,ns2.digitalocean.com,ns3.digitalocean.com \
+API_HEALTH_URL=https://wise-ravens.com/health \
+bash ./scripts/ops-external-daily.sh
+
+sudo REPO_DIR=/opt/wiseravenshare \
+  DOMAIN=wise-ravens.com \
+  WWW_DOMAIN=www.wise-ravens.com \
+  EXPECTED_CANONICAL_HOST=wise-ravens.com \
+  EXPECTED_NAMESERVERS_CSV=ns1.digitalocean.com,ns2.digitalocean.com,ns3.digitalocean.com \
+  API_HEALTH_URL=https://wise-ravens.com/health \
+  bash ./scripts/install-ops-agent-systemd.sh
+```
+
+## 8) Auth Security Checks
+
+Use [SECURITY.md](SECURITY.md) for authentication configuration and production guardrails.
+
+Run regression checks after each deployment:
+
+```powershell
+pwsh -File ./scripts/auth-regression-check.ps1 -BaseUrl https://wise-ravens.com
+```
+
+Optional allowlisted user verification:
+
+```powershell
+$cred = Get-Credential
+pwsh -File ./scripts/auth-regression-check.ps1 -BaseUrl https://wise-ravens.com -ValidCredential $cred
+```
