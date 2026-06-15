@@ -97,28 +97,31 @@ const LoginPage = ({ onAuth }) => {
     const submit = async () => {
         setError('');
 
-        if (!email.trim() || !password.trim() || (mode === 'signup' && !name.trim())) {
+        const loginValue = email.trim();
+
+        if (!loginValue || !password.trim() || (mode === 'signup' && !name.trim())) {
             setError('Please fill all required fields.');
             return;
         }
 
-        const emailValue = email.trim();
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(emailValue)) {
-            setError('Please enter a valid email address.');
-            return;
-        }
+        if (mode === 'signup') {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(loginValue)) {
+                setError('Please enter a valid email address.');
+                return;
+            }
 
-        if (password.length < 8) {
-            setError('Password must be at least 8 characters.');
-            return;
+            if (password.length < 8) {
+                setError('Password must be at least 8 characters.');
+                return;
+            }
         }
 
         try {
             await onAuth?.({
                 mode,
                 name,
-                email: emailValue,
+                email: loginValue,
                 password,
                 bio,
                 location,
