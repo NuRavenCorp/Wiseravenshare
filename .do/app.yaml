@@ -29,11 +29,6 @@ services:
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
-    routes:
-      - path: /api
-      - path: /api/*
-      - path: /health
-      - path: /weatherforecast
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
@@ -52,8 +47,29 @@ static_sites:
         value: ${api.PUBLIC_URL}/api
       - key: VITE_RAVENSIGHT_API_URL
         value: ${api.PUBLIC_URL}/api/ravensight
-    routes:
-      - path: /
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: api
+    - match:
+        path:
+          prefix: /health
+      component:
+        name: api
+    - match:
+        path:
+          prefix: /weatherforecast
+      component:
+        name: api
+    - match:
+        path:
+          prefix: /
+      component:
+        name: web
 
 # ── Managed Postgres database ─────────────────────────────────────────────────
 databases:
