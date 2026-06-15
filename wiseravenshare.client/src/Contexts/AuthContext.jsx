@@ -20,22 +20,26 @@ export const AuthProvider = ({ children }) => {
         checkAuth();
     }, []);
 
-    const checkAuth = async () => {
-        const localUser = authService.getUser();
-        if (localUser) {
-            setUser(localUser);
-            setLoading(false);
-            return;
-        }
+    const clearAuthState = () => {
+        authService.clearToken();
+        authService.clearUser();
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+        setUser(null);
+    };
 
+    const checkAuth = async () => {
         try {
             const token = localStorage.getItem('auth_token');
             if (token) {
                 const userData = await authService.verifyToken(token);
                 setUser(userData);
+            } else {
+                clearAuthState();
             }
         } catch (err) {
             console.error('Auth check failed:', err);
+            clearAuthState();
         } finally {
             setLoading(false);
         }
@@ -51,21 +55,9 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem('user_data', JSON.stringify(response.user));
             return response;
         } catch (err) {
-            // Fallback for local/demo mode when API auth endpoints are unavailable.
-            const mockUser = {
-                id: `user-${Date.now()}`,
-                name: email.split('@')[0] || 'Wiseraven User',
-                email,
-                handle: email.split('@')[0] || 'user',
-                avatar: (email[0] || 'U').toUpperCase(),
-                createdAt: new Date().toISOString()
-            };
-
-            const token = `demo-token-${Date.now()}`;
-            authService.setToken(token);
-            authService.setUser(mockUser);
-            setUser(mockUser);
-            return { user: mockUser, token, fallback: true };
+            clearAuthState();
+            setError(err?.message || 'Authentication failed.');
+            throw err;
         } finally {
             setLoading(false);
         }
@@ -81,23 +73,9 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem('user_data', JSON.stringify(response.user));
             return response;
         } catch (err) {
-            const mockUser = {
-                id: `user-${Date.now()}`,
-                name: userData.name || 'Wiseraven User',
-                email: userData.email,
-                handle: (userData.name || userData.email || 'user').toLowerCase().replace(/\s+/g, ''),
-                avatar: userData.avatar || (userData.name?.[0] || userData.email?.[0] || 'U').toUpperCase(),
-                bio: userData.bio || '',
-                location: userData.location || '',
-                website: userData.website || '',
-                createdAt: new Date().toISOString()
-            };
-
-            const token = `demo-token-${Date.now()}`;
-            authService.setToken(token);
-            authService.setUser(mockUser);
-            setUser(mockUser);
-            return { user: mockUser, token, fallback: true };
+            clearAuthState();
+            setError(err?.message || 'Registration failed.');
+            throw err;
         } finally {
             setLoading(false);
         }
@@ -107,9 +85,7 @@ export const AuthProvider = ({ children }) => {
         try {
             await authService.logout();
         } finally {
-            setUser(null);
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('user_data');
+            clearAuthState();
         }
     };
 
