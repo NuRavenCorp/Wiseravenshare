@@ -15,6 +15,8 @@ namespace Wiseravenshare.Server.Controllers;
 public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, UserRecord> UsersByEmail = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object SeedLock = new();
+    private static bool _seeded;
     private readonly IConfiguration _configuration;
 
     public AuthController(IConfiguration configuration)
@@ -26,6 +28,8 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public IActionResult Register([FromBody] RegisterRequest request)
     {
+        EnsureConfiguredUsersSeeded();
+
         var allowSelfRegistration = _configuration.GetValue<bool>("Authentication:AllowSelfRegistration", false);
         if (!allowSelfRegistration)
         {
@@ -76,6 +80,8 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public IActionResult Login([FromBody] LoginRequest request)
     {
+        EnsureConfiguredUsersSeeded();
+
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
         {
             return BadRequest(new { message = "Email and password are required." });
@@ -99,6 +105,8 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public IActionResult Verify([FromBody] VerifyRequest? request)
     {
+        EnsureConfiguredUsersSeeded();
+
         var providedToken = request?.Token;
         if (string.IsNullOrWhiteSpace(providedToken) && Request.Headers.TryGetValue("Authorization", out var authorizationHeader))
         {
@@ -236,6 +244,56 @@ public class AuthController : ControllerBase
     private static bool IsValidEmail(string email)
     {
         return new EmailAddressAttribute().IsValid(email?.Trim());
+    }
+
+    private void EnsureConfiguredUsersSeeded()
+    {
+        if (_seeded)
+        {
+            return;
+        }
+
+        lock (SeedLock)
+        {
+            if (_seeded)
+            {
+                return;
+            }
+
+            var configuredUsers = _configuration.GetSection("Authentication:Users").Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>();
+            foreach (var configuredUser in configuredUsers)
+            {
+                if (string.IsNullOrWhiteSpace(configuredUser.Email) || string.IsNullOrWhiteSpace(configuredUser.Password) || !IsValidEmail(configuredUser.Email))
+                {
+                    continue;
+                }
+
+                var email = configuredUser.Email.Trim();
+                var name = string.IsNullOrWhiteSpace(configuredUser.Name)
+                    ? email.Split('@')[0]
+                    : configuredUser.Name.Trim();
+
+                var user = new UserRecord
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Email = email,
+                    Name = name,
+                    Handle = name.ToLowerInvariant().Replace(" ", string.Empty),
+                    PasswordHash = HashPassword(configuredUser.Password)
+                };
+
+                UsersByEmail.TryAdd(user.Email, user);
+            }
+
+            _seeded = true;
+        }
+    }
+
+    private sealed class ConfiguredUser
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
     }
 }
 
