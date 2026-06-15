@@ -1,14 +1,94 @@
 import api from './api';
 
 class AuthService {
+    buildAuthFallbackBases() {
+        const bases = [];
+        const primaryBase = (api?.defaults?.baseURL || '').replace(/\/+$/, '');
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const ravensightUrl = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
+
+        if (primaryBase) {
+            bases.push(primaryBase);
+        }
+
+        if (origin) {
+            bases.push(origin);
+        }
+
+        if (ravensightUrl) {
+            const trimmed = ravensightUrl.replace(/\/+$/, '');
+            const withoutRavensight = trimmed.replace(/\/api\/ravensight$/i, '');
+            if (withoutRavensight) {
+                bases.push(withoutRavensight);
+            }
+        }
+
+        return [...new Set(bases.filter(Boolean))];
+    }
+
+    async postAuthWithFallback(path, payload = {}, options = {}) {
+        const bases = this.buildAuthFallbackBases();
+        const attempts = [];
+
+        const requestOnce = async (url, headers = {}) => {
+            return fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...headers
+                },
+                body: JSON.stringify(payload)
+            });
+        };
+
+        // Try conventional /api/auth path first, then /auth path as compatibility fallback.
+        for (const base of bases) {
+            const normalizedBase = base.replace(/\/+$/, '');
+            attempts.push(`${normalizedBase}/auth${path}`);
+            if (!/\/api$/i.test(normalizedBase)) {
+                attempts.push(`${normalizedBase}/api/auth${path}`);
+            }
+        }
+
+        const token = this.getToken();
+        let lastError = null;
+
+        for (const url of attempts) {
+            try {
+                const response = await requestOnce(url, token ? { Authorization: `Bearer ${token}` } : {});
+                if (response.ok) {
+                    return await response.json();
+                }
+
+                if (response.status !== 404) {
+                    const body = await response.json().catch(() => ({}));
+                    const error = new Error(body?.message || 'Server error');
+                    error.status = response.status;
+                    throw error;
+                }
+
+                lastError = { status: 404 };
+            } catch (error) {
+                if (error?.status && error.status !== 404) {
+                    throw error;
+                }
+                lastError = error;
+            }
+        }
+
+        const err = new Error('Authentication service is currently unavailable. Please try again.');
+        err.status = lastError?.status || 0;
+        throw err;
+    }
+
     async login(email, password) {
         try {
-            const response = await api.post('/auth/login', { email, password });
-            if (response.data.token) {
-                this.setToken(response.data.token);
-                this.setUser(response.data.user);
+            const response = await this.postAuthWithFallback('/login', { email, password });
+            if (response.token) {
+                this.setToken(response.token);
+                this.setUser(response.user);
             }
-            return response.data;
+            return response;
         } catch (error) {
             throw this.handleError(error);
         }
@@ -16,12 +96,12 @@ class AuthService {
 
     async register(userData) {
         try {
-            const response = await api.post('/auth/register', userData);
-            if (response.data.token) {
-                this.setToken(response.data.token);
-                this.setUser(response.data.user);
+            const response = await this.postAuthWithFallback('/register', userData);
+            if (response.token) {
+                this.setToken(response.token);
+                this.setUser(response.user);
             }
-            return response.data;
+            return response;
         } catch (error) {
             throw this.handleError(error);
         }
@@ -29,7 +109,7 @@ class AuthService {
 
     async logout() {
         try {
-            await api.post('/auth/logout');
+            await this.postAuthWithFallback('/logout', {});
         } finally {
             this.clearToken();
             this.clearUser();
@@ -38,13 +118,13 @@ class AuthService {
 
     async verifyToken(token) {
         try {
-            const response = await api.post('/auth/verify', { token });
-            if (response.data.valid) {
-                return response.data.user;
+            const response = await this.postAuthWithFallback('/verify', { token });
+            if (response.valid) {
+                return response.user;
             }
             throw new Error('Invalid token');
         } catch (error) {
-            if (error?.response?.status === 401 || error?.response?.status === 403) {
+            if (error?.response?.status === 401 || error?.response?.status === 403 || error?.status === 401 || error?.status === 403) {
                 this.clearToken();
                 this.clearUser();
             }
@@ -120,6 +200,10 @@ class AuthService {
         if (error.response) {
             const err = new Error(error.response.data.message || 'Server error');
             err.status = error.response.status;
+            return err;
+        } else if (error?.status) {
+            const err = new Error(error.message || 'Server error');
+            err.status = error.status;
             return err;
         } else if (error.request) {
             const err = new Error('Network error - please check your connection');
