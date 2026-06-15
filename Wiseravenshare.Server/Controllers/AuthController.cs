@@ -13,6 +13,7 @@ namespace Wiseravenshare.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Route("[controller]")]
 public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, UserRecord> UsersByEmail = new(StringComparer.OrdinalIgnoreCase);
