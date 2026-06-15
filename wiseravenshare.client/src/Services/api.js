@@ -28,11 +28,8 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     async (error) => {
-        if (error.response?.status === 401) {
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('user_data');
-            window.location.reload();
-        }
+        // Do not force logout globally on every 401.
+        // AuthContext/AuthService owns token lifecycle decisions.
         return Promise.reject(error);
     }
 );
