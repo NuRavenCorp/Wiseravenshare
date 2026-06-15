@@ -27,10 +27,11 @@ services:
       - key: CLIENT_ORIGIN
         value: ${web.PUBLIC_URL}
       - key: ConnectionStrings__DefaultConnection
-        value: ${DATABASE_URL}
+        value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
     routes:
       - path: /api
+      - path: /api/*
       - path: /health
       - path: /weatherforecast
 
@@ -60,4 +61,10 @@ databases:
     engine: PG
     version: "16"
     production: false
+
+domains:
+  - domain: wise-ravens.com
+    type: PRIMARY
+  - domain: www.wise-ravens.com
+    type: ALIAS
 
