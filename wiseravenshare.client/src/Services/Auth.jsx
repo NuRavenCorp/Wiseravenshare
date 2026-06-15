@@ -44,7 +44,10 @@ class AuthService {
             }
             throw new Error('Invalid token');
         } catch (error) {
-            this.clearToken();
+            if (error?.response?.status === 401 || error?.response?.status === 403) {
+                this.clearToken();
+                this.clearUser();
+            }
             throw this.handleError(error);
         }
     }
@@ -115,9 +118,13 @@ class AuthService {
 
     handleError(error) {
         if (error.response) {
-            return new Error(error.response.data.message || 'Server error');
+            const err = new Error(error.response.data.message || 'Server error');
+            err.status = error.response.status;
+            return err;
         } else if (error.request) {
-            return new Error('Network error - please check your connection');
+            const err = new Error('Network error - please check your connection');
+            err.status = 0;
+            return err;
         } else {
             return error;
         }
