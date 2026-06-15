@@ -70,7 +70,14 @@ public class AuthController : ControllerBase
             return Conflict(new { message = "An account with that email already exists." });
         }
 
-        PersistUsers();
+        try
+        {
+            PersistUsers();
+        }
+        catch
+        {
+            // Keep signup/login functional even when local file persistence is unavailable.
+        }
 
         var token = GenerateToken(user);
         return Ok(new { token, user = ToResponse(user) });
