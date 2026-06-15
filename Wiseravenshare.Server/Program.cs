@@ -1,5 +1,8 @@
 using Wiseravenshare.Server.Services;
 using Npgsql;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +22,29 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+
+var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey))
+{
+    throw new InvalidOperationException("Authentication:Jwt:Key is required.");
+}
+
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = signingKey,
+            ValidateIssuer = true,
+            ValidIssuer = builder.Configuration["Authentication:Jwt:Issuer"],
+            ValidateAudience = true,
+            ValidAudience = builder.Configuration["Authentication:Jwt:Audience"],
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+    });
 
 // Request timeout middleware (requires .NET 8+)
 builder.Services.AddRequestTimeouts(options =>
@@ -47,7 +73,7 @@ builder.Services.AddCors(options =>
         else
         {
             // Fail-safe: block cross-origin in production if CLIENT_ORIGIN is missing
-            policy.WithOrigins("https://wiseravenshare.com", "https://www.wiseravenshare.com")
+            policy.WithOrigins("https://wise-ravens.com", "https://www.wise-ravens.com")
                   .AllowAnyHeader()
                   .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
         }
@@ -85,6 +111,7 @@ app.Use(async (context, next) =>
 
 app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

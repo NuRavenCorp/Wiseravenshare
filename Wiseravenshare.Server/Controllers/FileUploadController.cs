@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class MediaController : ControllerBase
 {
     private readonly IWebHostEnvironment _environment;
