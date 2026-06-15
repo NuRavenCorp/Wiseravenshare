@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -16,12 +17,15 @@ public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, UserRecord> UsersByEmail = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object SeedLock = new();
+    private static readonly object PersistenceLock = new();
     private static bool _seeded;
     private readonly IConfiguration _configuration;
+    private readonly IWebHostEnvironment _environment;
 
-    public AuthController(IConfiguration configuration)
+    public AuthController(IConfiguration configuration, IWebHostEnvironment environment)
     {
         _configuration = configuration;
+        _environment = environment;
     }
 
     [HttpPost("register")]
@@ -29,12 +33,6 @@ public class AuthController : ControllerBase
     public IActionResult Register([FromBody] RegisterRequest request)
     {
         EnsureConfiguredUsersSeeded();
-
-        var allowSelfRegistration = _configuration.GetValue<bool>("Authentication:AllowSelfRegistration", false);
-        if (!allowSelfRegistration)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Self-registration is disabled." });
-        }
 
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
         {
@@ -72,6 +70,8 @@ public class AuthController : ControllerBase
             return Conflict(new { message = "An account with that email already exists." });
         }
 
+        PersistUsers();
+
         var token = GenerateToken(user);
         return Ok(new { token, user = ToResponse(user) });
     }
@@ -87,12 +87,21 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Email and password are required." });
         }
 
-        if (!IsValidEmail(request.Email))
+        var loginIdentifier = request.Email.Trim();
+        UserRecord? user = null;
+
+        if (loginIdentifier.Contains('@'))
         {
-            return Unauthorized(new { message = "Invalid email or password." });
+            UsersByEmail.TryGetValue(loginIdentifier, out user);
+        }
+        else
+        {
+            user = UsersByEmail.Values.FirstOrDefault(u =>
+                string.Equals(u.Handle, loginIdentifier, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(u.Name, loginIdentifier, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (!UsersByEmail.TryGetValue(request.Email.Trim(), out var user) || !VerifyPassword(request.Password, user.PasswordHash))
+        if (user is null || !VerifyPassword(request.Password, user.PasswordHash))
         {
             return Unauthorized(new { message = "Invalid email or password." });
         }
@@ -261,6 +270,8 @@ public class AuthController : ControllerBase
             }
 
             var configuredUsers = _configuration.GetSection("Authentication:Users").Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>();
+            LoadPersistedUsersUnsafe();
+
             foreach (var configuredUser in configuredUsers)
             {
                 if (string.IsNullOrWhiteSpace(configuredUser.Email) || string.IsNullOrWhiteSpace(configuredUser.Password) || !IsValidEmail(configuredUser.Email))
@@ -286,6 +297,53 @@ public class AuthController : ControllerBase
             }
 
             _seeded = true;
+        }
+    }
+
+    private string GetUsersFilePath()
+    {
+        var appDataDir = Path.Combine(_environment.ContentRootPath, "App_Data");
+        Directory.CreateDirectory(appDataDir);
+        return Path.Combine(appDataDir, "users.json");
+    }
+
+    private void LoadPersistedUsersUnsafe()
+    {
+        var path = GetUsersFilePath();
+        if (!System.IO.File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var json = System.IO.File.ReadAllText(path);
+            var persistedUsers = JsonSerializer.Deserialize<List<UserRecord>>(json) ?? new List<UserRecord>();
+            foreach (var persistedUser in persistedUsers)
+            {
+                if (string.IsNullOrWhiteSpace(persistedUser.Email) || string.IsNullOrWhiteSpace(persistedUser.PasswordHash))
+                {
+                    continue;
+                }
+
+                UsersByEmail.TryAdd(persistedUser.Email, persistedUser);
+            }
+        }
+        catch
+        {
+            // Keep auth available even if persistence file is malformed.
+        }
+    }
+
+    private void PersistUsers()
+    {
+        lock (PersistenceLock)
+        {
+            var users = UsersByEmail.Values
+                .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
+            System.IO.File.WriteAllText(GetUsersFilePath(), json);
         }
     }
 
