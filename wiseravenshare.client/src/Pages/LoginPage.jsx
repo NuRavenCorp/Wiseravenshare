@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
 const LoginPage = ({ onAuth }) => {
-    const allowSignUp = true;
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -98,11 +97,6 @@ const LoginPage = ({ onAuth }) => {
     const submit = async () => {
         setError('');
 
-        if (mode === 'signup' && !allowSignUp) {
-            setError('Sign up is disabled. Contact an administrator for access.');
-            return;
-        }
-
         if (!email.trim() || !password.trim() || (mode === 'signup' && !name.trim())) {
             setError('Please fill all required fields.');
             return;
@@ -181,22 +175,20 @@ const LoginPage = ({ onAuth }) => {
                     >
                         Login
                     </button>
-                    {allowSignUp && (
-                        <button
-                            onClick={() => setMode('signup')}
-                            style={{
-                                flex: 1,
-                                padding: '10px',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border-color)',
-                                background: mode === 'signup' ? 'var(--highlight-color)' : 'transparent',
-                                color: 'var(--text-color)',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            Sign Up
-                        </button>
-                    )}
+                    <button
+                        onClick={() => setMode('signup')}
+                        style={{
+                            flex: 1,
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: mode === 'signup' ? 'var(--highlight-color)' : 'transparent',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Sign Up
+                    </button>
                 </div>
 
                 {mode === 'signup' && (
