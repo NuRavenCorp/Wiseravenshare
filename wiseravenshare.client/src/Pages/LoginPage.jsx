@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
+import { authService } from '../Services/Auth.jsx';
 
 const LoginPage = ({ onAuth }) => {
     const [mode, setMode] = useState('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [resetToken, setResetToken] = useState('');
     const [bio, setBio] = useState('');
     const [location, setLocation] = useState('');
     const [website, setWebsite] = useState('');
@@ -15,6 +17,7 @@ const LoginPage = ({ onAuth }) => {
     const [cameraError, setCameraError] = useState('');
     const [cameraStream, setCameraStream] = useState(null);
     const [error, setError] = useState('');
+    const [info, setInfo] = useState('');
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
 
@@ -96,15 +99,16 @@ const LoginPage = ({ onAuth }) => {
 
     const submit = async () => {
         setError('');
+        setInfo('');
 
         const loginValue = email.trim();
 
-        if (!loginValue || !password.trim() || (mode === 'signup' && !name.trim())) {
-            setError('Please fill all required fields.');
-            return;
-        }
-
         if (mode === 'signup') {
+            if (!loginValue || !password.trim() || !name.trim()) {
+                setError('Please fill all required fields.');
+                return;
+            }
+
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(loginValue)) {
                 setError('Please enter a valid email address.');
@@ -115,9 +119,50 @@ const LoginPage = ({ onAuth }) => {
                 setError('Password must be at least 8 characters.');
                 return;
             }
+        } else if (mode === 'login') {
+            if (!loginValue || !password.trim()) {
+                setError('Please fill all required fields.');
+                return;
+            }
+        } else if (mode === 'forgot') {
+            if (!loginValue) {
+                setError('Please enter your email address.');
+                return;
+            }
+        } else if (mode === 'reset') {
+            if (!resetToken.trim() || !password.trim()) {
+                setError('Reset token and new password are required.');
+                return;
+            }
+
+            if (password.length < 8) {
+                setError('Password must be at least 8 characters.');
+                return;
+            }
         }
 
         try {
+            if (mode === 'forgot') {
+                const response = await authService.requestPasswordReset(loginValue);
+                if (response?.resetToken) {
+                    setResetToken(response.resetToken);
+                    setMode('reset');
+                    setInfo('Reset token generated. Enter a new password to finish reset.');
+                } else {
+                    setInfo(response?.message || 'If your account exists, reset instructions have been sent.');
+                }
+                return;
+            }
+
+            if (mode === 'reset') {
+                await authService.resetPassword(resetToken.trim(), password.trim());
+                setMode('login');
+                setPassword('');
+                setResetToken('');
+                setInfo('Password reset successful. Sign in with your new password.');
+                return;
+            }
+
             await onAuth?.({
                 mode,
                 name,
@@ -158,14 +203,22 @@ const LoginPage = ({ onAuth }) => {
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '22px' }}>
                     <WiseRavenLogo size="hero" />
                 </div>
-                <h2 style={{ marginBottom: '12px' }}>{mode === 'signup' ? 'Create Account' : 'Sign In'}</h2>
+                <h2 style={{ marginBottom: '12px' }}>
+                    {mode === 'signup' && 'Create Account'}
+                    {mode === 'login' && 'Sign In'}
+                    {mode === 'forgot' && 'Forgot Password'}
+                    {mode === 'reset' && 'Reset Password'}
+                </h2>
                 <p style={{ marginBottom: '20px', color: 'var(--light-color)' }}>
-                    {mode === 'signup' ? 'Sign up to start posting and messaging.' : 'Sign in to your account.'}
+                    {mode === 'signup' && 'Sign up to start posting and messaging.'}
+                    {mode === 'login' && 'Sign in to your account.'}
+                    {mode === 'forgot' && 'Enter your account email to request a reset token.'}
+                    {mode === 'reset' && 'Paste your reset token and choose a new password.'}
                 </p>
 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button
-                        onClick={() => setMode('login')}
+                        onClick={() => { setMode('login'); setError(''); setInfo(''); }}
                         style={{
                             flex: 1,
                             padding: '10px',
@@ -179,7 +232,7 @@ const LoginPage = ({ onAuth }) => {
                         Login
                     </button>
                     <button
-                        onClick={() => setMode('signup')}
+                        onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
                         style={{
                             flex: 1,
                             padding: '10px',
@@ -351,38 +404,100 @@ const LoginPage = ({ onAuth }) => {
                     </>
                 )}
 
-                <input
-                    type="email"
-                    placeholder="Email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    style={{
-                        width: '100%',
-                        marginBottom: '12px',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-color)',
-                        background: 'rgba(255,255,255,0.05)',
-                        color: 'var(--text-color)'
-                    }}
-                />
-                <input
-                    type="password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    style={{
-                        width: '100%',
-                        marginBottom: '12px',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-color)',
-                        background: 'rgba(255,255,255,0.05)',
-                        color: 'var(--text-color)'
-                    }}
-                />
+                {mode !== 'reset' && (
+                    <input
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        style={{
+                            width: '100%',
+                            marginBottom: '12px',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                )}
+
+                {mode === 'reset' && (
+                    <input
+                        type="text"
+                        placeholder="Reset token"
+                        value={resetToken}
+                        onChange={(e) => setResetToken(e.target.value)}
+                        style={{
+                            width: '100%',
+                            marginBottom: '12px',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                )}
+
+                {mode !== 'forgot' && (
+                    <input
+                        type="password"
+                        placeholder={mode === 'reset' ? 'New password' : 'Password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        style={{
+                            width: '100%',
+                            marginBottom: '12px',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                )}
+
+                {mode === 'login' && (
+                    <button
+                        type="button"
+                        onClick={() => { setMode('forgot'); setError(''); setInfo(''); }}
+                        style={{
+                            width: '100%',
+                            marginBottom: '12px',
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--light-color)',
+                            textAlign: 'right',
+                            cursor: 'pointer',
+                            textDecoration: 'underline'
+                        }}
+                    >
+                        Forgot password?
+                    </button>
+                )}
+
+                {mode === 'forgot' && (
+                    <button
+                        type="button"
+                        onClick={() => { setMode('login'); setError(''); setInfo(''); }}
+                        style={{
+                            width: '100%',
+                            marginBottom: '12px',
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--light-color)',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            textDecoration: 'underline'
+                        }}
+                    >
+                        Back to login
+                    </button>
+                )}
 
                 {error && <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>}
+                {info && <p style={{ color: '#93c5fd', marginBottom: '12px' }}>{info}</p>}
 
                 <button
                     onClick={submit}
@@ -397,7 +512,10 @@ const LoginPage = ({ onAuth }) => {
                         fontWeight: 'bold'
                     }}
                 >
-                    {mode === 'signup' ? 'Create Account' : 'Continue'}
+                    {mode === 'signup' && 'Create Account'}
+                    {mode === 'login' && 'Continue'}
+                    {mode === 'forgot' && 'Request Reset Token'}
+                    {mode === 'reset' && 'Set New Password'}
                 </button>
             </div>
         </div>

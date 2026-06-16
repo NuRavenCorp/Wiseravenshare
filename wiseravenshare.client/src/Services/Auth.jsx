@@ -153,8 +153,7 @@ class AuthService {
 
     async requestPasswordReset(email) {
         try {
-            await api.post('/auth/forgot-password', { email });
-            return true;
+            return await this.postAuthWithFallback('/forgot-password', { email });
         } catch (error) {
             throw this.handleError(error);
         }
@@ -162,8 +161,7 @@ class AuthService {
 
     async resetPassword(token, newPassword) {
         try {
-            await api.post('/auth/reset-password', { token, newPassword });
-            return true;
+            return await this.postAuthWithFallback('/reset-password', { token, newPassword });
         } catch (error) {
             throw this.handleError(error);
         }

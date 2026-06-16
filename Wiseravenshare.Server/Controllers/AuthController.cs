@@ -17,6 +17,7 @@ namespace Wiseravenshare.Server.Controllers;
 public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, UserRecord> UsersByEmail = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, PasswordResetRecord> PasswordResetsByToken = new(StringComparer.Ordinal);
     private static readonly object SeedLock = new();
     private static readonly object PersistenceLock = new();
     private static bool _seeded;
@@ -181,6 +182,92 @@ public class AuthController : ControllerBase
         return Ok(new { success = true });
     }
 
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public IActionResult ForgotPassword([FromBody] ForgotPasswordRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var email = request.Email?.Trim() ?? string.Empty;
+        if (!IsValidEmail(email))
+        {
+            return BadRequest(new { message = "A valid email address is required." });
+        }
+
+        if (!UsersByEmail.ContainsKey(email))
+        {
+            return Ok(new
+            {
+                success = true,
+                message = "If an account exists for that email, a reset token has been generated."
+            });
+        }
+
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(30);
+        PasswordResetsByToken[token] = new PasswordResetRecord
+        {
+            Email = email,
+            ExpiresAtUtc = expiresAtUtc
+        };
+
+        return Ok(new
+        {
+            success = true,
+            message = "Use the reset token to set a new password.",
+            resetToken = token,
+            expiresAtUtc
+        });
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    public IActionResult ResetPassword([FromBody] ResetPasswordRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            return BadRequest(new { message = "Token and new password are required." });
+        }
+
+        if (request.NewPassword.Length < 8)
+        {
+            return BadRequest(new { message = "Password must be at least 8 characters." });
+        }
+
+        var token = request.Token.Trim();
+        if (!PasswordResetsByToken.TryGetValue(token, out var record) || record.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            PasswordResetsByToken.TryRemove(token, out _);
+            return Unauthorized(new { message = "Reset token is invalid or expired." });
+        }
+
+        if (!UsersByEmail.TryGetValue(record.Email, out var user))
+        {
+            PasswordResetsByToken.TryRemove(token, out _);
+            return Unauthorized(new { message = "Reset token is invalid or expired." });
+        }
+
+        user.PasswordHash = HashPassword(request.NewPassword);
+
+        try
+        {
+            PersistUsers();
+        }
+        catch
+        {
+            // Keep reset flow functional if local file persistence is unavailable.
+        }
+
+        foreach (var pair in PasswordResetsByToken.Where(p => string.Equals(p.Value.Email, record.Email, StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            PasswordResetsByToken.TryRemove(pair.Key, out _);
+        }
+
+        return Ok(new { success = true, message = "Password reset successful." });
+    }
+
     private TokenValidationParameters BuildTokenValidationParameters()
     {
         return new TokenValidationParameters
@@ -272,6 +359,12 @@ public class AuthController : ControllerBase
         public string Email { get; set; } = string.Empty;
         public string Handle { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
+    }
+
+    private sealed class PasswordResetRecord
+    {
+        public string Email { get; set; } = string.Empty;
+        public DateTime ExpiresAtUtc { get; set; }
     }
 
     private static bool IsValidEmail(string email)
@@ -395,6 +488,17 @@ public sealed class RegisterRequest
 public sealed class VerifyRequest
 {
     public string Token { get; set; } = string.Empty;
+}
+
+public sealed class ForgotPasswordRequest
+{
+    public string Email { get; set; } = string.Empty;
+}
+
+public sealed class ResetPasswordRequest
+{
+    public string Token { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
 }
 
 public sealed class UserResponse
