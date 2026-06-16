@@ -3,10 +3,10 @@ set -euo pipefail
 
 # IONOS Ubuntu server bootstrap for Wiseravenshare
 # Usage:
-#   sudo DOMAIN=wiseravenshare.com WWW_DOMAIN=www.wiseravenshare.com EMAIL=admin@example.com ./scripts/setup-ionos-server.sh
+#   sudo DOMAIN=wise-ravens.com WWW_DOMAIN=www.wise-ravens.com EMAIL=admin@example.com ./scripts/setup-ionos-server.sh
 
-DOMAIN="${DOMAIN:-wiseravenshare.com}"
-WWW_DOMAIN="${WWW_DOMAIN:-www.wiseravenshare.com}"
+DOMAIN="${DOMAIN:-wise-ravens.com}"
+WWW_DOMAIN="${WWW_DOMAIN:-www.wise-ravens.com}"
 EMAIL="${EMAIL:-admin@${DOMAIN}}"
 REPO_DIR="${REPO_DIR:-/opt/wiseravenshare}"
 WEB_ROOT="${WEB_ROOT:-/var/www/wiseravenshare}"
