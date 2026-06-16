@@ -4,6 +4,7 @@ import PostCard from '../Components/Feed/PostCard.jsx';
 import VideoFeedMini from '../Components/Feed/VideoFeedMini.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
+import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
 const MAX_STORED_POSTS = 120;
@@ -126,6 +127,8 @@ const FeedPage = ({ addTruthAlert }) => {
         post.userId === currentUser.id || following.includes(post.userId)
     );
 
+    const rankedFeedPosts = rankPostsByPredictedEngagement(filteredPosts, { horizonHours: 18 });
+
     return (
         <div>
             <div
@@ -153,9 +156,9 @@ const FeedPage = ({ addTruthAlert }) => {
                 </div>
             </div>
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} />
-            <VideoFeedMini posts={filteredPosts} />
+            <VideoFeedMini posts={rankedFeedPosts} />
             <div style={{ marginTop: '20px' }}>
-                {filteredPosts.map(post => (
+                {rankedFeedPosts.map(post => (
                     <PostCard
                         key={post.id}
                         post={post}
