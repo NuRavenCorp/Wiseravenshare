@@ -29,24 +29,40 @@ export const AuthProvider = ({ children }) => {
     };
 
     const checkAuth = async () => {
+        const token = localStorage.getItem('auth_token');
+        const localUser = authService.getUser();
+
+        if (!token) {
+            clearAuthState();
+            setLoading(false);
+            return;
+        }
+
+        // Keep the local session available while token verification runs.
+        if (localUser) {
+            setUser(localUser);
+        }
+
         try {
-            const token = localStorage.getItem('auth_token');
-            if (token) {
-                const userData = await authService.verifyToken(token);
-                setUser(userData);
-            } else {
-                clearAuthState();
-            }
+            const userData = await authService.verifyToken(token);
+            setUser(userData);
         } catch (err) {
             console.error('Auth check failed:', err);
-            clearAuthState();
+            if (err?.status === 401) {
+                clearAuthState();
+            }
+            else if (localUser) {
+                setUser(localUser);
+            }
+            else {
+                clearAuthState();
+            }
         } finally {
             setLoading(false);
         }
     };
 
     const login = async (email, password) => {
-        setLoading(true);
         setError(null);
         try {
             const response = await authService.login(email, password);
@@ -58,13 +74,10 @@ export const AuthProvider = ({ children }) => {
             clearAuthState();
             setError(err?.message || 'Authentication failed.');
             throw err;
-        } finally {
-            setLoading(false);
         }
     };
 
     const register = async (userData) => {
-        setLoading(true);
         setError(null);
         try {
             const response = await authService.register(userData);
@@ -76,8 +89,6 @@ export const AuthProvider = ({ children }) => {
             clearAuthState();
             setError(err?.message || 'Registration failed.');
             throw err;
-        } finally {
-            setLoading(false);
         }
     };
 

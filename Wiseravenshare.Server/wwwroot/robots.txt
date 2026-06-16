@@ -8,7 +8,7 @@ Disallow: /auth/
 Disallow: /*?*
 
 # Sitemap location
-Sitemap: https://wiseravenshare.com/sitemap.xml
+Sitemap: https://wise-ravens.com/sitemap.xml
 
 # Crawl delay for bots
 Crawl-delay: 1
