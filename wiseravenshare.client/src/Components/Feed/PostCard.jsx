@@ -11,6 +11,20 @@ const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, 
         return truthEngine.getTruthBadge(score);
     }, [post.truthScore, post.content]);
 
+    const predictionSummary = useMemo(() => {
+        const predicted = Number(post.predictedEngagementScore);
+        const confidence = Number(post.confidence);
+        if (!Number.isFinite(predicted)) {
+            return null;
+        }
+
+        const safeConfidence = Number.isFinite(confidence) ? Math.max(0, Math.min(100, Math.round(confidence))) : null;
+        return {
+            predicted: Math.max(0, Math.round(predicted)),
+            confidence: safeConfidence
+        };
+    }, [post.predictedEngagementScore, post.confidence]);
+
     const addComment = () => {
         if (!commentText.trim()) {
             return;
@@ -65,7 +79,26 @@ const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, 
 
             <p style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>{post.content}</p>
 
-            <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)' }}>{truthBadge.text}</div>
+            <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{truthBadge.text}</div>
+                {predictionSummary && (
+                    <div
+                        title="Predicted engagement score for near-term ranking"
+                        style={{
+                            fontSize: '11px',
+                            color: 'var(--text-color)',
+                            background: 'rgba(125, 211, 252, 0.14)',
+                            border: '1px solid rgba(125, 211, 252, 0.45)',
+                            borderRadius: '999px',
+                            padding: '3px 9px',
+                            fontWeight: 600
+                        }}
+                    >
+                        Predicted: {predictionSummary.predicted}
+                        {predictionSummary.confidence !== null ? ` (${predictionSummary.confidence}% conf)` : ''}
+                    </div>
+                )}
+            </div>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
                 <button onClick={() => onLike?.(post.id)}>Like ({post.likes ?? 0})</button>
