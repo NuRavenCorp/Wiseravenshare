@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "postgresql1": {
+      "restored": true,
+      "restoreTime": "2026-06-08T15:54:08.1378549Z"
+    },
+    "redis1": {
+      "restored": true,
+      "restoreTime": "2026-06-08T15:54:40.2261107Z"
+    },
+    "identityapp1": {
+      "restored": true,
+      "restoreTime": "2026-06-08T15:55:13.0328829Z"
+    }
+  },
+  "parameters": {}
+}

@@ -1,0 +1,16 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - wiseravenshare.client/Dockerfile
+      - --build-arg
+      - VITE_API_URL=$_VITE_API_URL
+      - --build-arg
+      - VITE_RAVENSIGHT_API_URL=$_VITE_RAVENSIGHT_API_URL
+      - -t
+      - $_IMAGE_URI
+      - .
+
+images:
+  - $_IMAGE_URI
