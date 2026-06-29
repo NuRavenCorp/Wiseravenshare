@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wiseravnshare-db
+      POSTGRES_USER: wiseravenshare-user
+      POSTGRES_PASSWORD: wiseravenshare_password
+    volumes:
+      - wiseravenshare-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiseravenshare-user -d wiseravnshare-db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: ./Wiseravenshare.Server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+      CLIENT_ORIGIN: http://localhost:5173
+      ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=wiseravnshare-db;Username=wiseravenshare-user;Password=wiseravenshare_password;SSL Mode=Disable;Trust Server Certificate=true
+    volumes:
+      - wiseravenshare-api-data:/app/App_Data
+    ports:
+      - "10000:10000"
+
+volumes:
+  wiseravenshare-postgres-data:
+  wiseravenshare-api-data:

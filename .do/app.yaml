@@ -1,0 +1,89 @@
+name: wiseravenshare
+region: nyc
+
+# ── API service (ASP.NET Core / Docker) ──────────────────────────────────────
+services:
+  - name: api
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Wiseravenshare.Server/Dockerfile
+    source_dir: /
+    http_port: 10000
+    instance_size_slug: basic-xs
+    instance_count: 1
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 20
+      period_seconds: 30
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: CLIENT_ORIGIN
+        value: ${web.PUBLIC_URL}
+      - key: ConnectionStrings__DefaultConnection
+        value: ${wiseravenshare-db.DATABASE_URL}
+        type: SECRET
+
+# ── Frontend static site ──────────────────────────────────────────────────────
+static_sites:
+  - name: web
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: main
+      deploy_on_push: true
+    source_dir: wiseravenshare.client
+    build_command: npm ci && npm run build
+    output_dir: dist
+    index_document: index.html
+    error_document: index.html
+    envs:
+      - key: VITE_API_URL
+        value: ${api.PUBLIC_URL}/api
+      - key: VITE_RAVENSIGHT_API_URL
+        value: ${api.PUBLIC_URL}/api/ravensight
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /health
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /weatherforecast
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /
+      component:
+        name: web
+
+# ── Managed Postgres database ─────────────────────────────────────────────────
+databases:
+  - name: wiseravenshare-db
+    engine: PG
+    version: "16"
+    production: false
+
+domains:
+  - domain: wise-ravens.com
+    type: PRIMARY
+  - domain: www.wise-ravens.com
+    type: ALIAS
+
