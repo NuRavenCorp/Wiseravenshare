@@ -26,7 +26,7 @@ services:
         value: http://0.0.0.0:10000
       - key: CLIENT_ORIGIN
         value: ${web.PUBLIC_URL}
-      - key: ConnectionStrings__DefaultConnection
+      - key: DATABASE_URL
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
 

@@ -1,34 +1,35 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace Wiseravenshare.Server.Services;
-
-[ApiController]
-[Route("api/[controller]")]
-public class VideoStreamingController : ControllerBase
+namespace Wiseravenshare.Server.Services
 {
-    private readonly IWebHostEnvironment _environment;
-
-    public VideoStreamingController(IWebHostEnvironment environment)
+    [ApiController]
+    [Route("api/[controller]")]
+    public class VideoStreamingController : ControllerBase
     {
-        _environment = environment;
-    }
+        private readonly IWebHostEnvironment _environment;
 
-    [HttpGet("stream")]
-    public IActionResult StreamVideo([FromQuery] string fileName)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
+        public VideoStreamingController(IWebHostEnvironment environment)
         {
-            return BadRequest("fileName is required.");
+            _environment = environment;
         }
 
-        var filePath = Path.Combine(_environment.ContentRootPath, "MediaStorage", fileName);
-
-        if (!System.IO.File.Exists(filePath))
+        [HttpGet("stream")]
+        public IActionResult StreamVideo([FromQuery] string fileName)
         {
-            return NotFound();
-        }
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return BadRequest("fileName is required.");
+            }
 
-        var stream = System.IO.File.OpenRead(filePath);
-        return File(stream, "video/mp4", enableRangeProcessing: true);
+            var filePath = Path.Combine(_environment.ContentRootPath, "MediaStorage", fileName);
+
+            if (!System.IO.File.Exists(filePath))
+            {
+                return NotFound();
+            }
+
+            var stream = System.IO.File.OpenRead(filePath);
+            return File(stream, "video/mp4", enableRangeProcessing: true);
+        }
     }
 }

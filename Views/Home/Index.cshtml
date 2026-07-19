@@ -1,0 +1,172 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+
+@{
+    var ravenSightBaseUrl = Configuration["Integration:RavensightPublicBaseUrl"]
+        ?? Configuration["Integration:RavensightBaseUrl"]
+        ?? "http://localhost:18081";
+}
+
+<div class="text-center py-5">
+    <h1 class="display-4 fw-bold">WiseRavenSocial</h1>
+    <p class="lead">Jump straight into the podcast studio or continue managing social content.</p>
+    <div class="d-flex gap-3 justify-content-center flex-wrap mt-4">
+        <a class="btn btn-primary btn-lg" href="@ravenSightBaseUrl">Open Podcast Studio</a>
+        <a class="btn btn-success btn-lg" href="/social/feed">Open Social Feed</a>
+        <a class="btn btn-outline-success btn-lg" href="/social/messages">Messages</a>
+        <a class="btn btn-outline-secondary btn-lg" asp-controller="Home" asp-action="Privacy">Privacy</a>
+    </div>
+    <p class="mt-4 text-muted">Seamless handoff between podcast production and social publishing.</p>
+</div>
+
+<section class="py-3">
+    <div class="row g-3">
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Social Feed</h5>
+                    <p class="card-text text-muted">Open the latest timeline and trending post stream.</p>
+                    <a class="btn btn-sm btn-primary" href="/social/feed">Go to Feed</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Messages</h5>
+                    <p class="card-text text-muted">Open conversations and direct message threads.</p>
+                    <a class="btn btn-sm btn-primary" href="/social/messages">Open Messages</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Profile</h5>
+                    <p class="card-text text-muted">View and update your public social profile.</p>
+                    <a class="btn btn-sm btn-primary" href="/social/profile">Open Profile</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Notifications</h5>
+                    <p class="card-text text-muted">See unread alerts, mentions, and social updates.</p>
+                    <a class="btn btn-sm btn-primary" href="/social/notifications">Open Notifications</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Account Access</h5>
+                    <p class="card-text text-muted">Sign in to unlock your social feed and private actions.</p>
+                    <a class="btn btn-sm btn-outline-primary" href="/social/access">Sign In</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Podcast to Social</h5>
+                    <p class="card-text text-muted">Jump to Ravensight and return to publish outcomes here.</p>
+                    <a class="btn btn-sm btn-outline-primary" href="@ravenSightBaseUrl">Open Ravensight</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="py-4">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <h2 class="h3 mb-0">Live Social Feeds</h2>
+        <span class="text-muted">Facebook, TikTok, and Instagram</span>
+    </div>
+
+    <div class="row g-3 social-feeds-home">
+        <div class="col-12 col-xl-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Facebook</h5>
+                    <div class="embed-shell">
+                        <iframe
+                            title="Facebook Feed"
+                            class="social-feed-iframe"
+                            loading="lazy"
+                            allowfullscreen="true"
+                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Fmeta&tabs=timeline&width=340&height=450&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true&appId">
+                        </iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">TikTok</h5>
+                    <div class="embed-shell">
+                        <blockquote class="tiktok-embed social-embed-block" cite="https://www.tiktok.com/@tiktok/video/7315262411457125664" data-video-id="7315262411457125664" style="max-width: 605px; min-width: 325px;">
+                            <section>
+                                <a target="_blank" title="tiktok" href="https://www.tiktok.com/@tiktok">@@tiktok</a>
+                            </section>
+                        </blockquote>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Instagram</h5>
+                    <div class="embed-shell">
+                        <blockquote class="instagram-media social-embed-block" data-instgrm-captioned data-instgrm-permalink="https://www.instagram.com/p/C5w8-2bM1hN/" data-instgrm-version="14" style="margin: 0 auto; max-width: 540px; width: 100%;">
+                            <a href="https://www.instagram.com/p/C5w8-2bM1hN/" target="_blank">View this post on Instagram</a>
+                        </blockquote>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .social-feeds-home .embed-shell {
+        border-radius: 10px;
+        overflow: hidden;
+        min-height: 460px;
+        background: #fff;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .social-feeds-home .social-feed-iframe {
+        width: 100%;
+        height: 450px;
+        border: 0;
+    }
+
+    .social-feeds-home .social-embed-block {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    @media (max-width: 1199px) {
+        .social-feeds-home .embed-shell {
+            min-height: 420px;
+        }
+
+        .social-feeds-home .social-feed-iframe {
+            height: 420px;
+        }
+    }
+</style>
+
+@section Scripts {
+    <script async src="https://www.tiktok.com/embed.js"></script>
+    <script async src="https://www.instagram.com/embed.js"></script>
+}

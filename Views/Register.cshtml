@@ -1,0 +1,207 @@
+﻿@model WiseRavenSocial.ViewModels.LoginViewModel
+@{
+    ViewData["Title"] = "Register";
+    Layout = "_AuthLayout";
+}
+
+<div class="auth-container">
+    <div class="auth-left">
+        <div class="auth-logo">
+            <i class="fas fa-crow"></i>
+        </div>
+        <div class="auth-header">
+            <h1>Join WiseRavenSocial</h1>
+            <p>Connect, share, and grow with our vibrant community</p>
+        </div>
+        <ul class="auth-features">
+            <li><i class="fas fa-check"></i> Connect with friends and experts</li>
+            <li><i class="fas fa-check"></i> Share photos and videos</li>
+            <li><i class="fas fa-check"></i> Personal planner & goals tracker</li>
+            <li><i class="fas fa-check"></i> Real-time market watch</li>
+            <li><i class="fas fa-check"></i> Secure & private messaging</li>
+        </ul>
+    </div>
+
+    <div class="auth-right">
+        <div class="auth-tabs">
+            <a class="auth-tab" asp-action="Login">Login</a>
+            <a class="auth-tab active" asp-action="Register">Sign Up</a>
+        </div>
+
+        <form id="signup-form" method="post" enctype="multipart/form-data" asp-action="Register">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            @if (!string.IsNullOrEmpty(ViewBag.SuccessMessage))
+            {
+            <div class="alert alert-success">@ViewBag.SuccessMessage</div>
+            }
+
+            <!-- Profile Image -->
+            <div class="profile-image-upload">
+                <div class="profile-image-container">
+                    <img id="profile-preview" src="https://ui-avatars.com/api/?name=New+User&background=4a7bff&color=fff&size=120"
+                         alt="Profile Preview" class="profile-image">
+                    <button type="button" class="upload-btn" onclick="document.getElementById('ProfileImage').click()">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <input asp-for="ProfileImage" type="file" id="ProfileImage" accept="image/*" style="display: none;"
+                           onchange="previewProfileImage(event)">
+                </div>
+                <span asp-validation-for="ProfileImage" class="text-danger"></span>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="FirstName"></label>
+                    <input asp-for="FirstName" class="form-control" placeholder="John" />
+                    <span asp-validation-for="FirstName" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="LastName"></label>
+                    <input asp-for="LastName" class="form-control" placeholder="Doe" />
+                    <span asp-validation-for="LastName" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Username"></label>
+                <input asp-for="Username" class="form-control" placeholder="johndoe" />
+                <span asp-validation-for="Username" class="text-danger"></span>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Email"></label>
+                <input asp-for="Email" class="form-control" placeholder="john@example.com" />
+                <span asp-validation-for="Email" class="text-danger"></span>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="Password"></label>
+                    <input asp-for="Password" type="password" class="form-control" placeholder="Create a password"
+                           oninput="checkPasswordStrength(this.value)" />
+                    <div class="password-strength">
+                        <div class="strength-meter" id="password-strength-meter"></div>
+                    </div>
+                    <span asp-validation-for="Password" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="ConfirmPassword"></label>
+                    <input asp-for="ConfirmPassword" type="password" class="form-control" placeholder="Confirm password" />
+                    <span asp-validation-for="ConfirmPassword" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Bio"></label>
+                <textarea asp-for="Bio" class="form-control" rows="2" placeholder="Tell us about yourself..."></textarea>
+                <span asp-validation-for="Bio" class="text-danger"></span>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="Location"></label>
+                    <input asp-for="Location" class="form-control" placeholder="City, Country" />
+                    <span asp-validation-for="Location" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="PhoneNumber"></label>
+                    <input asp-for="PhoneNumber" class="form-control" placeholder="+1234567890" />
+                    <span asp-validation-for="PhoneNumber" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="DateOfBirth"></label>
+                    <input asp-for="DateOfBirth" type="date" class="form-control" max="@DateTime.Now.AddYears(-18).ToString(" yyyy-MM-dd")" />
+                    <span asp-validation-for="DateOfBirth" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="Gender"></label>
+                    <select asp-for="Gender" class="form-control">
+                        <option value="">Select</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="non-binary">Non-binary</option>
+                        <option value="prefer-not-to-say">Prefer not to say</option>
+                    </select>
+                    <span asp-validation-for="Gender" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Interests"></label>
+                <input asp-for="Interests" class="form-control" placeholder="e.g., photography, hiking, tech, music" />
+                <span asp-validation-for="Interests" class="text-danger"></span>
+            </div>
+
+            <div class="form-check">
+                <input asp-for="AcceptTerms" class="form-check-input" />
+                <label asp-for="AcceptTerms" class="form-check-label">
+                    I agree to the <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a>
+                </label>
+                <span asp-validation-for="AcceptTerms" class="text-danger"></span>
+            </div>
+
+            <div class="form-check">
+                <input asp-for="SubscribeToNewsletter" class="form-check-input" checked />
+                <label asp-for="SubscribeToNewsletter" class="form-check-label">
+                    Subscribe to our newsletter for updates
+                </label>
+            </div>
+
+            <button type="submit" id="signup-btn" class="auth-btn">
+                <span id="signup-text">Create Account</span>
+                <span id="signup-loading" class="loading-spinner" style="display: none;"></span>
+            </button>
+
+            <div class="switch-text">
+                Already have an account? <a asp-action="Login">Log in</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+<partial name="_ValidationScriptsPartial" />
+<script>
+        function previewProfileImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('Image size should be less than 5MB');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('profile-preview').src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function checkPasswordStrength(password) {
+            let strength = 0;
+            if (password.length >= 8) strength++;
+            if (/[A-Z]/.test(password)) strength++;
+            if (/[a-z]/.test(password)) strength++;
+            if (/[0-9]/.test(password)) strength++;
+            if (/[^A-Za-z0-9]/.test(password)) strength++;
+
+            const meter = document.getElementById('password-strength-meter');
+            meter.className = `strength-meter strength-${strength}`;
+        }
+
+        document.getElementById('signup-form').addEventListener('submit', function(e) {
+            const btn = document.getElementById('signup-btn');
+            const text = document.getElementById('signup-text');
+            const loading = document.getElementById('signup-loading');
+
+            btn.disabled = true;
+            text.style.display = 'none';
+            loading.style.display = 'inline-block';
+        });
+</script>
+}

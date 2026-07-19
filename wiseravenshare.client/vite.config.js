@@ -2,7 +2,40 @@ import { fileURLToPath, URL } from 'node:url';
 
 import { defineConfig } from 'vite';
 import plugin from '@vitejs/plugin-react';
+import fs from 'fs';
+import path from 'path';
+import child_process from 'child_process';
 import { env } from 'process';
+
+const baseFolder =
+    env.APPDATA !== undefined && env.APPDATA !== ''
+        ? `${env.APPDATA}/ASP.NET/https`
+        : `${env.HOME}/.aspnet/https`;
+
+const certificateName = "wiseravenshare.client";
+const certFilePath = path.join(baseFolder, `${certificateName}.pem`);
+const keyFilePath = path.join(baseFolder, `${certificateName}.key`);
+
+if (!fs.existsSync(baseFolder)) {
+    fs.mkdirSync(baseFolder, { recursive: true });
+}
+
+if (!fs.existsSync(certFilePath) || !fs.existsSync(keyFilePath)) {
+    if (0 !== child_process.spawnSync('dotnet', [
+        'dev-certs',
+        'https',
+        '--export-path',
+        certFilePath,
+        '--format',
+        'Pem',
+        '--no-password',
+    ], { stdio: 'inherit', }).status) {
+        throw new Error("Could not create certificate.");
+    }
+}
+
+const target = env.ASPNETCORE_HTTPS_PORT ? `https://localhost:${env.ASPNETCORE_HTTPS_PORT}` :
+    env.ASPNETCORE_URLS ? env.ASPNETCORE_URLS.split(';')[0] : 'https://localhost:7189';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -12,26 +45,21 @@ export default defineConfig({
             '@': fileURLToPath(new URL('./src', import.meta.url))
         }
     },
-    build: {
-        // Split vendor chunks to improve caching
-        rollupOptions: {
-            output: {
-                manualChunks(id) {
-                    if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-                        return 'vendor-react';
-                    }
-                    if (id.includes('node_modules/react-icons')) {
-                        return 'vendor-icons';
-                    }
-                    if (id.includes('node_modules/axios')) {
-                        return 'vendor-http';
-                    }
-                }
+    server: {
+        proxy: {
+            '^/api': {
+                target,
+                secure: false
+            },
+            '^/weatherforecast': {
+                target,
+                secure: false
             }
         },
-        chunkSizeWarningLimit: 600
-    },
-    server: {
-        port: parseInt(env.DEV_SERVER_PORT || '5173'),
+        port: parseInt(env.DEV_SERVER_PORT || '65090'),
+        https: {
+            key: fs.readFileSync(keyFilePath),
+            cert: fs.readFileSync(certFilePath),
+        }
     }
 })

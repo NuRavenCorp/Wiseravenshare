@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wise Raven Planner</title>
+    <style>
+        :root {
+            --primary-color: #1a1f2b;
+            --secondary-color: #2d3748;
+            --accent-color: #4a5568;
+            --highlight-color: #718096;
+            --light-color: #e2e8f0;
+            --text-color: #f8fafc;
+            --bg-color: #0f1419;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 300px;
+            margin-right: 20px;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .right-sidebar {
+            width: 300px;
+            margin-left: 20px;
+        }
+
+        .goal-section {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+        }
+
+        .planner-board {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            flex: 1;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+        }
+
+        .stock-widget {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+        }
+
+        .task-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 8px;
+            cursor: move;
+            border-left: 4px solid var(--highlight-color);
+            transition: all 0.3s ease;
+        }
+
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .columns-container {
+            display: flex;
+            gap: 20px;
+            overflow-x: auto;
+            padding: 10px 0;
+        }
+
+        .board-column {
+            min-width: 300px;
+            padding: 15px;
+            background: var(--secondary-color);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .board-column h4 {
+            color: var(--light-color);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .add-btn {
+            background: var(--highlight-color);
+            color: var(--text-color);
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .add-btn:hover {
+            background: var(--light-color);
+            color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+
+        .stock-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stock-item:last-child {
+            border-bottom: none;
+        }
+
+        .recommendation-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent-color);
+        }
+
+        h3 {
+            color: var(--light-color);
+            margin-bottom: 15px;
+        }
+
+        h2 {
+            color: var(--light-color);
+            margin-bottom: 20px;
+        }
+
+        /* File attachment for tasks */
+        .task-attachment {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .task-attachment i {
+            color: var(--highlight-color);
+        }
+
+        .attachment-options {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .attachment-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid var(--border-color);
+        }
+
+        .attachment-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .attachment-option i {
+            font-size: 18px;
+            margin-bottom: 5px;
+            color: var(--highlight-color);
+        }
+
+        .attachment-option span {
+            font-size: 0.7rem;
+            text-align: center;
+        }
+
+        @media (max-width: 1024px) {
+            body {
+                flex-direction: column;
+            }
+            
+            .sidebar, .right-sidebar {
+                width: 100%;
+                margin: 0 0 20px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Left Sidebar -->
+    <div class="sidebar">
+        <div class="goal-section">
+            <h3>Long Term Goals</h3>
+            <div id="long-term-goals"></div>
+            <button class="add-btn" onclick="addGoal('long')">+ Add Goal</button>
+        </div>
+
+        <div class="goal-section">
+            <h3>Short Term Goals</h3>
+            <div id="short-term-goals"></div>
+            <button class="add-btn" onclick="addGoal('short')">+ Add Goal</button>
+        </div>
+
+        <div class="goal-section">
+            <h3>Next Moves</h3>
+            <div id="next-moves"></div>
+            <button class="add-btn" onclick="addGoal('next')">+ Add Action</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="planner-board">
+            <h2>Wise Raven Planner</h2>
+            <div class="columns-container">
+                <div class="board-column" id="day-column">
+                    <h4>Today</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+                <div class="board-column" id="week-column">
+                    <h4>This Week</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+                <div class="board-column" id="month-column">
+                    <h4>This Month</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="right-sidebar">
+        <div class="stock-widget">
+            <h3>Market Watch</h3>
+            <div id="stock-data"></div>
+        </div>
+        <div class="goal-section">
+            <h3>DeepSeek Recommendations</h3>
+            <div id="recommendations"></div>
+        </div>
+        <div class="goal-section">
+            <h3>File Attachments</h3>
+            <div class="attachment-options">
+                <div class="attachment-option" onclick="attachFile('document')">
+                    <i class="fas fa-file"></i>
+                    <span>Document</span>
+                </div>
+                <div class="attachment-option" onclick="attachFile('image')">
+                    <i class="fas fa-image"></i>
+                    <span>Image</span>
+                </div>
+                <div class="attachment-option" onclick="attachFile('audio')">
+                    <i class="fas fa-music"></i>
+                    <span>Audio</span>
+                </div>
+                <div class="attachment-option" onclick="attachFile('bluetooth')">
+                    <i class="fas fa-bluetooth"></i>
+                    <span>Bluetooth</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Wise Raven Planner Main Script
+         *
+         * This script manages:
+         * - Goal creation and display for long-term, short-term, and next moves
+         * - Drag and drop functionality for tasks
+         * - Stock market widget with mock data and periodic updates
+         * - State persistence using localStorage
+         * - Display of DeepSeek recommendations
+         */
+
+        // Goals System
+        let goalIdCounter = 0;
+        function addGoal(type) {
+            const text = prompt('Enter your goal:');
+            if (text) {
+                const goal = document.createElement('div');
+                goal.className = 'task-item';
+                goal.draggable = true;
+                goal.ondragstart = drag;
+                goal.textContent = text;
+                goal.id = 'goal-' + (goalIdCounter++);
+
+                const containerIds = {
+                    long: 'long-term-goals',
+                    short: 'short-term-goals',
+                    next: 'next-moves'
+                };
+                const container = document.getElementById(containerIds[type]);
+                if (container) container.appendChild(goal);
+                saveState();
+            }
+        }
+
+        // Drag & Drop System
+        function allowDrop(ev) {
+            ev.preventDefault();
+        }
+
+        function drag(ev) {
+            ev.dataTransfer.setData("text/plain", ev.target.id);
+        }
+
+        function drop(ev) {
+            ev.preventDefault();
+            const id = ev.dataTransfer.getData("text/plain");
+            const task = document.getElementById(id);
+            const tasksContainer = ev.target.closest('.tasks');
+            if (task && tasksContainer && !tasksContainer.contains(task)) {
+                tasksContainer.appendChild(task);
+                saveState();
+            }
+        }
+
+        // File Attachment System
+        function attachFile(type) {
+            if (type === 'bluetooth') {
+                alert('Bluetooth file sharing would be implemented here');
+                return;
+            }
+            
+            const input = document.createElement('input');
+            input.type = 'file';
+            
+            // Set accept attribute based on file type
+            switch(type) {
+                case 'document':
+                    input.accept = '.pdf,.doc,.docx,.txt';
+                    break;
+                case 'image':
+                    input.accept = 'image/*';
+                    break;
+                case 'audio':
+                    input.accept = 'audio/*';
+                    break;
+                default:
+                    input.accept = '*/*';
+            }
+            
+            input.onchange = function(e) {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    alert(`File "${file.name}" would be attached to a task. In a real implementation, this would be uploaded and linked to the selected task.`);
+                }
+            };
+            
+            input.click();
+        }
+
+        // Stock Market Data (Example using mock data)
+        function updateStockData() {
+            const stocks = [
+                { symbol: 'WRAV', price: 145.23, change: 1.2 },
+                { symbol: 'DSEEK', price: 234.56, change: -0.8 },
+                { symbol: 'TECH', price: 189.75, change: 2.5 },
+                { symbol: 'INNV', price: 76.44, change: -1.3 }
+            ];
+
+            let html = '';
+            stocks.forEach(stock => {
+                html += `
+                    <div class="stock-item">
+                        <span>${stock.symbol}</span>
+                        <span>$${stock.price.toFixed(2)}</span>
+                        <span style="color: ${stock.change >= 0 ? '#4caf50' : '#f44336'}">
+                            (${stock.change >= 0 ? '+' : ''}${stock.change}%)
+                        </span>
+                    </div>
+                `;
+            });
+            document.getElementById('stock-data').innerHTML = html;
+        }
+
+        // State Management
+        function saveState() {
+            const state = {
+                longTermGoals: getTextContent('long-term-goals'),
+                shortTermGoals: getTextContent('short-term-goals'),
+                nextMoves: getTextContent('next-moves')
+            };
+            localStorage.setItem('plannerState', JSON.stringify(state));
+        }
+
+        function loadState() {
+            const state = JSON.parse(localStorage.getItem('plannerState'));
+            if (state) {
+                populateSection('long-term-goals', state.longTermGoals);
+                populateSection('short-term-goals', state.shortTermGoals);
+                populateSection('next-moves', state.nextMoves);
+            }
+        }
+
+        function getTextContent(id) {
+            return Array.from(document.getElementById(id).children)
+                .map(item => item.textContent);
+        }
+
+        function populateSection(id, items) {
+            const container = document.getElementById(id);
+            items.forEach(text => {
+                const item = document.createElement('div');
+                item.className = 'task-item';
+                item.draggable = true;
+                item.ondragstart = drag;
+                item.textContent = text;
+                item.id = 'goal-' + (goalIdCounter++);
+                container.appendChild(item);
+            });
+        }
+
+        // Recommendation Engine (Basic Example)
+        const recommendations = [
+            "Review your quarterly objectives",
+            "Check market trends analysis",
+            "Connect with 5 new professionals this week",
+            "Schedule time for creative thinking",
+            "Update your skills with online courses"
+        ];
+        
+        function updateRecommendations() {
+            document.getElementById('recommendations').innerHTML = recommendations
+                .map(r => `<div class="recommendation-item">${r}</div>`).join('');
+        }
+
+        // Initialize the planner
+        loadState();
+        updateStockData();
+        updateRecommendations();
+        setInterval(updateStockData, 60000); // Update every minute
+
+        // Add some sample tasks to the board columns
+        document.addEventListener('DOMContentLoaded', function() {
+            const sampleTasks = {
+                today: [
+                    "Finish project proposal",
+                    "Team meeting at 2 PM",
+                    "Review analytics report"
+                ],
+                week: [
+                    "Prepare presentation for client",
+                    "Schedule content for next week",
+                    "Research new market trends"
+                ],
+                month: [
+                    "Launch new feature",
+                    "Plan quarterly strategy",
+                    "Attend industry conference"
+                ]
+            };
+            
+            // Only add sample tasks if columns are empty
+            if (document.querySelector('#day-column .tasks').children.length === 0) {
+                sampleTasks.today.forEach(task => {
+                    const taskElement = document.createElement('div');
+                    taskElement.className = 'task-item';
+                    taskElement.draggable = true;
+                    taskElement.ondragstart = drag;
+                    taskElement.textContent = task;
+                    taskElement.id = 'goal-' + (goalIdCounter++);
+                    document.querySelector('#day-column .tasks').appendChild(taskElement);
+                });
+            }
+            
+            if (document.querySelector('#week-column .tasks').children.length === 0) {
+                sampleTasks.week.forEach(task => {
+                    const taskElement = document.createElement('div');
+                    taskElement.className = 'task-item';
+                    taskElement.draggable = true;
+                    taskElement.ondragstart = drag;
+                    taskElement.textContent = task;
+                    taskElement.id = 'goal-' + (goalIdCounter++);
+                    document.querySelector('#week-column .tasks').appendChild(taskElement);
+                });
+            }
+            
+            if (document.querySelector('#month-column .tasks').children.length === 0) {
+                sampleTasks.month.forEach(task => {
+                    const taskElement = document.createElement('div');
+                    taskElement.className = 'task-item';
+                    taskElement.draggable = true;
+                    taskElement.ondragstart = drag;
+                    taskElement.textContent = task;
+                    taskElement.id = 'goal-' + (goalIdCounter++);
+                    document.querySelector('#month-column .tasks').appendChild(taskElement);
+                });
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wiseraven - Notifications</title>
+    <style>
+        :root {
+            --primary-color: #1a1f2b;
+            --secondary-color: #2d3748;
+            --accent-color: #4a5568;
+            --highlight-color: #718096;
+            --light-color: #e2e8f0;
+            --text-color: #f8fafc;
+            --bg-color: #0f1419;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+            --success-color: #4caf50;
+            --warning-color: #ff9800;
+            --error-color: #f44336;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .header-title {
+            font-size: 28px;
+            color: var(--light-color);
+        }
+
+        .notification-filters {
+            display: flex;
+            gap: 10px;
+        }
+
+        .filter-btn {
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .filter-btn.active {
+            background-color: var(--highlight-color);
+            color: var(--text-color);
+            border-color: var(--highlight-color);
+        }
+
+        .filter-btn:hover {
+            background-color: var(--accent-color);
+        }
+
+        .notification-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .notification-item {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            transition: all 0.3s ease;
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .notification-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .notification-item.unread {
+            border-left: 4px solid var(--highlight-color);
+        }
+
+        .notification-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid var(--highlight-color);
+        }
+
+        .notification-content {
+            flex: 1;
+        }
+
+        .notification-text {
+            margin-bottom: 5px;
+            line-height: 1.5;
+        }
+
+        .notification-text strong {
+            color: var(--light-color);
+        }
+
+        .notification-time {
+            font-size: 12px;
+            color: var(--highlight-color);
+        }
+
+        .notification-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .action-btn {
+            padding: 5px 10px;
+            border-radius: 15px;
+            border: 1px solid var(--border-color);
+            background-color: transparent;
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn.primary {
+            background-color: var(--highlight-color);
+            border-color: var(--highlight-color);
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .notification-type {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            font-size: 18px;
+            color: var(--highlight-color);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 50px 0;
+            color: var(--highlight-color);
+        }
+
+        .empty-state-icon {
+            font-size: 50px;
+            margin-bottom: 15px;
+        }
+
+        .empty-state-text {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .mark-all-read {
+            background: none;
+            border: none;
+            color: var(--highlight-color);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .mark-all-read:hover {
+            color: var(--light-color);
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .notification-filters {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="header-title">Notifications</h1>
+            <div class="notification-actions">
+                <button class="mark-all-read" id="markAllRead">Mark all as read</button>
+            </div>
+        </div>
+
+        <div class="notification-filters">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="unread">Unread</button>
+            <button class="filter-btn" data-filter="mentions">Mentions</button>
+            <button class="filter-btn" data-filter="follows">Follows</button>
+            <button class="filter-btn" data-filter="likes">Likes</button>
+        </div>
+
+        <div class="notification-list" id="notificationList">
+            <div class="notification-item unread" data-type="like">
+                <img src="https://randomuser.me/api/portraits/women/44.jpg" alt="User" class="notification-avatar">
+                <div class="notification-content">
+                    <div class="notification-text">
+                        <strong>Sarah Johnson</strong> liked your post: "The future of social media is decentralized..."
+                    </div>
+                    <div class="notification-time">2 hours ago</div>
+                    <div class="notification-actions">
+                        <button class="action-btn primary">View Post</button>
+                        <button class="action-btn">Follow Back</button>
+                    </div>
+                </div>
+                <div class="notification-type">
+                    <i class="fas fa-heart"></i>
+                </div>
+            </div>
+
+            <div class="notification-item unread" data-type="follow">
+                <img src="https://randomuser.me/api/portraits/men/32.jpg" alt="User" class="notification-avatar">
+                <div class="notification-content">
+                    <div class="notification-text">
+                        <strong>Michael Chen</strong> started following you
+                    </div>
+                    <div class="notification-time">5 hours ago</div>
+                    <div class="notification-actions">
+                        <button class="action-btn primary">Follow Back</button>
+                        <button class="action-btn">Message</button>
+                    </div>
+                </div>
+                <div class="notification-type">
+                    <i class="fas fa-user-plus"></i>
+                </div>
+            </div>
+
+            <div class="notification-item" data-type="mention">
+                <img src="https://randomuser.me/api/portraits/women/68.jpg" alt="User" class="notification-avatar">
+                <div class="notification-content">
+                    <div class="notification-text">
+                        <strong>Emma Wilson</strong> mentioned you in a comment: "Great point @RavenBlackbeak!"
+                    </div>
+                    <div class="notification-time">1 day ago</div>
+                    <div class="notification-actions">
+                        <button class="action-btn primary">View Comment</button>
+                    </div>
+                </div>
+                <div class="notification-type">
+                    <i class="fas fa-at"></i>
+                </div>
+            </div>
+
+            <div class="notification-item" data-type="comment">
+                <img src="https://randomuser.me/api/portraits/men/22.jpg" alt="User" class="notification-avatar">
+                <div class="notification-content">
+                    <div class="notification-text">
+                        <strong>David Kim</strong> commented on your photo: "Amazing shot! The lighting is perfect."
+                    </div>
+                    <div class="notification-time">2 days ago</div>
+                    <div class="notification-actions">
+                        <button class="action-btn primary">View Photo</button>
+                        <button class="action-btn">Reply</button>
+                    </div>
+                </div>
+                <div class="notification-type">
+                    <i class="fas fa-comment"></i>
+                </div>
+            </div>
+
+            <div class="notification-item" data-type="share">
+                <img src="https://randomuser.me/api/portraits/women/33.jpg" alt="User" class="notification-avatar">
+                <div class="notification-content">
+                    <div class="notification-text">
+                        <strong>Lisa Park</strong> shared your post with her followers
+                    </div>
+                    <div class="notification-time">3 days ago</div>
+                    <div class="notification-actions">
+                        <button class="action-btn primary">View Post</button>
+                    </div>
+                </div>
+                <div class="notification-type">
+                    <i class="fas fa-share"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            const notificationItems = document.querySelectorAll('.notification-item');
+            const markAllReadBtn = document.getElementById('markAllRead');
+            
+            // Filter notifications
+            filterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    const filter = this.getAttribute('data-filter');
+                    
+                    notificationItems.forEach(item => {
+                        if (filter === 'all') {
+                            item.style.display = 'flex';
+                        } else if (filter === 'unread') {
+                            if (item.classList.contains('unread')) {
+                                item.style.display = 'flex';
+                            } else {
+                                item.style.display = 'none';
+                            }
+                        } else {
+                            const type = item.getAttribute('data-type');
+                            if (type === filter) {
+                                item.style.display = 'flex';
+                            } else {
+                                item.style.display = 'none';
+                            }
+                        }
+                    });
+                });
+            });
+            
+            // Mark all as read
+            markAllReadBtn.addEventListener('click', function() {
+                notificationItems.forEach(item => {
+                    item.classList.remove('unread');
+                });
+                
+                // Show confirmation
+                alert('All notifications marked as read');
+            });
+            
+            // Mark individual notification as read when clicked
+            notificationItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    // Don't mark as read if clicking on action buttons
+                    if (!e.target.classList.contains('action-btn')) {
+                        this.classList.remove('unread');
+                    }
+                });
+            });
+            
+            // Handle action buttons
+            document.querySelectorAll('.action-btn').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.stopPropagation(); // Prevent marking as read
+                    
+                    const action = this.textContent;
+                    const notification = this.closest('.notification-item');
+                    const userName = notification.querySelector('strong').textContent;
+                    
+                    alert(`Action "${action}" would be performed for ${userName}`);
+                    
+                    // If it's a "Follow Back" action, change the button
+                    if (action === 'Follow Back') {
+                        this.textContent = 'Following';
+                        this.classList.remove('primary');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
