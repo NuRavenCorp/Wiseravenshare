@@ -13,11 +13,11 @@ namespace Wiseravenshare.Server.Controllers;
 [Route("api/[controller]")]
 [Authorize(Roles = "Admin,Moderator")]
 [Produces("application/json")]
-public class EvolutionController : ControllerBase
+public class TruthController : ControllerBase
 {
     private readonly IEvolutionService _evolutionService;
 
-    public EvolutionController(IEvolutionService evolutionService)
+    public TruthController(IEvolutionService evolutionService)
     {
         _evolutionService = evolutionService;
     }

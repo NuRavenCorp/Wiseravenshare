@@ -49,6 +49,7 @@ builder.Services.AddScoped<IAgentRepository, AgentRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<IVideoService, VideoService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<IEmailService, NoopEmailService>();
@@ -105,6 +106,7 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(
                 "http://localhost:3000",
+            "http://localhost:5173",
                 "https://wiseravenshare.com")
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -182,6 +184,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         await dbContext.Database.MigrateAsync();
+        await EnsureBillingSchemaAsync(dbContext);
 
         // Seed data if needed
         if (!await dbContext.Users.AnyAsync())
@@ -216,6 +219,8 @@ using (var scope = app.Services.CreateScope())
                 }
             }
 
+            await EnsureBillingSchemaAsync(dbContext);
+
             if (!await dbContext.Users.AnyAsync())
             {
                 var seeder = scope.ServiceProvider.GetRequiredService<IDataSeeder>();
@@ -229,6 +234,34 @@ using (var scope = app.Services.CreateScope())
             logger.LogWarning(ensureEx, "Skipping startup migration/seed due to database initialization issues.");
         }
     }
+}
+
+static async Task EnsureBillingSchemaAsync(AppDbContext dbContext)
+{
+    const string sql = @"
+CREATE TABLE IF NOT EXISTS ""UserSubscriptions"" (
+    ""Id"" uuid NOT NULL,
+    ""UserId"" uuid NOT NULL,
+    ""StripeCustomerId"" character varying(100) NOT NULL,
+    ""StripeSubscriptionId"" character varying(100) NULL,
+    ""StripePriceId"" character varying(100) NULL,
+    ""Status"" character varying(50) NOT NULL,
+    ""CurrentPeriodEnd"" timestamp with time zone NULL,
+    ""CancelAtPeriodEnd"" boolean NOT NULL,
+    ""LastWebhookEventId"" character varying(100) NULL,
+    ""CreatedAt"" timestamp with time zone NOT NULL,
+    ""UpdatedAt"" timestamp with time zone NOT NULL,
+    ""IsDeleted"" boolean NOT NULL,
+    ""DeletedAt"" timestamp with time zone NULL,
+    CONSTRAINT ""PK_UserSubscriptions"" PRIMARY KEY (""Id""),
+    CONSTRAINT ""FK_UserSubscriptions_Users_UserId"" FOREIGN KEY (""UserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_UserId"" ON ""UserSubscriptions"" (""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_StripeCustomerId"" ON ""UserSubscriptions"" (""StripeCustomerId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_StripeSubscriptionId"" ON ""UserSubscriptions"" (""StripeSubscriptionId"") WHERE ""StripeSubscriptionId"" IS NOT NULL;";
+
+    await dbContext.Database.ExecuteSqlRawAsync(sql);
 }
 
 app.Run();
