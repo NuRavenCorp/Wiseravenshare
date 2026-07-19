@@ -35,6 +35,16 @@ services:
       - key: Stripe__WebhookSecret
         value: ${STRIPE_WEBHOOK_SECRET}
         type: SECRET
+      - key: Social__Facebook__PageId
+        value: ${FACEBOOK_PAGE_ID}
+      - key: Social__Facebook__PageAccessToken
+        value: ${FACEBOOK_PAGE_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__TikTok__Username
+        value: ${TIKTOK_USERNAME}
+      - key: Social__TikTok__AccessToken
+        value: ${TIKTOK_ACCESS_TOKEN}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:

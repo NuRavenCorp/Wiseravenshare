@@ -19,6 +19,14 @@ services:
         sync: false
       - key: Stripe__WebhookSecret
         sync: false
+      - key: Social__Facebook__PageId
+        sync: false
+      - key: Social__Facebook__PageAccessToken
+        sync: false
+      - key: Social__TikTok__Username
+        sync: false
+      - key: Social__TikTok__AccessToken
+        sync: false
 
   - type: web
     name: wiseravenshare-app

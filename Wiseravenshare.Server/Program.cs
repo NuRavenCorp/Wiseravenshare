@@ -54,6 +54,7 @@ builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<IEmailService, NoopEmailService>();
 builder.Services.AddScoped<IDataSeeder, DataSeeder>();
+builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 
 // External Services
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
@@ -159,6 +160,7 @@ else
 }
 
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 app.UseResponseCompression();
 app.UseRateLimiter();
 
@@ -185,6 +187,7 @@ using (var scope = app.Services.CreateScope())
     {
         await dbContext.Database.MigrateAsync();
         await EnsureBillingSchemaAsync(dbContext);
+        await EnsureCoreSchemaAsync(dbContext);
 
         // Seed data if needed
         if (!await dbContext.Users.AnyAsync())
@@ -220,6 +223,7 @@ using (var scope = app.Services.CreateScope())
             }
 
             await EnsureBillingSchemaAsync(dbContext);
+            await EnsureCoreSchemaAsync(dbContext);
 
             if (!await dbContext.Users.AnyAsync())
             {
@@ -260,6 +264,71 @@ CREATE TABLE IF NOT EXISTS ""UserSubscriptions"" (
 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_UserId"" ON ""UserSubscriptions"" (""UserId"");
 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_StripeCustomerId"" ON ""UserSubscriptions"" (""StripeCustomerId"");
 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserSubscriptions_StripeSubscriptionId"" ON ""UserSubscriptions"" (""StripeSubscriptionId"") WHERE ""StripeSubscriptionId"" IS NOT NULL;";
+
+    await dbContext.Database.ExecuteSqlRawAsync(sql);
+}
+
+static async Task EnsureCoreSchemaAsync(AppDbContext dbContext)
+{
+    const string sql = @"
+CREATE INDEX IF NOT EXISTS ""IX_Posts_UserId_CreatedAt"" ON ""Posts"" (""UserId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Videos_UserId_CreatedAt"" ON ""Videos"" (""UserId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Videos_Status_Privacy_PublishedAt"" ON ""Videos"" (""Status"", ""Privacy"", ""PublishedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Message_ConversationId_CreatedAt"" ON ""Message"" (""ConversationId"", ""CreatedAt"" DESC);
+
+CREATE INDEX IF NOT EXISTS ""IX_Users_Email_Lookup"" ON ""Users"" ((lower(""Email""))) WHERE NOT ""IsDeleted"";
+CREATE INDEX IF NOT EXISTS ""IX_Users_Username_Lookup"" ON ""Users"" ((lower(""Username""))) WHERE NOT ""IsDeleted"";
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'IX_Users_Email_Active_UQ') THEN
+
+        IF EXISTS (
+            SELECT 1
+            FROM ""Users""
+            WHERE NOT ""IsDeleted""
+            GROUP BY lower(""Email"")
+            HAVING COUNT(*) > 1) THEN
+            RAISE NOTICE 'Skipping IX_Users_Email_Active_UQ creation due to duplicate active emails.';
+        ELSE
+            CREATE UNIQUE INDEX ""IX_Users_Email_Active_UQ""
+                ON ""Users"" ((lower(""Email"")))
+                WHERE NOT ""IsDeleted"";
+        END IF;
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'IX_Users_Username_Active_UQ') THEN
+
+        IF EXISTS (
+            SELECT 1
+            FROM ""Users""
+            WHERE NOT ""IsDeleted""
+            GROUP BY lower(""Username"")
+            HAVING COUNT(*) > 1) THEN
+            RAISE NOTICE 'Skipping IX_Users_Username_Active_UQ creation due to duplicate active usernames.';
+        ELSE
+            CREATE UNIQUE INDEX ""IX_Users_Username_Active_UQ""
+                ON ""Users"" ((lower(""Username"")))
+                WHERE NOT ""IsDeleted"";
+        END IF;
+    END IF;
+END$$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostLikes_PostId_UserId_UQ"" ON ""PostLikes"" (""PostId"", ""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostReposts_PostId_UserId_UQ"" ON ""PostReposts"" (""PostId"", ""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostBookmarks_PostId_UserId_UQ"" ON ""PostBookmarks"" (""PostId"", ""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_VideoLike_VideoId_UserId_UQ"" ON ""VideoLike"" (""VideoId"", ""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ConversationParticipant_ConversationId_UserId_UQ"" ON ""ConversationParticipant"" (""ConversationId"", ""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TruthVerificationVotes_ClaimId_UserId_UQ"" ON ""TruthVerificationVotes"" (""ClaimId"", ""UserId"");";
 
     await dbContext.Database.ExecuteSqlRawAsync(sql);
 }

@@ -16,6 +16,32 @@ export type VideoItem = {
 
 const apiBase = import.meta.env.VITE_API_URL || '';
 
+function normalizeAssetUrl(url?: string): string {
+  if (!url) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+
+  if (!apiBase) {
+    return url;
+  }
+
+  const base = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+  const path = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${path}`;
+}
+
+function mapVideoItem(video: VideoItem): VideoItem {
+  return {
+    ...video,
+    videoUrl: normalizeAssetUrl(video.videoUrl),
+    thumbnailUrl: normalizeAssetUrl(video.thumbnailUrl),
+  };
+}
+
 function getAuthToken(): string | null {
   return localStorage.getItem('ws.accessToken') ||
     localStorage.getItem('auth_token') ||
@@ -88,7 +114,8 @@ async function getMyLibraryVideos(page = 1, pageSize = 24): Promise<VideoItem[]>
     throw new Error(message);
   }
 
-  return response.json();
+  const videos: VideoItem[] = await response.json();
+  return videos.map(mapVideoItem);
 }
 
 async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<VideoItem[]> {
@@ -108,7 +135,8 @@ async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<V
     throw new Error(message);
   }
 
-  return response.json();
+  const videos: VideoItem[] = await response.json();
+  return videos.map(mapVideoItem);
 }
 
 export const videoService = {
