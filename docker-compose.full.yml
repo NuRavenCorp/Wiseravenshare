@@ -1,47 +1,913 @@
+# docker-compose.prod.yml
 version: '3.8'
 
 services:
-  api:
-    image: wiseravenshare-api:latest
-    ports:
-      - "10000:8080"
-    depends_on:
-      - db
-    environment:
-      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=wiseravenshare;Username=postgres;Password=postgres
-    networks:
-      - app-network
+  # ============================================
+  # Database Services
+  # ============================================
 
-  db:
-    image: postgres:16-alpine
+  # PostgreSQL with Replication and Backup
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: wiseravenshare-postgres-primary
+    restart: unless-stopped
     environment:
-      - POSTGRES_DB=wiseravenshare
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: wiseravenshare-db
+      POSTGRES_USER: wiseravenshare-user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8 --data-checksums"
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+      POSTGRES_WORK_MEM: 16MB
+      POSTGRES_MAINTENANCE_WORK_MEM: 128MB
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_WAL_LEVEL: replica
+      POSTGRES_MAX_WAL_SENDERS: 10
+      POSTGRES_WAL_KEEP_SEGMENTS: 32
+      POSTGRES_CHECKPOINT_TIMEOUT: 15min
+      POSTGRES_CHECKPOINT_COMPLETION_TARGET: 0.9
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./backend/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - postgres_wal:/var/lib/postgresql/wal
+    ports:
+      - "5432:5432"
+    networks:
+      - wiseravenshare-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U wiseravenshare-user -d wiseravenshare-db"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
 
-  nginx:
-    image: nginx:alpine
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: wiseravenshare-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wiseravenshare-db
+      POSTGRES_USER: wiseravenshare-user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+      POSTGRES_MAX_CONNECTIONS: 100
+      POSTGRES_WAL_LEVEL: replica
+      POSTGRES_HOT_STANDBY: "on"
+      POSTGRES_MAX_STANDBY_STREAMING_DELAY: 30s
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "5433:5432"
+    depends_on:
+      - postgres-primary
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiseravenshare-user -d wiseravenshare-db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 3G
+        reservations:
+          cpus: '0.75'
+          memory: 1.5G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # PostgreSQL Backup Service
+  postgres-backup:
+    image: prodrigestivill/postgres-backup-local:15
+    container_name: wiseravenshare-postgres-backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres-primary
+      POSTGRES_DB: wiseravenshare-db
+      POSTGRES_USER: wiseravenshare-user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_EXTRA_OPTS: "-Z9 --schema=public --blobs"
+      SCHEDULE: "0 2 * * *"
+      BACKUP_DIR: /backups
+      BACKUP_KEEP_DAYS: 30
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 3
+    volumes:
+      - postgres_backups:/backups
+      - ./backup/scripts:/scripts:ro
+    depends_on:
+      - postgres-primary
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # PgBouncer - Connection Pooling
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: wiseravenshare-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres-primary
+      DB_USER: wiseravenshare-user
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: wiseravenshare-db
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 5
+      MAX_DB_CONNECTIONS: 50
+      SERVER_IDLE_TIMEOUT: 600
+      SERVER_LIFETIME: 3600
+      SERVER_RESET_QUERY: DISCARD ALL
+      QUERY_TIMEOUT: 0
+      QUERY_WAIT_TIMEOUT: 120
+      CLIENT_IDLE_TIMEOUT: 0
+      CLIENT_LOGIN_TIMEOUT: 60
+      AUTODB_IDLE_TIMEOUT: 3600
+      DNS_MAX_TTL: 15.0
+      DNS_ZXFRANKS: false
+    ports:
+      - "6432:6432"
+    depends_on:
+      - postgres-primary
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Redis with Sentinel for High Availability
+  redis-master:
+    image: redis:7-alpine
+    container_name: wiseravenshare-redis-master
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --replica-read-only yes
+      --replica-serve-stale-data no
+    volumes:
+      - redis_master_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "6379:6379"
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  redis-replica:
+    image: redis:7-alpine
+    container_name: wiseravenshare-redis-replica
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --replica-read-only yes
+      --replica-serve-stale-data no
+      --replicaof redis-master 6379
+    volumes:
+      - redis_replica_data:/data
+    depends_on:
+      - redis-master
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 1.5G
+        reservations:
+          cpus: '0.375'
+          memory: 768M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: wiseravenshare-redis-sentinel
+    restart: unless-stopped
+    command: >
+      redis-sentinel
+      /usr/local/etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+      - redis-replica
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.125'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================
+  # Backend Services
+  # ============================================
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      target: production
+    image: wiseravenshare-backend:${VERSION:-latest}
+    container_name: wiseravenshare-api
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000;https://+:5001
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=${SSL_PASSWORD}
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetapp.pfx
+      - ConnectionStrings__DefaultConnection=Host=pgbouncer;Port=6432;Database=wiseravenshare-db;Username=wiseravenshare-user;Password=${DB_PASSWORD}
+      - ConnectionStrings__Redis=redis-master:6379,password=${REDIS_PASSWORD},abortConnect=false,connectTimeout=5000,responseTimeout=5000,defaultDatabase=0
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Jwt__Issuer=wiseravenshare.com
+      - Jwt__Audience=wiseravenshare.com
+      - Jwt__ExpiryMinutes=15
+      - Jwt__RefreshTokenExpiryDays=7
+      - YouTube__ApiKey=${YOUTUBE_API_KEY}
+      - YouTube__ClientId=${YOUTUBE_CLIENT_ID}
+      - YouTube__ClientSecret=${YOUTUBE_CLIENT_SECRET}
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - OpenAI__Organization=${OPENAI_ORGANIZATION}
+      - OpenAI__Model=gpt-4-turbo-preview
+      - Email__SmtpHost=${SMTP_HOST}
+      - Email__SmtpPort=${SMTP_PORT}
+      - Email__Username=${SMTP_USERNAME}
+      - Email__Password=${SMTP_PASSWORD}
+      - Email__From=${SMTP_FROM}
+      - Azure__StorageConnectionString=${AZURE_STORAGE_CONNECTION_STRING}
+      - Azure__ContainerName=${AZURE_CONTAINER_NAME}
+      - ApplicationInsights__ConnectionString=${APPINSIGHTS_CONNECTION_STRING}
+      - Serilog__MinimumLevel=Information
+      - Serilog__WriteTo__Console__OutputTemplate=[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}
+      - Serilog__WriteTo__File__Path=/app/Logs/log-.txt
+      - Serilog__WriteTo__File__RollingInterval=Day
+      - Serilog__WriteTo__File__RetainedFileCountLimit=30
+      - Serilog__WriteTo__ApplicationInsights__InstrumentationKey=${APPINSIGHTS_INSTRUMENTATION_KEY}
+      - CORS__AllowedOrigins=${CORS_ALLOWED_ORIGINS}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - SENTRY_ENVIRONMENT=production
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    volumes:
+      - backend_logs:/app/Logs
+      - backend_media:/app/MediaStorage
+      - ~/.aspnet/https:/https:ro
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # Background Worker Service
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker.prod
+      target: production
+    image: wiseravenshare-worker:${VERSION:-latest}
+    container_name: wiseravenshare-worker
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Host=pgbouncer;Port=6432;Database=wiseravenshare-db;Username=wiseravenshare-user;Password=${DB_PASSWORD}
+      - ConnectionStrings__Redis=redis-master:6379,password=${REDIS_PASSWORD},abortConnect=false,connectTimeout=5000,responseTimeout=5000,defaultDatabase=1
+      - YouTube__ApiKey=${YOUTUBE_API_KEY}
+      - YouTube__ClientId=${YOUTUBE_CLIENT_ID}
+      - YouTube__ClientSecret=${YOUTUBE_CLIENT_SECRET}
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - OpenAI__Organization=${OPENAI_ORGANIZATION}
+      - Email__SmtpHost=${SMTP_HOST}
+      - Email__SmtpPort=${SMTP_PORT}
+      - Email__Username=${SMTP_USERNAME}
+      - Email__Password=${SMTP_PASSWORD}
+      - Email__From=${SMTP_FROM}
+      - Azure__StorageConnectionString=${AZURE_STORAGE_CONNECTION_STRING}
+      - Azure__ContainerName=${AZURE_CONTAINER_NAME}
+      - Serilog__MinimumLevel=Information
+      - Serilog__WriteTo__Console__OutputTemplate=[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}
+      - Serilog__WriteTo__File__Path=/app/Logs/worker-log-.txt
+      - Serilog__WriteTo__File__RollingInterval=Day
+      - Serilog__WriteTo__File__RetainedFileCountLimit=30
+      - SENTRY_DSN=${SENTRY_DSN}
+      - SENTRY_ENVIRONMENT=production
+    volumes:
+      - worker_logs:/app/Logs
+      - worker_media:/app/MediaStorage
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.75'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # ============================================
+  # Frontend Services
+  # ============================================
+
+  # React Frontend with SSR
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      target: production
+      args:
+        - VITE_API_URL=${FRONTEND_API_URL}
+        - VITE_WS_URL=${FRONTEND_WS_URL}
+        - VITE_GOOGLE_ANALYTICS_ID=${GOOGLE_ANALYTICS_ID}
+        - VITE_SENTRY_DSN=${SENTRY_DSN}
+        - VITE_ENABLE_ANALYTICS=true
+    image: wiseravenshare-frontend:${VERSION:-latest}
+    container_name: wiseravenshare-frontend
+    restart: unless-stopped
     ports:
       - "3000:80"
+      - "3001:443"
+    environment:
+      - NODE_ENV=production
     volumes:
-      - ./wiseravenshare.client/dist:/usr/share/nginx/html:ro
-      - ./nginx-local.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_build:/app/dist
     depends_on:
-      - api
+      - backend
     networks:
-      - app-network
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
-volumes:
-  postgres_data:
+  # ============================================
+  # Reverse Proxy & Load Balancer
+  # ============================================
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: wiseravenshare-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/sites:/etc/nginx/sites-enabled:ro
+      - ./nginx/ssl/prod:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+      - frontend_build:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # ============================================
+  # Monitoring & Observability
+  # ============================================
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: wiseravenshare-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      - prometheus_data:/prometheus
+      - prometheus_config:/etc/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.wal-compression'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--alertmanager.url=http://alertmanager:9093'
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9090/-/healthy", "-O", "/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: wiseravenshare-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel,grafana-worldmap-panel,grafana-polystat-panel
+      - GF_SERVER_ROOT_URL=https://grafana.wiseravenshare.com
+      - GF_SERVER_DOMAIN=grafana.wiseravenshare.com
+      - GF_SERVER_ENFORCE_DOMAIN=true
+      - GF_SERVER_ROUTER_LOGGING=false
+      - GF_SMTP_ENABLED=${GRAFANA_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${GRAFANA_SMTP_HOST}
+      - GF_SMTP_USER=${GRAFANA_SMTP_USER}
+      - GF_SMTP_PASSWORD=${GRAFANA_SMTP_PASSWORD}
+      - GF_SMTP_FROM_ADDRESS=${GRAFANA_SMTP_FROM}
+      - GF_AUTH_GOOGLE_ENABLED=${GRAFANA_GOOGLE_AUTH:-false}
+      - GF_AUTH_GOOGLE_CLIENT_ID=${GRAFANA_GOOGLE_CLIENT_ID}
+      - GF_AUTH_GOOGLE_CLIENT_SECRET=${GRAFANA_GOOGLE_CLIENT_SECRET}
+      - GF_AUTH_GOOGLE_ALLOWED_DOMAINS=${GRAFANA_GOOGLE_ALLOWED_DOMAINS}
+      - GF_AUTH_GOOGLE_ALLOW_SIGN_UP=true
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # Alertmanager
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: wiseravenshare-alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address='
+    ports:
+      - "9093:9093"
+    depends_on:
+      - prometheus
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.125'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Node Exporter
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: wiseravenshare-node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /dev:/host/dev:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+      - '--collector.diskstats.ignored-devices=^(ram|loop|fd|(h|s|v|xv)d[a-z]|nvme\\d+n\\d+p\\d+)$'
+    ports:
+      - "9100:9100"
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.125'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # cAdvisor
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: wiseravenshare-cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.125'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================
+  # Logging & Analysis
+  # ============================================
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: wiseravenshare-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=${ELASTIC_SECURITY_ENABLED:-true}
+      - xpack.security.authc.api_key.enabled=true
+      - xpack.security.enrollment.enabled=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic}
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - path.data=/usr/share/elasticsearch/data
+      - path.logs=/usr/share/elasticsearch/logs
+      - cluster.name=wiseravenshare
+      - node.name=elasticsearch-1
+      - network.host=0.0.0.0
+      - discovery.seed_hosts=[]
+      - cluster.initial_master_nodes=["elasticsearch-1"]
+      - bootstrap.memory_lock=true
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - wiseravenshare-network
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # Kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.10.0
+    container_name: wiseravenshare-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-elastic}
+      - SERVER_NAME=kibana.wiseravenshare.com
+      - SERVER_PUBLICBASEURL=https://kibana.wiseravenshare.com
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+  # Logstash
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.10.0
+    container_name: wiseravenshare-logstash
+    restart: unless-stopped
+    volumes:
+      - ./logging/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./logging/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - backend_logs:/var/log/backend:ro
+      - nginx_logs:/var/log/nginx:ro
+    ports:
+      - "5044:5044"
+      - "5000:5000"
+      - "9600:9600"
+    depends_on:
+      - elasticsearch
+    networks:
+      - wiseravenshare-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        compress: "true"
+
+# ============================================
+# Networks
+# ============================================
 
 networks:
-  app-network:
+  wiseravenshare-network:
+    name: wiseravenshare-network
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: wiseravenshare0
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.driver.mtu: "1500"
+
+# ============================================
+# Volumes
+# ============================================
+
+volumes:
+  # Database volumes
+  postgres_primary_data:
+    name: wiseravenshare-postgres-primary-data
+  postgres_replica_data:
+    name: wiseravenshare-postgres-replica-data
+  postgres_wal:
+    name: wiseravenshare-postgres-wal
+  postgres_backups:
+    name: wiseravenshare-postgres-backups
+  
+  # Redis volumes
+  redis_master_data:
+    name: wiseravenshare-redis-master-data
+  redis_replica_data:
+    name: wiseravenshare-redis-replica-data
+  
+  # Application volumes
+  backend_logs:
+    name: wiseravenshare-backend-logs
+  backend_media:
+    name: wiseravenshare-backend-media
+  worker_logs:
+    name: wiseravenshare-worker-logs
+  worker_media:
+    name: wiseravenshare-worker-media
+  frontend_build:
+    name: wiseravenshare-frontend-build
+  
+  # Monitoring volumes
+  prometheus_data:
+    name: wiseravenshare-prometheus-data
+  prometheus_config:
+    name: wiseravenshare-prometheus-config
+  grafana_data:
+    name: wiseravenshare-grafana-data
+  alertmanager_data:
+    name: wiseravenshare-alertmanager-data
+  
+  # Logging volumes
+  elasticsearch_data:
+    name: wiseravenshare-elasticsearch-data
+  nginx_logs:
+    name: wiseravenshare-nginx-logs

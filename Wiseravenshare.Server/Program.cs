@@ -1,141 +1,234 @@
-using Wiseravenshare.Server.Services;
-using Npgsql;
+// Wiseravenshare.Server/Program.cs
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Data;
+using System.Reflection;
 using System.Text;
+using System.Text.Json.Serialization;
+using Wiseravenshare.Server.Filters;
+using Wiseravenshare.Server.Hubs;
+using Wiseravenshare.Server.Middleware;
+using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Infrastructure.Data.Repositories;
+using Wiseravenshare.Server.Infrastructure.External;
+using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Configuration ────────────────────────────────────────────────────────────
-var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
-var defaultConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-
-// ── Logging ──────────────────────────────────────────────────────────────────
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-if (!builder.Environment.IsDevelopment())
+// Add services
+builder.Services.AddControllers(options =>
 {
-    builder.Logging.SetMinimumLevel(LogLevel.Warning);
-}
+    options.Filters.Add<GlobalExceptionFilter>();
+    options.Filters.Add<ValidationFilter>();
+})
+.AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
 
-// ── Services ─────────────────────────────────────────────────────────────────
-builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddScoped<IYouTubeService, YouTubeService>();
 
-var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
-if (string.IsNullOrWhiteSpace(jwtKey))
-{
-    throw new InvalidOperationException("Authentication:Jwt:Key is required.");
-}
+// Database
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
+        .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
-var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+// Repositories
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IPostRepository, PostRepository>();
+builder.Services.AddScoped<ITruthRepository, TruthRepository>();
+builder.Services.AddScoped<IAgentRepository, AgentRepository>();
+
+// Services
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IPostService, PostService>();
+builder.Services.AddScoped<IVideoService, VideoService>();
+builder.Services.AddScoped<ITruthService, TruthService>();
+builder.Services.AddScoped<IEvolutionService, EvolutionService>();
+builder.Services.AddScoped<IEmailService, NoopEmailService>();
+builder.Services.AddScoped<IDataSeeder, DataSeeder>();
+
+// External Services
+builder.Services.AddScoped<IOpenAIService, OpenAIService>();
+
+// Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = signingKey,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? "default-secret-key-32-chars-minimum")),
             ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Authentication:Jwt:Issuer"],
+            ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "wiseravenshare.com",
             ValidateAudience = true,
-            ValidAudience = builder.Configuration["Authentication:Jwt:Audience"],
+            ValidAudience = builder.Configuration["Jwt:Audience"] ?? "wiseravenshare.com",
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(1)
+            ClockSkew = TimeSpan.Zero
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 
-// Request timeout middleware (requires .NET 8+)
-builder.Services.AddRequestTimeouts(options =>
+builder.Services.AddAuthorization();
+
+// SignalR
+builder.Services.AddSignalR(options =>
 {
-    options.DefaultPolicy = new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
-    {
-        Timeout = TimeSpan.FromSeconds(60)
-    };
+    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 1024 * 1024;
 });
 
-// CORS — explicit origin when set, locked-down in production
+// CORS
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("ClientPolicy", policy =>
+    options.AddPolicy("AllowReactApp", policy =>
     {
-        if (!string.IsNullOrWhiteSpace(clientOrigin))
-        {
-            policy.WithOrigins(clientOrigin)
-                  .AllowAnyHeader()
-                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
-        }
-        else if (builder.Environment.IsDevelopment())
-        {
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-        }
-        else
-        {
-            // Fail-safe: block cross-origin in production if CLIENT_ORIGIN is missing
-            policy.WithOrigins("https://wise-ravens.com", "https://www.wise-ravens.com")
-                  .AllowAnyHeader()
-                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
-        }
+        policy.WithOrigins(
+                "http://localhost:3000",
+                "https://wiseravenshare.com")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
-// Only register OpenAPI in development
-if (builder.Environment.IsDevelopment())
+// Health checks
+builder.Services.AddHealthChecks();
+
+// Rate limiting
+builder.Services.AddRateLimiter(options =>
 {
-    builder.Services.AddOpenApi();
-}
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 10;
+    });
+});
+
+// Memory cache
+builder.Services.AddMemoryCache();
+
+// Response compression
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+});
+
+// Background services
+builder.Services.AddHostedService<EvolutionBackgroundService>();
+builder.Services.AddHostedService<TruthVerificationBackgroundService>();
+
+// Application insights
+builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
 
-// ── Middleware pipeline ───────────────────────────────────────────────────────
+// Configure pipeline
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
-    app.UseHttpsRedirection();
+    app.UseDeveloperExceptionPage();
+}
+else
+{
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
 }
 
-// Security headers for all responses
-app.Use(async (context, next) =>
-{
-    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-    context.Response.Headers["X-Frame-Options"] = "DENY";
-    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    context.Response.Headers["X-XSS-Protection"] = "0"; // CSP is the modern replacement
-    if (!app.Environment.IsDevelopment())
-    {
-        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
-    }
-    await next();
-});
+app.UseHttpsRedirection();
+app.UseResponseCompression();
+app.UseRateLimiter();
 
-app.UseCors("ClientPolicy");
-app.UseRequestTimeouts();
+app.UseCors("AllowReactApp");
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.UseMiddleware<RequestLoggingMiddleware>();
+
+app.MapHub<EvolutionHub>("/hubs/evolution");
+app.MapHub<NotificationHub>("/hubs/notification");
+
+app.MapHealthChecks("/health");
+
 app.MapControllers();
 
-// ── Health endpoints ──────────────────────────────────────────────────────────
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/health/db", async () =>
+// Ensure database is created and apply migrations
+using (var scope = app.Services.CreateScope())
 {
-    if (string.IsNullOrWhiteSpace(defaultConnectionString))
-    {
-        return Results.Problem("DefaultConnection is not configured.", statusCode: StatusCodes.Status500InternalServerError);
-    }
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
     try
     {
-        await using var connection = new NpgsqlConnection(defaultConnectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT 1", connection);
-        var result = await command.ExecuteScalarAsync();
-        return Results.Ok(new { status = "ok", database = "postgres", result });
+        await dbContext.Database.MigrateAsync();
+
+        // Seed data if needed
+        if (!await dbContext.Users.AnyAsync())
+        {
+            var seeder = scope.ServiceProvider.GetRequiredService<IDataSeeder>();
+            await seeder.SeedAsync();
+        }
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Database connectivity check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
+        logger.LogWarning(ex, "Migration/seed failed. Attempting schema creation fallback.");
+
+        try
+        {
+            await using var connection = dbContext.Database.GetDbConnection();
+            if (connection.State != ConnectionState.Open)
+            {
+                await connection.OpenAsync();
+            }
+
+            await using (var existsCommand = connection.CreateCommand())
+            {
+                existsCommand.CommandText = "SELECT to_regclass('public.\"Users\"')::text";
+                var usersTableName = await existsCommand.ExecuteScalarAsync();
+
+                if (usersTableName == null || usersTableName == DBNull.Value)
+                {
+                    var createScript = dbContext.Database.GenerateCreateScript();
+                    await using var createCommand = connection.CreateCommand();
+                    createCommand.CommandText = createScript;
+                    await createCommand.ExecuteNonQueryAsync();
+                }
+            }
+
+            if (!await dbContext.Users.AnyAsync())
+            {
+                var seeder = scope.ServiceProvider.GetRequiredService<IDataSeeder>();
+                await seeder.SeedAsync();
+            }
+
+            logger.LogInformation("Schema creation fallback completed.");
+        }
+        catch (Exception ensureEx)
+        {
+            logger.LogWarning(ensureEx, "Skipping startup migration/seed due to database initialization issues.");
+        }
     }
-});
+}
 
 app.Run();

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace Wiseravenshare.Server.Controllers
+namespace WiseRavenShare.Server.Controllers
 {
     [ApiController]
     [Route("[controller]")]

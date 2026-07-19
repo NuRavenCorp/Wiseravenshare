@@ -1,4 +1,4 @@
-namespace Wiseravenshare.Server
+namespace WiseRavenShare.Server
 {
     public class WeatherForecast
     {

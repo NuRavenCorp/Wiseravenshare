@@ -13,8 +13,8 @@ services:
         value: http://0.0.0.0:10000
       - key: CLIENT_ORIGIN
         value: https://wise-ravens.com
-      - key: ConnectionStrings__DefaultConnection
-        value: Host=<postgres-host>;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=<postgres-password>;SSL Mode=Require;Trust Server Certificate=true
+      - key: DATABASE_URL
+        sync: false
 
   - type: web
     name: wiseravenshare-app

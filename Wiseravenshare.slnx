@@ -3,5 +3,4 @@
     <Build />
     <Deploy />
   </Project>
-  <Project Path="Wiseravenshare.Server/Wiseravenshare.Server.csproj" />
 </Solution>

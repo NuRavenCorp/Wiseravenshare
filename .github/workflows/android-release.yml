@@ -1,0 +1,151 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "android-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.ANDROID_PLAY_SERVICE_ACCOUNT_JSON }}
+      ANDROID_PLAY_TRACK: ${{ secrets.ANDROID_PLAY_TRACK || 'internal' }}
+      ANDROID_PACKAGE_NAME: com.nuravencorp.wiseravenshare
+    defaults:
+      run:
+        working-directory: wiseravenshare.client
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: wiseravenshare.client/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Android assets
+        run: npm run android:assets
+
+      - name: Build web assets and sync Android
+        run: npm run android:sync
+
+      - name: Prepare release metadata
+        shell: bash
+        run: |
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          VERSION_NAME="${GITHUB_REF_NAME#android-v}"
+          if [ -z "$VERSION_NAME" ] || [ "$VERSION_NAME" = "$GITHUB_REF_NAME" ]; then
+            VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "ANDROID_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+
+      - name: Prepare signing keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        shell: bash
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release-key.jks
+          echo "ANDROID_KEYSTORE_PATH=${GITHUB_WORKSPACE}/wiseravenshare.client/android/release-key.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build release APK and AAB
+        shell: bash
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleRelease bundleRelease
+
+      - name: Generate changelog notes
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../build
+
+          if [[ "${GITHUB_REF}" == refs/tags/android-v* ]]; then
+            CURRENT_TAG="${GITHUB_REF_NAME}"
+            PREV_TAG="$(git tag --list 'android-v*' --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)"
+            {
+              echo "# Android ${ANDROID_VERSION_NAME}"
+              echo
+              if [[ -n "${PREV_TAG}" ]]; then
+                echo "Changes since ${PREV_TAG}:"
+                echo
+                git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:'- %s (%h)'
+              else
+                echo "Initial Android tag release notes:"
+                echo
+                git log -n 30 --pretty=format:'- %s (%h)'
+              fi
+            } > ../build/RELEASE_NOTES.md
+          else
+            {
+              echo "# Android CI Build ${ANDROID_VERSION_NAME}"
+              echo
+              echo "Latest changes:"
+              echo
+              git log -n 30 --pretty=format:'- %s (%h)'
+            } > ../build/RELEASE_NOTES.md
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: wiseravenshare.client/android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-notes
+          path: build/RELEASE_NOTES.md
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: build/RELEASE_NOTES.md
+          files: |
+            wiseravenshare.client/android/app/build/outputs/apk/release/app-release.apk
+            wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload to Google Play (optional)
+        if: env.ANDROID_PLAY_SERVICE_ACCOUNT_JSON != '' && env.ANDROID_KEYSTORE_BASE64 != ''
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ env.ANDROID_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.ANDROID_PACKAGE_NAME }}
+          releaseFiles: wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+          track: ${{ env.ANDROID_PLAY_TRACK }}
+          status: completed

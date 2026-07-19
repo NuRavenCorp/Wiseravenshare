@@ -1,6 +1,6 @@
-@Wiseravenshare.Server_HostAddress = http://localhost:5242
+@WiseRavenShare.Server_HostAddress = http://localhost:5028
 
-GET {{Wiseravenshare.Server_HostAddress}}/weatherforecast/
+GET {{WiseRavenShare.Server_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
