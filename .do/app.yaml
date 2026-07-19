@@ -29,6 +29,12 @@ services:
       - key: DATABASE_URL
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
+      - key: Stripe__SecretKey
+        value: ${STRIPE_SECRET_KEY}
+        type: SECRET
+      - key: Stripe__WebhookSecret
+        value: ${STRIPE_WEBHOOK_SECRET}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:

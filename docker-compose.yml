@@ -8,6 +8,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:10000
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=wiseravenshare_db;Username=wiseravenshare_user;Password=wiseravenshare_password
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
     ports:
       - "10000:10000"
     volumes:

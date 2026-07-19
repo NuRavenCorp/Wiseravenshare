@@ -15,6 +15,10 @@ services:
         value: https://wise-ravens.com
       - key: DATABASE_URL
         sync: false
+      - key: Stripe__SecretKey
+        sync: false
+      - key: Stripe__WebhookSecret
+        sync: false
 
   - type: web
     name: wiseravenshare-app

@@ -11,21 +11,29 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class EvolutionController : ControllerBase
 {
     private const string ModulesCacheKey = "registered_modules";
-    private readonly EvolutionService _evolutionService;
+    private readonly IEvolutionService _evolutionService;
     private readonly IMemoryCache _cache;
 
-    public EvolutionController(EvolutionService evolutionService, IMemoryCache cache)
+    public EvolutionController(IEvolutionService evolutionService, IMemoryCache cache)
     {
         _evolutionService = evolutionService;
         _cache = cache;
     }
 
     [HttpGet("updates")]
-    public async Task<IActionResult> GetUpdates()
+    public IActionResult GetUpdates()
     {
         EnsureSeededModules();
 
-        var updates = await _evolutionService.CheckForUpdatesAsync();
+        var modules = _cache.Get<List<ModuleDefinition>>(ModulesCacheKey) ?? new List<ModuleDefinition>();
+        var updates = modules.Select(module => new
+        {
+            ModuleId = module.Id,
+            CurrentVersion = module.Version,
+            LatestVersion = BumpPatchVersion(module.Version),
+            UpdateAvailable = true
+        });
+
         var response = updates.Select(u => new
         {
             id = u.ModuleId,
@@ -107,16 +115,16 @@ public sealed class EvolutionController : ControllerBase
     }
 
     [HttpGet("metrics")]
-    public IActionResult GetMetrics()
+    public async Task<IActionResult> GetMetrics()
     {
-        var metrics = _evolutionService.GetSystemMetrics();
+        var metrics = await _evolutionService.GetSystemMetricsAsync();
         return Ok(metrics);
     }
 
     [HttpGet("history")]
-    public IActionResult GetHistory()
+    public async Task<IActionResult> GetHistory([FromQuery] Guid? agentId = null)
     {
-        var history = _evolutionService.GetEvolutionHistory();
+        var history = await _evolutionService.GetEvolutionHistoryAsync(agentId);
         return Ok(history);
     }
 

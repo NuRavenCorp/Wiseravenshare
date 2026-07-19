@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<PostBookmark> PostBookmarks => Set<PostBookmark>();
     public DbSet<AgentEvolution> AgentEvolutions => Set<AgentEvolution>();
     public DbSet<AgentInteraction> AgentInteractions => Set<AgentInteraction>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
 
@@ -107,6 +108,24 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(s => s.UserId)
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<UserSubscription>(entity =>
+        {
+            entity.HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(s => s.UserId)
+                .IsUnique();
+
+            entity.HasIndex(s => s.StripeCustomerId)
+                .IsUnique();
+
+            entity.HasIndex(s => s.StripeSubscriptionId)
+                .HasFilter("\"StripeSubscriptionId\" IS NOT NULL")
                 .IsUnique();
         });
 
