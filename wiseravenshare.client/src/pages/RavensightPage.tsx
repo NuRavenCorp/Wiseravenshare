@@ -4,6 +4,7 @@ import { MainLayout } from '../components/layout/MainLayout';
 import { VideoStudio } from '../components/Ravensight/VideoStudio';
 import { VideoFeed } from '../components/Ravensight/VideoFeed';
 import { VideoLibrary } from '../components/Ravensight/VideoLibrary';
+import { SocialBridge } from '../components/Ravensight/SocialBridge';
 import { Tabs } from '../components/ui/Tabs';
 
 const RavenSightPage: React.FC = () => {
@@ -13,6 +14,7 @@ const RavenSightPage: React.FC = () => {
         { id: 'studio', label: '🎥 Studio' },
         { id: 'feed', label: '📺 Feed' },
         { id: 'library', label: '📚 Library' },
+        { id: 'social', label: '🌐 Social' },
     ];
 
     return (
@@ -35,6 +37,7 @@ const RavenSightPage: React.FC = () => {
                     {activeTab === 'studio' && <VideoStudio />}
                     {activeTab === 'feed' && <VideoFeed />}
                     {activeTab === 'library' && <VideoLibrary />}
+                    {activeTab === 'social' && <SocialBridge />}
                 </div>
             </div>
         </MainLayout>
