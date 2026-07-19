@@ -49,17 +49,6 @@ public class BillingController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize]
-    [HttpPost("subscription/cancel")]
-    [ProducesResponseType(typeof(SubscriptionStatusDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> CancelSubscription([FromBody] CancelSubscriptionRequest request)
-    {
-        var userId = User.GetUserId();
-        var result = await _subscriptionService.CancelSubscriptionAsync(userId, request);
-        return Ok(result);
-    }
-
     [AllowAnonymous]
     [HttpPost("webhook")]
     public async Task<IActionResult> Webhook()

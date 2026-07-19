@@ -19,29 +19,21 @@ RUN apt-get -y install nodejs
 FROM with-node AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["WiseRavenShare.Server/WiseRavenShare.Server.csproj", "WiseRavenShare.Server/"]
+COPY ["Wiseravenshare.Server/Wiseravenshare.Server.csproj", "Wiseravenshare.Server/"]
 COPY ["wiseravenshare.client/wiseravenshare.client.esproj", "wiseravenshare.client/"]
-RUN dotnet restore "./WiseRavenShare.Server/WiseRavenShare.Server.csproj"
+RUN dotnet restore "./Wiseravenshare.Server/Wiseravenshare.Server.csproj"
 COPY . .
-WORKDIR "/src/WiseRavenShare.Server"
-RUN dotnet build "./WiseRavenShare.Server.csproj" -c $BUILD_CONFIGURATION -o /app/build
-
-# Copy csproj files and restore dependencies
-COPY ["Wiseravenshare.Server.API/Wiseravenshare.Server.API.csproj", "Wiseravenshare.Server.API/"]
-COPY ["Wiseravenshare.Server.Core/Wiseravenshare.Server.Core.csproj", "Wiseravenshare.Server.Core/"]
-COPY ["Wiseravenshare.Server.Application/Wiseravenshare.Server.Application.csproj", "Wiseravenshare.Server.Application/"]
-COPY ["Wiseravenshare.Server.Infrastructure/Wiseravenshare.Server.Infrastructure.csproj", "Wiseravenshare.Server.Infrastructure/"]
-COPY ["Wiseravenshare.Server.Shared/Wiseravenshare.Server.Shared.csproj", "Wiseravenshare.Server.Shared/"]
-RUN dotnet restore "Wiseravenshare.Server.API/Wiseravenshare.Server.API.csproj"
+WORKDIR "/src/Wiseravenshare.Server"
+RUN dotnet build "./Wiseravenshare.Server.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 
 # This stage is used to publish the service project to be copied to the final stage
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./WiseRavenShare.Server.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./Wiseravenshare.Server.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 # This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "WiseRavenShare.Server.dll"]
+ENTRYPOINT ["dotnet", "Wiseravenshare.Server.dll"]

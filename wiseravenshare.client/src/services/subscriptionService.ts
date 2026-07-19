@@ -63,10 +63,4 @@ export const subscriptionService = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-
-  cancelSubscription: (cancelAtPeriodEnd = true) =>
-    request<SubscriptionStatus>('/api/billing/subscription/cancel', {
-      method: 'POST',
-      body: JSON.stringify({ cancelAtPeriodEnd }),
-    }),
 };
