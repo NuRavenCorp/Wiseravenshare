@@ -16,7 +16,6 @@ public interface ISubscriptionService
     Task<CheckoutSessionResponse> CreateCheckoutSessionAsync(Guid userId, CreateCheckoutSessionRequest request);
     Task<PortalSessionResponse> CreatePortalSessionAsync(Guid userId, CreatePortalSessionRequest request);
     Task<SubscriptionStatusDto> GetSubscriptionStatusAsync(Guid userId);
-    Task<SubscriptionStatusDto> CancelSubscriptionAsync(Guid userId, CancelSubscriptionRequest request);
     Task HandleWebhookAsync(string payload, string signatureHeader);
 }
 
@@ -151,36 +150,6 @@ public class SubscriptionService : ISubscriptionService
             StripeCustomerId = subscription.StripeCustomerId,
             StripeSubscriptionId = subscription.StripeSubscriptionId
         };
-    }
-
-    public async Task<SubscriptionStatusDto> CancelSubscriptionAsync(Guid userId, CancelSubscriptionRequest request)
-    {
-        var subscription = await _dbContext.Set<UserSubscription>()
-            .AsTracking()
-            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted);
-
-        if (subscription == null || string.IsNullOrWhiteSpace(subscription.StripeSubscriptionId))
-        {
-            throw new NotFoundException("No active Stripe subscription found.");
-        }
-
-        var stripeSubscriptionService = new Stripe.SubscriptionService();
-
-        var updated = await stripeSubscriptionService.UpdateAsync(
-            subscription.StripeSubscriptionId,
-            new SubscriptionUpdateOptions
-            {
-                CancelAtPeriodEnd = request.CancelAtPeriodEnd
-            });
-
-        subscription.Status = updated.Status ?? subscription.Status;
-        subscription.CancelAtPeriodEnd = updated.CancelAtPeriodEnd;
-        subscription.CurrentPeriodEnd = updated.CurrentPeriodEnd;
-        subscription.UpdatedAt = DateTime.UtcNow;
-
-        await _dbContext.SaveChangesAsync();
-
-        return await GetSubscriptionStatusAsync(userId);
     }
 
     public async Task HandleWebhookAsync(string payload, string signatureHeader)

@@ -23,11 +23,6 @@ public class PortalSessionResponse
     public string Url { get; set; } = string.Empty;
 }
 
-public class CancelSubscriptionRequest
-{
-    public bool CancelAtPeriodEnd { get; set; } = true;
-}
-
 public class SubscriptionStatusDto
 {
     public bool HasActiveSubscription { get; set; }
