@@ -1,0 +1,86 @@
+@using WiseRavenSocial.Models
+@model WiseRavenSocial.Models.ApplicationUser
+@{
+    ViewData["Title"] = "Planner";
+    Layout = "_Layout";
+}
+
+<div class="planner-container">
+    <!-- Left Sidebar -->
+    <div class="sidebar">
+        <div class="goal-section">
+            <h3>Long Term Goals</h3>
+            <div id="long-term-goals"></div>
+            <button class="add-btn" onclick="addGoal('long')">+ Add Goal</button>
+        </div>
+
+        <div class="goal-section">
+            <h3>Short Term Goals</h3>
+            <div id="short-term-goals"></div>
+            <button class="add-btn" onclick="addGoal('short')">+ Add Goal</button>
+        </div>
+
+        <div class="goal-section">
+            <h3>Next Moves</h3>
+            <div id="next-moves"></div>
+            <button class="add-btn" onclick="addGoal('next')">+ Add Action</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="planner-board">
+            <h2>Wise Raven Planner</h2>
+            <div class="columns-container">
+                <div class="board-column" id="day-column">
+                    <h4>Today</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+                <div class="board-column" id="week-column">
+                    <h4>This Week</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+                <div class="board-column" id="month-column">
+                    <h4>This Month</h4>
+                    <div class="tasks" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="right-sidebar">
+        <div class="stock-widget">
+            <h3>Market Watch</h3>
+            <div id="stock-data"></div>
+        </div>
+        <div class="goal-section">
+            <h3>Recommendations</h3>
+            <div id="recommendations"></div>
+        </div>
+        <div class="goal-section">
+            <h3>File Attachments</h3>
+            <div class="attachment-options">
+                <div class="attachment-option" onclick="attachFile('document')">
+                    <i class="fas fa-file"></i>
+                    <span>Document</span>
+                </div>
+                <div class="attachment-option" onclick="attachFile('image')">
+                    <i class="fas fa-image"></i>
+                    <span>Image</span>
+                </div>
+                <div class="attachment-option" onclick="attachFile('audio')">
+                    <i class="fas fa-music"></i>
+                    <span>Audio</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const currentUserId = @Model?.Id;
+    </script>
+    <script src="~/js/planner.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,52 @@
+Wiseravenshare.sln
+├── Wiseravenshare.Core/
+│   ├── Entities/
+│   │   ├── User.cs
+│   │   ├── Post.cs
+│   │   ├── Comment.cs
+│   │   ├── TruthClaim.cs
+│   │   ├── Video.cs
+│   │   ├── Goal.cs
+│   │   └── Task.cs
+│   ├── Interfaces/
+│   │   ├── Repositories/
+│   │   ├── Services/
+│   │   └── IAIAgent.cs
+│   └── Enums/
+├── Wiseravenshare.Application/
+│   ├── DTOs/
+│   ├── Services/
+│   │   ├── AuthService.cs
+│   │   ├── PostService.cs
+│   │   ├── TruthService.cs
+│   │   ├── RavenSightService.cs
+│   │   ├── AIAgentService.cs
+│   │   └── EvolutionService.cs
+│   ├── Mappings/
+│   ├── Validators/
+│   └── Exceptions/
+├── Wiseravenshare.Infrastructure/
+│   ├── Data/
+│   │   ├── Context/
+│   │   ├── Repositories/
+│   │   └── Migrations/
+│   ├── External/
+│   │   ├── YouTubeService.cs
+│   │   ├── OpenAIService.cs
+│   │   └── WebSocketService.cs
+│   └── Cache/
+├── Wiseravenshare.API/
+│   ├── Controllers/
+│   │   ├── AuthController.cs
+│   │   ├── PostsController.cs
+│   │   ├── TruthController.cs
+│   │   ├── VideoController.cs
+│   │   ├── PlannerController.cs
+│   │   └── EvolutionController.cs
+│   ├── Middleware/
+│   ├── Filters/
+│   ├── Hubs/
+│   └── Program.cs
+└── Wiseravenshare.Shared/
+    ├── Constants/
+    └── Helpers/
