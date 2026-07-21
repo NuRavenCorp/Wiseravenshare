@@ -220,6 +220,11 @@ public sealed class UserStore
             current.Facebook = NormalizeConnection(request.Facebook);
         }
 
+        if (request.Instagram is not null)
+        {
+            current.Instagram = NormalizeConnection(request.Instagram);
+        }
+
         user.SocialFeeds = current;
         user.UpdatedAtUtc = DateTime.UtcNow;
         PersistUsers();
@@ -294,7 +299,8 @@ public sealed class UserStore
         return new SocialFeedSettings
         {
             TikTok = NormalizeConnection(feeds.TikTok),
-            Facebook = NormalizeConnection(feeds.Facebook)
+            Facebook = NormalizeConnection(feeds.Facebook),
+            Instagram = NormalizeConnection(feeds.Instagram)
         };
     }
 
