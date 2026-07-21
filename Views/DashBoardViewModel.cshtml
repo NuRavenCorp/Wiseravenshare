@@ -1,0 +1,987 @@
+﻿@model WiseRavenSocial.ViewModels.DashboardViewModel
+
+@{
+    ViewData["Title"] = "Dashboard";
+    Layout = "_Layout";
+}
+
+@@section Styles {
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+    :root {
+        --primary-color: #1a1f2b;
+        --secondary-color: #2d3748;
+        --accent-color: #4a5568;
+        --highlight-color: #718096;
+        --light-color: #e2e8f0;
+        --text-color: #f8fafc;
+        --bg-color: #0f1419;
+        --card-bg: #1e293b;
+        --border-color: #334155;
+    }
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        line-height: 1.6;
+    }
+
+    header {
+        background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+        color: var(--text-color);
+        padding: 1rem 0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+
+    .header-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+    }
+
+    header h1 {
+        font-size: 1.8rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+    }
+
+    .user-controls {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    #logout-btn {
+        background: var(--accent-color);
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-weight: 600;
+    }
+
+        #logout-btn:hover {
+            background: var(--highlight-color);
+            transform: translateY(-2px);
+        }
+
+    .container {
+        display: flex;
+        max-width: 1200px;
+        margin: 20px auto;
+        gap: 20px;
+    }
+
+    .left-column {
+        flex: 0 0 250px;
+    }
+
+    .middle-column {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .right-column {
+        flex: 0 0 300px;
+    }
+
+    .user-profile {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        text-align: center;
+        border: 1px solid var(--border-color);
+    }
+
+    .profile-pic {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        object-fit: cover;
+        margin-bottom: 10px;
+        border: 3px solid var(--highlight-color);
+    }
+
+    .stats {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 10px;
+        font-size: 0.9rem;
+    }
+
+    .nav-menu {
+        list-style: none;
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 10px 0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+    }
+
+        .nav-menu li a {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: var(--text-color);
+            text-decoration: none;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+
+            .nav-menu li a:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-left: 3px solid var(--highlight-color);
+            }
+
+            .nav-menu li a.active {
+                color: var(--light-color);
+                font-weight: bold;
+                border-left: 3px solid var(--light-color);
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+    .post-creator {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+    }
+
+    .post-input {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .small-profile-pic {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        object-fit: cover;
+    }
+
+    .post-input textarea {
+        flex: 1;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 12px 15px;
+        resize: none;
+        min-height: 60px;
+        font-family: inherit;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-color);
+        transition: all 0.3s ease;
+    }
+
+        .post-input textarea:focus {
+            outline: none;
+            border-color: var(--highlight-color);
+            box-shadow: 0 0 0 2px rgba(113, 128, 150, 0.3);
+        }
+
+    .post-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 15px;
+    }
+
+    #create-post-btn {
+        background: var(--highlight-color);
+        color: white;
+        border: none;
+        padding: 10px 24px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: all 0.3s ease;
+    }
+
+        #create-post-btn:hover {
+            background: var(--light-color);
+            color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+
+    .post {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+        transition: transform 0.3s ease;
+    }
+
+        .post:hover {
+            transform: translateY(-3px);
+        }
+
+    .post-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .post-user {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--text-color);
+        font-weight: bold;
+    }
+
+    .post-content {
+        margin-bottom: 15px;
+        padding: 0 10px;
+    }
+
+    .post-footer {
+        display: flex;
+        justify-content: space-between;
+        border-top: 1px solid var(--border-color);
+        padding-top: 15px;
+    }
+
+    .post-action {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--text-color);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        padding: 5px 10px;
+        border-radius: 8px;
+    }
+
+        .post-action:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .post-action.liked {
+            color: #e0245e;
+        }
+
+    .search-box {
+        display: flex;
+        background: var(--card-bg);
+        border-radius: 20px;
+        padding: 8px 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+    }
+
+        .search-box input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            outline: none;
+            color: var(--text-color);
+        }
+
+        .search-box button {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: var(--highlight-color);
+        }
+
+    .trending-section, .suggested-users {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+    }
+
+        .trending-section h3, .suggested-users h3 {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            color: var(--light-color);
+        }
+
+    .trending-topic, .suggested-user {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border-color);
+        transition: all 0.3s ease;
+    }
+
+        .trending-topic:hover, .suggested-user:hover {
+            background: rgba(255, 255, 255, 0.05);
+            padding-left: 10px;
+        }
+
+    .suggested-user {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .follow-btn {
+        background: var(--highlight-color);
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 15px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all 0.3s ease;
+    }
+
+        .follow-btn:hover {
+            background: var(--light-color);
+            color: var(--primary-color);
+        }
+
+    /* File Upload Styles */
+    .file-upload-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 15px 0;
+    }
+
+    .upload-option {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 80px;
+        height: 80px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border: 1px solid var(--border-color);
+    }
+
+        .upload-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-3px);
+        }
+
+        .upload-option i {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: var(--highlight-color);
+        }
+
+        .upload-option span {
+            font-size: 0.8rem;
+            text-align: center;
+        }
+
+    .file-preview {
+        margin-top: 15px;
+        display: none;
+    }
+
+        .file-preview.active {
+            display: block;
+        }
+
+    .preview-item {
+        position: relative;
+        margin-bottom: 10px;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+        .preview-item img, .preview-item video {
+            width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+        }
+
+        .preview-item audio {
+            width: 100%;
+        }
+
+    .remove-file {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Modal styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(5px);
+    }
+
+    .modal-content {
+        background-color: var(--card-bg);
+        margin: 10% auto;
+        padding: 25px;
+        border-radius: 12px;
+        width: 80%;
+        max-width: 500px;
+        position: relative;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        border: 1px solid var(--border-color);
+    }
+
+    .close-btn {
+        position: absolute;
+        right: 20px;
+        top: 15px;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--highlight-color);
+    }
+
+    /* Responsive design */
+    @@media (max-width: 768px) {
+        .container {
+            flex-direction: column;
+        }
+
+        .left-column, .right-column {
+            flex: 1;
+        }
+    }
+</style>
+}
+
+<header>
+    <div class="header-container">
+        <h1><i class="fas fa-crow"></i> Wise-Raven</h1>
+        <div class="user-controls">
+            <span id="username-display">Welcome, @Model.CurrentUser?.FullName</span>
+            <form asp-controller="Account" asp-action="Logout" method="post" id="logout-form">
+                <button type="submit" id="logout-btn">Logout</button>
+            </form>
+        </div>
+    </div>
+</header>
+
+<main>
+    <div class="container">
+        <nav class="left-column">
+            <div class="user-profile">
+                <img src="@(Model.CurrentUser?.AvatarUrl ?? " /images/default-avatar.jpg")" alt="Profile Picture" class="profile-pic">
+                <h3 id="profile-name">@Model.CurrentUser?.FullName</h3>
+                <div class="stats">
+                    <span><i class="fas fa-users"></i> <span id="follower-count">@Model.CurrentUser?.FollowersCount</span> followers</span>
+                    <span><i class="fas fa-user-friends"></i> <span id="following-count">@Model.CurrentUser?.FollowingCount</span> following</span>
+                </div>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#" class="active" data-section="feed"><i class="fas fa-home"></i> Feed</a></li>
+                <li><a href="#" data-section="discover"><i class="fas fa-compass"></i> Discover</a></li>
+                <li><a href="@Url.Action("Notifications", "Home")" data-section="notifications"><i class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="@Url.Action("Messages", "Home")" data-section="messages"><i class="fas fa-envelope"></i> Messages</a></li>
+                <li><a href="#" data-section="bookmarks"><i class="fas fa-bookmark"></i> Bookmarks</a></li>
+                <li><a href="@Url.Action("Profile", "Home")" data-section="profile"><i class="fas fa-user"></i> Profile</a></li>
+                <li><a href="@Url.Action("Planner", "Home")" data-section="planner"><i class="fas fa-tasks"></i> Planner</a></li>
+        </nav>
+
+        <section class="middle-column">
+            <div class="post-creator">
+                <div class="post-input">
+                    <img src="@(Model.CurrentUser?.AvatarUrl ?? " /images/default-avatar.jpg")" alt="Your profile" class="small-profile-pic">
+                    <textarea placeholder="What wisdom do you share today?" id="post-content"></textarea>
+                </div>
+
+                <!-- File Upload Options -->
+                <div class="file-upload-options">
+                    <div class="upload-option" data-type="photo">
+                        <i class="fas fa-image"></i>
+                        <span>Photo</span>
+                    </div>
+                    <div class="upload-option" data-type="video">
+                        <i class="fas fa-video"></i>
+                        <span>Video</span>
+                    </div>
+                    <div class="upload-option" data-type="audio">
+                        <i class="fas fa-music"></i>
+                        <span>Audio</span>
+                    </div>
+                    <div class="upload-option" data-type="document">
+                        <i class="fas fa-file"></i>
+                        <span>Document</span>
+                    </div>
+                </div>
+
+                <!-- File Preview Area -->
+                <div class="file-preview" id="file-preview"></div>
+
+                <div class="post-actions">
+                    <button id="create-post-btn"><i class="fas fa-feather-alt"></i> Post</button>
+                </div>
+            </div>
+
+            <div class="feed" id="post-feed">
+                <!-- Posts will be dynamically loaded or server-side rendered -->
+                @if (Model.Posts != null && Model.Posts.Any())
+                {
+                foreach (var post in Model.Posts)
+                {
+                <div class="post" data-post-id="@post.Id">
+                    <div class="post-header">
+                        <a href="@Url.Action(" Profile", "Home" , new { userId=post.AuthorId })" class="post-user">
+                            <img src="@(post.AuthorAvatar ?? " /images/default-avatar.jpg")" alt="Profile Picture" class="small-profile-pic" />
+                            <span>@post.AuthorName</span>
+                        </a>
+                        <small style="margin-left: auto; color: var(--highlight-color);">@post.CreatedAt.ToString("MMM dd, h:mm tt")</small>
+                    </div>
+                    <div class="post-content">
+                        <p>@post.Content</p>
+                        @if (!string.IsNullOrEmpty(post.MediaUrl))
+                        {
+                        @if (post.MediaType == "image")
+                        {
+                        <img src="@post.MediaUrl" alt="Post image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">
+                        }
+                        else if (post.MediaType == "video")
+                        {
+                        <video controls style="max-width: 100%; border-radius: 8px; margin: 10px 0;">
+                            <source src="@post.MediaUrl" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        }
+                        else if (post.MediaType == "audio")
+                        {
+                        <audio controls style="width: 100%; margin: 10px 0;">
+                            <source src="@post.MediaUrl" type="audio/mpeg">
+                            Your browser does not support the audio tag.
+                        </audio>
+                        }
+                        }
+                    </div>
+                    <div class="post-footer">
+                        <div class="post-action" onclick="likePost(@post.Id)">
+                            <i class="far fa-heart"></i>
+                            <span>@post.LikesCount</span>
+                        </div>
+                        <div class="post-action" onclick="focusComment(@post.Id)">
+                            <i class="far fa-comment"></i>
+                            <span>@post.CommentsCount</span>
+                        </div>
+                        <div class="post-action" onclick="sharePost(@post.Id)">
+                            <i class="far fa-share-square"></i>
+                            <span>Share</span>
+                        </div>
+                    </div>
+                </div>
+                }
+                }
+                else
+                {
+                <div class="post" style="text-align: center; padding: 40px;">
+                    <p style="color: var(--highlight-color);">No posts yet. Be the first to share!</p>
+                </div>
+                }
+            </div>
+        </section>
+
+        <aside class="right-column">
+            <div class="search-box">
+                <input type="text" placeholder="Search Wise-Raven...">
+                <button><i class="fas fa-search"></i></button>
+            </div>
+
+            <div class="trending-section">
+                <h3>Trending Now</h3>
+                <div class="trending-topics">
+                    @if (Model.TrendingTopics != null && Model.TrendingTopics.Any())
+                    {
+                    foreach (var topic in Model.TrendingTopics)
+                    {
+                    <div class="trending-topic">
+                        <strong>#@topic.Name</strong>
+                        <small style="color: var(--highlight-color);">@topic.PostCount posts</small>
+                    </div>
+                    }
+                    }
+                </div>
+            </div>
+
+            <div class="suggested-users">
+                <h3>Who to Follow</h3>
+                <div class="user-suggestions">
+                    @if (Model.SuggestedUsers != null && Model.SuggestedUsers.Any())
+                    {
+                    foreach (var user in Model.SuggestedUsers)
+                    {
+                    <div class="suggested-user">
+                        <div class="user-info">
+                            <img src="@(user.AvatarUrl ?? " /images/default-avatar.jpg")" alt="Profile" style="width: 40px; height: 40px; border-radius: 50%;">
+                            <div>
+                                <strong>@user.FullName</strong>
+                                <small style="color: var(--highlight-color);">@user.Followers followers</small>
+                            </div>
+                        </div>
+                        <button class="follow-btn" onclick="followUser('@user.Id')">Follow</button>
+                    </div>
+                    }
+                    }
+                </div>
+            </div>
+        </aside>
+    </div>
+</main>
+
+<!-- File Upload Modal -->
+<div id="file-upload-modal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn">&times;</span>
+        <h3>Upload File</h3>
+        <div id="upload-options">
+            <div class="upload-method">
+                <h4>Select Upload Method</h4>
+                <input type="file" id="file-input" multiple style="display: none;">
+                <button class="auth-btn" onclick="document.getElementById('file-input').click()">
+                    <i class="fas fa-upload"></i> Select from Device
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+        // File Upload Functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadOptions = document.querySelectorAll('.upload-option');
+            const filePreview = document.getElementById('file-preview');
+            const fileUploadModal = document.getElementById('file-upload-modal');
+            const closeModalBtn = document.querySelector('.close-btn');
+            const fileInput = document.getElementById('file-input');
+            const postContent = document.getElementById('post-content');
+            const createPostBtn = document.getElementById('create-post-btn');
+
+            let selectedFiles = [];
+            let currentUploadType = '';
+
+            // Open file upload modal when an upload option is clicked
+            uploadOptions.forEach(option => {
+                option.addEventListener('click', function() {
+                    currentUploadType = this.getAttribute('data-type');
+                    fileUploadModal.style.display = 'block';
+
+                    // Set accept attribute based on file type
+                    switch(currentUploadType) {
+                        case 'photo':
+                            fileInput.accept = 'image/*';
+                            break;
+                        case 'video':
+                            fileInput.accept = 'video/*';
+                            break;
+                        case 'audio':
+                            fileInput.accept = 'audio/*';
+                            break;
+                        case 'document':
+                            fileInput.accept = '.pdf,.doc,.docx,.txt';
+                            break;
+                        default:
+                            fileInput.accept = '*/*';
+                    }
+                });
+            });
+
+            // Close modal
+            closeModalBtn.addEventListener('click', function() {
+                fileUploadModal.style.display = 'none';
+            });
+
+            // Handle file selection
+            fileInput.addEventListener('change', function(e) {
+                handleFiles(e.target.files, currentUploadType);
+                fileUploadModal.style.display = 'none';
+            });
+
+            // Handle selected files
+            function handleFiles(files, type) {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    selectedFiles.push({
+                        file: file,
+                        type: type
+                    });
+
+                    // Create preview
+                    createFilePreview(file, type);
+                }
+
+                // Show preview area
+                filePreview.classList.add('active');
+            }
+
+            // Create file preview
+            function createFilePreview(file, type) {
+                const previewItem = document.createElement('div');
+                previewItem.className = 'preview-item';
+
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-file';
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                removeBtn.onclick = function() {
+                    previewItem.remove();
+                    // Remove from selectedFiles array
+                    const index = selectedFiles.findIndex(f => f.file === file);
+                    if (index !== -1) {
+                        selectedFiles.splice(index, 1);
+                    }
+
+                    // Hide preview area if no files
+                    if (selectedFiles.length === 0) {
+                        filePreview.classList.remove('active');
+                    }
+                };
+
+                let previewElement;
+
+                if (type === 'photo') {
+                    previewElement = document.createElement('img');
+                    previewElement.src = URL.createObjectURL(file);
+                } else if (type === 'video') {
+                    previewElement = document.createElement('video');
+                    previewElement.src = URL.createObjectURL(file);
+                    previewElement.controls = true;
+                } else if (type === 'audio') {
+                    previewElement = document.createElement('audio');
+                    previewElement.src = URL.createObjectURL(file);
+                    previewElement.controls = true;
+                } else {
+                    previewElement = document.createElement('div');
+                    previewElement.className = 'file-info';
+                    previewElement.innerHTML = `
+                        <i class="fas fa-file"></i>
+                        <span>${file.name}</span>
+                        <small>${(file.size / 1024).toFixed(2)} KB</small>
+                    `;
+                }
+
+                previewItem.appendChild(previewElement);
+                previewItem.appendChild(removeBtn);
+                filePreview.appendChild(previewItem);
+            }
+
+            // Create post with files
+            createPostBtn.addEventListener('click', async function() {
+                const content = postContent.value.trim();
+
+                if (!content && selectedFiles.length === 0) {
+                    alert('Please add some content or files to your post.');
+                    return;
+                }
+
+                // Prepare form data for submission
+                const formData = new FormData();
+                formData.append('content', content);
+
+                // Add files to form data
+                selectedFiles.forEach((fileObj, index) => {
+                    formData.append(`files`, fileObj.file);
+                });
+
+                try {
+                    const response = await fetch('@Url.Action("CreatePost", "Home")', {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                        }
+                    });
+
+                    if (response.ok) {
+                        const newPost = await response.json();
+                        addPostToFeed(newPost);
+
+                        // Reset form
+                        postContent.value = '';
+                        filePreview.innerHTML = '';
+                        filePreview.classList.remove('active');
+                        selectedFiles = [];
+                    } else {
+                        throw new Error('Failed to create post');
+                    }
+                } catch (error) {
+                    console.error('Error creating post:', error);
+                    alert('Error creating post. Please try again.');
+                }
+            });
+
+            // Function to add post to feed
+            function addPostToFeed(post) {
+                const feed = document.getElementById('post-feed');
+                const postElement = document.createElement('div');
+                postElement.className = 'post';
+                postElement.setAttribute('data-post-id', post.id);
+
+                let mediaHtml = '';
+                if (post.mediaUrl) {
+                    if (post.mediaType === 'image') {
+                        mediaHtml = `<img src="${post.mediaUrl}" alt="Post image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">`;
+                    } else if (post.mediaType === 'video') {
+                        mediaHtml = `
+                            <video controls style="max-width: 100%; border-radius: 8px; margin: 10px 0;">
+                                <source src="${post.mediaUrl}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        `;
+                    } else if (post.mediaType === 'audio') {
+                        mediaHtml = `
+                            <audio controls style="width: 100%; margin: 10px 0;">
+                                <source src="${post.mediaUrl}" type="audio/mpeg">
+                                Your browser does not support the audio tag.
+                            </audio>
+                        `;
+                    }
+                }
+
+                const postDate = new Date(post.createdAt).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: 'numeric'
+                });
+
+                postElement.innerHTML = `
+                    <div class="post-header">
+                        <a href="/Home/Profile?userId=${post.authorId}" class="post-user">
+                            <img src="${post.authorAvatar || '/images/default-avatar.jpg'}" alt="Profile Picture" class="small-profile-pic" />
+                            <span>${post.authorName}</span>
+                        </a>
+                        <small style="margin-left: auto; color: var(--highlight-color);">${postDate}</small>
+                    </div>
+                    <div class="post-content">
+                        <p>${post.content}</p>
+                        ${mediaHtml}
+                    </div>
+                    <div class="post-footer">
+                        <div class="post-action" onclick="likePost(${post.id})">
+                            <i class="far fa-heart"></i>
+                            <span>${post.likesCount}</span>
+                        </div>
+                        <div class="post-action" onclick="focusComment(${post.id})">
+                            <i class="far fa-comment"></i>
+                            <span>${post.commentsCount}</span>
+                        </div>
+                        <div class="post-action" onclick="sharePost(${post.id})">
+                            <i class="far fa-share-square"></i>
+                            <span>Share</span>
+                        </div>
+                    </div>
+                `;
+
+                feed.prepend(postElement);
+            }
+
+            // Close modal when clicking outside
+            window.addEventListener('click', function(event) {
+                if (event.target === fileUploadModal) {
+                    fileUploadModal.style.display = 'none';
+                }
+            });
+        });
+
+        // Post interaction functions
+        async function likePost(postId) {
+            try {
+                const response = await fetch('@Url.Action("LikePost", "Home")', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                    },
+                    body: JSON.stringify({ postId: postId })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    const likeElement = document.querySelector(`[data-post-id="${postId}"] .post-action:first-child span`);
+                    if (likeElement) {
+                        likeElement.textContent = result.likesCount;
+                    }
+                }
+            } catch (error) {
+                console.error('Error liking post:', error);
+            }
+        }
+
+        function focusComment(postId) {
+            // Implement comment focus logic
+            alert('Comment functionality would open here');
+        }
+
+        function sharePost(postId) {
+            // Implement share functionality
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Check out this post on WiseRaven',
+                    url: window.location.href + '?post=' + postId
+                });
+            } else {
+                alert('Post link copied to clipboard!');
+            }
+        }
+
+        function followUser(userId) {
+            fetch('@Url.Action("FollowUser", "Home")', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                },
+                body: JSON.stringify({ userId: userId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const btn = event.target;
+                    btn.textContent = 'Following';
+                    btn.disabled = true;
+                }
+            });
+        }
+</script>
+}

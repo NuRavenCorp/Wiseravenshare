@@ -1,0 +1,27 @@
+@{
+    var pageTitle = ViewData["Title"]?.ToString() ?? "Social";
+    var endpoint = ViewData["Endpoint"]?.ToString() ?? "/api/posts/feed";
+    var description = ViewData["Description"]?.ToString() ?? "Open social capabilities.";
+}
+
+<div class="py-4">
+    <h1 class="display-6 fw-bold">@pageTitle</h1>
+    <p class="lead">@description</p>
+
+    <div class="d-flex gap-2 flex-wrap mb-3">
+        <a class="btn btn-primary" href="@endpoint">Open API Endpoint</a>
+        <a class="btn btn-outline-secondary" href="/social/feed">Feed</a>
+        <a class="btn btn-outline-secondary" href="/social/messages">Messages</a>
+        <a class="btn btn-outline-secondary" href="/social/profile">Profile</a>
+        <a class="btn btn-outline-secondary" href="/social/notifications">Notifications</a>
+        <a class="btn btn-outline-secondary" href="/social/access">Access</a>
+    </div>
+
+    <div class="alert alert-info" role="alert">
+        Some social endpoints require sign-in and may return 401 until authenticated.
+    </div>
+
+    <p class="mb-0">
+        <a href="/Home/Index">Back to Home</a>
+    </p>
+</div>

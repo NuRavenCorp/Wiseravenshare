@@ -1,0 +1,26 @@
+wiseravenshare/
+├── backend/                           # ASP.NET Core 8 Web API
+│   ├── Wiseravenshare.API/           # API Controllers, Middleware
+│   ├── Wiseravenshare.Core/          # Domain Entities, Interfaces
+│   ├── Wiseravenshare.Application/   # DTOs, Services, Business Logic
+│   ├── Wiseravenshare.Infrastructure/# Data Access, External Services
+│   └── Wiseravenshare.Shared/        # Common Utilities, Constants
+├── frontend/                          # React 18 + TypeScript
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── common/
+│   │   │   ├── feed/
+│   │   │   ├── truth/
+│   │   │   ├── ravensight/
+│   │   │   ├── planner/
+│   │   │   └── ui/
+│   │   ├── pages/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── store/
+│   │   ├── styles/
+│   │   └── utils/
+│   └── package.json
+├── docker-compose.yml
+├── .env
+└── README.md

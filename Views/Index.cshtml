@@ -1,0 +1,1498 @@
+﻿@model WiseRavenSocial.Models.User
+@{
+    ViewData["Title"] = "Wise Raven Social";
+    Layout = "_Layout";
+}
+
+<div class="header-container">
+    <h1><i class="fas fa-crow"></i> Wise-Raven</h1>
+    <div class="user-controls">
+        <span id="username-display">Loading...</span>
+        <button id="logout-btn">Logout</button>
+    </div>
+</div>
+</header>
+
+<main>
+    <div class="container">
+        <nav class="left-column">
+            <div class="user-profile">
+                <img id="profile-picture" src="default-avatar.jpg" alt="Profile Picture" class="profile-pic">
+                <h3 id="profile-name">Loading...</h3>
+                <div class="stats">
+                    <span><i class="fas fa-users"></i> <span id="follower-count">0</span> followers</span>
+                    <span><i class="fas fa-user-friends"></i> <span id="following-count">0</span> following</span>
+                </div>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#" class="active" data-section="feed"><i class="fas fa-home"></i> Feed</a></li>
+                <li><a href="#" data-section="discover" id="discover-link"><i class="fas fa-compass"></i> Discover</a></li>
+                <li><a href="notifications.html" data-section="notifications"><i class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="messages.html" data-section="messages"><i class="fas fa-envelope"></i> Messages</a></li>
+                <li><a href="#" data-section="bookmarks" id="bookmarks-link"><i class="fas fa-bookmark"></i> Bookmarks</a></li>
+                <li><a href="profile.html" data-section="profile"><i class="fas fa-user"></i> Profile</a></li>
+                <li><a href="plnr.html" data-section="planner"><i class="fas fa-tasks"></i> Planner</a></li>
+            </ul>
+        </nav>
+
+        <section class="middle-column">
+            <!-- Alert Messages -->
+            <div id="alert-container"></div>
+
+            <div class="post-creator">
+                <div class="post-input">
+                    <img id="current-user-avatar" src="default-avatar.jpg" alt="Your profile" class="small-profile-pic">
+                    <textarea placeholder="What wisdom do you share today?" id="post-content" maxlength="500"></textarea>
+                </div>
+
+                <div class="file-upload-options">
+                    <div class="upload-option" data-type="photo">
+                        <i class="fas fa-image"></i>
+                        <span>Photo</span>
+                    </div>
+                    <div class="upload-option" data-type="video">
+                        <i class="fas fa-video"></i>
+                        <span>Video</span>
+                    </div>
+                    <div class="upload-option" data-type="audio">
+                        <i class="fas fa-music"></i>
+                        <span>Audio</span>
+                    </div>
+                    <div class="upload-option" data-type="document">
+                        <i class="fas fa-file"></i>
+                        <span>Document</span>
+                    </div>
+                </div>
+
+                <div class="file-preview" id="file-preview"></div>
+
+                <div class="post-actions">
+                    <div class="character-count">
+                        <span id="char-count">0</span>/500
+                    </div>
+                    <button id="create-post-btn"><i class="fas fa-feather-alt"></i> Post</button>
+                </div>
+            </div>
+
+            <div class="feed" id="post-feed">
+                <!-- Posts loaded via API -->
+                <div class="skeleton-post">
+                    <div class="post">
+                        <div class="post-header">
+                            <div class="skeleton skeleton-avatar"></div>
+                            <div style="flex: 1; margin-left: 10px;">
+                                <div class="skeleton skeleton-text" style="width: 30%;"></div>
+                                <div class="skeleton skeleton-text" style="width: 20%;"></div>
+                            </div>
+                        </div>
+                        <div class="post-content">
+                            <div class="skeleton skeleton-text"></div>
+                            <div class="skeleton skeleton-text"></div>
+                            <div class="skeleton skeleton-text" style="width: 60%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <aside class="right-column">
+            <div class="search-box">
+                <input type="text" placeholder="Search Wise-Raven..." id="search-input">
+                <button id="search-btn"><i class="fas fa-search"></i></button>
+            </div>
+
+            <div class="trending-section">
+                <h3>Trending Now</h3>
+                <div class="trending-topics" id="trending-topics">
+                    <!-- Loaded via API -->
+                </div>
+                <div class="algorithm-info">
+                    <i class="fas fa-brain"></i> Powered by Trend Analysis Algorithm
+                </div>
+            </div>
+
+            <div class="suggested-users">
+                <h3>Who to Follow</h3>
+                <div class="user-suggestions" id="user-suggestions">
+                    <!-- Loaded via API -->
+                </div>
+                <div class="algorithm-info">
+                    <i class="fas fa-code-branch"></i> Based on your interests & network
+                </div>
+            </div>
+
+            <div class="quick-stats">
+                <h3>Your Activity</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <i class="fas fa-fire"></i>
+                        <span>Weekly Engagement: <strong id="weekly-engagement">0</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-trend-up"></i>
+                        <span>Trending Score: <strong id="trending-score">0</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="social-feeds-panel">
+                <h3>Social Feeds</h3>
+
+                <div class="social-feed-card">
+                    <div class="social-feed-title">
+                        <i class="fab fa-facebook"></i>
+                        <span>Facebook</span>
+                    </div>
+                    <div class="social-feed-frame-wrap">
+                        <iframe
+                            title="Facebook Feed"
+                            class="social-feed-iframe"
+                            loading="lazy"
+                            allowfullscreen="true"
+                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Fmeta&tabs=timeline&width=340&height=430&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true&appId">
+                        </iframe>
+                    </div>
+                </div>
+
+                <div class="social-feed-card">
+                    <div class="social-feed-title">
+                        <i class="fab fa-tiktok"></i>
+                        <span>TikTok</span>
+                    </div>
+                    <blockquote class="tiktok-embed social-embed-block" cite="https://www.tiktok.com/@tiktok/video/7315262411457125664" data-video-id="7315262411457125664" style="max-width: 605px; min-width: 325px;">
+                        <section>
+                            <a target="_blank" title="tiktok" href="https://www.tiktok.com/@tiktok">@@tiktok</a>
+                        </section>
+                    </blockquote>
+                </div>
+
+                <div class="social-feed-card">
+                    <div class="social-feed-title">
+                        <i class="fab fa-instagram"></i>
+                        <span>Instagram</span>
+                    </div>
+                    <blockquote class="instagram-media social-embed-block" data-instgrm-captioned data-instgrm-permalink="https://www.instagram.com/p/C5w8-2bM1hN/" data-instgrm-version="14" style="margin: 0 auto; max-width: 540px; width: 100%;">
+                        <a href="https://www.instagram.com/p/C5w8-2bM1hN/" target="_blank">View this post on Instagram</a>
+                    </blockquote>
+                </div>
+            </div>
+        </aside>
+    </div>
+</main>
+
+<style>
+    .social-feeds-panel {
+        margin-top: 20px;
+        padding: 16px;
+        border-radius: 12px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+    }
+
+    .social-feeds-panel h3 {
+        margin: 0 0 12px;
+        color: var(--light-color);
+    }
+
+    .social-feed-card {
+        padding: 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        margin-bottom: 12px;
+        overflow: hidden;
+    }
+
+    .social-feed-card:last-child {
+        margin-bottom: 0;
+    }
+
+    .social-feed-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        font-weight: 600;
+        color: var(--text-color);
+    }
+
+    .social-feed-frame-wrap {
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    .social-feed-iframe {
+        width: 100%;
+        height: 430px;
+        border: 0;
+    }
+
+    .social-embed-block {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    @media (max-width: 768px) {
+        .social-feeds-panel {
+            margin-top: 16px;
+        }
+
+        .social-feed-iframe {
+            height: 360px;
+        }
+    }
+</style>
+
+<script async src="https://www.tiktok.com/embed.js"></script>
+<script async src="https://www.instagram.com/embed.js"></script>
+
+<!-- File Upload Modal -->
+<div id="file-upload-modal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn">&times;</span>
+        <h3>Upload File</h3>
+        <div id="upload-options">
+            <div class="upload-method">
+                <h4>Select Upload Method</h4>
+                <div class="upload-options-grid">
+                    <div class="upload-method-option" data-method="device">
+                        <i class="fas fa-mobile-alt"></i>
+                        <span>Device Storage</span>
+                    </div>
+                    <div class="upload-method-option" data-method="bluetooth">
+                        <i class="fas fa-bluetooth"></i>
+                        <span>Bluetooth</span>
+                    </div>
+                    <div class="upload-method-option" data-method="wifi">
+                        <i class="fas fa-wifi"></i>
+                        <span>Wi-Fi Direct</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading-overlay">
+    <div class="spinner"></div>
+    <div style="margin-top: 20px;">Connecting to Wise-Raven API...</div>
+</div>
+
+<!-- API Status Indicator -->
+<div class="api-status connected" id="api-status">
+    <span class="status-indicator"></span>
+    <span id="api-status-text">Connected to API</span>
+</div>
+
+<script>
+    // ===================== CONFIGURATION =====================
+    const API_CONFIG = {
+        BASE_URL: 'https://api.wiseraven.social/v1',
+        ENDPOINTS: {
+            AUTH: '/auth/verify',
+            LOGOUT: '/auth/logout',
+            POSTS: '/posts',
+            FEED: '/posts/feed',
+            TRENDING: '/trending',
+            SUGGESTIONS: '/users/suggestions',
+            USER_PROFILE: '/users/profile',
+            FOLLOW: '/users/follow',
+            BOOKMARKS: '/bookmarks',
+            DISCOVER: '/discover',
+            SEARCH: '/search'
+        },
+        TIMEOUT: 10000
+    };
+
+    // ===================== STATE MANAGEMENT =====================
+    const AppState = {
+        user: null,
+        token: null,
+        posts: [],
+        trending: [],
+        suggestions: [],
+        isAuthenticated: false,
+        apiConnected: false
+    };
+
+    // ===================== AUTHENTICATION SYSTEM =====================
+    class AuthManager {
+        constructor() {
+            this.token = localStorage.getItem('wise-raven-token');
+            this.userData = localStorage.getItem('wise-raven-user');
+        }
+
+        async verifyAuthentication() {
+            if (!this.token) {
+                this.redirectToLogin();
+                return false;
+            }
+
+            try {
+                const response = await this.apiRequest(API_CONFIG.ENDPOINTS.AUTH, {
+                    method: 'GET',
+                    headers: this.getAuthHeaders()
+                });
+
+                if (response.valid) {
+                    AppState.user = response.user;
+                    AppState.isAuthenticated = true;
+                    this.updateUIWithUserData(response.user);
+                    return true;
+                } else {
+                    this.redirectToLogin();
+                    return false;
+                }
+            } catch (error) {
+                console.error('Auth verification failed:', error);
+                this.redirectToLogin();
+                return false;
+            }
+        }
+
+        getAuthHeaders() {
+            return {
+                'Authorization': `Bearer ${this.token}`,
+                'Content-Type': 'application/json'
+            };
+        }
+
+        async logout() {
+            try {
+                await this.apiRequest(API_CONFIG.ENDPOINTS.LOGOUT, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders()
+                });
+            } catch (error) {
+                console.warn('Logout API call failed, clearing local storage anyway');
+            } finally {
+                this.clearSession();
+                this.redirectToLogin();
+            }
+        }
+
+        clearSession() {
+            localStorage.removeItem('wise-raven-token');
+            localStorage.removeItem('wise-raven-user');
+            AppState.user = null;
+            AppState.token = null;
+            AppState.isAuthenticated = false;
+        }
+
+        redirectToLogin() {
+            window.location.href = 'login.html?redirect=' + encodeURIComponent(window.location.pathname);
+        }
+
+        updateUIWithUserData(user) {
+            document.getElementById('username-display').textContent = `Welcome, ${user.username}`;
+            document.getElementById('profile-name').textContent = user.displayName || user.username;
+            document.getElementById('follower-count').textContent = user.followers || 0;
+            document.getElementById('following-count').textContent = user.following || 0;
+            document.getElementById('current-user-avatar').src = user.avatar || 'default-avatar.jpg';
+            document.getElementById('profile-picture').src = user.avatar || 'default-avatar.jpg';
+
+            if (user.weeklyEngagement) {
+                document.getElementById('weekly-engagement').textContent = user.weeklyEngagement;
+            }
+            if (user.trendingScore) {
+                document.getElementById('trending-score').textContent = user.trendingScore;
+            }
+        }
+
+        async apiRequest(endpoint, options = {}) {
+            const url = `${API_CONFIG.BASE_URL}${endpoint}`;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
+            }
+        }
+    }
+
+    // ===================== POST MANAGEMENT =====================
+    class PostManager {
+        constructor(authManager) {
+            this.authManager = authManager;
+        }
+
+        async loadFeed() {
+            try {
+                const feed = document.getElementById('post-feed');
+                feed.innerHTML = this.createSkeletonLoader(3);
+
+                const data = await this.authManager.apiRequest(API_CONFIG.ENDPOINTS.FEED, {
+                    method: 'GET',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                AppState.posts = data.posts || [];
+                this.renderPosts(AppState.posts);
+            } catch (error) {
+                this.showError('Failed to load posts. Please try again.');
+                console.error('Feed load error:', error);
+            }
+        }
+
+        async createPost(content, files = []) {
+            const formData = new FormData();
+            formData.append('content', content);
+
+            files.forEach((file, index) => {
+                formData.append(`file${index}`, file.file);
+                formData.append(`fileType${index}`, file.type);
+            });
+
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.POSTS}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${AppState.token}`
+                    },
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const newPost = await response.json();
+                    this.addPostToFeed(newPost);
+                    this.showSuccess('Post created successfully!');
+                    return newPost;
+                } else {
+                    throw new Error('Post creation failed');
+                }
+            } catch (error) {
+                this.showError('Failed to create post. Please try again.');
+                throw error;
+            }
+        }
+
+        renderPosts(posts) {
+            const feed = document.getElementById('post-feed');
+            feed.innerHTML = '';
+
+            if (posts.length === 0) {
+                feed.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-feather-alt" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+                                <h3>No posts yet</h3>
+                                <p>Be the first to share some wisdom!</p>
+                            </div>
+                        `;
+                return;
+            }
+
+            posts.forEach(post => {
+                const postElement = this.createPostElement(post);
+                feed.appendChild(postElement);
+            });
+        }
+
+        createPostElement(post) {
+            const div = document.createElement('div');
+            div.className = 'post';
+            div.dataset.postId = post.id;
+
+            const mediaHtml = this.generateMediaHtml(post.media);
+            const timeAgo = this.formatTimeAgo(post.createdAt);
+
+            div.innerHTML = `
+                        <div class="post-header">
+                            <a href="profile.html?id=${post.author.id}" class="post-user">
+                                <img src="${post.author.avatar || 'default-avatar.jpg'}"
+                                     alt="${post.author.username}"
+                                     class="small-profile-pic">
+                                <div>
+                                    <strong>${post.author.username}</strong>
+                                    <small>${timeAgo}</small>
+                                </div>
+                            </a>
+                        </div>
+                        <div class="post-content">
+                            <p>${this.escapeHtml(post.content)}</p>
+                            ${mediaHtml}
+                        </div>
+                        <div class="post-interactions">
+                            <div class="interaction-counts">
+                                <span><i class="far fa-heart"></i> ${post.likes || 0}</span>
+                                <span><i class="far fa-comment"></i> ${post.comments || 0}</span>
+                                <span><i class="fas fa-retweet"></i> ${post.shares || 0}</span>
+                            </div>
+                            <div class="post-actions">
+                                <button class="post-action ${post.liked ? 'liked' : ''}"
+                                        data-action="like"
+                                        data-post-id="${post.id}">
+                                    <i class="${post.liked ? 'fas' : 'far'} fa-heart"></i>
+                                </button>
+                                <button class="post-action" data-action="comment" data-post-id="${post.id}">
+                                    <i class="far fa-comment"></i>
+                                </button>
+                                <button class="post-action" data-action="share" data-post-id="${post.id}">
+                                    <i class="fas fa-share-alt"></i>
+                                </button>
+                                <button class="post-action" data-action="bookmark" data-post-id="${post.id}">
+                                    <i class="${post.bookmarked ? 'fas' : 'far'} fa-bookmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+            return div;
+        }
+
+        generateMediaHtml(mediaArray) {
+            if (!mediaArray || mediaArray.length === 0) return '';
+
+            return mediaArray.map(media => {
+                switch (media.type) {
+                    case 'image':
+                        return `<img src="${media.url}" alt="Post image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">`;
+                    case 'video':
+                        return `<video controls style="max-width: 100%; border-radius: 8px; margin: 10px 0;">
+                                          <source src="${media.url}" type="video/mp4">
+                                        </video>`;
+                    case 'audio':
+                        return `<audio controls style="width: 100%; margin: 10px 0;">
+                                          <source src="${media.url}" type="audio/mpeg">
+                                        </audio>`;
+                    default:
+                        return `<div class="document-preview">
+                                          <i class="fas fa-file"></i>
+                                          <a href="${media.url}" target="_blank">${media.name}</a>
+                                        </div>`;
+                }
+            }).join('');
+        }
+
+        formatTimeAgo(timestamp) {
+            const seconds = Math.floor((new Date() - new Date(timestamp)) / 1000);
+            let interval = seconds / 31536000;
+
+            if (interval > 1) return Math.floor(interval) + " years ago";
+            interval = seconds / 2592000;
+            if (interval > 1) return Math.floor(interval) + " months ago";
+            interval = seconds / 86400;
+            if (interval > 1) return Math.floor(interval) + " days ago";
+            interval = seconds / 3600;
+            if (interval > 1) return Math.floor(interval) + " hours ago";
+            interval = seconds / 60;
+            if (interval > 1) return Math.floor(interval) + " minutes ago";
+            return Math.floor(seconds) + " seconds ago";
+        }
+
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        createSkeletonLoader(count) {
+            let skeletons = '';
+            for (let i = 0; i < count; i++) {
+                skeletons += `
+                            <div class="skeleton-post">
+                                <div class="post">
+                                    <div class="post-header">
+                                        <div class="skeleton skeleton-avatar"></div>
+                                        <div style="flex: 1; margin-left: 10px;">
+                                            <div class="skeleton skeleton-text" style="width: 30%;"></div>
+                                            <div class="skeleton skeleton-text" style="width: 20%;"></div>
+                                        </div>
+                                    </div>
+                                    <div class="post-content">
+                                        <div class="skeleton skeleton-text"></div>
+                                        <div class="skeleton skeleton-text"></div>
+                                        <div class="skeleton skeleton-text" style="width: 60%;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+            }
+            return skeletons;
+        }
+
+        showError(message) {
+            this.showAlert(message, 'error');
+        }
+
+        showSuccess(message) {
+            this.showAlert(message, 'success');
+        }
+
+        showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `
+                        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                        <span>${message}</span>
+                    `;
+
+            const container = document.getElementById('alert-container');
+            container.appendChild(alertDiv);
+
+            setTimeout(() => {
+                alertDiv.style.display = 'block';
+                setTimeout(() => {
+                    alertDiv.style.opacity = '0';
+                    setTimeout(() => alertDiv.remove(), 300);
+                }, 3000);
+            }, 10);
+        }
+    }
+
+    // ===================== TRENDING ALGORITHMS =====================
+    class TrendAlgorithm {
+        constructor() {
+            this.weights = {
+                recency: 0.3,
+                engagement: 0.4,
+                velocity: 0.2,
+                authority: 0.1
+            };
+        }
+
+        calculateTrendScore(post) {
+            const now = new Date();
+            const postTime = new Date(post.createdAt);
+            const hoursDiff = (now - postTime) / (1000 * 60 * 60);
+
+            // Recency score (more recent = higher score)
+            const recencyScore = Math.max(0, 1 - (hoursDiff / 72));
+
+            // Engagement score (likes, comments, shares)
+            const engagementScore = this.normalize(
+                (post.likes * 1) + (post.comments * 2) + (post.shares * 3),
+                0, 1000
+            );
+
+            // Velocity score (engagement per hour)
+            const velocityScore = hoursDiff > 0 ?
+                ((post.likes + post.comments + post.shares) / hoursDiff) / 10 : 0;
+
+            // Authority score (based on author followers)
+            const authorityScore = this.normalize(post.author.followers || 0, 0, 10000);
+
+            // Weighted sum
+            return (
+                recencyScore * this.weights.recency +
+                engagementScore * this.weights.engagement +
+                velocityScore * this.weights.velocity +
+                authorityScore * this.weights.authority
+            );
+        }
+
+        normalize(value, min, max) {
+            if (max === min) return 0.5;
+            return Math.max(0, Math.min(1, (value - min) / (max - min)));
+        }
+
+        async getTrendingTopics(posts) {
+            const hashtagMap = new Map();
+
+            posts.forEach(post => {
+                const hashtags = this.extractHashtags(post.content);
+                const postScore = this.calculateTrendScore(post);
+
+                hashtags.forEach(tag => {
+                    const normalizedTag = tag.toLowerCase();
+                    if (!hashtagMap.has(normalizedTag)) {
+                        hashtagMap.set(normalizedTag, {
+                            tag: tag,
+                            count: 0,
+                            score: 0,
+                            posts: []
+                        });
+                    }
+
+                    const data = hashtagMap.get(normalizedTag);
+                    data.count++;
+                    data.score += postScore;
+                    data.posts.push(post.id);
+                });
+            });
+
+            // Convert to array and sort by score
+            return Array.from(hashtagMap.values())
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10);
+        }
+
+        extractHashtags(text) {
+            const hashtagRegex = /#(\w+)/g;
+            const matches = text.match(hashtagRegex) || [];
+            return matches.map(tag => tag.substring(1)); // Remove #
+        }
+    }
+
+    // ===================== USER SUGGESTION ALGORITHM =====================
+    class SuggestionAlgorithm {
+        constructor() {
+            this.factors = {
+                mutualConnections: 0.35,
+                interests: 0.30,
+                location: 0.15,
+                activityLevel: 0.10,
+                followerCount: 0.10
+            };
+        }
+
+        calculateCompatibilityScore(currentUser, suggestedUser, context) {
+            let score = 0;
+
+            // Mutual connections
+            const mutualCount = this.countMutualConnections(currentUser, suggestedUser);
+            score += (mutualCount / 100) * this.factors.mutualConnections;
+
+            // Common interests
+            const interestMatch = this.calculateInterestOverlap(currentUser.interests, suggestedUser.interests);
+            score += interestMatch * this.factors.interests;
+
+            // Location proximity
+            if (currentUser.location && suggestedUser.location) {
+                const locationScore = this.calculateLocationScore(currentUser.location, suggestedUser.location);
+                score += locationScore * this.factors.location;
+            }
+
+            // Activity level compatibility
+            const activityScore = this.calculateActivityScore(currentUser.activityLevel, suggestedUser.activityLevel);
+            score += activityScore * this.factors.activityLevel;
+
+            // Follower count normalization
+            const followerScore = this.normalizeFollowerScore(suggestedUser.followers);
+            score += followerScore * this.factors.followerCount;
+
+            return Math.min(1, score);
+        }
+
+        countMutualConnections(user1, user2) {
+            if (!user1.following || !user2.followers) return 0;
+            return user1.following.filter(id => user2.followers.includes(id)).length;
+        }
+
+        calculateInterestOverlap(interests1, interests2) {
+            if (!interests1 || !interests2) return 0;
+            const set1 = new Set(interests1);
+            const set2 = new Set(interests2);
+            const intersection = new Set([...set1].filter(x => set2.has(x)));
+            return intersection.size / Math.max(set1.size, set2.size, 1);
+        }
+
+        calculateLocationScore(loc1, loc2) {
+            // Simplified location scoring
+            if (loc1.city === loc2.city && loc1.country === loc2.country) return 0.8;
+            if (loc1.country === loc2.country) return 0.5;
+            return 0.2;
+        }
+
+        calculateActivityScore(level1, level2) {
+            // Balance between active users
+            const diff = Math.abs(level1 - level2);
+            return Math.max(0, 1 - diff);
+        }
+
+        normalizeFollowerScore(followers) {
+            // Logarithmic normalization to prevent bias toward mega-influencers
+            return Math.min(1, Math.log10(followers + 1) / 3);
+        }
+    }
+
+    // ===================== API CONNECTION MANAGER =====================
+    class APIManager {
+        constructor() {
+            this.connected = false;
+            this.retryCount = 0;
+            this.maxRetries = 3;
+        }
+
+        async testConnection() {
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}/health`, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(3000)
+                });
+
+                this.connected = response.ok;
+                this.updateConnectionStatus();
+                return this.connected;
+            } catch (error) {
+                this.connected = false;
+                this.updateConnectionStatus();
+
+                if (this.retryCount < this.maxRetries) {
+                    this.retryCount++;
+                    setTimeout(() => this.testConnection(), 2000 * this.retryCount);
+                }
+
+                return false;
+            }
+        }
+
+        updateConnectionStatus() {
+            const statusElement = document.getElementById('api-status');
+            const statusText = document.getElementById('api-status-text');
+
+            if (this.connected) {
+                statusElement.className = 'api-status connected';
+                statusText.textContent = 'Connected to Wise-Raven API';
+                this.retryCount = 0;
+            } else {
+                statusElement.className = 'api-status disconnected';
+                statusText.textContent = 'Disconnected - Attempting to reconnect...';
+            }
+
+            AppState.apiConnected = this.connected;
+        }
+    }
+
+    // ===================== MAIN APPLICATION =====================
+    class WiseRavenApp {
+        constructor() {
+            this.authManager = new AuthManager();
+            this.postManager = new PostManager(this.authManager);
+            this.trendAlgorithm = new TrendAlgorithm();
+            this.suggestionAlgorithm = new SuggestionAlgorithm();
+            this.apiManager = new APIManager();
+            this.selectedFiles = [];
+            this.currentUploadType = '';
+        }
+
+        async initialize() {
+            console.log('Initializing Wise-Raven Social Media...');
+
+            // Show loading overlay
+            document.getElementById('loading-overlay').style.display = 'flex';
+
+            // Test API connection
+            await this.apiManager.testConnection();
+
+            // Verify authentication
+            const isAuthenticated = await this.authManager.verifyAuthentication();
+            if (!isAuthenticated) return;
+
+            // Load initial data
+            await this.loadInitialData();
+
+            // Setup event listeners
+            this.setupEventListeners();
+
+            // Hide loading overlay
+            setTimeout(() => {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }, 1000);
+
+            console.log('App initialized successfully');
+        }
+
+        async loadInitialData() {
+            try {
+                await Promise.all([
+                    this.loadFeed(),
+                    this.loadTrendingTopics(),
+                    this.loadSuggestedUsers(),
+                    this.loadUserStats()
+                ]);
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+                this.postManager.showError('Failed to load some data. Please refresh.');
+            }
+        }
+
+        async loadFeed() {
+            await this.postManager.loadFeed();
+        }
+
+        async loadTrendingTopics() {
+            try {
+                const data = await this.authManager.apiRequest(API_CONFIG.ENDPOINTS.TRENDING, {
+                    method: 'GET',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                AppState.trending = data.topics || [];
+                this.renderTrendingTopics(AppState.trending);
+            } catch (error) {
+                console.error('Trending load error:', error);
+                // Fallback to client-side calculation
+                this.calculateClientSideTrending();
+            }
+        }
+
+        calculateClientSideTrending() {
+            if (AppState.posts.length > 0) {
+                const trending = this.trendAlgorithm.getTrendingTopics(AppState.posts);
+                this.renderTrendingTopics(trending);
+            }
+        }
+
+        renderTrendingTopics(topics) {
+            const container = document.getElementById('trending-topics');
+            container.innerHTML = '';
+
+            if (!topics || topics.length === 0) {
+                container.innerHTML = '<div class="trending-topic">No trending topics yet</div>';
+                return;
+            }
+
+            topics.forEach((topic, index) => {
+                const div = document.createElement('div');
+                div.className = 'trending-topic';
+                div.innerHTML = `
+                            <strong>${topic.tag}</strong>
+                            <span style="color: var(--highlight-color); font-size: 0.9em;">
+                                ${topic.count} posts
+                            </span>
+                            ${index < 3 ? '<span class="trending-badge">🔥</span>' : ''}
+                        `;
+                container.appendChild(div);
+            });
+        }
+
+        async loadSuggestedUsers() {
+            try {
+                const data = await this.authManager.apiRequest(API_CONFIG.ENDPOINTS.SUGGESTIONS, {
+                    method: 'GET',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                AppState.suggestions = data.users || [];
+                this.renderSuggestedUsers(AppState.suggestions);
+            } catch (error) {
+                console.error('Suggestions load error:', error);
+                this.renderSuggestedUsers([]);
+            }
+        }
+
+        renderSuggestedUsers(users) {
+            const container = document.getElementById('user-suggestions');
+            container.innerHTML = '';
+
+            if (!users || users.length === 0) {
+                container.innerHTML = '<div class="suggested-user">No suggestions available</div>';
+                return;
+            }
+
+            users.forEach(user => {
+                const div = document.createElement('div');
+                div.className = 'suggested-user';
+                div.innerHTML = `
+                            <div class="user-info">
+                                <img src="${user.avatar || 'default-avatar.jpg'}"
+                                     alt="${user.username}"
+                                     class="small-profile-pic">
+                                <div>
+                                    <strong>${user.username}</strong>
+                                    <small>${user.mutualFriends || 0} mutual connections</small>
+                                </div>
+                            </div>
+                            <button class="follow-btn" data-user-id="${user.id}">
+                                ${user.isFollowing ? 'Following' : 'Follow'}
+                            </button>
+                        `;
+                container.appendChild(div);
+            });
+        }
+
+        async loadUserStats() {
+            try {
+                const data = await this.authManager.apiRequest(API_CONFIG.ENDPOINTS.USER_PROFILE, {
+                    method: 'GET',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                if (data.stats) {
+                    document.getElementById('weekly-engagement').textContent = data.stats.weeklyEngagement || 0;
+                    document.getElementById('trending-score').textContent = data.stats.trendingScore || 0;
+                }
+            } catch (error) {
+                console.error('Stats load error:', error);
+            }
+        }
+
+        setupEventListeners() {
+            // Logout button
+            document.getElementById('logout-btn').addEventListener('click', () => {
+                this.authManager.logout();
+            });
+
+            // Post creation
+            const postContent = document.getElementById('post-content');
+            const createPostBtn = document.getElementById('create-post-btn');
+            const charCount = document.getElementById('char-count');
+
+            postContent.addEventListener('input', () => {
+                charCount.textContent = postContent.value.length;
+            });
+
+            createPostBtn.addEventListener('click', async () => {
+                const content = postContent.value.trim();
+
+                if (!content && this.selectedFiles.length === 0) {
+                    this.postManager.showError('Please add content or files to your post.');
+                    return;
+                }
+
+                createPostBtn.disabled = true;
+                createPostBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Posting...';
+
+                try {
+                    await this.postManager.createPost(content, this.selectedFiles);
+                    postContent.value = '';
+                    charCount.textContent = '0';
+                    this.selectedFiles = [];
+                    document.getElementById('file-preview').innerHTML = '';
+                    document.getElementById('file-preview').classList.remove('active');
+                } catch (error) {
+                    console.error('Post creation error:', error);
+                } finally {
+                    createPostBtn.disabled = false;
+                    createPostBtn.innerHTML = '<i class="fas fa-feather-alt"></i> Post';
+                }
+            });
+
+            // File upload
+            this.setupFileUploadListeners();
+
+            // Navigation
+            this.setupNavigationListeners();
+
+            // Search
+            const searchInput = document.getElementById('search-input');
+            const searchBtn = document.getElementById('search-btn');
+
+            const performSearch = () => {
+                const query = searchInput.value.trim();
+                if (query) {
+                    window.location.href = `search.html?q=${encodeURIComponent(query)}`;
+                }
+            };
+
+            searchBtn.addEventListener('click', performSearch);
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+
+            // Follow buttons delegation
+            document.addEventListener('click', async (e) => {
+                if (e.target.closest('.follow-btn')) {
+                    const btn = e.target.closest('.follow-btn');
+                    const userId = btn.dataset.userId;
+                    await this.handleFollowAction(userId, btn);
+                }
+            });
+
+            // Post interactions delegation
+            document.getElementById('post-feed').addEventListener('click', async (e) => {
+                const actionBtn = e.target.closest('.post-action');
+                if (actionBtn) {
+                    const action = actionBtn.dataset.action;
+                    const postId = actionBtn.dataset.postId;
+                    await this.handlePostInteraction(action, postId, actionBtn);
+                }
+            });
+
+            // Discover and Bookmarks links
+            document.getElementById('discover-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                window.location.href = 'discover.html';
+            });
+
+            document.getElementById('bookmarks-link').addEventListener('click', async (e) => {
+                e.preventDefault();
+                window.location.href = 'bookmarks.html';
+            });
+        }
+
+        setupFileUploadListeners() {
+            const uploadOptions = document.querySelectorAll('.upload-option');
+            const fileUploadModal = document.getElementById('file-upload-modal');
+            const closeModalBtn = document.querySelector('.close-btn');
+
+            uploadOptions.forEach(option => {
+                option.addEventListener('click', () => {
+                    this.currentUploadType = option.dataset.type;
+                    fileUploadModal.style.display = 'block';
+                });
+            });
+
+            closeModalBtn.addEventListener('click', () => {
+                fileUploadModal.style.display = 'none';
+            });
+
+            // Upload method selection
+            document.querySelectorAll('.upload-method-option').forEach(method => {
+                method.addEventListener('click', () => {
+                    const methodType = method.dataset.method;
+                    this.handleUploadMethod(methodType);
+                    fileUploadModal.style.display = 'none';
+                });
+            });
+
+            // Close modal on outside click
+            window.addEventListener('click', (e) => {
+                if (e.target === fileUploadModal) {
+                    fileUploadModal.style.display = 'none';
+                }
+            });
+        }
+
+        setupNavigationListeners() {
+            const navLinks = document.querySelectorAll('.nav-menu a');
+            navLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    if (!link.href || link.getAttribute('href') === '#') {
+                        e.preventDefault();
+                        const section = link.dataset.section;
+                        this.handleNavigation(section);
+                    }
+                });
+            });
+        }
+
+        async handleUploadMethod(method) {
+            switch (method) {
+                case 'device':
+                    this.handleDeviceUpload();
+                    break;
+                case 'bluetooth':
+                    this.handleBluetoothUpload();
+                    break;
+                case 'wifi':
+                    this.handleWifiUpload();
+                    break;
+                default:
+                    console.error('Unknown upload method:', method);
+            }
+        }
+
+        handleDeviceUpload() {
+            const input = document.createElement('input');
+            input.type = 'file';
+
+            switch (this.currentUploadType) {
+                case 'photo':
+                    input.accept = 'image/*';
+                    break;
+                case 'video':
+                    input.accept = 'video/*';
+                    break;
+                case 'audio':
+                    input.accept = 'audio/*';
+                    break;
+                case 'document':
+                    input.accept = '.pdf,.doc,.docx,.txt';
+                    break;
+            }
+
+            input.multiple = true;
+            input.onchange = (e) => this.handleFiles(e.target.files);
+            input.click();
+        }
+
+        handleBluetoothUpload() {
+            this.postManager.showError('Bluetooth upload requires Web Bluetooth API. Feature coming soon!');
+        }
+
+        handleWifiUpload() {
+            this.postManager.showError('Wi-Fi Direct upload requires device-specific APIs. Feature coming soon!');
+        }
+
+        handleFiles(files) {
+            for (let file of files) {
+                this.selectedFiles.push({
+                    file: file,
+                    type: this.currentUploadType
+                });
+                this.createFilePreview(file);
+            }
+
+            document.getElementById('file-preview').classList.add('active');
+        }
+
+        createFilePreview(file) {
+            const previewItem = document.createElement('div');
+            previewItem.className = 'preview-item';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-file';
+            removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            removeBtn.onclick = () => {
+                previewItem.remove();
+                const index = this.selectedFiles.findIndex(f => f.file === file);
+                if (index !== -1) this.selectedFiles.splice(index, 1);
+                if (this.selectedFiles.length === 0) {
+                    document.getElementById('file-preview').classList.remove('active');
+                }
+            };
+
+            let previewElement;
+            if (this.currentUploadType === 'photo') {
+                previewElement = document.createElement('img');
+                previewElement.src = URL.createObjectURL(file);
+            } else if (this.currentUploadType === 'video') {
+                previewElement = document.createElement('video');
+                previewElement.src = URL.createObjectURL(file);
+                previewElement.controls = true;
+            } else if (this.currentUploadType === 'audio') {
+                previewElement = document.createElement('audio');
+                previewElement.src = URL.createObjectURL(file);
+                previewElement.controls = true;
+            } else {
+                previewElement = document.createElement('div');
+                previewElement.className = 'file-info';
+                previewElement.innerHTML = `
+                            <i class="fas fa-file"></i>
+                            <span>${file.name}</span>
+                            <small>${(file.size / 1024).toFixed(2)} KB</small>
+                        `;
+            }
+
+            previewItem.appendChild(previewElement);
+            previewItem.appendChild(removeBtn);
+            document.getElementById('file-preview').appendChild(previewItem);
+        }
+
+        async handleFollowAction(userId, button) {
+            try {
+                const response = await this.authManager.apiRequest(`${API_CONFIG.ENDPOINTS.FOLLOW}/${userId}`, {
+                    method: 'POST',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                if (response.success) {
+                    const isFollowing = response.status === 'following';
+                    button.textContent = isFollowing ? 'Following' : 'Follow';
+                    button.classList.toggle('following', isFollowing);
+
+                    // Update follower count
+                    const followerCount = document.getElementById('follower-count');
+                    if (followerCount && response.newCount !== undefined) {
+                        followerCount.textContent = response.newCount;
+                    }
+                }
+            } catch (error) {
+                console.error('Follow action failed:', error);
+                this.postManager.showError('Failed to update follow status');
+            }
+        }
+
+        async handlePostInteraction(action, postId, button) {
+            try {
+                const endpoint = `${API_CONFIG.ENDPOINTS.POSTS}/${postId}/${action}`;
+                const response = await this.authManager.apiRequest(endpoint, {
+                    method: 'POST',
+                    headers: this.authManager.getAuthHeaders()
+                });
+
+                if (response.success) {
+                    // Update UI
+                    switch (action) {
+                        case 'like':
+                            button.classList.toggle('liked');
+                            button.innerHTML = button.classList.contains('liked') ?
+                                '<i class="fas fa-heart"></i>' :
+                                '<i class="far fa-heart"></i>';
+                            break;
+                        case 'bookmark':
+                            button.innerHTML = response.bookmarked ?
+                                '<i class="fas fa-bookmark"></i>' :
+                                '<i class="far fa-bookmark"></i>';
+                            break;
+                    }
+
+                    // Update counts in the post
+                    const postElement = button.closest('.post');
+                    if (postElement) {
+                        this.updatePostCounts(postElement, response.counts);
+                    }
+                }
+            } catch (error) {
+                console.error(`${action} action failed:`, error);
+            }
+        }
+
+        updatePostCounts(postElement, counts) {
+            if (counts.likes !== undefined) {
+                const likesSpan = postElement.querySelector('.interaction-counts span:nth-child(1)');
+                if (likesSpan) {
+                    likesSpan.innerHTML = `<i class="far fa-heart"></i> ${counts.likes}`;
+                }
+            }
+            if (counts.comments !== undefined) {
+                const commentsSpan = postElement.querySelector('.interaction-counts span:nth-child(2)');
+                if (commentsSpan) {
+                    commentsSpan.innerHTML = `<i class="far fa-comment"></i> ${counts.comments}`;
+                }
+            }
+        }
+
+        handleNavigation(section) {
+            switch (section) {
+                case 'feed':
+                    // Already on feed
+                    break;
+                case 'discover':
+                    window.location.href = 'discover.html';
+                    break;
+                case 'bookmarks':
+                    window.location.href = 'bookmarks.html';
+                    break;
+                default:
+                    console.log('Navigating to:', section);
+            }
+        }
+    }
+
+    // ===================== INITIALIZE APPLICATION =====================
+    document.addEventListener('DOMContentLoaded', () => {
+        const app = new WiseRavenApp();
+        app.initialize();
+
+        // Periodic data refresh (every 2 minutes)
+        setInterval(() => {
+            if (AppState.isAuthenticated && AppState.apiConnected) {
+                app.loadTrendingTopics();
+                app.loadSuggestedUsers();
+            }
+        }, 120000);
+    });
+
+    // ===================== ALGORITHM IMPLEMENTATIONS =====================
+    // These algorithms can be expanded based on your specific needs
+
+    // Example: User Interest Matching Algorithm
+    class InterestMatchingAlgorithm {
+        constructor() {
+            this.userInterests = new Map();
+            this.postTags = new Map();
+        }
+
+        // Collaborative filtering for user suggestions
+        collaborativeFilter(userId, allUsers, interactions) {
+            const userInteractions = interactions[userId] || {};
+            const scores = [];
+
+            allUsers.forEach(otherUser => {
+                if (otherUser.id === userId) return;
+
+                const similarity = this.calculateUserSimilarity(userId, otherUser.id, interactions);
+                const score = similarity * (otherUser.followers || 1) * 0.001;
+
+                scores.push({
+                    user: otherUser,
+                    score: score,
+                    mutualInterests: this.getMutualInterests(userId, otherUser.id)
+                });
+            });
+
+            return scores
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10);
+        }
+
+        calculateUserSimilarity(userId1, userId2, interactions) {
+            // Implement Jaccard similarity or cosine similarity
+            const interactions1 = new Set(Object.keys(interactions[userId1] || {}));
+            const interactions2 = new Set(Object.keys(interactions[userId2] || {}));
+
+            const intersection = new Set([...interactions1].filter(x => interactions2.has(x)));
+            const union = new Set([...interactions1, ...interactions2]);
+
+            return union.size > 0 ? intersection.size / union.size : 0;
+        }
+
+        getMutualInterests(userId1, userId2) {
+            const interests1 = this.userInterests.get(userId1) || new Set();
+            const interests2 = this.userInterests.get(userId2) || new Set();
+
+            return new Set([...interests1].filter(x => interests2.has(x)));
+        }
+    }
+
+    // Example: Content Recommendation Algorithm
+    class ContentRecommendationAlgorithm {
+        constructor() {
+            this.userPreferences = new Map();
+            this.contentFeatures = new Map();
+        }
+
+        recommendContent(userId, availablePosts, userHistory) {
+            const userPrefs = this.userPreferences.get(userId) || {};
+            const recommendations = [];
+
+            availablePosts.forEach(post => {
+                let score = 0;
+
+                // Content-based scoring
+                score += this.calculateContentSimilarity(post, userPrefs) * 0.4;
+
+                // Collaborative filtering scoring
+                score += this.calculateCollaborativeScore(userId, post, userHistory) * 0.3;
+
+                // Trending boost
+                score += this.calculateTrendingBoost(post) * 0.2;
+
+                // Freshness factor
+                score += this.calculateFreshnessScore(post) * 0.1;
+
+                recommendations.push({
+                    post: post,
+                    score: score,
+                    reasons: this.generateExplanation(post, userPrefs)
+                });
+            });
+
+            return recommendations
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 20);
+        }
+
+        calculateContentSimilarity(post, userPrefs) {
+            // Implement TF-IDF or similar text analysis
+            return Math.random(); // Placeholder
+        }
+
+        calculateCollaborativeScore(userId, post, userHistory) {
+            // Implement user-based collaborative filtering
+            return Math.random(); // Placeholder
+        }
+
+        calculateTrendingBoost(post) {
+            // Boost trending content
+            return post.engagementRate || 0;
+        }
+
+        calculateFreshnessScore(post) {
+            const hoursOld = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
+            return Math.max(0, 1 - (hoursOld / 168)); // Decay over 1 week
+        }
+
+        generateExplanation(post, userPrefs) {
+            const reasons = [];
+            if (post.author.followers > 1000) reasons.push('Popular creator');
+            if (post.likes > 100) reasons.push('Highly liked');
+            if (this.hasCommonInterests(post, userPrefs)) reasons.push('Matches your interests');
+            return reasons;
+        }
+
+        hasCommonInterests(post, userPrefs) {
+            // Check for common interests between post tags and user preferences
+            return Math.random() > 0.5; // Placeholder
+        }
+    }
+</script>
