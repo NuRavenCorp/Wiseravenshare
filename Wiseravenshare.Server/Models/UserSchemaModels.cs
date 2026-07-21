@@ -20,6 +20,7 @@ public sealed class SocialFeedSettings
 {
     public SocialFeedConnection TikTok { get; set; } = new();
     public SocialFeedConnection Facebook { get; set; } = new();
+    public SocialFeedConnection Instagram { get; set; } = new();
 }
 
 public sealed class SocialFeedConnection
@@ -59,4 +60,5 @@ public sealed class UpdateSocialFeedsRequest
 {
     public SocialFeedConnection? TikTok { get; set; }
     public SocialFeedConnection? Facebook { get; set; }
+    public SocialFeedConnection? Instagram { get; set; }
 }

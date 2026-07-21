@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 
@@ -10,7 +11,9 @@ const normalizeConnection = (connection, platform) => {
 
     const fallbackProfileUrl = platform === 'facebook'
         ? (username ? `https://www.facebook.com/${username}` : '')
-        : (username ? `https://www.tiktok.com/@${username}` : '');
+        : platform === 'instagram'
+            ? (username ? `https://www.instagram.com/${username}` : '')
+            : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(safeConnection.enabled),
@@ -38,6 +41,7 @@ const getSnapshot = (user) => {
     return {
         tikTok: normalizeConnection(feeds.tikTok, 'tiktok'),
         facebook: normalizeConnection(feeds.facebook, 'facebook'),
+        instagram: normalizeConnection(feeds.instagram, 'instagram'),
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
@@ -45,6 +49,8 @@ const getSnapshot = (user) => {
 
 const SocialFeedsTimeline = ({ user, compact = false }) => {
     const [snapshot, setSnapshot] = useState(() => getSnapshot(user));
+    const [feedItems, setFeedItems] = useState([]);
+    const [isLoadingFeed, setIsLoadingFeed] = useState(false);
 
     useEffect(() => {
         setSnapshot(getSnapshot(user));
@@ -66,6 +72,46 @@ const SocialFeedsTimeline = ({ user, compact = false }) => {
             window.removeEventListener('wiseraven:social-updated', refresh);
         };
     }, [user]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCombinedFeed = async () => {
+            if (!snapshot.tikTok.enabled && !snapshot.facebook.enabled) {
+                setFeedItems([]);
+                return;
+            }
+
+            setIsLoadingFeed(true);
+            try {
+                const items = await socialService.getCombinedFeed(
+                    compact ? 5 : 10,
+                    snapshot.facebook.username || undefined,
+                    snapshot.tikTok.username || undefined
+                );
+
+                if (!cancelled) {
+                    setFeedItems(Array.isArray(items) ? items : []);
+                }
+            } catch {
+                if (!cancelled) {
+                    setFeedItems([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingFeed(false);
+                }
+            }
+        };
+
+        loadCombinedFeed();
+        const intervalId = setInterval(loadCombinedFeed, REFRESH_MS);
+
+        return () => {
+            cancelled = true;
+            clearInterval(intervalId);
+        };
+    }, [compact, snapshot.facebook.enabled, snapshot.facebook.username, snapshot.tikTok.enabled, snapshot.tikTok.username]);
 
     const timelineItems = useMemo(() => {
         const items = [];
@@ -92,10 +138,21 @@ const SocialFeedsTimeline = ({ user, compact = false }) => {
             });
         }
 
+        if (snapshot.instagram.enabled && snapshot.instagram.resolvedUrl) {
+            items.push({
+                id: 'instagram',
+                platform: 'Instagram',
+                icon: '📸',
+                color: '#f9a8d4',
+                username: snapshot.instagram.username,
+                url: snapshot.instagram.resolvedUrl
+            });
+        }
+
         return items;
     }, [snapshot]);
 
-    if (timelineItems.length === 0) {
+    if (timelineItems.length === 0 && feedItems.length === 0) {
         return null;
     }
 
@@ -175,6 +232,64 @@ const SocialFeedsTimeline = ({ user, compact = false }) => {
                         </div>
                     </article>
                 ))}
+            </div>
+
+            <div style={{ marginTop: '12px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
+                    Live Facebook + TikTok Feed
+                </div>
+
+                {isLoadingFeed && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                        Refreshing feed...
+                    </div>
+                )}
+
+                {!isLoadingFeed && feedItems.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        No live feed items returned yet. Add page/username in profile and verify platform tokens on server.
+                    </div>
+                )}
+
+                <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                    {feedItems.map((item) => (
+                        <article
+                            key={`${item.platform}-${item.externalId}`}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '10px',
+                                padding: compact ? '8px' : '10px',
+                                background: 'rgba(255,255,255,0.02)'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '11px', color: 'var(--light-color)' }}>
+                                <span style={{ textTransform: 'uppercase' }}>{item.platform}</span>
+                                <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</span>
+                            </div>
+
+                            <div style={{ marginTop: '6px', fontSize: '13px' }}>
+                                {item.text || 'No text provided.'}
+                            </div>
+
+                            {item.permalinkUrl && (
+                                <a
+                                    href={item.permalinkUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                        marginTop: '6px',
+                                        display: 'inline-block',
+                                        fontSize: '12px',
+                                        color: 'var(--highlight-color)',
+                                        textDecoration: 'none'
+                                    }}
+                                >
+                                    Open original
+                                </a>
+                            )}
+                        </article>
+                    ))}
+                </div>
             </div>
         </section>
     );
