@@ -41,6 +41,24 @@ services:
       - key: STRIPE_PRICE_ANNUAL_ID
         value: ${STRIPE_PRICE_ANNUAL_ID}
         type: SECRET
+      - key: Social__Facebook__PageId
+        value: ${SOCIAL_FACEBOOK_PAGE_ID}
+        type: SECRET
+      - key: Social__Facebook__PageAccessToken
+        value: ${SOCIAL_FACEBOOK_PAGE_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__TikTok__Username
+        value: ${SOCIAL_TIKTOK_USERNAME}
+        type: SECRET
+      - key: Social__TikTok__AccessToken
+        value: ${SOCIAL_TIKTOK_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Instagram__Username
+        value: ${SOCIAL_INSTAGRAM_USERNAME}
+        type: SECRET
+      - key: Social__Instagram__ProfileUrl
+        value: ${SOCIAL_INSTAGRAM_PROFILE_URL}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:

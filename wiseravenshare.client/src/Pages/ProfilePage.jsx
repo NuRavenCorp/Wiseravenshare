@@ -12,7 +12,8 @@ const ProfilePage = () => {
     const { addToast } = useNotification();
     const emptySocialFeeds = {
         tikTok: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        facebook: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
+        facebook: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        instagram: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
     };
     const [posts, setPosts] = useState([]);
     const [likedPosts, setLikedPosts] = useState([]);
@@ -63,6 +64,12 @@ const ProfilePage = () => {
                         username: user.socialFeeds?.facebook?.username || '',
                         profileUrl: user.socialFeeds?.facebook?.profileUrl || '',
                         feedUrl: user.socialFeeds?.facebook?.feedUrl || ''
+                    },
+                    instagram: {
+                        enabled: Boolean(user.socialFeeds?.instagram?.enabled),
+                        username: user.socialFeeds?.instagram?.username || '',
+                        profileUrl: user.socialFeeds?.instagram?.profileUrl || '',
+                        feedUrl: user.socialFeeds?.instagram?.feedUrl || ''
                     }
                 }
             });
@@ -389,6 +396,16 @@ const ProfilePage = () => {
                                             Facebook Feed
                                         </a>
                                     )}
+                                    {user.socialFeeds?.instagram?.enabled && (
+                                        <a
+                                            href={user.socialFeeds?.instagram?.profileUrl || user.socialFeeds?.instagram?.feedUrl || `https://www.instagram.com/${user.socialFeeds?.instagram?.username || ''}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ color: '#f9a8d4', fontSize: '13px' }}
+                                        >
+                                            Instagram Feed
+                                        </a>
+                                    )}
                                 </div>
                             </>
                         ) : (
@@ -600,6 +617,85 @@ const ProfilePage = () => {
                                                 socialFeeds: {
                                                     ...prev.socialFeeds,
                                                     facebook: { ...prev.socialFeeds.facebook, feedUrl: e.target.value }
+                                                }
+                                            }))}
+                                            style={{
+                                                width: '100%',
+                                                padding: '10px',
+                                                background: 'rgba(255, 255, 255, 0.05)',
+                                                border: '1px solid var(--border-color)',
+                                                borderRadius: '8px',
+                                                color: 'var(--text-color)'
+                                            }}
+                                        />
+                                    </div>
+                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
+                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Instagram feed connection</div>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(editForm.socialFeeds?.instagram?.enabled)}
+                                                onChange={(e) => setEditForm((prev) => ({
+                                                    ...prev,
+                                                    socialFeeds: {
+                                                        ...prev.socialFeeds,
+                                                        instagram: { ...prev.socialFeeds.instagram, enabled: e.target.checked }
+                                                    }
+                                                }))}
+                                            />
+                                            Enable Instagram feed
+                                        </label>
+                                        <input
+                                            type="text"
+                                            placeholder="Instagram username"
+                                            value={editForm.socialFeeds?.instagram?.username || ''}
+                                            onChange={(e) => setEditForm((prev) => ({
+                                                ...prev,
+                                                socialFeeds: {
+                                                    ...prev.socialFeeds,
+                                                    instagram: { ...prev.socialFeeds.instagram, username: e.target.value }
+                                                }
+                                            }))}
+                                            style={{
+                                                width: '100%',
+                                                padding: '10px',
+                                                marginBottom: '8px',
+                                                background: 'rgba(255, 255, 255, 0.05)',
+                                                border: '1px solid var(--border-color)',
+                                                borderRadius: '8px',
+                                                color: 'var(--text-color)'
+                                            }}
+                                        />
+                                        <input
+                                            type="url"
+                                            placeholder="Instagram profile URL"
+                                            value={editForm.socialFeeds?.instagram?.profileUrl || ''}
+                                            onChange={(e) => setEditForm((prev) => ({
+                                                ...prev,
+                                                socialFeeds: {
+                                                    ...prev.socialFeeds,
+                                                    instagram: { ...prev.socialFeeds.instagram, profileUrl: e.target.value }
+                                                }
+                                            }))}
+                                            style={{
+                                                width: '100%',
+                                                padding: '10px',
+                                                marginBottom: '8px',
+                                                background: 'rgba(255, 255, 255, 0.05)',
+                                                border: '1px solid var(--border-color)',
+                                                borderRadius: '8px',
+                                                color: 'var(--text-color)'
+                                            }}
+                                        />
+                                        <input
+                                            type="url"
+                                            placeholder="Instagram feed URL (optional override)"
+                                            value={editForm.socialFeeds?.instagram?.feedUrl || ''}
+                                            onChange={(e) => setEditForm((prev) => ({
+                                                ...prev,
+                                                socialFeeds: {
+                                                    ...prev.socialFeeds,
+                                                    instagram: { ...prev.socialFeeds.instagram, feedUrl: e.target.value }
                                                 }
                                             }))}
                                             style={{
