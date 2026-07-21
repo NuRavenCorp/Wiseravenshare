@@ -1,0 +1,4 @@
+NuRavenCorpLLM/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+NuRavenCorpLLM/**/*.pt filter=lfs diff=lfs merge=lfs -text
+NuRavenCorpLLM/**/*.pth filter=lfs diff=lfs merge=lfs -text
+NuRavenCorpLLM/**/*.ckpt filter=lfs diff=lfs merge=lfs -text

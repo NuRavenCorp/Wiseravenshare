@@ -1,0 +1,15 @@
+{
+  "dependencies": {
+    "postgresql1": {
+      "type": "postgresql",
+      "connectionId": "ConnectionStrings:DatabaseConnection"
+    },
+    "redis1": {
+      "type": "redis",
+      "connectionId": "CacheConnection"
+    },
+    "identityapp1": {
+      "type": "identityapp"
+    }
+  }
+}
