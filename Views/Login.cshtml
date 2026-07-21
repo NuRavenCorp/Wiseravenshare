@@ -1,0 +1,757 @@
+
+@model WiseRavenSocial.ViewModels.LoginViewModel
+
+@{
+    ViewData["Title"] = "Login";
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - WiseRavenSocial</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #1a1f2b;
+            --secondary-color: #2d3748;
+            --accent-color: #4a5568;
+            --highlight-color: #718096;
+            --light-color: #e2e8f0;
+            --text-color: #f8fafc;
+            --bg-color: #0f1419;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+            --success-color: #4caf50;
+            --error-color: #f44336;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-color);
+            padding: 20px;
+        }
+
+        .auth-container {
+            background: var(--card-bg);
+            border-radius: 15px;
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 450px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+
+        .auth-header {
+            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+            color: var(--text-color);
+            padding: 25px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+            .auth-header h1 {
+                font-size: 24px;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+            }
+
+        .auth-body {
+            padding: 30px;
+        }
+
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .auth-tab {
+            flex: 1;
+            padding: 10px;
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 16px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+            .auth-tab.active {
+                border-bottom-color: var(--highlight-color);
+                color: var(--light-color);
+            }
+
+        .auth-form {
+            display: none;
+        }
+
+            .auth-form.active {
+                display: block;
+            }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+            .form-group label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: 500;
+                color: var(--light-color);
+            }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-color);
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+            .form-control:focus {
+                outline: none;
+                border-color: var(--highlight-color);
+                box-shadow: 0 0 0 2px rgba(113, 128, 150, 0.3);
+            }
+
+        .text-danger {
+            color: var(--error-color);
+            font-size: 14px;
+            margin-top: 5px;
+            display: block;
+        }
+
+        .validation-summary-errors ul {
+            list-style: none;
+            padding: 10px;
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid var(--error-color);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .validation-summary-errors li {
+            color: var(--error-color);
+        }
+
+        .form-check {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .form-check-input {
+            margin-right: 10px;
+        }
+
+        .form-check-label {
+            color: var(--highlight-color);
+            font-size: 14px;
+        }
+
+        .auth-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+            color: var(--text-color);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+            .auth-btn:hover {
+                background: linear-gradient(to right, var(--secondary-color), var(--accent-color));
+                transform: translateY(-2px);
+            }
+
+        .forgot-password {
+            display: block;
+            text-align: center;
+            margin-top: 15px;
+            color: var(--highlight-color);
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+            .forgot-password:hover {
+                color: var(--light-color);
+            }
+
+        .social-login {
+            margin-top: 30px;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+            color: var(--highlight-color);
+        }
+
+            .divider::before,
+            .divider::after {
+                content: "";
+                flex: 1;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .divider::before {
+                margin-right: 10px;
+            }
+
+            .divider::after {
+                margin-left: 10px;
+            }
+
+        .social-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-color);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+            .social-btn:hover {
+                background: rgba(255, 255, 255, 0.05);
+                transform: translateY(-2px);
+            }
+
+        .social-icon {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+
+        .google-btn {
+            color: #DB4437;
+        }
+
+        .facebook-btn {
+            color: #4267B2;
+        }
+
+        .twitter-btn {
+            color: #1DA1F2;
+        }
+
+        .auth-footer {
+            text-align: center;
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            font-size: 14px;
+            color: var(--highlight-color);
+        }
+
+            .auth-footer a {
+                color: var(--light-color);
+                text-decoration: none;
+                font-weight: 600;
+            }
+
+        .alert {
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert-success {
+            background: rgba(76, 175, 80, 0.1);
+            border: 1px solid var(--success-color);
+            color: var(--success-color);
+        }
+
+        .alert-danger {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+        }
+
+        .external-login-form {
+            display: inline;
+        }
+
+        .external-login-btn {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-color);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+            .external-login-btn:hover {
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+        .return-url {
+            display: none;
+        }
+
+
+        @@media (max-width: 480px) {
+            .auth-container {
+                max-width: 100%;
+            }
+
+            .auth-body {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1><i class="fas fa-crow"></i> WiseRavenSocial</h1>
+        </div>
+
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">Sign In</button>
+            <button class="auth-tab" data-tab="register">Sign Up</button>
+        </div>
+
+        <div class="auth-body">
+            @if (ViewData.ModelState.ErrorCount > 0)
+            {
+                <div class="alert alert-danger">
+                    <div asp-validation-summary="All" class="validation-summary-errors"></div>
+                </div>
+            }
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form active" method="post" asp-controller="Account" asp-action="Login">
+                <input type="hidden" name="returnUrl" value="@ViewData["ReturnUrl"]" />
+
+                <div class="form-group">
+                    <label asp-for="Username"></label>
+                    <input asp-for="Username" class="form-control" />
+                    <span asp-validation-for="Username" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="Password"></label>
+                    <input asp-for="Password" class="form-control" type="password" />
+                    <span asp-validation-for="Password" class="text-danger"></span>
+                </div>
+                <div class="form-check">
+                    <input asp-for="RememberMe" class="form-check-input" />
+                    <label asp-for="RememberMe" class="form-check-label"></label>
+                </div>
+                <button type="submit" class="auth-btn">Sign In</button>
+                <a href="/Account/ForgotPassword" class="forgot-password">Forgot password?</a>
+            </form>
+
+            <div class="social-login">
+                <div class="divider">or</div>
+
+                <form asp-controller="Account" asp-action="ExternalLogin">
+                    <input type="hidden" name="returnUrl" value="@ViewData["ReturnUrl"]" />
+                    <button type="submit" class="external-login-btn google-btn">
+                        <i class="fab fa-google social-icon"></i> Sign in with Google
+                    </button>
+                    <button type="submit" class="external-login-btn facebook-btn">
+                        <i class="fab fa-facebook social-icon"></i> Sign in with Facebook
+                    </button>
+                    <button type="submit" class="external-login-btn twitter-btn">
+                        <i class="fab fa-twitter social-icon"></i> Sign in with Twitter
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="auth-footer">
+            <p>
+                &copy; 2023 WiseRavenSocial. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+<script>
+    // Tab switching
+    const tabs = document.querySelectorAll('.auth-tab');
+    const forms = document.querySelectorAll('.auth-form');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabId = tab.getAttribute('data-tab');
+
+            // Update active tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Show corresponding form
+            forms.forEach(form => {
+                form.classList.remove('active');
+                if (form.id === `${tabId}-form`) {
+                    form.classList.add('active');
+                }
+            });
+
+            // Clear messages
+            clearMessage();
+        });
+    });
+
+    // Show message
+    function showMessage(text, type) {
+        const messageDiv = document.getElementById('message');
+        messageDiv.textContent = text;
+        messageDiv.className = `message ${type}`;
+        messageDiv.style.display = 'block';
+
+        // Auto-hide after 5 seconds
+        if (type === 'success') {
+            setTimeout(clearMessage, 5000);
+        }
+    }
+
+    function clearMessage() {
+        const messageDiv = document.getElementById('message');
+        messageDiv.style.display = 'none';
+        messageDiv.textContent = '';
+    }
+
+    // Native Login
+    document.getElementById('login-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+
+        if (!email || !password) {
+            showMessage('Please fill in all fields', 'error');
+            return;
+        }
+
+        showMessage('Signing in...', 'info');
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Store token and user data
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('user_data', JSON.stringify(data.user));
+
+                showMessage('Login successful! Redirecting...', 'success');
+
+                // Redirect to index page
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1500);
+            } else {
+                showMessage(data.message || 'Login failed', 'error');
+            }
+        } catch (error) {
+            showMessage('Network error. Please try again.', 'error');
+        }
+    });
+
+        // Simulate API call
+        showMessage('Signing in...', 'success');
+
+        try {
+            // In a real app, you would make an API call to your backend
+            // const response = await fetch('/api/auth/login', {
+            //     method: 'POST',
+            //     headers: { 'Content-Type': 'application/json' },
+            //     body: JSON.stringify({ email, password })
+            // });
+
+            // For demo purposes, simulate successful login
+            setTimeout(() => {
+                showMessage('Login successful! Redirecting...', 'success');
+                // Redirect to main page
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1500);
+            }, 1000);
+
+        } catch (error) {
+            showMessage('Login failed. Please check your credentials.', 'error');
+        }
+    });
+
+    // Native Registration
+    document.getElementById('register-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const name = document.getElementById('register-name').value;
+        const email = document.getElementById('register-email').value;
+        const password = document.getElementById('register-password').value;
+        const confirmPassword = document.getElementById('register-confirm-password').value;
+
+        if (!name || !email || !password || !confirmPassword) {
+            showMessage('Please fill in all fields', 'error');
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            showMessage('Passwords do not match', 'error');
+            return;
+        }
+
+        if (password.length < 6) {
+            showMessage('Password must be at least 6 characters', 'error');
+            return;
+        }
+
+        showMessage('Creating your account...', 'info');
+
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password, confirmPassword })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Store token and user data
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('user_data', JSON.stringify(data.user));
+
+                showMessage('Account created successfully! Redirecting to login...', 'success');
+
+                // Option 1: Auto-login and redirect to index
+                // setTimeout(() => {
+                //     window.location.href = 'index.html';
+                // }, 1500);
+
+                // Option 2: Switch to login tab
+                setTimeout(() => {
+                    document.querySelector('[data-tab="login"]').click();
+                }, 1500);
+            } else {
+                showMessage(data.message || 'Registration failed', 'error');
+            }
+        } catch (error) {
+            showMessage('Network error. Please try again.', 'error');
+        }
+    });
+    // Check if user is logged in
+    const token = localStorage.getItem('auth_token');
+    const userData = localStorage.getItem('user_data');
+
+    if (!token || !userData) {
+        // Redirect to login page
+        window.location.href = 'login.html';
+    } else {
+        // Parse user data and update UI
+        const user = JSON.parse(userData);
+        document.getElementById('username-display').textContent = `Welcome, ${user.name}`;
+        document.getElementById('profile-name').textContent = user.name;
+    }
+
+        // Simulate API call
+        showMessage('Creating your account...', 'success');
+
+        try {
+            // In a real app, you would make an API call to your backend
+            // const response = await fetch('/api/auth/register', {
+            //     method: 'POST',
+            //     headers: { 'Content-Type': 'application/json' },
+            //     body: JSON.stringify({ name, email, password })
+            // });
+
+            // For demo purposes, simulate successful registration
+            setTimeout(() => {
+                showMessage('Account created successfully! Redirecting to login...', 'success');
+                setTimeout(() => {
+                    document.querySelector('[data-tab="login"]').click();
+                }, 1500);
+            }, 1000);
+
+        } catch (error) {
+            showMessage('Registration failed. Please try again.', 'error');
+        }
+    });
+
+    // Social Logins (OAuth 2.0)
+    function loginWithGoogle() {
+        // Redirect to Google OAuth endpoint
+        // In production, this would be your backend OAuth endpoint
+        const clientId = 'YOUR_GOOGLE_CLIENT_ID';
+        const redirectUri = encodeURIComponent(window.location.origin + '/auth/google/callback');
+        const scope = encodeURIComponent('profile email');
+        const state = generateState();
+
+        localStorage.setItem('oauth_state', state);
+
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+            `client_id=${clientId}&` +
+            `redirect_uri=${redirectUri}&` +
+            `response_type=code&` +
+            `scope=${scope}&` +
+            `state=${state}`;
+
+        window.location.href = authUrl;
+    }
+
+    function loginWithFacebook() {
+        // Redirect to Facebook OAuth endpoint
+        const clientId = 'YOUR_FACEBOOK_APP_ID';
+        const redirectUri = encodeURIComponent(window.location.origin + '/auth/facebook/callback');
+        const scope = encodeURIComponent('email public_profile');
+        const state = generateState();
+
+        localStorage.setItem('oauth_state', state);
+
+        const authUrl = `https://www.facebook.com/v12.0/dialog/oauth?` +
+            `client_id=${clientId}&` +
+            `redirect_uri=${redirectUri}&` +
+            `response_type=code&` +
+            `scope=${scope}&` +
+            `state=${state}`;
+
+        window.location.href = authUrl;
+    }
+
+    function loginWithTwitter() {
+        // Twitter uses OAuth 1.0a, so you need server-side implementation
+        // This would redirect to your backend endpoint
+        window.location.href = '/auth/twitter';
+    }
+
+    function generateState() {
+        return Math.random().toString(36).substring(2, 15) +
+            Math.random().toString(36).substring(2, 15);
+    }
+
+    // Forgot Password
+    document.querySelector('.forgot-password').addEventListener('click', function (e) {
+        e.preventDefault();
+        const email = prompt('Enter your email address to reset password:');
+        if (email) {
+            resetPassword(email);
+        }
+    });
+
+    function resetPassword(email) {
+        // In a real app, make API call to send reset email
+        showMessage(`Reset link sent to ${email}`, 'success');
+    }
+
+    // Check if there's a redirect message (for demo purposes)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('message')) {
+        showMessage(urlParams.get('message'), 'success');
+    }
+
+    // Authentication state management
+    // Authentication state management
+    document.addEventListener('DOMContentLoaded', function () {
+        // Check if user is logged in
+        const token = localStorage.getItem('auth_token');
+        const userData = localStorage.getItem('user_data');
+
+        if (!token || !userData) {
+            // Redirect to login if not authenticated
+            window.location.href = 'login.html';
+            return;
+        }
+
+        // Parse user data
+        const user = JSON.parse(userData);
+
+        // Update UI with user data
+        document.getElementById('username-display').textContent = `Welcome, ${user.name}`;
+        document.getElementById('profile-name').textContent = user.name;
+
+        // Logout functionality
+        document.getElementById('logout-btn').addEventListener('click', function () {
+            // Clear authentication data
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
+
+            // Redirect to login
+            window.location.href = 'login.html';
+        });
+
+
+    });
+
+        // Parse user data
+        const user = JSON.parse(userData);
+
+        // Update UI with user data
+        document.getElementById('username-display').textContent = `Welcome, ${user.name}`;
+        document.getElementById('profile-name').textContent = user.name;
+
+        // Logout functionality
+        document.getElementById('logout-btn').addEventListener('click', function () {
+            // Clear authentication data
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
+
+            // Redirect to login
+            window.location.href = 'login.html';
+        });
+
+        // Rest of your existing JavaScript code...
+    });
+        // Parse user data
+        const user = JSON.parse(userData);
+
+        // Update UI with user data
+        document.getElementById('username-display').textContent = `Welcome, ${user.name}`;
+        document.getElementById('profile-name').textContent = user.name;
+
+        // Logout functionality
+        document.getElementById('logout-btn').addEventListener('click', function () {
+            // Clear authentication data
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
+
+            // Redirect to login
+            window.location.href = 'login.html';
+        });
+
+        // Rest of your existing JavaScript code...
+    });
+</script>

@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wise-Raven Social Media</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.2.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.2.1/core.js"></script>
+    <style>
+     :root {
+     --primary-color: #1a1f2b;
+     --secondary-color: #2d3748;
+     --accent-color: #4a5568;
+     --highlight-color: #718096;
+     --light-color: #e2e8f0;
+     --text-color: #f8fafc;
+     --bg-color: #0f1419;
+     --card-bg: #1e293b;
+     --border-color: #334155;
+ }
+
+ * {
+     margin: 0;
+     padding: 0;
+     box-sizing: border-box;
+ }
+
+ body {
+     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+     background-color: var(--bg-color);
+     color: var(--text-color);
+     line-height: 1.6;
+ }
+
+ header {
+     background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+     color: var(--text-color);
+     padding: 1rem 0;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+     position: sticky;
+     top: 0;
+     z-index: 100;
+ }
+
+ .header-container {
+     display: flex;
+     justify-content: space-between;
+     align-items: center;
+     max-width: 1200px;
+     margin: 0 auto;
+     padding: 0 20px;
+ }
+
+ header h1 {
+     font-size: 1.8rem;
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     font-weight: 700;
+ }
+
+ .user-controls {
+     display: flex;
+     align-items: center;
+     gap: 15px;
+ }
+
+ #logout-btn {
+     background: var(--accent-color);
+     color: white;
+     border: none;
+     padding: 8px 16px;
+     border-radius: 20px;
+     cursor: pointer;
+     transition: all 0.3s ease;
+     font-weight: 600;
+ }
+
+     #logout-btn:hover {
+         background: var(--highlight-color);
+         transform: translateY(-2px);
+     }
+
+ .container {
+     display: flex;
+     max-width: 1200px;
+     margin: 20px auto;
+     gap: 20px;
+ }
+
+ .left-column {
+     flex: 0 0 250px;
+ }
+
+ .middle-column {
+     flex: 1;
+     min-width: 0;
+ }
+
+ .right-column {
+     flex: 0 0 300px;
+ }
+
+ .user-profile {
+     background: var(--card-bg);
+     border-radius: 12px;
+     padding: 20px;
+     margin-bottom: 20px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     text-align: center;
+     border: 1px solid var(--border-color);
+ }
+
+ .profile-pic {
+     width: 100px;
+     height: 100px;
+     border-radius: 50%;
+     object-fit: cover;
+     margin-bottom: 10px;
+     border: 3px solid var(--highlight-color);
+ }
+
+ .stats {
+     display: flex;
+     justify-content: space-around;
+     margin-top: 10px;
+     font-size: 0.9rem;
+ }
+
+ .nav-menu {
+     list-style: none;
+     background: var(--card-bg);
+     border-radius: 12px;
+     padding: 10px 0;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     border: 1px solid var(--border-color);
+ }
+
+     .nav-menu li a {
+         display: flex;
+         align-items: center;
+         padding: 12px 20px;
+         color: var(--text-color);
+         text-decoration: none;
+         gap: 10px;
+         transition: all 0.3s ease;
+     }
+
+         .nav-menu li a:hover {
+             background: rgba(255, 255, 255, 0.05);
+             border-left: 3px solid var(--highlight-color);
+         }
+
+         .nav-menu li a.active {
+             color: var(--light-color);
+             font-weight: bold;
+             border-left: 3px solid var(--light-color);
+             background: rgba(255, 255, 255, 0.1);
+         }
+
+ .post-creator {
+     background: var(--card-bg);
+     border-radius: 12px;
+     padding: 20px;
+     margin-bottom: 20px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     border: 1px solid var(--border-color);
+ }
+
+ .post-input {
+     display: flex;
+     gap: 10px;
+     margin-bottom: 10px;
+ }
+
+ .small-profile-pic {
+     width: 40px;
+     height: 40px;
+     border-radius: 50%;
+     object-fit: cover;
+ }
+
+ .post-input textarea {
+     flex: 1;
+     border: 1px solid var(--border-color);
+     border-radius: 12px;
+     padding: 12px 15px;
+     resize: none;
+     min-height: 60px;
+     font-family: inherit;
+     background: rgba(255, 255, 255, 0.05);
+     color: var(--text-color);
+     transition: all 0.3s ease;
+ }
+
+     .post-input textarea:focus {
+         outline: none;
+         border-color: var(--highlight-color);
+         box-shadow: 0 0 0 2px rgba(113, 128, 150, 0.3);
+     }
+
+ .post-actions {
+     display: flex;
+     justify-content: space-between;
+     align-items: center;
+     margin-top: 15px;
+ }
+
+ #create-post-btn {
+     background: var(--highlight-color);
+     color: white;
+     border: none;
+     padding: 10px 24px;
+     border-radius: 20px;
+     cursor: pointer;
+     font-weight: bold;
+     transition: all 0.3s ease;
+ }
+
+     #create-post-btn:hover {
+         background: var(--light-color);
+         color: var(--primary-color);
+         transform: translateY(-2px);
+     }
+
+ .post {
+     background: var(--card-bg);
+     border-radius: 12px;
+     padding: 20px;
+     margin-bottom: 20px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     border: 1px solid var(--border-color);
+     transition: transform 0.3s ease;
+ }
+
+     .post:hover {
+         transform: translateY(-3px);
+     }
+
+ .post-header {
+     display: flex;
+     align-items: center;
+     margin-bottom: 10px;
+ }
+
+ .post-user {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     text-decoration: none;
+     color: var(--text-color);
+     font-weight: bold;
+ }
+
+ .post-content {
+     margin-bottom: 15px;
+     padding: 0 10px;
+ }
+
+ .post-actions {
+     display: flex;
+     justify-content: space-between;
+     border-top: 1px solid var(--border-color);
+     padding-top: 15px;
+ }
+
+ .post-action {
+     display: flex;
+     align-items: center;
+     gap: 5px;
+     color: var(--text-color);
+     cursor: pointer;
+     transition: all 0.3s ease;
+     padding: 5px 10px;
+     border-radius: 8px;
+ }
+
+     .post-action:hover {
+         background: rgba(255, 255, 255, 0.05);
+     }
+
+     .post-action.liked {
+         color: #e0245e;
+     }
+
+ .search-box {
+     display: flex;
+     background: var(--card-bg);
+     border-radius: 20px;
+     padding: 8px 15px;
+     margin-bottom: 20px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     border: 1px solid var(--border-color);
+ }
+
+     .search-box input {
+         flex: 1;
+         border: none;
+         background: transparent;
+         outline: none;
+         color: var(--text-color);
+     }
+
+     .search-box button {
+         background: transparent;
+         border: none;
+         cursor: pointer;
+         color: var(--highlight-color);
+     }
+
+ .trending-section, .suggested-users {
+     background: var(--card-bg);
+     border-radius: 12px;
+     padding: 20px;
+     margin-bottom: 20px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+     border: 1px solid var(--border-color);
+ }
+
+     .trending-section h3, .suggested-users h3 {
+         margin-bottom: 15px;
+         font-size: 1.1rem;
+         color: var(--light-color);
+     }
+
+ .trending-topic, .suggested-user {
+     padding: 12px 0;
+     border-bottom: 1px solid var(--border-color);
+     transition: all 0.3s ease;
+ }
+
+     .trending-topic:hover, .suggested-user:hover {
+         background: rgba(255, 255, 255, 0.05);
+         padding-left: 10px;
+     }
+
+ .suggested-user {
+     display: flex;
+     align-items: center;
+     justify-content: space-between;
+ }
+
+ .user-info {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+ }
+
+ .follow-btn {
+     background: var(--highlight-color);
+     color: white;
+     border: none;
+     padding: 6px 12px;
+     border-radius: 15px;
+     cursor: pointer;
+     font-size: 0.8rem;
+     transition: all 0.3s ease;
+ }
+
+     .follow-btn:hover {
+         background: var(--light-color);
+         color: var(--primary-color);
+     }
+
+ /* Enhanced File Upload Styles */
+ .file-upload-options {
+     display: flex;
+     flex-wrap: wrap;
+     gap: 10px;
+     margin: 15px 0;
+ }
+
+ .upload-option {
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+     justify-content: center;
+     width: 80px;
+     height: 80px;
+     background: rgba(255, 255, 255, 0.05);
+     border-radius: 12px;
+     cursor: pointer;
+     transition: all 0.3s ease;
+     border: 1px solid var(--border-color);
+ }
+
+     .upload-option:hover {
+         background: rgba(255, 255, 255, 0.1);
+         transform: translateY(-3px);
+     }
+
+     .upload-option i {
+         font-size: 24px;
+         margin-bottom: 8px;
+         color: var(--highlight-color);
+     }
+
+     .upload-option span {
+         font-size: 0.8rem;
+         text-align: center;
+     }
+
+ .file-preview {
+     margin-top: 15px;
+     display: none;
+ }
+
+     .file-preview.active {
+         display: block;
+     }
+
+ .preview-item {
+     position: relative;
+     margin-bottom: 10px;
+     border-radius: 8px;
+     overflow: hidden;
+ }
+
+     .preview-item img, .preview-item video {
+         width: 100%;
+         max-height: 300px;
+         object-fit: cover;
+     }
+
+     .preview-item audio {
+         width: 100%;
+     }
+
+ .remove-file {
+     position: absolute;
+     top: 10px;
+     right: 10px;
+     background: rgba(0, 0, 0, 0.7);
+     color: white;
+     border: none;
+     border-radius: 50%;
+     width: 30px;
+     height: 30px;
+     cursor: pointer;
+     display: flex;
+     align-items: center;
+     justify-content: center;
+ }
+
+ /* Modal styles */
+ .modal {
+     display: none;
+     position: fixed;
+     z-index: 1000;
+     left: 0;
+     top: 0;
+     width: 100%;
+     height: 100%;
+     background-color: rgba(0, 0, 0, 0.7);
+     backdrop-filter: blur(5px);
+ }
+
+ .modal-content {
+     background-color: var(--card-bg);
+     margin: 10% auto;
+     padding: 25px;
+     border-radius: 12px;
+     width: 80%;
+     max-width: 500px;
+     position: relative;
+     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+     border: 1px solid var(--border-color);
+ }
+
+ .close-btn {
+     position: absolute;
+     right: 20px;
+     top: 15px;
+     font-size: 1.5rem;
+     cursor: pointer;
+     color: var(--highlight-color);
+ }
+
+ /* Loading overlay */
+ .loading-overlay {
+     position: fixed;
+     top: 0;
+     left: 0;
+     width: 100%;
+     height: 100%;
+     background: rgba(0, 0, 0, 0.8);
+     display: flex;
+     justify-content: center;
+     align-items: center;
+     z-index: 9999;
+     display: none;
+ }
+
+ .spinner {
+     width: 50px;
+     height: 50px;
+     border: 5px solid var(--border-color);
+     border-top-color: var(--highlight-color);
+     border-radius: 50%;
+     animation: spin 1s linear infinite;
+ }
+
+ @keyframes spin {
+     to {
+         transform: rotate(360deg);
+     }
+ }
+
+ /* Responsive design */
+ @media (max-width: 768px) {
+     .container {
+         flex-direction: column;
+     }
+
+     .left-column, .right-column {
+         flex: 1;
+     }
+ }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <h1><i class="fas fa-crow"></i> Wise-Raven</h1>
+            <div class="user-controls">
+                <span id="username-display">Welcome, User</span>
+                <button id="logout-btn">Logout</button>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="container">
+            <nav class="left-column">
+                <div class="user-profile">
+                    <img src="default-avatar.jpg" alt="Profile Picture" class="profile-pic">
+                    <h3 id="profile-name">User Name</h3>
+                    <div class="stats">
+                        <span><i class="fas fa-users"></i> <span id="follower-count">0</span> followers</span>
+                        <span><i class="fas fa-user-friends"></i> <span id="following-count">0</span> following</span>
+                    </div>
+                </div>
+                <ul class="nav-menu">
+                    <li><a href="#" class="active" data-section="feed"><i class="fas fa-home"></i> Feed</a></li>
+                    <li><a href="#" data-section="discover"><i class="fas fa-compass"></i> Discover</a></li>
+                    <li><a href="notifications.html" data-section="notifications"><i class="fas fa-bell"></i> Notifications</a></li>
+                    <li><a href="messages.html" data-section="messages"><i class="fas fa-envelope"></i> Messages</a></li>
+                    <li><a href="#" data-section="bookmarks"><i class="fas fa-bookmark"></i> Bookmarks</a></li>
+                    <li><a href="profile.html" data-section="profile"><i class="fas fa-user"></i> Profile</a></li>
+                    <li><a href="plnr.html" data-section="planner"><i class="fas fa-tasks"></i> Planner</a></li>
+                </ul>
+            </nav>
+
+            <section class="middle-column">
+                <div class="post-creator">
+                    <div class="post-input">
+                        <img src="default-avatar.jpg" alt="Your profile" class="small-profile-pic">
+                        <textarea placeholder="What wisdom do you share today?" id="post-content"></textarea>
+                    </div>
+                    
+                    <!-- Enhanced File Upload Options -->
+                    <div class="file-upload-options">
+                        <div class="upload-option" data-type="photo">
+                            <i class="fas fa-image"></i>
+                            <span>Photo</span>
+                        </div>
+                        <div class="upload-option" data-type="video">
+                            <i class="fas fa-video"></i>
+                            <span>Video</span>
+                        </div>
+                        <div class="upload-option" data-type="audio">
+                            <i class="fas fa-music"></i>
+                            <span>Audio</span>
+                        </div>
+                        <div class="upload-option" data-type="document">
+                            <i class="fas fa-file"></i>
+                            <span>Document</span>
+                        </div>
+                        <div class="upload-option" data-type="bluetooth">
+                            <i class="fas fa-bluetooth"></i>
+                            <span>Bluetooth</span>
+                        </div>
+                        <div class="upload-option" data-type="wifi">
+                            <i class="fas fa-wifi"></i>
+                            <span>Wi-Fi</span>
+                        </div>
+                    </div>
+                    
+                    <!-- File Preview Area -->
+                    <div class="file-preview" id="file-preview"></div>
+                    
+                    <div class="post-actions">
+                        <button id="create-post-btn"><i class="fas fa-feather-alt"></i> Post</button>
+                    </div>
+                </div>
+
+                <div class="feed" id="post-feed">
+                    <!-- Posts will be dynamically loaded here -->
+                </div>
+            </section>
+
+            <aside class="right-column">
+                <div class="search-box">
+                    <input type="text" placeholder="Search Wise-Raven...">
+                    <button><i class="fas fa-search"></i></button>
+                </div>
+
+                <div class="trending-section">
+                    <h3>Trending Now</h3>
+                    <div class="trending-topics">
+                        <!-- Trending topics will be loaded here -->
+                    </div>
+                </div>
+
+                <div class="suggested-users">
+                    <h3>Who to Follow</h3>
+                    <div class="user-suggestions">
+                        <!-- Suggested users will be loaded here -->
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <!-- File Upload Modal -->
+    <div id="file-upload-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn">&times;</span>
+            <h3>Upload File</h3>
+            <div id="upload-options">
+                <div class="upload-method">
+                    <h4>Select Upload Method</h4>
+                    <div class="upload-options-grid">
+                        <div class="upload-method-option" data-method="device">
+                            <i class="fas fa-mobile-alt"></i>
+                            <span>Device Storage</span>
+                        </div>
+                        <div class="upload-method-option" data-method="bluetooth">
+                            <i class="fas fa-bluetooth"></i>
+                            <span>Bluetooth</span>
+                        </div>
+                        <div class="upload-method-option" data-method="wifi">
+                            <i class="fas fa-wifi"></i>
+                            <span>Wi-Fi Direct</span>
+                        </div>
+                        <div class="upload-method-option" data-method="cloud">
+                            <i class="fas fa-cloud"></i>
+                            <span>Cloud Storage</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Enhanced File Upload Functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadOptions = document.querySelectorAll('.upload-option');
+            const filePreview = document.getElementById('file-preview');
+            const fileUploadModal = document.getElementById('file-upload-modal');
+            const closeModalBtn = document.querySelector('.close-btn');
+            const uploadMethodOptions = document.querySelectorAll('.upload-method-option');
+            const postContent = document.getElementById('post-content');
+            const createPostBtn = document.getElementById('create-post-btn');
+            
+            let selectedFiles = [];
+            let currentUploadType = '';
+
+            // Open file upload modal when an upload option is clicked
+            uploadOptions.forEach(option => {
+                option.addEventListener('click', function() {
+                    currentUploadType = this.getAttribute('data-type');
+                    fileUploadModal.style.display = 'block';
+                    
+                    // Show appropriate upload methods based on type
+                    if (currentUploadType === 'bluetooth') {
+                        // Show only Bluetooth option
+                        uploadMethodOptions.forEach(method => {
+                            if (method.getAttribute('data-method') === 'bluetooth') {
+                                method.style.display = 'block';
+                            } else {
+                                method.style.display = 'none';
+                            }
+                        });
+                    } else if (currentUploadType === 'wifi') {
+                        // Show only Wi-Fi option
+                        uploadMethodOptions.forEach(method => {
+                            if (method.getAttribute('data-method') === 'wifi') {
+                                method.style.display = 'block';
+                            } else {
+                                method.style.display = 'none';
+                            }
+                        });
+                    } else {
+                        // Show all options for other file types
+                        uploadMethodOptions.forEach(method => {
+                            method.style.display = 'block';
+                        });
+                    }
+                });
+            });
+
+            // Close modal
+            closeModalBtn.addEventListener('click', function() {
+                fileUploadModal.style.display = 'none';
+            });
+
+            // Handle upload method selection
+            uploadMethodOptions.forEach(method => {
+                method.addEventListener('click', function() {
+                    const uploadMethod = this.getAttribute('data-method');
+                    handleUploadMethod(uploadMethod, currentUploadType);
+                    fileUploadModal.style.display = 'none';
+                });
+            });
+
+            // Handle different upload methods
+            function handleUploadMethod(method, type) {
+                switch(method) {
+                    case 'device':
+                        handleDeviceUpload(type);
+                        break;
+                    case 'bluetooth':
+                        handleBluetoothUpload(type);
+                        break;
+                    case 'wifi':
+                        handleWifiUpload(type);
+                        break;
+                    case 'cloud':
+                        handleCloudUpload(type);
+                        break;
+                }
+            }
+
+            // Enhanced File Upload Functionality
+            document.addEventListener('DOMContentLoaded', function () {
+                // === Authentication Check ===
+                // Check if user is logged in
+                const token = localStorage.getItem('auth_token');
+                const userData = localStorage.getItem('user_data');
+
+                if (!token || !userData) {
+                    // Redirect to login if not authenticated
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                // Parse user data
+                const user = JSON.parse(userData);
+
+                // Update UI with user data
+                document.getElementById('username-display').textContent = `Welcome, ${user.name}`;
+                document.getElementById('profile-name').textContent = user.name;
+
+                // Logout functionality
+                document.getElementById('logout-btn').addEventListener('click', function () {
+                    // Clear authentication data
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('user_data');
+
+                    // Redirect to login
+                    window.location.href = 'login.html';
+                });
+                // === End Authentication Check ===
+
+                const uploadOptions = document.querySelectorAll('.upload-option');
+                const filePreview = document.getElementById('file-preview');
+                const fileUploadModal = document.getElementById('file-upload-modal');
+                const closeModalBtn = document.querySelector('.close-btn');
+                const uploadMethodOptions = document.querySelectorAll('.upload-method-option');
+                const postContent = document.getElementById('post-content');
+                const createPostBtn = document.getElementById('create-post-btn');
+
+                let selectedFiles = [];
+                let currentUploadType = '';
+
+
+            });
+
+            // Device storage upload
+            function handleDeviceUpload(type) {
+                const input = document.createElement('input');
+                input.type = 'file';
+                
+                // Set accept attribute based on file type
+                switch(type) {
+                    case 'photo':
+                        input.accept = 'image/*';
+                        break;
+                    case 'video':
+                        input.accept = 'video/*';
+                        break;
+                    case 'audio':
+                        input.accept = 'audio/*';
+                        break;
+                    case 'document':
+                        input.accept = '.pdf,.doc,.docx,.txt';
+                        break;
+                    default:
+                        input.accept = '*/*';
+                }
+                
+                input.multiple = true;
+                input.onchange = function(e) {
+                    handleFiles(e.target.files, type);
+                };
+                input.click();
+            }
+
+            // Bluetooth upload (simulated)
+            function handleBluetoothUpload(type) {
+                alert('Bluetooth file sharing would be implemented here. This would require Web Bluetooth API integration.');
+                // In a real implementation, this would use the Web Bluetooth API
+                // to discover and connect to devices and transfer files
+            }
+
+            // Wi-Fi Direct upload (simulated)
+            function handleWifiUpload(type) {
+                alert('Wi-Fi Direct file sharing would be implemented here. This would require specific device APIs.');
+                // In a real implementation, this would use device-specific APIs
+                // for Wi-Fi Direct file sharing
+            }
+
+            // Cloud storage upload (simulated)
+            function handleCloudUpload(type) {
+                alert('Cloud storage integration would be implemented here. This would connect to services like Google Drive, Dropbox, etc.');
+                // In a real implementation, this would integrate with cloud storage APIs
+            }
+
+            // Handle selected files
+            function handleFiles(files, type) {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    selectedFiles.push({
+                        file: file,
+                        type: type
+                    });
+                    
+                    // Create preview
+                    createFilePreview(file, type);
+                }
+                
+                // Show preview area
+                filePreview.classList.add('active');
+            }
+
+            // Create file preview
+            function createFilePreview(file, type) {
+                const previewItem = document.createElement('div');
+                previewItem.className = 'preview-item';
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-file';
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                removeBtn.onclick = function() {
+                    previewItem.remove();
+                    // Remove from selectedFiles array
+                    const index = selectedFiles.findIndex(f => f.file === file);
+                    if (index !== -1) {
+                        selectedFiles.splice(index, 1);
+                    }
+                    
+                    // Hide preview area if no files
+                    if (selectedFiles.length === 0) {
+                        filePreview.classList.remove('active');
+                    }
+                };
+                
+                let previewElement;
+                
+                if (type === 'photo') {
+                    previewElement = document.createElement('img');
+                    previewElement.src = URL.createObjectURL(file);
+                } else if (type === 'video') {
+                    previewElement = document.createElement('video');
+                    previewElement.src = URL.createObjectURL(file);
+                    previewElement.controls = true;
+                } else if (type === 'audio') {
+                    previewElement = document.createElement('audio');
+                    previewElement.src = URL.createObjectURL(file);
+                    previewElement.controls = true;
+                } else {
+                    previewElement = document.createElement('div');
+                    previewElement.className = 'file-info';
+                    previewElement.innerHTML = `
+                        <i class="fas fa-file"></i>
+                        <span>${file.name}</span>
+                        <small>${(file.size / 1024).toFixed(2)} KB</small>
+                    `;
+                }
+                
+                previewItem.appendChild(previewElement);
+                previewItem.appendChild(removeBtn);
+                filePreview.appendChild(previewItem);
+            }
+
+            // Create post with files
+            createPostBtn.addEventListener('click', async function() {
+                const content = postContent.value.trim();
+                
+                if (!content && selectedFiles.length === 0) {
+                    alert('Please add some content or files to your post.');
+                    return;
+                }
+                
+                // Prepare form data for submission
+                const formData = new FormData();
+                formData.append('content', content);
+                
+                // Add files to form data
+                selectedFiles.forEach((fileObj, index) => {
+                    formData.append(`files[${index}]`, fileObj.file);
+                    formData.append(`fileTypes[${index}]`, fileObj.type);
+                });
+                
+                try {
+                    const response = await fetch('/api/posts', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (response.ok) {
+                        const newPost = await response.json();
+                        addPostToFeed(newPost);
+                        
+                        // Reset form
+                        postContent.value = '';
+                        filePreview.innerHTML = '';
+                        filePreview.classList.remove('active');
+                        selectedFiles = [];
+                    } else {
+                        throw new Error('Failed to create post');
+                    }
+                } catch (error) {
+                    console.error('Error creating post:', error);
+                    alert('Error creating post. Please try again.');
+                }
+            });
+
+            // Function to add post to feed
+            function addPostToFeed(post) {
+                const feed = document.getElementById('post-feed');
+                const postElement = document.createElement('div');
+                postElement.className = 'post';
+                
+                let mediaHtml = '';
+                if (post.media && post.media.length > 0) {
+                    post.media.forEach(media => {
+                        if (media.type === 'photo') {
+                            mediaHtml += `<img src="${media.url}" alt="Post image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;">`;
+                        } else if (media.type === 'video') {
+                            mediaHtml += `
+                                <video controls style="max-width: 100%; border-radius: 8px; margin: 10px 0;">
+                                    <source src="${media.url}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                            `;
+                        } else if (media.type === 'audio') {
+                            mediaHtml += `
+                                <audio controls style="width: 100%; margin: 10px 0;">
+                                    <source src="${media.url}" type="audio/mpeg">
+                                    Your browser does not support the audio tag.
+                                </audio>
+                            `;
+                        } else {
+                            mediaHtml += `
+                                <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin: 10px 0;">
+                                    <i class="fas fa-file"></i> 
+                                    <a href="${media.url}" target="_blank">${media.name}</a>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+                
+                postElement.innerHTML = `
+                    <div class="post-header">
+                        <a href="#" class="post-user">
+                            <img src="default-avatar.jpg" alt="Profile Picture" class="small-profile-pic" />
+                            <span>${post.username}</span>
+                        </a>
+                    </div>
+                    <div class="post-content">
+                        <p>${post.content}</p>
+                        ${mediaHtml}
+                    </div>
+                    <div class="post-actions">
+                        <div class="post-action">
+                            <i class="far fa-heart"></i>
+                            <span>Like</span>
+                        </div>
+                        <div class="post-action">
+                            <i class="far fa-comment"></i>
+                            <span>Comment</span>
+                        </div>
+                        <div class="post-action">
+                            <i class="far fa-share-square"></i>
+                            <span>Share</span>
+                        </div>
+                    </div>
+                `;
+                
+                feed.prepend(postElement);
+            }
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', function(event) {
+                if (event.target === fileUploadModal) {
+                    fileUploadModal.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+global using System.ComponentModel.DataAnnotations;
+global using Task = System.Threading.Tasks.Task;
+global using Wiseravenshare.Server.Entities;
+global using Wiseravenshare.Server.DTOs;
+global using Wiseravenshare.Server.DTOs.Auth;
+global using Wiseravenshare.Server.DTOs.User;
+global using Wiseravenshare.Server.DTOs.Post;
+global using Wiseravenshare.Server.DTOs.Video;
+global using Wiseravenshare.Server.DTOs.Agent;
+global using Wiseravenshare.Server.Interfaces.Repositories;
+global using Wiseravenshare.Server.Shared;
