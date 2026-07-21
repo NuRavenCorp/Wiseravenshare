@@ -1,0 +1,16 @@
+[
+  {
+    "Id": "28d5080911fc4bd28f33e0bfcd4a6fe2",
+    "Name": "Arnold Spence",
+    "Email": "arnold3_spence08@outlook.com",
+    "Handle": "arnoldspence",
+    "PasswordHash": "o0i2e3ujZg8JtcZNzpHiEg==.fG2Cdf9N4ocyWq73yeoqfOejbbkkAU6FLGD\u002B2Vr0QOQ="
+  },
+  {
+    "Id": "243385e4f5064cc8acde69e034f06c03",
+    "Name": "Auth Check",
+    "Email": "authcheck938655@example.com",
+    "Handle": "authcheck",
+    "PasswordHash": "rlw8AkHwdJ9dSQln64HgEg==.5pBxif1uOabO0qc/EvgkS4Jez1BZhDIvARVVmWsfdDs="
+  }
+]

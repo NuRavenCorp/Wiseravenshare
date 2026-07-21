@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.5171056">
+  <PropertyGroup>
+    <StartupCommand>npm run dev</StartupCommand>
+    <JavaScriptTestRoot>src\</JavaScriptTestRoot>
+    <JavaScriptTestFramework>Vitest</JavaScriptTestFramework>
+    <!-- Allows the build (or compile) script located on package.json to run on Build -->
+    <ShouldRunBuildScript>false</ShouldRunBuildScript>
+    <!-- Folder where production build objects will be placed -->
+    <BuildOutputFolder>$(MSBuildProjectDirectory)\dist</BuildOutputFolder>
+  </PropertyGroup>
+  <ItemGroup>
+    <Folder Include="src\Components\Feed\" />
+    <Folder Include="src\Components\Messages\" />
+    <Folder Include="src\Components\Modal\" />
+    <Folder Include="src\Components\Truth\" />
+    <Folder Include="src\Components\Notifications\" />
+    <Folder Include="src\Components\Planner\" />
+    <Folder Include="src\public\" />
+    <Folder Include="src\Styles\" />
+    <Folder Include="src\Services\" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,234 @@
+{
+  "name": "Wiseravenshare",
+  "short_name": "WiseRaven",
+  "description": "Truth-powered social media platform with real-time fact checking, podcast publishing, and AI-driven content verification",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#1a1f2b",
+  "background_color": "#0f1419",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": [ "social", "news", "productivity", "education" ],
+  "lang": "en-US",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-256x256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/desktop-home.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Wiseravenshare Home Feed"
+    },
+    {
+      "src": "/screenshots/mobile-home.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile Feed View"
+    },
+    {
+      "src": "/screenshots/truth-seeker.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Truth Seeker - Fact Checking"
+    },
+    {
+      "src": "/screenshots/ravensight.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Ravensight Video Studio"
+    },
+    {
+      "src": "/screenshots/planner.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Wise Planner"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Post",
+      "short_name": "Post",
+      "description": "Create a new post",
+      "url": "/?action=post",
+      "icons": [
+        {
+          "src": "/icons/post-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Truth Seeker",
+      "short_name": "Truth",
+      "description": "Verify facts and claims",
+      "url": "/truthseeker",
+      "icons": [
+        {
+          "src": "/icons/truth-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Messages",
+      "short_name": "Chat",
+      "description": "View your messages",
+      "url": "/messages",
+      "icons": [
+        {
+          "src": "/icons/messages-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "short_name": "Alerts",
+      "description": "View your notifications",
+      "url": "/notifications",
+      "icons": [
+        {
+          "src": "/icons/notifications-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Ravensight",
+      "short_name": "Studio",
+      "description": "Record and upload videos",
+      "url": "/ravensight",
+      "icons": [
+        {
+          "src": "/icons/ravensight-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Planner",
+      "short_name": "Tasks",
+      "description": "Manage your goals and tasks",
+      "url": "/planner",
+      "icons": [
+        {
+          "src": "/icons/planner-shortcut.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "display_override": [ "window-controls-overlay", "standalone" ],
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": [ "focus-existing", "auto" ]
+  },
+  "note_taking": {
+    "new_note_url": "/planner"
+  },
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": [ "image/*", "video/*", "audio/*" ]
+        }
+      ]
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/upload",
+      "accept": {
+        "image/*": [ ".jpg", ".jpeg", ".png", ".gif", ".webp" ],
+        "video/*": [ ".mp4", ".webm", ".mov", ".avi" ],
+        "audio/*": [ ".mp3", ".wav", ".ogg", ".m4a" ],
+        "application/pdf": [ ".pdf" ],
+        "text/plain": [ ".txt" ]
+      }
+    }
+  ],
+  "protocol_handlers": [
+    {
+      "protocol": "web+wiseraven",
+      "url": "/?claim=%s"
+    }
+  ],
+  "url_handlers": [
+    {
+      "origin": "https://wiseravenshare.com",
+      "url": "/"
+    }
+  ]
+}
