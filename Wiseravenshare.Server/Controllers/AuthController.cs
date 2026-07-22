@@ -17,6 +17,10 @@ namespace Wiseravenshare.Server.Controllers;
 public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, PasswordResetRecord> PasswordResetsByToken = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
+    private const int MaxFailedLoginAttempts = 5;
 
     private readonly IConfiguration _configuration;
     private readonly UserStore _userStore;
@@ -33,6 +37,11 @@ public class AuthController : ControllerBase
     {
         EnsureConfiguredUsersSeeded();
 
+        if (!IsSelfRegistrationAllowed())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Self-registration is disabled." });
+        }
+
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
         {
             return BadRequest(new { message = "Email and password are required." });
@@ -43,9 +52,9 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "A valid email address is required." });
         }
 
-        if (request.Password.Length < 8)
+        if (!MeetsPasswordPolicy(request.Password))
         {
-            return BadRequest(new { message = "Password must be at least 8 characters." });
+            return BadRequest(new { message = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character." });
         }
 
         if (_userStore.EmailExists(request.Email))
@@ -77,11 +86,21 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Email and password are required." });
         }
 
+        var attemptKey = BuildAttemptKey(request.Email);
+        if (IsLockedOut(attemptKey, out var retryAfter))
+        {
+            Response.Headers["Retry-After"] = Math.Max((int)Math.Ceiling(retryAfter.TotalSeconds), 1).ToString();
+            return StatusCode(StatusCodes.Status429TooManyRequests, new { message = "Too many failed login attempts. Please try again later." });
+        }
+
         var user = _userStore.FindByLoginIdentifier(request.Email);
         if (user is null || !UserStore.VerifyPassword(request.Password, user.PasswordHash))
         {
+            RecordFailedLogin(attemptKey);
             return Unauthorized(new { message = "Invalid email or password." });
         }
+
+        ClearFailedLogins(attemptKey);
 
         var token = GenerateToken(user.Id, user.Email, user.Name);
         return Ok(new { token, user = UserStore.ToResponse(user) });
@@ -170,10 +189,19 @@ public class AuthController : ControllerBase
             ExpiresAtUtc = expiresAtUtc
         };
 
+        if (!HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment())
+        {
+            return Ok(new
+            {
+                success = true,
+                message = "If an account exists for that email, reset instructions have been sent."
+            });
+        }
+
         return Ok(new
         {
             success = true,
-            message = "Use the reset token to set a new password.",
+            message = "Development mode: use the reset token to set a new password.",
             resetToken = token,
             expiresAtUtc
         });
@@ -190,9 +218,9 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Token and new password are required." });
         }
 
-        if (request.NewPassword.Length < 8)
+        if (!MeetsPasswordPolicy(request.NewPassword))
         {
-            return BadRequest(new { message = "Password must be at least 8 characters." });
+            return BadRequest(new { message = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character." });
         }
 
         var token = request.Token.Trim();
@@ -278,6 +306,90 @@ public class AuthController : ControllerBase
         return new EmailAddressAttribute().IsValid(email?.Trim());
     }
 
+    private bool IsSelfRegistrationAllowed()
+    {
+        return _configuration.GetValue("Authentication:AllowSelfRegistration", false);
+    }
+
+    private static bool MeetsPasswordPolicy(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+        {
+            return false;
+        }
+
+        var hasUpper = password.Any(char.IsUpper);
+        var hasLower = password.Any(char.IsLower);
+        var hasDigit = password.Any(char.IsDigit);
+        var hasSpecial = password.Any(c => !char.IsLetterOrDigit(c));
+        return hasUpper && hasLower && hasDigit && hasSpecial;
+    }
+
+    private string BuildAttemptKey(string identifier)
+    {
+        var normalizedIdentifier = (identifier ?? string.Empty).Trim().ToLowerInvariant();
+        var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return $"{remoteIp}|{normalizedIdentifier}";
+    }
+
+    private static bool IsLockedOut(string key, out TimeSpan retryAfter)
+    {
+        retryAfter = TimeSpan.Zero;
+        if (!LoginAttemptsByKey.TryGetValue(key, out var record))
+        {
+            return false;
+        }
+
+        if (record.LockedOutUntilUtc is null || record.LockedOutUntilUtc <= DateTime.UtcNow)
+        {
+            LoginAttemptsByKey.TryRemove(key, out _);
+            return false;
+        }
+
+        retryAfter = record.LockedOutUntilUtc.Value - DateTime.UtcNow;
+        return true;
+    }
+
+    private static void RecordFailedLogin(string key)
+    {
+        var now = DateTime.UtcNow;
+        LoginAttemptsByKey.AddOrUpdate(
+            key,
+            _ => new LoginAttemptRecord
+            {
+                FirstAttemptUtc = now,
+                FailedCount = 1
+            },
+            (_, existing) =>
+            {
+                if (existing.LockedOutUntilUtc is not null && existing.LockedOutUntilUtc > now)
+                {
+                    return existing;
+                }
+
+                if (now - existing.FirstAttemptUtc > LoginAttemptWindow)
+                {
+                    existing.FirstAttemptUtc = now;
+                    existing.FailedCount = 1;
+                    existing.LockedOutUntilUtc = null;
+                    return existing;
+                }
+
+                existing.FailedCount++;
+                if (existing.FailedCount >= MaxFailedLoginAttempts)
+                {
+                    existing.LockedOutUntilUtc = now.Add(LoginLockoutDuration);
+                }
+
+                return existing;
+            });
+    }
+
+    private static void ClearFailedLogins(string key)
+    {
+        LoginAttemptsByKey.TryRemove(key, out _);
+    }
+
     private void EnsureConfiguredUsersSeeded()
     {
         var configuredUsers = (_configuration.GetSection("Authentication:Users").Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>())
@@ -296,6 +408,13 @@ public class AuthController : ControllerBase
     {
         public string Email { get; set; } = string.Empty;
         public DateTime ExpiresAtUtc { get; set; }
+    }
+
+    private sealed class LoginAttemptRecord
+    {
+        public DateTime FirstAttemptUtc { get; set; }
+        public int FailedCount { get; set; }
+        public DateTime? LockedOutUntilUtc { get; set; }
     }
 }
 

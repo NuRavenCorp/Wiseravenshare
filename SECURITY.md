@@ -7,6 +7,9 @@ The application is configured to fail closed by default.
 - Self-registration is disabled unless explicitly enabled.
 - Login is restricted to users configured in environment variables.
 - Any account not configured in the allowlist cannot authenticate.
+- Passwords must include uppercase, lowercase, number, and special character.
+- Failed login attempts are rate-limited per IP+identifier with temporary lockout.
+- Password reset tokens are only returned in API responses during development.
 
 ## Required Production Environment Variables
 
@@ -35,6 +38,7 @@ Add additional users with index increments:
 2. Ensure register endpoint returns `403` when self-registration is disabled.
 3. Ensure one allowlisted user can log in successfully.
 4. Ensure protected endpoints reject unauthenticated requests with `401`.
+5. Ensure repeated failed login attempts receive `429` with `Retry-After` header.
 
 ## Regression Script
 
