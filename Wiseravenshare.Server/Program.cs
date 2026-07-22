@@ -31,6 +31,11 @@ if (string.IsNullOrWhiteSpace(jwtKey))
     throw new InvalidOperationException("Authentication:Jwt:Key is required.");
 }
 
+if (jwtKey.Length < 32)
+{
+    throw new InvalidOperationException("Authentication:Jwt:Key must be at least 32 characters.");
+}
+
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
