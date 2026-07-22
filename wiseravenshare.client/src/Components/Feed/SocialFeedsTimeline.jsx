@@ -3,6 +3,16 @@ import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
 const normalizeConnection = (connection, platform) => {
     const safeConnection = connection || {};
     const username = String(safeConnection.username || '').trim();
@@ -33,10 +43,110 @@ const readCachedUser = () => {
     }
 };
 
+const readCachedSocialFeeds = () => {
+    try {
+        const raw = localStorage.getItem('wiseSocialFeeds');
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
+const normalizeFeeds = (feeds) => {
+    const source = feeds || {};
+    return {
+        tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
+        facebook: getConnection(source, 'facebook', 'Facebook'),
+        instagram: getConnection(source, 'instagram', 'Instagram')
+    };
+};
+
+const getTikTokEmbedUrl = (url) => {
+    if (!url) return '';
+    const match = url.match(/\/video\/(\d+)/i);
+    if (!match?.[1]) return '';
+    return `https://www.tiktok.com/embed/v2/${match[1]}`;
+};
+
+const getInstagramEmbedUrl = (url) => {
+    if (!url) return '';
+    const match = url.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)/i);
+    if (!match?.[2]) return '';
+    return `https://www.instagram.com/${match[1]}/${match[2]}/embed`;
+};
+
+const getFacebookEmbedUrl = (url) => {
+    if (!url) return '';
+    const normalizedUrl = String(url).trim();
+    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        return '';
+    }
+
+    return `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(normalizedUrl)}&show_text=true&width=500`;
+};
+
+const FeedEmbedCard = ({ item, compact }) => {
+    const platformId = String(item.id || '').toLowerCase();
+    const isTikTok = platformId === 'tiktok';
+    const isFacebook = platformId === 'facebook';
+    const isInstagram = platformId === 'instagram';
+
+    const embedUrl = isTikTok
+        ? getTikTokEmbedUrl(item.url)
+        : isFacebook
+            ? getFacebookEmbedUrl(item.url)
+            : isInstagram
+                ? getInstagramEmbedUrl(item.url)
+                : '';
+
+    return (
+        <article
+            style={{
+                border: `1px solid ${item.color}`,
+                borderRadius: '10px',
+                padding: compact ? '10px' : '12px',
+                background: 'rgba(255,255,255,0.02)'
+            }}
+        >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong>
+                    <span style={{ marginRight: '6px' }}>{item.icon}</span>
+                    {item.platform}
+                </strong>
+                <a href={item.url} target="_blank" rel="noreferrer" style={{ color: item.color, fontSize: '12px' }}>
+                    Open
+                </a>
+            </div>
+
+            {embedUrl ? (
+                <iframe
+                    title={`${item.platform} feed embed`}
+                    src={embedUrl}
+                    style={{
+                        width: '100%',
+                        minHeight: isTikTok ? '520px' : '420px',
+                        border: 'none',
+                        borderRadius: '8px',
+                        background: '#0b0f14'
+                    }}
+                    loading="lazy"
+                    allow="clipboard-write; encrypted-media; picture-in-picture; web-share"
+                    allowFullScreen
+                />
+            ) : (
+                <div style={{ fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.5 }}>
+                    Embedded preview requires a direct post/video URL for {item.platform}. The feed link is active and can be opened directly.
+                </div>
+            )}
+        </article>
+    );
+};
+
 const getSnapshot = (user) => {
     const cached = readCachedUser();
+    const cachedFeeds = readCachedSocialFeeds();
     const source = user || cached || {};
-    const feeds = source.socialFeeds || {};
+    const feeds = normalizeFeeds(source.socialFeeds || cachedFeeds || {});
 
     return {
         tikTok: normalizeConnection(feeds.tikTok, 'tiktok'),
@@ -232,6 +342,17 @@ const SocialFeedsTimeline = ({ user, compact = false }) => {
                         </div>
                     </article>
                 ))}
+            </div>
+
+            <div style={{ marginTop: '12px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
+                    Feed Rendering
+                </div>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                    {timelineItems.map((item) => (
+                        <FeedEmbedCard key={`${item.id}-embed`} item={item} compact={compact} />
+                    ))}
+                </div>
             </div>
 
             <div style={{ marginTop: '12px' }}>

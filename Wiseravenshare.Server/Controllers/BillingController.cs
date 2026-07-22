@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -21,7 +22,7 @@ public class BillingController : ControllerBase
     [HttpPost("checkout-session")]
     [ProducesResponseType(typeof(CheckoutSessionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
+    public async Task<IActionResult> CreateCheckoutSession([FromBody] global::Wiseravenshare.Server.DTOs.CreateCheckoutSessionRequest request)
     {
         var userId = User.GetUserId();
         var result = await _subscriptionService.CreateCheckoutSessionAsync(userId, request);
@@ -32,7 +33,7 @@ public class BillingController : ControllerBase
     [HttpPost("portal-session")]
     [ProducesResponseType(typeof(PortalSessionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CreatePortalSession([FromBody] CreatePortalSessionRequest request)
+    public async Task<IActionResult> CreatePortalSession([FromBody] global::Wiseravenshare.Server.DTOs.CreatePortalSessionRequest request)
     {
         var userId = User.GetUserId();
         var result = await _subscriptionService.CreatePortalSessionAsync(userId, request);
