@@ -1,7 +1,19 @@
 import React, { useMemo, useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 
-const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, onBookmark, bookmarkLabel = 'Bookmark' }) => {
+const PostCard = ({
+    post,
+    onLike,
+    onRepost,
+    onDispute,
+    onVerify,
+    integrityReport,
+    currentUser,
+    isFollowing,
+    onFollow,
+    onBookmark,
+    bookmarkLabel = 'Bookmark'
+}) => {
     const [showComments, setShowComments] = useState(false);
     const [commentText, setCommentText] = useState('');
     const [comments, setComments] = useState(post.comments || []);
@@ -104,10 +116,47 @@ const PostCard = ({ post, onLike, onRepost, currentUser, isFollowing, onFollow, 
                 <button onClick={() => onLike?.(post.id)}>Like ({post.likes ?? 0})</button>
                 <button onClick={() => onRepost?.(post.id)}>Repost ({post.reposts ?? 0})</button>
                 <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
+                <button onClick={() => onVerify?.(post)}>Verify</button>
+                <button onClick={() => onDispute?.(post)}>Dispute</button>
                 <button onClick={() => setShowComments((prev) => !prev)}>
                     Comments ({comments.length})
                 </button>
             </div>
+
+            {integrityReport && (
+                <div
+                    style={{
+                        marginTop: '12px',
+                        padding: '10px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '10px',
+                        background: 'rgba(255, 255, 255, 0.03)'
+                    }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '13px' }}>
+                            Integrity Check {integrityReport.mode === 'auto' ? '(Auto)' : '(Manual)'}
+                        </strong>
+                        <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                            {new Date(integrityReport.checkedAt).toLocaleString()}
+                        </span>
+                    </div>
+
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                        {integrityReport.badge?.text || `Truth Score: ${integrityReport.score || 0}%`}
+                    </div>
+
+                    {Array.isArray(integrityReport.findings) && integrityReport.findings.length > 0 && (
+                        <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '18px', fontSize: '12px' }}>
+                            {integrityReport.findings.slice(0, 3).map((finding, index) => (
+                                <li key={`${finding.claim}-${index}`} style={{ marginBottom: '4px' }}>
+                                    {finding.claim}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
 
             {showComments && (
                 <div style={{ marginTop: '12px' }}>

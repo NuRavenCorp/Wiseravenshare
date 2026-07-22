@@ -21,6 +21,14 @@ class EvolutionEngine {
             errors: 0
         };
         this.isRunning = false;
+        this.monitorHandle = null;
+        this.baseIntervalMs = 60000;
+        this.minIntervalMs = 15000;
+        this.maxIntervalMs = 300000;
+        this.currentIntervalMs = this.baseIntervalMs;
+        this.moduleCooldownMs = 180000;
+        this.maxHistoryEntries = 500;
+        this.lastEvolutionByModule = new Map();
 
         EvolutionEngine.instance = this;
     }
@@ -34,12 +42,24 @@ class EvolutionEngine {
 
     // Initialize self-evolution system
     async initialize() {
+        if (this.isRunning) {
+            return;
+        }
+
         this.isRunning = true;
 
         // Load evolution history from storage
         const history = await storage.get('evolutionHistory');
-        if (history) {
+        if (Array.isArray(history)) {
             this.evolutionHistory = history;
+            for (const item of history) {
+                if (item?.moduleId && item?.timestamp) {
+                    const current = this.lastEvolutionByModule.get(item.moduleId) || 0;
+                    if (item.timestamp > current) {
+                        this.lastEvolutionByModule.set(item.moduleId, item.timestamp);
+                    }
+                }
+            }
         }
 
         // Start evolution monitoring
@@ -57,16 +77,21 @@ class EvolutionEngine {
 
     // Monitor and evolve modules
     startEvolutionMonitoring() {
-        setInterval(async () => {
+        const runCycle = async () => {
             if (!this.isRunning) return;
+
+            const startedAt = Date.now();
+            let urgency = 0;
 
             try {
                 // Analyze module performance
                 const performanceData = await this.analyzeModulePerformance();
+                urgency = this.calculateEvolutionUrgency(performanceData);
 
                 // Check if evolution is needed
                 if (this.shouldEvolve(performanceData)) {
                     await this.evolveModules(performanceData);
+                    urgency = Math.max(urgency, 0.8);
                 }
 
                 // Check for new module versions
@@ -74,8 +99,16 @@ class EvolutionEngine {
             } catch (error) {
                 console.error('Evolution monitoring error:', error);
                 this.metrics.errors++;
+                urgency = 1;
+            } finally {
+                this.adjustMonitoringInterval(urgency, Date.now() - startedAt);
+                if (this.isRunning) {
+                    this.monitorHandle = setTimeout(runCycle, this.currentIntervalMs);
+                }
             }
-        }, 60000); // Check every minute
+        };
+
+        this.monitorHandle = setTimeout(runCycle, 0);
     }
 
     // Self-healing mechanism
@@ -123,19 +156,12 @@ class EvolutionEngine {
     // Determine if evolution is needed
     shouldEvolve(performanceData) {
         for (const [id, metrics] of Object.entries(performanceData)) {
-            // Evolve if error rate is high
-            if (metrics.errorRate > 0.05) {
-                return true;
-            }
-
-            // Evolve if module is outdated
             const module = ModuleRegistry.get(id);
-            if (module && this.isOutdated(module.version)) {
-                return true;
+            if (!module || this.isInCooldown(id)) {
+                continue;
             }
 
-            // Evolve if usage is declining
-            if (metrics.usageCount < 10 && metrics.loadTime > 2000) {
+            if (this.shouldEvolveModule(module, metrics)) {
                 return true;
             }
         }
@@ -154,25 +180,37 @@ class EvolutionEngine {
             const strategy = this.determineStrategy(module, metrics);
 
             if (strategy) {
+                if (this.isInCooldown(id)) {
+                    continue;
+                }
+
                 try {
                     const result = await this.applyEvolution(id, strategy);
-                    this.evolutionHistory.push({
-                        moduleId: id,
-                        strategy,
-                        result,
-                        timestamp: Date.now(),
-                        version: module.version
-                    });
+                    if (result?.success !== false) {
+                        const evolvedAt = Date.now();
+                        this.evolutionHistory.push({
+                            moduleId: id,
+                            strategy,
+                            result,
+                            timestamp: evolvedAt,
+                            version: module.version
+                        });
+                        this.markEvolved(id, evolvedAt);
+                        this.pruneEvolutionHistory();
 
-                    this.metrics.evolutions++;
-                    this.emit('moduleEvolved', {
-                        module: id,
-                        strategy,
-                        version: module.version,
-                        timestamp: Date.now()
-                    });
+                        this.metrics.evolutions++;
+                        this.emit('moduleEvolved', {
+                            module: id,
+                            strategy,
+                            version: module.version,
+                            timestamp: evolvedAt
+                        });
+                    } else {
+                        this.metrics.errors++;
+                    }
                 } catch (error) {
                     console.error(`Failed to evolve module ${id}:`, error);
+                    this.metrics.errors++;
                 }
             }
         }
@@ -380,6 +418,92 @@ class EvolutionEngine {
         }
     }
 
+    shouldEvolveModule(module, metrics) {
+        // Evolve if error rate is high
+        if (metrics.errorRate > 0.05) {
+            return true;
+        }
+
+        // Evolve if module is outdated
+        if (this.isOutdated(module.version)) {
+            return true;
+        }
+
+        // Evolve if usage is declining
+        return metrics.usageCount < 10 && metrics.loadTime > 2000;
+    }
+
+    isInCooldown(moduleId) {
+        const lastEvolution = this.lastEvolutionByModule.get(moduleId);
+        if (!lastEvolution) {
+            return false;
+        }
+
+        return Date.now() - lastEvolution < this.moduleCooldownMs;
+    }
+
+    markEvolved(moduleId, timestamp) {
+        this.lastEvolutionByModule.set(moduleId, timestamp);
+    }
+
+    pruneEvolutionHistory() {
+        if (this.evolutionHistory.length <= this.maxHistoryEntries) {
+            return;
+        }
+
+        this.evolutionHistory = this.evolutionHistory.slice(-this.maxHistoryEntries);
+    }
+
+    calculateEvolutionUrgency(performanceData) {
+        let maxUrgency = 0;
+
+        for (const metrics of Object.values(performanceData)) {
+            if (metrics.errorRate > 0.1) {
+                maxUrgency = Math.max(maxUrgency, 1);
+            } else if (metrics.errorRate > 0.05) {
+                maxUrgency = Math.max(maxUrgency, 0.8);
+            }
+
+            if (metrics.loadTime > 3000) {
+                maxUrgency = Math.max(maxUrgency, 0.7);
+            } else if (metrics.loadTime > 2000) {
+                maxUrgency = Math.max(maxUrgency, 0.5);
+            }
+
+            if (metrics.usageCount < 10) {
+                maxUrgency = Math.max(maxUrgency, 0.4);
+            }
+        }
+
+        return maxUrgency;
+    }
+
+    adjustMonitoringInterval(urgency, durationMs) {
+        if (urgency >= 0.8) {
+            this.currentIntervalMs = Math.max(this.minIntervalMs, Math.floor(this.currentIntervalMs * 0.7));
+        } else if (urgency <= 0.2) {
+            this.currentIntervalMs = Math.min(this.maxIntervalMs, Math.floor(this.currentIntervalMs * 1.2));
+        }
+
+        if (durationMs > 5000) {
+            this.currentIntervalMs = Math.min(this.maxIntervalMs, this.currentIntervalMs + 10000);
+        }
+    }
+
+    async getModuleMetrics(moduleId) {
+        const metrics = await storage.get(`moduleMetrics:${moduleId}`);
+        return metrics || {};
+    }
+
+    shouldHeal(error) {
+        if (!error) {
+            return false;
+        }
+
+        const message = typeof error === 'string' ? error : (error.message || '');
+        return /module|network|fetch|state|timeout|chunk/i.test(message);
+    }
+
     // Version comparison
     isNewerVersion(newVersion, currentVersion) {
         if (!currentVersion) return true;
@@ -433,6 +557,10 @@ class EvolutionEngine {
     // Destroy engine
     destroy() {
         this.isRunning = false;
+        if (this.monitorHandle) {
+            clearTimeout(this.monitorHandle);
+            this.monitorHandle = null;
+        }
         this.listeners.clear();
         console.log('🧬 Evolution Engine destroyed');
     }

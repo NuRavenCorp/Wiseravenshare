@@ -6,6 +6,7 @@ import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
+import { truthEngine } from '../Services/TruthDetectionEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
 const MAX_STORED_POSTS = 120;
@@ -13,8 +14,26 @@ const MAX_STORED_POSTS = 120;
 const FeedPage = ({ addTruthAlert }) => {
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
+    const [integrityReports, setIntegrityReports] = useState({});
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
+
+    const buildIntegrityReport = (post, mode = 'manual') => {
+        const content = String(post?.content || '').trim();
+        const findings = content ? truthEngine.analyzeContent(content) : [];
+        const score = content ? truthEngine.getTruthScore(content) : 72;
+        const badge = truthEngine.getTruthBadge(score);
+        const criticalFindings = findings.filter((item) => item.isTrue === false && Number(item.confidence) >= 0.9);
+
+        return {
+            score,
+            badge,
+            findings,
+            criticalFindings,
+            mode,
+            checkedAt: new Date().toISOString()
+        };
+    };
 
     useEffect(() => {
         // Load sample posts
@@ -124,11 +143,71 @@ const FeedPage = ({ addTruthAlert }) => {
         addTruthAlert('success', 'Post saved to bookmarks.', null);
     };
 
+    const handleVerifyPost = (post) => {
+        const content = String(post?.content || '').trim();
+        if (!content) {
+            addTruthAlert('info', 'This post has no text content to verify.', null);
+            return;
+        }
+
+        const report = buildIntegrityReport(post, 'manual');
+
+        setIntegrityReports((prev) => ({
+            ...prev,
+            [post.id]: report
+        }));
+
+        if (report.criticalFindings.length > 0) {
+            addTruthAlert(
+                'warning',
+                `Integrity checker flagged ${report.criticalFindings.length} issue(s) in this post.`,
+                report.criticalFindings[0].correction || null
+            );
+            return;
+        }
+
+        addTruthAlert('success', `Integrity check complete. ${report.badge.text}`, null);
+    };
+
+    const handleDisputePost = async (post) => {
+        try {
+            const result = await truthEngine.disputePost(post.id, post.content || '', 'Feed integrity review');
+            handleVerifyPost(post);
+
+            if (result?.corrections?.length) {
+                addTruthAlert('warning', 'Dispute recorded and corrections were suggested.', result.corrections[0]);
+                return;
+            }
+
+            addTruthAlert('info', 'Dispute submitted for review.', null);
+        } catch {
+            addTruthAlert('error', 'Failed to run integrity dispute check.', null);
+        }
+    };
+
     const filteredPosts = posts.filter(post =>
         post.userId === currentUser.id || following.includes(post.userId)
     );
 
     const rankedFeedPosts = rankPostsByPredictedEngagement(filteredPosts, { horizonHours: 18 });
+
+    useEffect(() => {
+        setIntegrityReports((prev) => {
+            const next = { ...prev };
+            let changed = false;
+
+            for (const post of rankedFeedPosts) {
+                if (!post?.id || next[post.id]) {
+                    continue;
+                }
+
+                next[post.id] = buildIntegrityReport(post, 'auto');
+                changed = true;
+            }
+
+            return changed ? next : prev;
+        });
+    }, [rankedFeedPosts]);
 
     return (
         <div>
@@ -166,7 +245,9 @@ const FeedPage = ({ addTruthAlert }) => {
                         post={post}
                         onLike={handleLike}
                         onRepost={handleRepost}
-                        onDispute={() => { }}
+                        onDispute={handleDisputePost}
+                        onVerify={handleVerifyPost}
+                        integrityReport={integrityReports[post.id]}
                         currentUser={currentUser}
                         isFollowing={following.includes(post.userId)}
                         onFollow={handleFollow}
