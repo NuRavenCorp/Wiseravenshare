@@ -7,6 +7,34 @@ import { useNotification } from '../Contexts/NotificationContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
+const normalizeConnection = (connection) => ({
+    enabled: Boolean(connection?.enabled),
+    username: String(connection?.username || '').trim(),
+    profileUrl: String(connection?.profileUrl || '').trim(),
+    feedUrl: String(connection?.feedUrl || '').trim()
+});
+
+const normalizeSocialFeeds = (socialFeeds) => {
+    const feeds = socialFeeds || {};
+    return {
+        tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
+        facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
+        instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram'))
+    };
+};
+
+const getProfileDraftKey = (userId) => `wiseProfileEditDraft:${userId}`;
+
 const ProfilePage = () => {
     const { user, updateProfile } = useAuth();
     const { addToast } = useNotification();
@@ -46,35 +74,36 @@ const ProfilePage = () => {
         if (user) {
             socialGraphService.registerUserProfile(user);
             loadUserData();
+            const normalizedFeeds = normalizeSocialFeeds(user.socialFeeds);
+            let draft = null;
+
+            try {
+                const rawDraft = localStorage.getItem(getProfileDraftKey(user.id));
+                draft = rawDraft ? JSON.parse(rawDraft) : null;
+            } catch {
+                draft = null;
+            }
+
             setEditForm({
-                name: user.name || '',
-                bio: user.bio || '',
-                location: user.location || '',
-                website: user.website || '',
-                avatar: user.avatar || '',
-                socialFeeds: {
-                    tikTok: {
-                        enabled: Boolean(user.socialFeeds?.tikTok?.enabled),
-                        username: user.socialFeeds?.tikTok?.username || '',
-                        profileUrl: user.socialFeeds?.tikTok?.profileUrl || '',
-                        feedUrl: user.socialFeeds?.tikTok?.feedUrl || ''
-                    },
-                    facebook: {
-                        enabled: Boolean(user.socialFeeds?.facebook?.enabled),
-                        username: user.socialFeeds?.facebook?.username || '',
-                        profileUrl: user.socialFeeds?.facebook?.profileUrl || '',
-                        feedUrl: user.socialFeeds?.facebook?.feedUrl || ''
-                    },
-                    instagram: {
-                        enabled: Boolean(user.socialFeeds?.instagram?.enabled),
-                        username: user.socialFeeds?.instagram?.username || '',
-                        profileUrl: user.socialFeeds?.instagram?.profileUrl || '',
-                        feedUrl: user.socialFeeds?.instagram?.feedUrl || ''
-                    }
-                }
+                name: draft?.name ?? user.name ?? '',
+                bio: draft?.bio ?? user.bio ?? '',
+                location: draft?.location ?? user.location ?? '',
+                website: draft?.website ?? user.website ?? '',
+                avatar: draft?.avatar ?? user.avatar ?? '',
+                socialFeeds: normalizeSocialFeeds(draft?.socialFeeds || normalizedFeeds)
             });
         }
     }, [user]);
+
+    useEffect(() => {
+        if (!user?.id || !editing) return;
+
+        try {
+            localStorage.setItem(getProfileDraftKey(user.id), JSON.stringify(editForm));
+        } catch {
+            /* ignore storage errors */
+        }
+    }, [editing, editForm, user?.id]);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -179,6 +208,9 @@ const ProfilePage = () => {
     const handleEditSubmit = async () => {
         try {
             await updateProfile(editForm);
+            if (user?.id) {
+                localStorage.removeItem(getProfileDraftKey(user.id));
+            }
             setEditing(false);
             if (cameraStream) {
                 cameraStream.getTracks().forEach((track) => track.stop());
@@ -549,6 +581,9 @@ const ProfilePage = () => {
                                                 color: 'var(--text-color)'
                                             }}
                                         />
+                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                            For embed rendering, use a direct TikTok video URL (example: https://www.tiktok.com/@user/video/1234567890).
+                                        </div>
                                     </div>
                                     <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
                                         <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Facebook feed connection</div>
@@ -628,6 +663,9 @@ const ProfilePage = () => {
                                                 color: 'var(--text-color)'
                                             }}
                                         />
+                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                            For embed rendering, use a direct Facebook post URL (example: https://www.facebook.com/page/posts/postId).
+                                        </div>
                                     </div>
                                     <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
                                         <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Instagram feed connection</div>
@@ -707,6 +745,9 @@ const ProfilePage = () => {
                                                 color: 'var(--text-color)'
                                             }}
                                         />
+                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                            For embed rendering, use an Instagram post/reel URL (example: https://www.instagram.com/p/ABC123xyz/).
+                                        </div>
                                     </div>
                                     <label style={{ display: 'block', margin: '10px 0 8px', color: 'var(--highlight-color)' }}>
                                         Profile photo

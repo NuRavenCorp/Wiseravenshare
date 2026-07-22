@@ -2,6 +2,34 @@ import React, { useEffect, useState } from 'react';
 import { socialGraphService } from '../../Services/SocialGraph';
 import WiseRavenLogo from './WiseRavenLogo';
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
+const normalizeConnection = (connection, platform) => {
+    const username = String(connection?.username || '').trim();
+    const profileUrl = String(connection?.profileUrl || '').trim();
+    const feedUrl = String(connection?.feedUrl || '').trim();
+
+    const fallbackUrl = platform === 'facebook'
+        ? (username ? `https://www.facebook.com/${username}` : '')
+        : platform === 'instagram'
+            ? (username ? `https://www.instagram.com/${username}` : '')
+            : (username ? `https://www.tiktok.com/@${username}` : '');
+
+    return {
+        enabled: Boolean(connection?.enabled),
+        username,
+        resolvedUrl: feedUrl || profileUrl || fallbackUrl
+    };
+};
+
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
 
@@ -42,6 +70,31 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     };
 
     const hasImageAvatar = typeof profile.avatar === 'string' && (profile.avatar.startsWith('data:image/') || profile.avatar.startsWith('http'));
+
+    const feeds = user?.socialFeeds || {};
+    const socialFeedItems = [
+        {
+            id: 'facebook-feed',
+            label: 'Facebook Feed',
+            icon: 'fab fa-facebook',
+            color: '#93c5fd',
+            connection: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook'), 'facebook')
+        },
+        {
+            id: 'tiktok-feed',
+            label: 'TikTok Feed',
+            icon: 'fab fa-tiktok',
+            color: '#67e8f9',
+            connection: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok'), 'tiktok')
+        },
+        {
+            id: 'instagram-feed',
+            label: 'Instagram Feed',
+            icon: 'fab fa-instagram',
+            color: '#f9a8d4',
+            connection: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram'), 'instagram')
+        }
+    ];
 
     return (
         <aside className="left-column">
@@ -143,6 +196,68 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                     </li>
                 ))}
             </ul>
+
+            <div style={{
+                marginTop: '14px',
+                background: 'var(--card-bg)',
+                borderRadius: '12px',
+                padding: '12px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)'
+            }}>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '10px'
+                }}>
+                    <strong style={{ fontSize: '0.95rem' }}>Feed List</strong>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--light-color)' }}>Social</span>
+                </div>
+
+                <div style={{ display: 'grid', gap: '8px' }}>
+                    {socialFeedItems.map((item) => {
+                        const isActive = item.connection.enabled && item.connection.resolvedUrl;
+                        return (
+                            <div
+                                key={item.id}
+                                style={{
+                                    border: `1px solid ${isActive ? item.color : 'var(--border-color)'}`,
+                                    borderRadius: '10px',
+                                    padding: '8px 10px',
+                                    background: 'rgba(255, 255, 255, 0.02)'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <i className={item.icon} style={{ color: item.color }}></i>
+                                        <span style={{ fontSize: '0.85rem' }}>{item.label}</span>
+                                    </div>
+
+                                    {isActive ? (
+                                        <a
+                                            href={item.connection.resolvedUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ color: item.color, fontSize: '0.75rem', textDecoration: 'none' }}
+                                        >
+                                            Open
+                                        </a>
+                                    ) : (
+                                        <span style={{ fontSize: '0.75rem', color: 'var(--light-color)' }}>Not set</span>
+                                    )}
+                                </div>
+
+                                {item.connection.username && (
+                                    <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--light-color)' }}>
+                                        @{item.connection.username}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
         </aside>
     );
 };
