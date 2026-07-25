@@ -380,10 +380,17 @@ public sealed class UserStore
             return false;
         }
 
-        var salt = Convert.FromBase64String(parts[0]);
-        var expectedHash = Convert.FromBase64String(parts[1]);
-        var actualHash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
-        return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
+        try
+        {
+            var salt = Convert.FromBase64String(parts[0]);
+            var expectedHash = Convert.FromBase64String(parts[1]);
+            var actualHash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
+            return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string BuildHandle(string name, string email)
