@@ -149,7 +149,7 @@ export const apiService = {
     sendCalendarReminder: (payload) => api.post('/notifications/reminder', payload),
 
     // Admin diagnostics endpoints
-    getPersistenceStatus: () => api.get('/persistence/status')
+    getPersistenceStatus: (refresh = false) => api.get('/persistence/status', { params: { refresh } })
 };
 
 export default api;

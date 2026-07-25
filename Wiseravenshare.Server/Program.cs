@@ -92,6 +92,7 @@ builder.Services.AddScoped<IYouTubeService, YouTubeService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<VideoLibraryStore>();
+builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 
@@ -169,9 +170,34 @@ using (var scope = app.Services.CreateScope())
 {
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
+    var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
 
     var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
     var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
+    var userStatus = userStore.GetPersistenceStatus();
+
+    persistenceDiagnosticsCache.SetSnapshot(new PersistenceDiagnosticsSnapshot
+    {
+        LastCheckedAtUtc = DateTime.UtcNow,
+        Users = new PersistenceDiagnosticsEntry
+        {
+            DatabaseConfigured = userStatus.DatabaseConfigured,
+            DatabaseAvailable = userStatus.DatabaseAvailable,
+            RequiresDatabase = userStatus.RequiresDatabase,
+            ActiveTable = userStatus.ActiveTable,
+            LastError = userStatus.LastError,
+            TimedOut = false
+        },
+        Videos = new PersistenceDiagnosticsEntry
+        {
+            DatabaseConfigured = !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")),
+            DatabaseAvailable = videoDbPersistenceAvailable,
+            RequiresDatabase = false,
+            ActiveTable = "app_data.ravensight_videos",
+            LastError = string.Empty,
+            TimedOut = false
+        }
+    });
 
     if (!userDbPersistenceAvailable || !videoDbPersistenceAvailable)
     {

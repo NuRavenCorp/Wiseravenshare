@@ -11,63 +11,62 @@ public sealed class PersistenceController : ControllerBase
 {
     private readonly UserStore _userStore;
     private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly PersistenceDiagnosticsCache _diagnosticsCache;
     private readonly IConfiguration _configuration;
+    private static readonly SemaphoreSlim RefreshLock = new(1, 1);
 
-    public PersistenceController(UserStore userStore, VideoLibraryStore videoLibraryStore, IConfiguration configuration)
+    public PersistenceController(
+        UserStore userStore,
+        VideoLibraryStore videoLibraryStore,
+        PersistenceDiagnosticsCache diagnosticsCache,
+        IConfiguration configuration)
     {
         _userStore = userStore;
         _videoLibraryStore = videoLibraryStore;
+        _diagnosticsCache = diagnosticsCache;
         _configuration = configuration;
     }
 
     [Authorize]
     [HttpGet("status")]
-    public async Task<IActionResult> GetStatus()
+    public IActionResult GetStatus([FromQuery] bool refresh = false)
     {
         if (!IsAdminRequest())
         {
             return Forbid();
         }
 
-        var timeoutSeconds = 4;
-        var timeoutFromConfig = _configuration["Persistence:DiagnosticsTimeoutSeconds"];
-        if (int.TryParse(timeoutFromConfig, out var parsedTimeout) && parsedTimeout > 0)
+        if (refresh)
         {
-            timeoutSeconds = Math.Min(parsedTimeout, 15);
+            _ = TriggerBackgroundRefreshAsync();
         }
 
-        var userCheck = await TryGetUserStatusWithTimeoutAsync(timeoutSeconds);
-        var videoCheck = await TryGetVideoStatusWithTimeoutAsync(timeoutSeconds, HttpContext.RequestAborted);
-
-        var userStatus = userCheck.Status;
-        var userLastError = string.IsNullOrWhiteSpace(userStatus.LastError) ? string.Empty : userStatus.LastError;
-        if (userCheck.TimedOut)
-        {
-            userLastError = string.IsNullOrWhiteSpace(userLastError)
-                ? $"User persistence check timed out after {timeoutSeconds}s."
-                : $"{userLastError} (timed out after {timeoutSeconds}s)";
-        }
-
+        var snapshot = _diagnosticsCache.GetSnapshot();
         var payload = new
         {
             users = new
             {
-                userStatus.DatabaseConfigured,
-                userStatus.DatabaseAvailable,
-                userStatus.RequiresDatabase,
-                userStatus.ActiveTable,
-                LastError = userLastError,
-                TimedOut = userCheck.TimedOut
+                snapshot.Users.DatabaseConfigured,
+                snapshot.Users.DatabaseAvailable,
+                snapshot.Users.RequiresDatabase,
+                snapshot.Users.ActiveTable,
+                snapshot.Users.LastError,
+                snapshot.Users.TimedOut
             },
             videos = new
             {
-                DatabaseAvailable = videoCheck.DatabaseAvailable,
-                LastError = videoCheck.LastError,
-                TimedOut = videoCheck.TimedOut
-            }
+                snapshot.Videos.DatabaseConfigured,
+                snapshot.Videos.DatabaseAvailable,
+                snapshot.Videos.RequiresDatabase,
+                snapshot.Videos.ActiveTable,
+                snapshot.Videos.LastError,
+                snapshot.Videos.TimedOut
+            },
+            lastCheckedAtUtc = snapshot.LastCheckedAtUtc,
+            refreshTriggered = refresh
         };
 
-        if (userStatus.RequiresDatabase && !userStatus.DatabaseAvailable)
+        if (snapshot.Users.RequiresDatabase && !snapshot.Users.DatabaseAvailable)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, payload);
         }
@@ -75,44 +74,97 @@ public sealed class PersistenceController : ControllerBase
         return Ok(payload);
     }
 
-    private async Task<(UserPersistenceStatus Status, bool TimedOut)> TryGetUserStatusWithTimeoutAsync(int timeoutSeconds)
+    private async Task TriggerBackgroundRefreshAsync()
     {
-        var statusTask = Task.Run(() => _userStore.GetPersistenceStatus());
-        var completedTask = await Task.WhenAny(statusTask, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds)));
-        if (completedTask == statusTask)
+        if (!await RefreshLock.WaitAsync(0))
         {
-            return (await statusTask, false);
+            return;
         }
-
-        var fallback = new UserPersistenceStatus
-        {
-            DatabaseConfigured = true,
-            DatabaseAvailable = false,
-            RequiresDatabase = true,
-            ActiveTable = "unknown",
-            LastError = string.Empty
-        };
-
-        return (fallback, true);
-    }
-
-    private async Task<(bool DatabaseAvailable, string LastError, bool TimedOut)> TryGetVideoStatusWithTimeoutAsync(int timeoutSeconds, CancellationToken requestAborted)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
-        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
         try
         {
-            var available = await _videoLibraryStore.IsDatabasePersistenceAvailableAsync(cts.Token);
-            return (available, string.Empty, false);
+            var timeoutSeconds = 4;
+            var timeoutFromConfig = _configuration["Persistence:DiagnosticsTimeoutSeconds"];
+            if (int.TryParse(timeoutFromConfig, out var parsedTimeout) && parsedTimeout > 0)
+            {
+                timeoutSeconds = Math.Min(parsedTimeout, 15);
+            }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+
+            var userStatus = await Task.Run(() => _userStore.GetPersistenceStatus(), cts.Token);
+
+            var videoAvailable = false;
+            var videoTimedOut = false;
+            var videoError = string.Empty;
+            try
+            {
+                videoAvailable = await _videoLibraryStore.IsDatabasePersistenceAvailableAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                videoTimedOut = true;
+                videoError = $"Video persistence check timed out after {timeoutSeconds}s.";
+            }
+            catch (Exception ex)
+            {
+                videoError = ex.Message;
+            }
+
+            _diagnosticsCache.SetSnapshot(new PersistenceDiagnosticsSnapshot
+            {
+                LastCheckedAtUtc = DateTime.UtcNow,
+                Users = new PersistenceDiagnosticsEntry
+                {
+                    DatabaseConfigured = userStatus.DatabaseConfigured,
+                    DatabaseAvailable = userStatus.DatabaseAvailable,
+                    RequiresDatabase = userStatus.RequiresDatabase,
+                    ActiveTable = userStatus.ActiveTable,
+                    LastError = userStatus.LastError,
+                    TimedOut = false
+                },
+                Videos = new PersistenceDiagnosticsEntry
+                {
+                    DatabaseConfigured = !string.IsNullOrWhiteSpace(_configuration.GetConnectionString("DefaultConnection")),
+                    DatabaseAvailable = videoAvailable,
+                    RequiresDatabase = false,
+                    ActiveTable = "app_data.ravensight_videos",
+                    LastError = videoError,
+                    TimedOut = videoTimedOut
+                }
+            });
         }
         catch (OperationCanceledException)
         {
-            return (false, $"Video persistence check timed out after {timeoutSeconds}s.", true);
+            var snapshot = _diagnosticsCache.GetSnapshot();
+            _diagnosticsCache.SetSnapshot(snapshot with
+            {
+                LastCheckedAtUtc = DateTime.UtcNow,
+                Users = snapshot.Users with
+                {
+                    DatabaseAvailable = false,
+                    LastError = "User persistence refresh timed out.",
+                    TimedOut = true
+                }
+            });
         }
         catch (Exception ex)
         {
-            return (false, ex.Message, false);
+            var snapshot = _diagnosticsCache.GetSnapshot();
+            _diagnosticsCache.SetSnapshot(snapshot with
+            {
+                LastCheckedAtUtc = DateTime.UtcNow,
+                Users = snapshot.Users with
+                {
+                    DatabaseAvailable = false,
+                    LastError = ex.Message,
+                    TimedOut = false
+                }
+            });
+        }
+        finally
+        {
+            RefreshLock.Release();
         }
     }
 
