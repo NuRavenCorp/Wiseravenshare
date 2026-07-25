@@ -18,6 +18,22 @@ const PostCard = ({
     const [commentText, setCommentText] = useState('');
     const [comments, setComments] = useState(post.comments || []);
 
+    const displayUser = useMemo(() => {
+        const postUser = post.user || {};
+        if (!post.userId || post.userId !== currentUser?.id) {
+            return postUser;
+        }
+
+        // Keep feed identity in sync with the latest profile for the signed-in user.
+        return {
+            ...postUser,
+            id: currentUser.id,
+            name: currentUser.name || postUser.name,
+            handle: currentUser.handle || currentUser.username || postUser.handle,
+            avatar: currentUser.avatar || postUser.avatar
+        };
+    }, [post.user, post.userId, currentUser]);
+
     const truthBadge = useMemo(() => {
         const score = post.truthScore ?? truthEngine.getTruthScore(post.content || '');
         return truthEngine.getTruthBadge(score);
@@ -65,8 +81,8 @@ const PostCard = ({
         >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                    <strong>{post.user?.name || 'Unknown'}</strong>
-                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{post.user?.handle || ''}</div>
+                    <strong>{displayUser?.name || 'Unknown'}</strong>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayUser?.handle || ''}</div>
                 </div>
                 {onFollow && post.userId && post.userId !== currentUser?.id && (
                     <button
