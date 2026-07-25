@@ -63,13 +63,14 @@ public sealed class PersistenceController : ControllerBase
                 snapshot.Videos.TimedOut
             },
             lastCheckedAtUtc = snapshot.LastCheckedAtUtc,
-            refreshTriggered = refresh
+            refreshTriggered = refresh,
+            health = new
+            {
+                usersDatabaseHealthy = snapshot.Users.DatabaseAvailable,
+                videosDatabaseHealthy = snapshot.Videos.DatabaseAvailable,
+                requiresUsersDatabase = snapshot.Users.RequiresDatabase
+            }
         };
-
-        if (snapshot.Users.RequiresDatabase && !snapshot.Users.DatabaseAvailable)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, payload);
-        }
 
         return Ok(payload);
     }
