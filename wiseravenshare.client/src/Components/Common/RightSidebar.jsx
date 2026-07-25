@@ -131,13 +131,17 @@ const RightSidebar = ({ onNavigate }) => {
                     const candidateFollowerIds = socialGraphService.getFollowerIds(candidate.id);
                     const mutualCount = candidateFollowerIds.filter((id) => following.includes(id)).length;
                     const hasRecentPost = posts.some((post) => post.userId === candidate.id);
-                    const rankScore = (counts.followers * 2) + (mutualCount * 8) + (hasRecentPost ? 5 : 0);
+                    const followMetrics = socialGraphService.getFollowBehaviorMetrics(user.id, candidate.id, posts);
+                    const rankScore = followMetrics.followScore;
 
                     return {
                         ...candidate,
                         followers: formatFollowers(counts.followers),
                         mutualCount,
-                        rankScore
+                        rankScore,
+                        followScore: followMetrics.followScore,
+                        followMetrics,
+                        hasRecentPost
                     };
                 })
                 .sort((a, b) => b.rankScore - a.rankScore)
@@ -490,6 +494,13 @@ const RightSidebar = ({ onNavigate }) => {
                                     {user.followers} followers
                                     {user.mutualCount > 0 ? ` • ${user.mutualCount} mutual` : ''}
                                 </div>
+                                {Number.isFinite(user.followScore) && (
+                                    <div style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>
+                                        Follow score {user.followScore}
+                                        {user.followMetrics?.isReciprocal ? ' • follows you' : ''}
+                                        {user.hasRecentPost ? ' • active now' : ''}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <button
