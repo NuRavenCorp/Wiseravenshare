@@ -6,9 +6,76 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+static string NormalizeConnectionString(string connectionString)
+{
+    var value = connectionString?.Trim() ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    if (!value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+        && !value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        return value;
+    }
+
+    if (value.EndsWith("?sslmode", StringComparison.OrdinalIgnoreCase))
+    {
+        return value + "=require";
+    }
+
+    value = value.Replace("?sslmode&", "?sslmode=require&", StringComparison.OrdinalIgnoreCase);
+    value = value.Replace("&sslmode&", "&sslmode=require&", StringComparison.OrdinalIgnoreCase);
+
+    if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+    {
+        return value;
+    }
+
+    var userName = string.Empty;
+    var password = string.Empty;
+    if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+    {
+        var parts = uri.UserInfo.Split(':', 2);
+        userName = Uri.UnescapeDataString(parts[0]);
+        if (parts.Length > 1)
+        {
+            password = Uri.UnescapeDataString(parts[1]);
+        }
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Username = userName,
+        Password = password,
+        Database = uri.AbsolutePath.Trim('/'),
+        SslMode = SslMode.Require,
+        TrustServerCertificate = true
+    };
+
+    var query = uri.Query?.TrimStart('?') ?? string.Empty;
+    foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var kv = segment.Split('=', 2);
+        var key = Uri.UnescapeDataString(kv[0]);
+        var val = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+        if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase)
+            && Enum.TryParse<SslMode>(val, true, out var mode))
+        {
+            builder.SslMode = mode;
+        }
+    }
+
+    return builder.ConnectionString;
+}
+
 // ── Configuration ────────────────────────────────────────────────────────────
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
-var defaultConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var defaultConnectionString = NormalizeConnectionString(builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 builder.Logging.ClearProviders();
@@ -22,8 +89,11 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<VideoLibraryStore>();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 
 var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
@@ -97,14 +167,19 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
-    try
+
+    var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
+    var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
+
+    if (!userDbPersistenceAvailable || !videoDbPersistenceAvailable)
     {
-        await videoLibraryStore.EnsureSchemaAsync();
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning(ex, "Video library schema initialization skipped.");
+        app.Logger.LogCritical(
+            "Database persistence is unavailable (userStore={UserStoreAvailable}, videoStore={VideoStoreAvailable}). " +
+            "Auth and/or content retention may fall back to non-durable storage until DB grants are fixed.",
+            userDbPersistenceAvailable,
+            videoDbPersistenceAvailable);
     }
 }
 
@@ -148,12 +223,45 @@ app.MapGet("/health/db", async () =>
     {
         await using var connection = new NpgsqlConnection(defaultConnectionString);
         await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT 1", connection);
-        var result = await command.ExecuteScalarAsync();
-        return Results.Ok(new { status = "ok", database = "postgres", result });
+        await using var pingCommand = new NpgsqlCommand("SELECT 1", connection);
+        var result = await pingCommand.ExecuteScalarAsync();
+
+        const string schemaCheckSql = @"
+SELECT
+    (to_regclass('app_data.app_users') IS NOT NULL OR to_regclass('public.app_users') IS NOT NULL) AS app_users_exists,
+    (to_regclass('app_data.ravensight_videos') IS NOT NULL OR to_regclass('public.ravensight_videos') IS NOT NULL) AS ravensight_videos_exists,
+    (to_regclass('app_data.ravensight_video_comments') IS NOT NULL OR to_regclass('public.ravensight_video_comments') IS NOT NULL) AS ravensight_video_comments_exists;";
+
+        await using var schemaCommand = new NpgsqlCommand(schemaCheckSql, connection);
+        await using var reader = await schemaCommand.ExecuteReaderAsync();
+
+        var appUsersExists = false;
+        var ravensightVideosExists = false;
+        var ravensightVideoCommentsExists = false;
+
+        if (await reader.ReadAsync())
+        {
+            appUsersExists = reader.GetBoolean(0);
+            ravensightVideosExists = reader.GetBoolean(1);
+            ravensightVideoCommentsExists = reader.GetBoolean(2);
+        }
+
+        return Results.Ok(new
+        {
+            status = "ok",
+            database = "postgres",
+            result,
+            schema = new
+            {
+                appUsersExists,
+                ravensightVideosExists,
+                ravensightVideoCommentsExists
+            }
+        });
     }
     catch (Exception ex)
     {
+        app.Logger.LogError(ex, "Database connectivity check failed in /health/db.");
         return Results.Problem($"Database connectivity check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });

@@ -35,6 +35,16 @@ const normalizeSocialFeeds = (socialFeeds) => {
 
 const getProfileDraftKey = (userId) => `wiseProfileEditDraft:${userId}`;
 
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    const defaults = ['admin@wise-ravens.com'];
+    return new Set([...defaults, ...fromEnv]);
+};
+
 const ProfilePage = () => {
     const { user, updateProfile } = useAuth();
     const { addToast } = useNotification();
@@ -67,8 +77,16 @@ const ProfilePage = () => {
     const [cameraOpen, setCameraOpen] = useState(false);
     const [cameraError, setCameraError] = useState('');
     const [cameraStream, setCameraStream] = useState(null);
+    const [persistenceStatus, setPersistenceStatus] = useState(null);
+    const [persistenceLoading, setPersistenceLoading] = useState(false);
+    const [persistenceError, setPersistenceError] = useState('');
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
 
     useEffect(() => {
         if (user) {
@@ -117,6 +135,38 @@ const ProfilePage = () => {
             window.removeEventListener('wiseraven:social-updated', handleSocialUpdate);
         };
     }, [user?.id]);
+
+    const loadPersistenceStatus = async () => {
+        if (!isAdminUser) {
+            return;
+        }
+
+        setPersistenceLoading(true);
+        setPersistenceError('');
+        try {
+            const response = await apiService.getPersistenceStatus();
+            setPersistenceStatus(response?.data || null);
+        } catch (error) {
+            const statusCode = error?.response?.status;
+            const message = error?.response?.data?.message
+                || error?.message
+                || 'Unable to load persistence diagnostics.';
+            setPersistenceError(statusCode ? `${message} (HTTP ${statusCode})` : message);
+            setPersistenceStatus(null);
+        } finally {
+            setPersistenceLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isAdminUser) {
+            setPersistenceStatus(null);
+            setPersistenceError('');
+            return;
+        }
+
+        loadPersistenceStatus();
+    }, [isAdminUser]);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -1012,6 +1062,73 @@ const ProfilePage = () => {
             </div>
 
             <SocialFeedsTimeline user={user} compact />
+
+            {isAdminUser && (
+                <div style={{
+                    background: 'var(--card-bg)',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    marginBottom: '20px',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                        <div>
+                            <div style={{ fontWeight: 'bold' }}>Admin Persistence Status</div>
+                            <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                Database consistency status for profiles and social feeds
+                            </div>
+                        </div>
+                        <button
+                            onClick={loadPersistenceStatus}
+                            disabled={persistenceLoading}
+                            style={{
+                                padding: '8px 12px',
+                                borderRadius: '999px',
+                                border: '1px solid var(--border-color)',
+                                background: 'transparent',
+                                color: 'var(--text-color)',
+                                cursor: persistenceLoading ? 'default' : 'pointer',
+                                opacity: persistenceLoading ? 0.7 : 1
+                            }}
+                        >
+                            {persistenceLoading ? 'Checking...' : 'Refresh'}
+                        </button>
+                    </div>
+
+                    {persistenceError && (
+                        <div style={{ color: 'var(--error-color)', fontSize: '13px', marginBottom: '10px' }}>
+                            {persistenceError}
+                        </div>
+                    )}
+
+                    {persistenceStatus && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                            <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>User DB Configured</div>
+                                <div style={{ fontWeight: 'bold' }}>{String(Boolean(persistenceStatus?.users?.databaseConfigured))}</div>
+                            </div>
+                            <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>User DB Available</div>
+                                <div style={{ fontWeight: 'bold' }}>{String(Boolean(persistenceStatus?.users?.databaseAvailable))}</div>
+                            </div>
+                            <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>Active User Table</div>
+                                <div style={{ fontWeight: 'bold', wordBreak: 'break-all' }}>{persistenceStatus?.users?.activeTable || 'n/a'}</div>
+                            </div>
+                            <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>Video DB Available</div>
+                                <div style={{ fontWeight: 'bold' }}>{String(Boolean(persistenceStatus?.videos?.databaseAvailable))}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {persistenceStatus?.users?.lastError && (
+                        <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--error-color)' }}>
+                            Last DB error: {persistenceStatus.users.lastError}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Tabs */}
             <div style={{

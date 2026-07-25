@@ -26,9 +26,13 @@ services:
         value: http://0.0.0.0:10000
       - key: CLIENT_ORIGIN
         value: ${web.PUBLIC_URL}
+      - key: Admin__Emails
+        value: admin@wise-ravens.com
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
+      - key: Persistence__RequireDatabase
+        value: "true"
       - key: STRIPE_SECRET_KEY
         value: ${STRIPE_SECRET_KEY}
         type: SECRET
@@ -59,6 +63,36 @@ services:
       - key: Social__Instagram__ProfileUrl
         value: ${SOCIAL_INSTAGRAM_PROFILE_URL}
         type: SECRET
+      - key: ReminderNotifications__Email__FromName
+        value: ${REMINDER_EMAIL_FROM_NAME}
+        type: SECRET
+      - key: ReminderNotifications__Email__FromAddress
+        value: ${REMINDER_EMAIL_FROM_ADDRESS}
+        type: SECRET
+      - key: ReminderNotifications__Email__SmtpHost
+        value: ${REMINDER_EMAIL_SMTP_HOST}
+        type: SECRET
+      - key: ReminderNotifications__Email__SmtpPort
+        value: ${REMINDER_EMAIL_SMTP_PORT}
+        type: SECRET
+      - key: ReminderNotifications__Email__EnableSsl
+        value: ${REMINDER_EMAIL_ENABLE_SSL}
+        type: SECRET
+      - key: ReminderNotifications__Email__Username
+        value: ${REMINDER_EMAIL_USERNAME}
+        type: SECRET
+      - key: ReminderNotifications__Email__Password
+        value: ${REMINDER_EMAIL_PASSWORD}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioAccountSid
+        value: ${TWILIO_ACCOUNT_SID}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioAuthToken
+        value: ${TWILIO_AUTH_TOKEN}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioFromNumber
+        value: ${TWILIO_FROM_NUMBER}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
@@ -79,6 +113,8 @@ static_sites:
         value: ${api.PUBLIC_URL}/api/ravensight
       - key: VITE_STRIPE_PUBLISHABLE_KEY
         value: ${STRIPE_PUBLISHABLE_KEY}
+      - key: VITE_ADMIN_EMAILS
+        value: admin@wise-ravens.com
 
 ingress:
   rules:

@@ -4,23 +4,30 @@ const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
 const resolveApiBaseUrl = () => {
     const configured = (import.meta.env.VITE_API_URL || '').trim();
-    const fallback = configured || 'http://localhost:5242/api';
+    const localhostApi = 'http://localhost:5242/api';
 
     if (typeof window === 'undefined') {
-        return fallback;
+        return configured || localhostApi;
     }
 
     const host = (window.location.hostname || '').toLowerCase();
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = VITE_DEV_PORTS.has(window.location.port);
 
-    // Keep API origin aligned with the currently hosted app outside Vite dev
-    // to avoid mixed-content/CORS issues and stale-port drift.
-    if (isLocalHost && !isViteDevServer) {
+    if (isLocalHost) {
+        return configured || localhostApi;
+    }
+
+    if (isViteDevServer) {
+        return configured || localhostApi;
+    }
+
+    // In production/non-local environments always prefer same-origin /api.
+    if (!isLocalHost) {
         return `${window.location.origin}/api`;
     }
 
-    return fallback;
+    return configured || localhostApi;
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
@@ -136,7 +143,13 @@ export const apiService = {
 
     // Payments endpoints
     createCheckoutSession: (payload) => api.post('/payments/checkout-session', payload),
-    getPaymentsConfig: () => api.get('/payments/config')
+    getPaymentsConfig: () => api.get('/payments/config'),
+
+    // Planner reminder endpoints
+    sendCalendarReminder: (payload) => api.post('/notifications/reminder', payload),
+
+    // Admin diagnostics endpoints
+    getPersistenceStatus: () => api.get('/persistence/status')
 };
 
 export default api;
