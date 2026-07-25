@@ -57,6 +57,7 @@ public sealed class UserStore
             }
 
             LoadPersistedUsersUnsafe();
+            var shouldPersist = false;
 
             foreach (var configuredUser in configuredUsers)
             {
@@ -66,8 +67,32 @@ public sealed class UserStore
                 }
 
                 var email = configuredUser.Email.Trim();
-                if (_usersByEmail.ContainsKey(email))
+                if (_usersByEmail.TryGetValue(email, out var existingUser))
                 {
+                    var safeConfiguredName = string.IsNullOrWhiteSpace(configuredUser.Name)
+                        ? email.Split('@')[0]
+                        : configuredUser.Name.Trim();
+
+                    var shouldUpdateName = !string.Equals(existingUser.Name, safeConfiguredName, StringComparison.Ordinal);
+                    var shouldUpdatePassword = !VerifyPassword(configuredUser.Password, existingUser.PasswordHash);
+
+                    if (shouldUpdateName)
+                    {
+                        existingUser.Name = safeConfiguredName;
+                        existingUser.Handle = BuildHandle(safeConfiguredName, email);
+                    }
+
+                    if (shouldUpdatePassword)
+                    {
+                        existingUser.PasswordHash = HashPassword(configuredUser.Password);
+                    }
+
+                    if (shouldUpdateName || shouldUpdatePassword)
+                    {
+                        existingUser.UpdatedAtUtc = DateTime.UtcNow;
+                        shouldPersist = true;
+                    }
+
                     continue;
                 }
 
@@ -87,6 +112,12 @@ public sealed class UserStore
                 };
 
                 _usersByEmail.TryAdd(user.Email, user);
+                shouldPersist = true;
+            }
+
+            if (shouldPersist)
+            {
+                PersistUsers();
             }
 
             _seeded = true;
