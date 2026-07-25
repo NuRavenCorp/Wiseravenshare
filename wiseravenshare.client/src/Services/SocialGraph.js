@@ -21,6 +21,52 @@ const saveGraph = (graph) => writeJson(GRAPH_KEY, graph);
 const loadProfiles = () => readJson(PROFILE_KEY, {});
 const saveProfiles = (profiles) => writeJson(PROFILE_KEY, profiles);
 
+const profileFromUser = (user) => ({
+    id: user.id,
+    name: user.name || 'User',
+    handle: user.handle || user.username || 'user',
+    avatar: user.avatar || (user.name?.[0] || 'U').toUpperCase()
+});
+
+const applyProfileToPost = (post, profile) => {
+    if (!post || post.userId !== profile.id) {
+        return post;
+    }
+
+    return {
+        ...post,
+        user: {
+            ...(post.user || {}),
+            id: profile.id,
+            name: profile.name,
+            handle: profile.handle,
+            avatar: profile.avatar
+        }
+    };
+};
+
+const updateStoredPostsForProfile = (storageKey, profile) => {
+    const posts = readJson(storageKey, []);
+    if (!Array.isArray(posts) || posts.length === 0) {
+        return false;
+    }
+
+    let changed = false;
+    const nextPosts = posts.map((post) => {
+        const nextPost = applyProfileToPost(post, profile);
+        if (nextPost !== post) {
+            changed = true;
+        }
+        return nextPost;
+    });
+
+    if (changed) {
+        writeJson(storageKey, nextPosts);
+    }
+
+    return changed;
+};
+
 const emitSocialUpdate = () => {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('wiseraven:social-updated'));
@@ -38,17 +84,38 @@ export const socialGraphService = {
     registerUserProfile(user) {
         if (!user?.id) return;
         const profiles = loadProfiles();
-        profiles[user.id] = {
-            id: user.id,
-            name: user.name || 'User',
-            handle: user.handle || user.username || 'user',
-            avatar: user.avatar || (user.name?.[0] || 'U').toUpperCase()
-        };
+        const profile = profileFromUser(user);
+        profiles[user.id] = profile;
         saveProfiles(profiles);
 
         const graph = loadGraph();
         ensureUserNode(graph, user.id);
         saveGraph(graph);
+        emitSocialUpdate();
+    },
+
+    syncProfileAcrossStorage(user) {
+        if (!user?.id) return;
+
+        const profile = profileFromUser(user);
+        const profiles = loadProfiles();
+        profiles[user.id] = profile;
+        saveProfiles(profiles);
+
+        const didChangePosts = [
+            'wiseRecentPosts',
+            'wiseDiscoverPosts',
+            'wiseBookmarks',
+            'wiseLikedPosts'
+        ]
+            .map((storageKey) => updateStoredPostsForProfile(storageKey, profile))
+            .some(Boolean);
+
+        if (didChangePosts && typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('wiseraven:posts-updated'));
+            window.dispatchEvent(new Event('wiseraven:likes-updated'));
+        }
+
         emitSocialUpdate();
     },
 
