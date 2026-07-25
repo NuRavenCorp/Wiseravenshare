@@ -29,8 +29,24 @@ public sealed class PersistenceController : ControllerBase
             return Forbid();
         }
 
-        var userStatus = _userStore.GetPersistenceStatus();
-        var videoPersistenceAvailable = await _videoLibraryStore.IsDatabasePersistenceAvailableAsync();
+        var timeoutSeconds = 4;
+        var timeoutFromConfig = _configuration["Persistence:DiagnosticsTimeoutSeconds"];
+        if (int.TryParse(timeoutFromConfig, out var parsedTimeout) && parsedTimeout > 0)
+        {
+            timeoutSeconds = Math.Min(parsedTimeout, 15);
+        }
+
+        var userCheck = await TryGetUserStatusWithTimeoutAsync(timeoutSeconds);
+        var videoCheck = await TryGetVideoStatusWithTimeoutAsync(timeoutSeconds, HttpContext.RequestAborted);
+
+        var userStatus = userCheck.Status;
+        var userLastError = string.IsNullOrWhiteSpace(userStatus.LastError) ? string.Empty : userStatus.LastError;
+        if (userCheck.TimedOut)
+        {
+            userLastError = string.IsNullOrWhiteSpace(userLastError)
+                ? $"User persistence check timed out after {timeoutSeconds}s."
+                : $"{userLastError} (timed out after {timeoutSeconds}s)";
+        }
 
         var payload = new
         {
@@ -40,11 +56,14 @@ public sealed class PersistenceController : ControllerBase
                 userStatus.DatabaseAvailable,
                 userStatus.RequiresDatabase,
                 userStatus.ActiveTable,
-                userStatus.LastError
+                LastError = userLastError,
+                TimedOut = userCheck.TimedOut
             },
             videos = new
             {
-                DatabaseAvailable = videoPersistenceAvailable
+                DatabaseAvailable = videoCheck.DatabaseAvailable,
+                LastError = videoCheck.LastError,
+                TimedOut = videoCheck.TimedOut
             }
         };
 
@@ -54,6 +73,47 @@ public sealed class PersistenceController : ControllerBase
         }
 
         return Ok(payload);
+    }
+
+    private async Task<(UserPersistenceStatus Status, bool TimedOut)> TryGetUserStatusWithTimeoutAsync(int timeoutSeconds)
+    {
+        var statusTask = Task.Run(() => _userStore.GetPersistenceStatus());
+        var completedTask = await Task.WhenAny(statusTask, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds)));
+        if (completedTask == statusTask)
+        {
+            return (await statusTask, false);
+        }
+
+        var fallback = new UserPersistenceStatus
+        {
+            DatabaseConfigured = true,
+            DatabaseAvailable = false,
+            RequiresDatabase = true,
+            ActiveTable = "unknown",
+            LastError = string.Empty
+        };
+
+        return (fallback, true);
+    }
+
+    private async Task<(bool DatabaseAvailable, string LastError, bool TimedOut)> TryGetVideoStatusWithTimeoutAsync(int timeoutSeconds, CancellationToken requestAborted)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            var available = await _videoLibraryStore.IsDatabasePersistenceAvailableAsync(cts.Token);
+            return (available, string.Empty, false);
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, $"Video persistence check timed out after {timeoutSeconds}s.", true);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message, false);
+        }
     }
 
     private bool IsAdminRequest()
