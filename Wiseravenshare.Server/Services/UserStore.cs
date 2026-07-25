@@ -1,9 +1,20 @@
 using System.Collections.Concurrent;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Npgsql;
 using Wiseravenshare.Server.Models;
 
 namespace Wiseravenshare.Server.Services;
+
+public sealed class UserPersistenceStatus
+{
+    public bool DatabaseConfigured { get; set; }
+    public bool DatabaseAvailable { get; set; }
+    public bool RequiresDatabase { get; set; }
+    public string ActiveTable { get; set; } = string.Empty;
+    public string LastError { get; set; } = string.Empty;
+}
 
 public sealed class UserStore
 {
@@ -11,11 +22,24 @@ public sealed class UserStore
     private readonly object _seedLock = new();
     private readonly object _persistenceLock = new();
     private readonly IWebHostEnvironment _environment;
+    private readonly string _connectionString;
+    private readonly bool _requireDatabasePersistence;
+    private string _usersTable = "app_data.app_users";
+    private bool _dbSchemaEnsured;
     private bool _seeded;
+    private static readonly JsonSerializerOptions JsonCaseInsensitive = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
-    public UserStore(IWebHostEnvironment environment)
+    public UserStore(IWebHostEnvironment environment, IConfiguration configuration)
     {
         _environment = environment;
+        _connectionString = NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+        var configuredRequirement = configuration["Persistence:RequireDatabase"];
+        var parsedRequirement = false;
+        var hasConfiguredRequirement = bool.TryParse(configuredRequirement, out parsedRequirement);
+        _requireDatabasePersistence = hasConfiguredRequirement ? parsedRequirement : _environment.IsProduction();
     }
 
     public void EnsureSeeded(IEnumerable<(string Name, string Email, string Password)> configuredUsers)
@@ -67,6 +91,55 @@ public sealed class UserStore
 
             _seeded = true;
         }
+    }
+
+    public bool IsDatabasePersistenceAvailable()
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return false;
+        }
+
+        try
+        {
+            EnsureDbSchema();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public UserPersistenceStatus GetPersistenceStatus()
+    {
+        var status = new UserPersistenceStatus
+        {
+            DatabaseConfigured = !string.IsNullOrWhiteSpace(_connectionString),
+            RequiresDatabase = _requireDatabasePersistence,
+            ActiveTable = _usersTable
+        };
+
+        if (!status.DatabaseConfigured)
+        {
+            status.LastError = "Connection string is not configured.";
+            return status;
+        }
+
+        try
+        {
+            EnsureDbSchema();
+            status.DatabaseAvailable = true;
+            status.ActiveTable = _usersTable;
+            status.LastError = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            status.DatabaseAvailable = false;
+            status.LastError = ex.Message;
+        }
+
+        return status;
     }
 
     public bool EmailExists(string email)
@@ -329,6 +402,11 @@ public sealed class UserStore
 
     private void LoadPersistedUsersUnsafe()
     {
+        if (TryLoadUsersFromDatabase())
+        {
+            return;
+        }
+
         var path = GetUsersFilePath();
         if (!System.IO.File.Exists(path))
         {
@@ -361,6 +439,16 @@ public sealed class UserStore
 
     private void PersistUsers()
     {
+        if (TryPersistUsersToDatabase())
+        {
+            return;
+        }
+
+        if (_requireDatabasePersistence)
+        {
+            throw new InvalidOperationException("Database persistence is unavailable. Profile and social feed changes were not saved.");
+        }
+
         lock (_persistenceLock)
         {
             var users = _usersByEmail.Values
@@ -369,5 +457,343 @@ public sealed class UserStore
             var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
             System.IO.File.WriteAllText(GetUsersFilePath(), json);
         }
+    }
+
+    private bool TryLoadUsersFromDatabase()
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return false;
+        }
+
+        try
+        {
+            EnsureDbSchema();
+
+            using var connection = new NpgsqlConnection(_connectionString);
+            connection.Open();
+
+            var sql = $@"
+SELECT id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, created_at_utc, updated_at_utc
+FROM {_usersTable}
+ORDER BY email;";
+
+            using var command = new NpgsqlCommand(sql, connection);
+            using var reader = command.ExecuteReader();
+
+            while (reader.Read())
+            {
+                var socialFeedsJson = reader.IsDBNull(9) ? "{}" : reader.GetString(9);
+                var socialFeeds = ParseSocialFeeds(socialFeedsJson);
+
+                var user = new UserRecord
+                {
+                    Id = reader.GetString(0),
+                    Email = reader.GetString(1),
+                    Name = reader.GetString(2),
+                    Handle = reader.GetString(3),
+                    PasswordHash = reader.GetString(4),
+                    Bio = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                    Location = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                    Website = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+                    Avatar = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    SocialFeeds = NormalizeSocialFeeds(socialFeeds),
+                    CreatedAtUtc = reader.GetDateTime(10),
+                    UpdatedAtUtc = reader.GetDateTime(11)
+                };
+
+                _usersByEmail[user.Email] = user;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static SocialFeedSettings ParseSocialFeeds(string socialFeedsJson)
+    {
+        if (string.IsNullOrWhiteSpace(socialFeedsJson))
+        {
+            return new SocialFeedSettings();
+        }
+
+        try
+        {
+            // Expected shape: { tikTok/facebook/instagram... }
+            var direct = JsonSerializer.Deserialize<SocialFeedSettings>(socialFeedsJson, JsonCaseInsensitive);
+            if (direct is not null)
+            {
+                return direct;
+            }
+        }
+        catch
+        {
+            // Fall through to compatibility parser.
+        }
+
+        try
+        {
+            // Compatibility path for legacy wrapper payloads: { socialFeeds: { ... } }
+            using var doc = JsonDocument.Parse(socialFeedsJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("socialFeeds", out var wrapped))
+            {
+                var wrappedJson = wrapped.GetRawText();
+                var wrappedFeeds = JsonSerializer.Deserialize<SocialFeedSettings>(wrappedJson, JsonCaseInsensitive);
+                if (wrappedFeeds is not null)
+                {
+                    return wrappedFeeds;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore and return defaults.
+        }
+
+        return new SocialFeedSettings();
+    }
+
+    private bool TryPersistUsersToDatabase()
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return false;
+        }
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                EnsureDbSchema();
+
+                lock (_persistenceLock)
+                {
+                    var users = _usersByEmail.Values
+                        .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    using var connection = new NpgsqlConnection(_connectionString);
+                    connection.Open();
+                    using var tx = connection.BeginTransaction();
+
+                    using (var truncate = new NpgsqlCommand($"TRUNCATE TABLE {_usersTable};", connection, tx))
+                    {
+                        truncate.ExecuteNonQuery();
+                    }
+
+                    var insertSql = $@"
+INSERT INTO {_usersTable} (
+    id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, created_at_utc, updated_at_utc
+) VALUES (
+    @id, @email, @name, @handle, @password_hash, @bio, @location, @website, @avatar, @social_feeds, @created_at_utc, @updated_at_utc
+);";
+
+                    foreach (var user in users)
+                    {
+                        using var insert = new NpgsqlCommand(insertSql, connection, tx);
+                        insert.Parameters.AddWithValue("id", user.Id);
+                        insert.Parameters.AddWithValue("email", user.Email);
+                        insert.Parameters.AddWithValue("name", user.Name);
+                        insert.Parameters.AddWithValue("handle", user.Handle);
+                        insert.Parameters.AddWithValue("password_hash", user.PasswordHash);
+                        insert.Parameters.AddWithValue("bio", user.Bio ?? string.Empty);
+                        insert.Parameters.AddWithValue("location", user.Location ?? string.Empty);
+                        insert.Parameters.AddWithValue("website", user.Website ?? string.Empty);
+                        insert.Parameters.AddWithValue("avatar", user.Avatar ?? string.Empty);
+                        insert.Parameters.AddWithValue("social_feeds", JsonSerializer.Serialize(user.SocialFeeds ?? new SocialFeedSettings()));
+                        insert.Parameters.AddWithValue("created_at_utc", user.CreatedAtUtc);
+                        insert.Parameters.AddWithValue("updated_at_utc", user.UpdatedAtUtc);
+                        insert.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                var shouldRetry = attempt < 3 && IsTransientDatabaseException(ex);
+                if (!shouldRetry)
+                {
+                    return false;
+                }
+
+                Thread.Sleep(TimeSpan.FromMilliseconds(200 * attempt));
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsTransientDatabaseException(Exception exception)
+    {
+        var current = exception;
+        while (current is not null)
+        {
+            if (current is TimeoutException || current is IOException || current is SocketException)
+            {
+                return true;
+            }
+
+            if (current is NpgsqlException npgsqlException)
+            {
+                if (npgsqlException.IsTransient)
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(npgsqlException.SqlState))
+                {
+                    var sqlState = npgsqlException.SqlState;
+                    if (sqlState.StartsWith("08", StringComparison.Ordinal)
+                        || sqlState == "40001"
+                        || sqlState == "40P01"
+                        || sqlState == "57P01")
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
+    }
+
+    private void EnsureDbSchema()
+    {
+        if (_dbSchemaEnsured || string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return;
+        }
+
+        using var connection = new NpgsqlConnection(_connectionString);
+        connection.Open();
+
+        if (TryEnsureUsersTable(connection, "app_data", ensureSchema: true))
+        {
+            _usersTable = "app_data.app_users";
+            _dbSchemaEnsured = true;
+            return;
+        }
+
+        if (TryEnsureUsersTable(connection, "public", ensureSchema: false))
+        {
+            _usersTable = "public.app_users";
+            _dbSchemaEnsured = true;
+            return;
+        }
+
+        throw new InvalidOperationException("Unable to create or access user persistence table in app_data or public schema.");
+    }
+
+    private static bool TryEnsureUsersTable(NpgsqlConnection connection, string schemaName, bool ensureSchema)
+    {
+        try
+        {
+            var prefix = $"{schemaName}.app_users";
+            var createSchemaSql = ensureSchema ? $"CREATE SCHEMA IF NOT EXISTS {schemaName};" : string.Empty;
+            var sql = $@"
+{createSchemaSql}
+
+CREATE TABLE IF NOT EXISTS {prefix} (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    bio TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    website TEXT NOT NULL DEFAULT '',
+    avatar TEXT NOT NULL DEFAULT '',
+    social_feeds JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_handle ON {prefix}(handle);
+";
+
+            using var command = new NpgsqlCommand(sql, connection);
+            command.ExecuteNonQuery();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeConnectionString(string connectionString)
+    {
+        var value = connectionString?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (!value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            && !value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        if (value.EndsWith("?sslmode", StringComparison.OrdinalIgnoreCase))
+        {
+            return value + "=require";
+        }
+
+        value = value.Replace("?sslmode&", "?sslmode=require&", StringComparison.OrdinalIgnoreCase);
+        value = value.Replace("&sslmode&", "&sslmode=require&", StringComparison.OrdinalIgnoreCase);
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return value;
+        }
+
+        var userName = string.Empty;
+        var password = string.Empty;
+        if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+            userName = Uri.UnescapeDataString(parts[0]);
+            if (parts.Length > 1)
+            {
+                password = Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.IsDefaultPort ? 5432 : uri.Port,
+            Username = userName,
+            Password = password,
+            Database = uri.AbsolutePath.Trim('/'),
+            SslMode = SslMode.Require,
+            TrustServerCertificate = true
+        };
+
+        var query = uri.Query?.TrimStart('?') ?? string.Empty;
+        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = segment.Split('=', 2);
+            var key = Uri.UnescapeDataString(kv[0]);
+            var val = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+            if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase)
+                && Enum.TryParse<SslMode>(val, true, out var mode))
+            {
+                builder.SslMode = mode;
+            }
+        }
+
+        return builder.ConnectionString;
     }
 }

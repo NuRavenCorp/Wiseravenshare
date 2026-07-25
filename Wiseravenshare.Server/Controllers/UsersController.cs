@@ -81,6 +81,10 @@ public sealed class UsersController : ControllerBase
             var user = _userStore.UpdateProfile(id, request);
             return Ok(UserStore.ToResponse(user));
         }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
+        }
         catch (KeyNotFoundException)
         {
             return NotFound(new { message = "User not found." });
@@ -115,6 +119,10 @@ public sealed class UsersController : ControllerBase
         {
             var user = _userStore.UpdateSocialFeeds(id, request);
             return Ok(user.SocialFeeds);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
         }
         catch (KeyNotFoundException)
         {
