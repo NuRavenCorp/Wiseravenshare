@@ -1,6 +1,7 @@
 const GRAPH_KEY = 'wiseSocialGraph';
 const PROFILE_KEY = 'wiseUserProfiles';
 const FOLLOW_EVENTS_KEY = 'wiseFollowEvents';
+const USER_ALIASES_KEY = 'wiseUserAliases';
 
 const defaultGraph = { users: {} };
 
@@ -23,6 +24,8 @@ const loadProfiles = () => readJson(PROFILE_KEY, {});
 const saveProfiles = (profiles) => writeJson(PROFILE_KEY, profiles);
 const loadFollowEvents = () => readJson(FOLLOW_EVENTS_KEY, []);
 const saveFollowEvents = (events) => writeJson(FOLLOW_EVENTS_KEY, events);
+const loadUserAliases = () => readJson(USER_ALIASES_KEY, {});
+const saveUserAliases = (aliases) => writeJson(USER_ALIASES_KEY, aliases);
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -90,6 +93,37 @@ const ensureUserNode = (graph, userId) => {
     }
 };
 
+const resolveUserId = (userId) => {
+    if (!userId) {
+        return userId;
+    }
+
+    const aliases = loadUserAliases();
+    return aliases[`id:${userId}`] || userId;
+};
+
+const getCanonicalUserId = (user) => {
+    const aliases = loadUserAliases();
+    const id = String(user?.id || '').trim();
+    const email = String(user?.email || '').trim().toLowerCase();
+
+    if (!id) {
+        return '';
+    }
+
+    const fromIdAlias = aliases[`id:${id}`];
+    const fromEmailAlias = email ? aliases[`email:${email}`] : '';
+    const canonicalId = fromIdAlias || fromEmailAlias || id;
+
+    aliases[`id:${id}`] = canonicalId;
+    if (email) {
+        aliases[`email:${email}`] = canonicalId;
+    }
+    saveUserAliases(aliases);
+
+    return canonicalId;
+};
+
 const recordFollowEvent = (actorId, targetId, action) => {
     if (!actorId || !targetId || !action) {
         return;
@@ -141,13 +175,20 @@ const getRecentPostsForUser = (posts = [], userId, days = 14) => {
 export const socialGraphService = {
     registerUserProfile(user) {
         if (!user?.id) return;
+
+        const canonicalId = getCanonicalUserId(user);
+        if (!canonicalId) {
+            return;
+        }
+
         const profiles = loadProfiles();
         const profile = profileFromUser(user);
-        profiles[user.id] = profile;
+        profile.id = canonicalId;
+        profiles[canonicalId] = profile;
         saveProfiles(profiles);
 
         const graph = loadGraph();
-        ensureUserNode(graph, user.id);
+        ensureUserNode(graph, canonicalId);
         saveGraph(graph);
         emitSocialUpdate();
     },
@@ -155,9 +196,15 @@ export const socialGraphService = {
     syncProfileAcrossStorage(user) {
         if (!user?.id) return;
 
+        const canonicalId = getCanonicalUserId(user);
+        if (!canonicalId) {
+            return;
+        }
+
         const profile = profileFromUser(user);
+        profile.id = canonicalId;
         const profiles = loadProfiles();
-        profiles[user.id] = profile;
+        profiles[canonicalId] = profile;
         saveProfiles(profiles);
 
         const didChangePosts = [
@@ -180,22 +227,28 @@ export const socialGraphService = {
     followUser(currentUserId, targetUserId) {
         if (!currentUserId || !targetUserId || currentUserId === targetUserId) return false;
 
-        const graph = loadGraph();
-        ensureUserNode(graph, currentUserId);
-        ensureUserNode(graph, targetUserId);
-
-        const current = graph.users[currentUserId];
-        const target = graph.users[targetUserId];
-
-        if (!current.following.includes(targetUserId)) {
-            current.following.push(targetUserId);
+        const resolvedCurrentUserId = resolveUserId(currentUserId);
+        const resolvedTargetUserId = resolveUserId(targetUserId);
+        if (!resolvedCurrentUserId || !resolvedTargetUserId || resolvedCurrentUserId === resolvedTargetUserId) {
+            return false;
         }
-        if (!target.followers.includes(currentUserId)) {
-            target.followers.push(currentUserId);
+
+        const graph = loadGraph();
+        ensureUserNode(graph, resolvedCurrentUserId);
+        ensureUserNode(graph, resolvedTargetUserId);
+
+        const current = graph.users[resolvedCurrentUserId];
+        const target = graph.users[resolvedTargetUserId];
+
+        if (!current.following.includes(resolvedTargetUserId)) {
+            current.following.push(resolvedTargetUserId);
+        }
+        if (!target.followers.includes(resolvedCurrentUserId)) {
+            target.followers.push(resolvedCurrentUserId);
         }
 
         saveGraph(graph);
-        recordFollowEvent(currentUserId, targetUserId, 'follow');
+        recordFollowEvent(resolvedCurrentUserId, resolvedTargetUserId, 'follow');
         emitSocialUpdate();
         return true;
     },
@@ -203,41 +256,54 @@ export const socialGraphService = {
     unfollowUser(currentUserId, targetUserId) {
         if (!currentUserId || !targetUserId || currentUserId === targetUserId) return false;
 
+        const resolvedCurrentUserId = resolveUserId(currentUserId);
+        const resolvedTargetUserId = resolveUserId(targetUserId);
+        if (!resolvedCurrentUserId || !resolvedTargetUserId || resolvedCurrentUserId === resolvedTargetUserId) {
+            return false;
+        }
+
         const graph = loadGraph();
-        ensureUserNode(graph, currentUserId);
-        ensureUserNode(graph, targetUserId);
+        ensureUserNode(graph, resolvedCurrentUserId);
+        ensureUserNode(graph, resolvedTargetUserId);
 
-        const current = graph.users[currentUserId];
-        const target = graph.users[targetUserId];
+        const current = graph.users[resolvedCurrentUserId];
+        const target = graph.users[resolvedTargetUserId];
 
-        current.following = current.following.filter((id) => id !== targetUserId);
-        target.followers = target.followers.filter((id) => id !== currentUserId);
+        current.following = current.following.filter((id) => id !== resolvedTargetUserId);
+        target.followers = target.followers.filter((id) => id !== resolvedCurrentUserId);
 
         saveGraph(graph);
-        recordFollowEvent(currentUserId, targetUserId, 'unfollow');
+        recordFollowEvent(resolvedCurrentUserId, resolvedTargetUserId, 'unfollow');
         emitSocialUpdate();
         return true;
     },
 
     isFollowing(currentUserId, targetUserId) {
         if (!currentUserId || !targetUserId) return false;
+        const resolvedCurrentUserId = resolveUserId(currentUserId);
+        const resolvedTargetUserId = resolveUserId(targetUserId);
+        if (!resolvedCurrentUserId || !resolvedTargetUserId) {
+            return false;
+        }
         const graph = loadGraph();
-        ensureUserNode(graph, currentUserId);
-        return graph.users[currentUserId].following.includes(targetUserId);
+        ensureUserNode(graph, resolvedCurrentUserId);
+        return graph.users[resolvedCurrentUserId].following.includes(resolvedTargetUserId);
     },
 
     getFollowingIds(userId) {
         if (!userId) return [];
+        const resolvedUserId = resolveUserId(userId);
         const graph = loadGraph();
-        ensureUserNode(graph, userId);
-        return graph.users[userId].following;
+        ensureUserNode(graph, resolvedUserId);
+        return graph.users[resolvedUserId].following;
     },
 
     getFollowerIds(userId) {
         if (!userId) return [];
+        const resolvedUserId = resolveUserId(userId);
         const graph = loadGraph();
-        ensureUserNode(graph, userId);
-        return graph.users[userId].followers;
+        ensureUserNode(graph, resolvedUserId);
+        return graph.users[resolvedUserId].followers;
     },
 
     getCounts(userId) {
@@ -276,13 +342,39 @@ export const socialGraphService = {
             };
         }
 
-        const graph = loadGraph();
-        ensureUserNode(graph, viewerId);
-        ensureUserNode(graph, candidateId);
+        const resolvedViewerId = resolveUserId(viewerId);
+        const resolvedCandidateId = resolveUserId(candidateId);
+        if (!resolvedViewerId || !resolvedCandidateId || resolvedViewerId === resolvedCandidateId) {
+            return {
+                followScore: 0,
+                components: {
+                    mutualScore: 0,
+                    reciprocityScore: 0,
+                    socialProofScore: 0,
+                    activityScore: 0,
+                    engagementScore: 0,
+                    retentionScore: 0,
+                    affinityScore: 0
+                },
+                counts: {
+                    mutualCount: 0,
+                    followers: 0,
+                    following: 0,
+                    recentPostCount: 0,
+                    followEvents: 0,
+                    unfollowEvents: 0
+                },
+                isReciprocal: false
+            };
+        }
 
-        const viewerFollowing = graph.users[viewerId].following || [];
-        const candidateFollowers = graph.users[candidateId].followers || [];
-        const candidateFollowing = graph.users[candidateId].following || [];
+        const graph = loadGraph();
+        ensureUserNode(graph, resolvedViewerId);
+        ensureUserNode(graph, resolvedCandidateId);
+
+        const viewerFollowing = graph.users[resolvedViewerId].following || [];
+        const candidateFollowers = graph.users[resolvedCandidateId].followers || [];
+        const candidateFollowing = graph.users[resolvedCandidateId].following || [];
 
         const mutualCount = getMutualCount(candidateFollowers, viewerFollowing);
         const mutualScore = clamp(mutualCount / 10, 0, 1);
@@ -296,7 +388,7 @@ export const socialGraphService = {
         const ratio = followers / (following + 1);
         const socialProofScore = clamp((followerLog / 4) * 0.7 + clamp(ratio / 6, 0, 1) * 0.3, 0, 1);
 
-        const recentPosts = getRecentPostsForUser(posts, candidateId, 14);
+        const recentPosts = getRecentPostsForUser(posts, resolvedCandidateId, 14);
         const recentPostCount = recentPosts.length;
         const activityScore = clamp(recentPostCount / 8, 0, 1);
 
@@ -309,7 +401,7 @@ export const socialGraphService = {
         const averageEngagement = recentPostCount > 0 ? totalEngagement / recentPostCount : 0;
         const engagementScore = clamp(averageEngagement / 60, 0, 1);
 
-        const followEvents = loadFollowEvents().filter((event) => event?.actorId === viewerId && event?.targetId === candidateId);
+        const followEvents = loadFollowEvents().filter((event) => event?.actorId === resolvedViewerId && event?.targetId === resolvedCandidateId);
         const followCount = followEvents.filter((event) => event.action === 'follow').length;
         const unfollowCount = followEvents.filter((event) => event.action === 'unfollow').length;
         const retentionScore = followCount === 0
