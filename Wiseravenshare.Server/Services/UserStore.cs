@@ -117,7 +117,15 @@ public sealed class UserStore
 
             if (shouldPersist)
             {
-                PersistUsers();
+                try
+                {
+                    PersistUsers();
+                }
+                catch (InvalidOperationException)
+                {
+                    // Keep authentication available even when durable persistence is temporarily unavailable.
+                    // Profile/feed updates still enforce persistence requirements in their own workflows.
+                }
             }
 
             _seeded = true;
