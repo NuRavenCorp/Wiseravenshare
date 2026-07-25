@@ -72,13 +72,26 @@ const readStoredProfiles = () => {
     }
 };
 
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
+
+const asPercent = (value) => `${Math.round((Number(value) || 0) * 100)}%`;
+
 const RightSidebar = ({ onNavigate }) => {
     const [trendingTopics, setTrendingTopics] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
     const [followingIds, setFollowingIds] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
+    const [showFollowDebug, setShowFollowDebug] = useState(false);
     const { user } = useAuth();
+    const isAdminUser = parseAdminEmails().has(String(user?.email || '').trim().toLowerCase());
 
     const [stockData, setStockData] = useState([
         { symbol: 'WRAV', name: 'Wise Raven', price: 145.23, change: 1.2 },
@@ -462,9 +475,27 @@ const RightSidebar = ({ onNavigate }) => {
                 padding: '20px',
                 border: '1px solid var(--border-color)'
             }}>
-                <h3 style={{ marginBottom: '15px', color: 'var(--light-color)' }}>
-                    <i className="fas fa-user-plus"></i> Who to Follow
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                    <h3 style={{ marginBottom: 0, color: 'var(--light-color)' }}>
+                        <i className="fas fa-user-plus"></i> Who to Follow
+                    </h3>
+                    {isAdminUser && (
+                        <button
+                            onClick={() => setShowFollowDebug((prev) => !prev)}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                background: showFollowDebug ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                color: 'var(--text-color)',
+                                borderRadius: '999px',
+                                padding: '5px 10px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            {showFollowDebug ? 'Hide Debug' : 'Show Debug'}
+                        </button>
+                    )}
+                </div>
                 {suggestedUsers.map(user => (
                     <div
                         key={user.id}
@@ -499,6 +530,35 @@ const RightSidebar = ({ onNavigate }) => {
                                         Follow score {user.followScore}
                                         {user.followMetrics?.isReciprocal ? ' • follows you' : ''}
                                         {user.hasRecentPost ? ' • active now' : ''}
+                                    </div>
+                                )}
+                                {isAdminUser && showFollowDebug && user.followMetrics && (
+                                    <div
+                                        style={{
+                                            marginTop: '6px',
+                                            padding: '6px 8px',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '8px',
+                                            background: 'rgba(255,255,255,0.03)',
+                                            fontSize: '10px',
+                                            color: 'var(--light-color)',
+                                            display: 'grid',
+                                            gap: '2px'
+                                        }}
+                                    >
+                                        <div>Mutual: {asPercent(user.followMetrics.components?.mutualScore)}</div>
+                                        <div>Reciprocity: {asPercent(user.followMetrics.components?.reciprocityScore)}</div>
+                                        <div>Social proof: {asPercent(user.followMetrics.components?.socialProofScore)}</div>
+                                        <div>Activity: {asPercent(user.followMetrics.components?.activityScore)}</div>
+                                        <div>Engagement: {asPercent(user.followMetrics.components?.engagementScore)}</div>
+                                        <div>Retention: {asPercent(user.followMetrics.components?.retentionScore)}</div>
+                                        <div>Affinity: {asPercent(user.followMetrics.components?.affinityScore)}</div>
+                                        <div>
+                                            Counts: {user.followMetrics.counts?.mutualCount || 0} mutual, {user.followMetrics.counts?.recentPostCount || 0} recent posts
+                                        </div>
+                                        <div>
+                                            History: {user.followMetrics.counts?.followEvents || 0} follow / {user.followMetrics.counts?.unfollowEvents || 0} unfollow
+                                        </div>
                                     </div>
                                 )}
                             </div>
