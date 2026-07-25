@@ -136,7 +136,7 @@ const ProfilePage = () => {
         };
     }, [user?.id]);
 
-    const loadPersistenceStatus = async () => {
+    const loadPersistenceStatus = async (refresh = false) => {
         if (!isAdminUser) {
             return;
         }
@@ -144,7 +144,7 @@ const ProfilePage = () => {
         setPersistenceLoading(true);
         setPersistenceError('');
         try {
-            const response = await apiService.getPersistenceStatus();
+            const response = await apiService.getPersistenceStatus(refresh);
             setPersistenceStatus(response?.data || null);
         } catch (error) {
             const statusCode = error?.response?.status;
@@ -1079,7 +1079,7 @@ const ProfilePage = () => {
                             </div>
                         </div>
                         <button
-                            onClick={loadPersistenceStatus}
+                            onClick={() => loadPersistenceStatus(true)}
                             disabled={persistenceLoading}
                             style={{
                                 padding: '8px 12px',
