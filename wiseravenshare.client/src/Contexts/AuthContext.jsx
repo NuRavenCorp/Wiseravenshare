@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { authService } from '../Services/Auth.jsx';
+import { socialGraphService } from '../Services/SocialGraph';
 
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
@@ -156,6 +157,7 @@ export const AuthProvider = ({ children }) => {
             setUser(updatedUser);
             localStorage.setItem('user_data', JSON.stringify(updatedUser));
             localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedUser?.socialFeeds || {}));
+            socialGraphService.syncProfileAcrossStorage(updatedUser);
             window.dispatchEvent(new Event('wiseraven:social-updated'));
             return updatedUser;
         } catch (err) {
