@@ -91,9 +91,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
+builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 
 var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
