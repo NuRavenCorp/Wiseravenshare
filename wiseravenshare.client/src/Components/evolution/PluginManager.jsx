@@ -1,5 +1,5 @@
-﻿import { ModuleRegistry } from './ModuleRegistry';
-import { api } from '../../services/api';
+import { ModuleRegistry } from './ModuleRegistry';
+import { api } from '../../Services/api';
 
 class PluginManager {
     static plugins = new Map();

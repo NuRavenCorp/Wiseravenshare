@@ -77,6 +77,7 @@ const ProfilePage = () => {
     const [cameraOpen, setCameraOpen] = useState(false);
     const [cameraError, setCameraError] = useState('');
     const [cameraStream, setCameraStream] = useState(null);
+    const [focusedProfile, setFocusedProfile] = useState(null);
     const [persistenceStatus, setPersistenceStatus] = useState(null);
     const [persistenceLoading, setPersistenceLoading] = useState(false);
     const [persistenceError, setPersistenceError] = useState('');
@@ -112,6 +113,33 @@ const ProfilePage = () => {
             });
         }
     }, [user]);
+
+    useEffect(() => {
+        if (!user?.id) {
+            setFocusedProfile(null);
+            return;
+        }
+
+        try {
+            const raw = localStorage.getItem('wiseProfileFocus');
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (!parsed?.id || parsed.id === user.id) {
+                setFocusedProfile(null);
+                return;
+            }
+
+            setFocusedProfile({
+                id: parsed.id,
+                name: parsed.name || 'User',
+                handle: parsed.handle || `@${parsed.id}`,
+                avatar: parsed.avatar || 'U',
+                followers: Number(parsed.followers) || 0,
+                following: Number(parsed.following) || 0
+            });
+        } catch {
+            setFocusedProfile(null);
+        }
+    }, [user?.id]);
 
     useEffect(() => {
         if (!user?.id || !editing) return;
@@ -390,11 +418,104 @@ const ProfilePage = () => {
     ];
 
     const isImageAvatar = typeof user?.avatar === 'string' && (user.avatar.startsWith('data:image/') || user.avatar.startsWith('http'));
+    const focusedIsImageAvatar = typeof focusedProfile?.avatar === 'string'
+        && (focusedProfile.avatar.startsWith('data:image/') || focusedProfile.avatar.startsWith('http'));
+    const isFollowingFocusedProfile = focusedProfile?.id
+        ? socialGraphService.isFollowing(user?.id, focusedProfile.id)
+        : false;
 
     if (!user) return null;
 
     return (
         <div>
+            {focusedProfile && (
+                <div style={{
+                    background: 'var(--card-bg)',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    marginBottom: '16px',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{
+                                width: '54px',
+                                height: '54px',
+                                borderRadius: '50%',
+                                background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 'bold'
+                            }}>
+                                {focusedIsImageAvatar ? (
+                                    <img
+                                        src={focusedProfile.avatar}
+                                        alt="Focused profile avatar"
+                                        style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                    />
+                                ) : (
+                                    focusedProfile.avatar
+                                )}
+                            </div>
+                            <div>
+                                <div style={{ fontWeight: 700 }}>{focusedProfile.name}</div>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>
+                                    {String(focusedProfile.handle).startsWith('@') ? focusedProfile.handle : `@${focusedProfile.handle}`}
+                                </div>
+                                <div style={{ color: 'var(--highlight-color)', fontSize: '12px' }}>
+                                    {focusedProfile.followers.toLocaleString()} followers • {focusedProfile.following.toLocaleString()} following
+                                </div>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!focusedProfile?.id || !user?.id) return;
+                                    if (socialGraphService.isFollowing(user.id, focusedProfile.id)) {
+                                        socialGraphService.unfollowUser(user.id, focusedProfile.id);
+                                    } else {
+                                        socialGraphService.followUser(user.id, focusedProfile.id);
+                                    }
+                                    window.dispatchEvent(new Event('wiseraven:social-updated'));
+                                    setFocusedProfile((prev) => (prev ? { ...prev } : prev));
+                                }}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    background: isFollowingFocusedProfile ? 'rgba(255,255,255,0.06)' : 'var(--highlight-color)',
+                                    color: 'var(--text-color)',
+                                    borderRadius: '999px',
+                                    padding: '7px 12px',
+                                    cursor: 'pointer',
+                                    fontSize: '12px'
+                                }}
+                            >
+                                {isFollowingFocusedProfile ? 'Following' : 'Follow'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    localStorage.removeItem('wiseProfileFocus');
+                                    setFocusedProfile(null);
+                                }}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    borderRadius: '999px',
+                                    padding: '7px 12px',
+                                    cursor: 'pointer',
+                                    fontSize: '12px'
+                                }}
+                            >
+                                Return to my profile
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Profile Header */}
             <div style={{
                 background: 'var(--card-bg)',

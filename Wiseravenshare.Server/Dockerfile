@@ -6,7 +6,7 @@ WORKDIR /app
 EXPOSE 10000
 
 RUN apt-get update \
-	&& apt-get install -y wget ca-certificates \
+	&& apt-get install -y wget ca-certificates libgssapi-krb5-2 \
 	&& wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb \
 	&& dpkg -i /tmp/packages-microsoft-prod.deb \
 	&& rm /tmp/packages-microsoft-prod.deb \
@@ -18,7 +18,7 @@ RUN apt-get update \
 # This stage is used to build the service project
 FROM ubuntu:24.04 AS with-node
 RUN apt-get update \
-	&& apt-get install -y wget curl ca-certificates gnupg \
+	&& apt-get install -y wget curl ca-certificates gnupg libgssapi-krb5-2 \
 	&& wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb \
 	&& dpkg -i /tmp/packages-microsoft-prod.deb \
 	&& rm /tmp/packages-microsoft-prod.deb \

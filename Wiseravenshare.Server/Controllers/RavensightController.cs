@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -19,12 +20,14 @@ public class RavensightController : ControllerBase
     private readonly IWebHostEnvironment _environment;
     private readonly IYouTubeService _youTubeService;
     private readonly VideoLibraryStore _videoStore;
+    private readonly ILogger<RavensightController> _logger;
 
-    public RavensightController(IWebHostEnvironment environment, IYouTubeService youTubeService, VideoLibraryStore videoStore)
+    public RavensightController(IWebHostEnvironment environment, IYouTubeService youTubeService, VideoLibraryStore videoStore, ILogger<RavensightController> logger)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoStore = videoStore;
+        _logger = logger;
     }
 
     [HttpPost("upload")]
@@ -79,14 +82,15 @@ public class RavensightController : ControllerBase
             return BadRequest(new { message = "Facebook permission consent is required." });
         }
 
-        var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
-        var uploadsFolder = Path.Combine(_environment.ContentRootPath, "MediaStorage");
-        Directory.CreateDirectory(uploadsFolder);
-
-        var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-        await using (var stream = new FileStream(filePath, FileMode.Create))
+        string uniqueFileName;
+        try
         {
-            await file.CopyToAsync(stream, cancellationToken);
+            uniqueFileName = await SaveVideoFileAsync(file, extension, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist uploaded video file before library save.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
         string? youtubeUrl = null;
@@ -110,21 +114,67 @@ public class RavensightController : ControllerBase
 
         var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
 
-        var saved = await _videoStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+        VideoLibraryVideo saved;
+        try
         {
-            UserId = userId,
-            Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(file.FileName) : upload.Title,
-            Description = upload.Description ?? string.Empty,
-            Tags = ParseTags(upload.Tags),
-            VideoUrl = absoluteVideoUrl,
-            PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
-            Status = "published",
-            YouTubeUrl = youtubeUrl,
-            TikTokUrl = tiktokUrl,
-            FacebookUrl = facebookUrl
-        }, cancellationToken);
+            saved = await _videoStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+            {
+                UserId = userId,
+                Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(file.FileName) : upload.Title,
+                Description = upload.Description ?? string.Empty,
+                Tags = ParseTags(upload.Tags),
+                VideoUrl = absoluteVideoUrl,
+                PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
+                Status = "published",
+                YouTubeUrl = youtubeUrl,
+                TikTokUrl = tiktokUrl,
+                FacebookUrl = facebookUrl
+            }, cancellationToken);
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Video library database is temporarily unavailable." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
+        }
 
         return Ok(new { video = saved });
+    }
+
+    private async Task<string> SaveVideoFileAsync(IFormFile file, string extension, CancellationToken cancellationToken)
+    {
+        var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
+        var candidateFolders = new[]
+        {
+            Path.Combine(_environment.ContentRootPath, "MediaStorage"),
+            Path.Combine(AppContext.BaseDirectory, "MediaStorage"),
+            Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage")
+        };
+
+        Exception? lastFailure = null;
+
+        foreach (var folder in candidateFolders)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                var filePath = Path.Combine(folder, uniqueFileName);
+                await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await file.CopyToAsync(stream, cancellationToken);
+                return uniqueFileName;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                lastFailure = ex;
+                _logger.LogWarning(ex, "Video upload write attempt failed for folder {Folder}", folder);
+            }
+        }
+
+        throw new InvalidOperationException("Unable to write uploaded video to any configured storage path.", lastFailure);
     }
 
     [HttpGet("feed")]

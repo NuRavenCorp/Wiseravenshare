@@ -105,7 +105,16 @@ const PostCard = ({
                 )}
             </div>
 
-            <p style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>{post.content}</p>
+            <p
+                style={{
+                    marginTop: '12px',
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word'
+                }}
+            >
+                {post.content}
+            </p>
 
             <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{truthBadge.text}</div>
@@ -193,7 +202,15 @@ const PostCard = ({
                         <button onClick={addComment}>Send</button>
                     </div>
                     {comments.map((comment) => (
-                        <div key={comment.id} style={{ fontSize: '13px', marginBottom: '6px' }}>
+                        <div
+                            key={comment.id}
+                            style={{
+                                fontSize: '13px',
+                                marginBottom: '6px',
+                                overflowWrap: 'anywhere',
+                                wordBreak: 'break-word'
+                            }}
+                        >
                             <strong>{comment.user?.name || 'User'}:</strong> {comment.content}
                         </div>
                     ))}

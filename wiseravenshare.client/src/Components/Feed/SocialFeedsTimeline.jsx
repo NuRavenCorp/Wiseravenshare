@@ -388,7 +388,15 @@ const SocialFeedsTimeline = ({ user, compact = false }) => {
                                 <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</span>
                             </div>
 
-                            <div style={{ marginTop: '6px', fontSize: '13px' }}>
+                            <div
+                                style={{
+                                    marginTop: '6px',
+                                    fontSize: '13px',
+                                    whiteSpace: 'pre-wrap',
+                                    overflowWrap: 'anywhere',
+                                    wordBreak: 'break-word'
+                                }}
+                            >
                                 {item.text || 'No text provided.'}
                             </div>
 

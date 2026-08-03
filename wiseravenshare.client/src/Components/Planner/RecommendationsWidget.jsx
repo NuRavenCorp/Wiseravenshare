@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { plannerState } from '../../services/plannerState';
+import { plannerState } from '../../Services/PlannerState';
 
 const RecommendationsWidget = () => {
     const [recommendations, setRecommendations] = useState([]);

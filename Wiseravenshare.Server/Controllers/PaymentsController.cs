@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Stripe;
 using Stripe.Checkout;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -12,10 +13,20 @@ namespace Wiseravenshare.Server.Controllers;
 public class PaymentsController : ControllerBase
 {
     private readonly IConfiguration _configuration;
+    private readonly GrowthService _growthService;
+    private readonly UserStore _userStore;
+    private readonly ILogger<PaymentsController> _logger;
 
-    public PaymentsController(IConfiguration configuration)
+    public PaymentsController(
+        IConfiguration configuration,
+        GrowthService growthService,
+        UserStore userStore,
+        ILogger<PaymentsController> logger)
     {
         _configuration = configuration;
+        _growthService = growthService;
+        _userStore = userStore;
+        _logger = logger;
     }
 
     [HttpGet("config")]
@@ -80,8 +91,47 @@ public class PaymentsController : ControllerBase
             }
         };
 
-        var service = new SessionService();
-        var session = service.Create(options);
+        Session session;
+        try
+        {
+            var service = new SessionService();
+            session = service.Create(options);
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogError(ex, "Stripe checkout session creation failed.");
+            return BadRequest(new { message = ex.StripeError?.Message ?? ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error while creating Stripe checkout session.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to create checkout session." });
+        }
+
+        try
+        {
+            var email = string.Empty;
+            if (_userStore.TryGetById(userId, out var user) && user is not null)
+            {
+                email = user.Email;
+            }
+
+            _growthService.TrackEvent(
+                userId,
+                email,
+                "checkout_started",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["source"] = "payments_controller",
+                    ["plan"] = request.Plan,
+                    ["billingCycle"] = request.BillingCycle,
+                    ["checkoutSessionId"] = session.Id ?? string.Empty
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Growth tracking failed during checkout session creation for user {UserId}.", userId);
+        }
 
         return Ok(new
         {

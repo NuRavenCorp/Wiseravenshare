@@ -91,6 +91,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
         const formData = new FormData();
         formData.append('video', selectedFile);
+        formData.append('file', selectedFile);
         formData.append('title', videoDetails.title);
         formData.append('description', videoDetails.description);
         formData.append('tags', JSON.stringify(videoDetails.tags));

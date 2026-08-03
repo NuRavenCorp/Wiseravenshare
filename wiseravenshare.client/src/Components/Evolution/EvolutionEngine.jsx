@@ -1,8 +1,8 @@
-﻿import { ModuleRegistry } from './ModuleRegistry';
+import { ModuleRegistry } from './ModuleRegistry';
 import { PluginManager } from './PluginManager';
 import { FeatureFlags } from './FeatureFlags';
-import { storage } from '../../services/storage';
-import { api } from '../../services/api';
+import { storage } from '../../Services/storage';
+import { api } from '../../Services/api';
 
 class EvolutionEngine {
     static instance = null;
