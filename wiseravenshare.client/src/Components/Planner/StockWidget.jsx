@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../../Services/api';
 
-const MARKET_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+const MARKET_SYMBOLS = ['MSFT', 'IBM'];
 
 const formatCurrency = (value, currency = 'USD') => {
     const amount = Number(value);

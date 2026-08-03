@@ -93,6 +93,7 @@ if (!builder.Environment.IsDevelopment())
 // ── Services ─────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddMemoryCache();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
         npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
