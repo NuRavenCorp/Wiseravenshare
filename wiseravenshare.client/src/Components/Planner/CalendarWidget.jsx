@@ -11,7 +11,11 @@ const CalendarWidget = () => {
         description: '',
         startAt: '',
         endAt: '',
-        reminderMinutes: 30
+        reminderMinutes: 30,
+        sendEmailReminder: false,
+        reminderEmail: '',
+        sendSmsReminder: false,
+        reminderPhone: ''
     });
 
     React.useEffect(() => {
@@ -103,7 +107,11 @@ const CalendarWidget = () => {
             description: '',
             startAt: '',
             endAt: '',
-            reminderMinutes: 30
+            reminderMinutes: 30,
+            sendEmailReminder: false,
+            reminderEmail: '',
+            sendSmsReminder: false,
+            reminderPhone: ''
         });
     };
 
@@ -114,7 +122,11 @@ const CalendarWidget = () => {
             description: event.description || '',
             startAt: event.startAt || '',
             endAt: event.endAt || '',
-            reminderMinutes: event.reminderMinutes || 30
+            reminderMinutes: event.reminderMinutes || 30,
+            sendEmailReminder: Boolean(event.sendEmailReminder),
+            reminderEmail: event.reminderEmail || '',
+            sendSmsReminder: Boolean(event.sendSmsReminder),
+            reminderPhone: event.reminderPhone || ''
         });
     };
 
@@ -128,7 +140,11 @@ const CalendarWidget = () => {
             description: eventForm.description.trim(),
             startAt: eventForm.startAt,
             endAt: eventForm.endAt,
-            reminderMinutes: Number(eventForm.reminderMinutes) || 0
+            reminderMinutes: Number(eventForm.reminderMinutes) || 0,
+            sendEmailReminder: Boolean(eventForm.sendEmailReminder),
+            reminderEmail: String(eventForm.reminderEmail || '').trim(),
+            sendSmsReminder: Boolean(eventForm.sendSmsReminder),
+            reminderPhone: String(eventForm.reminderPhone || '').trim()
         });
         resetEventForm();
     };
@@ -361,6 +377,11 @@ const CalendarWidget = () => {
                                     {event.startAt ? new Date(event.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'No start time'}
                                     {event.endAt ? ` - ${new Date(event.endAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
                                 </div>
+                                {(event.sendEmailReminder || event.sendSmsReminder) && (
+                                    <div style={{ fontSize: '12px', marginTop: '6px', color: 'var(--highlight-color)' }}>
+                                        Reminder via {event.sendEmailReminder ? 'email' : ''}{event.sendEmailReminder && event.sendSmsReminder ? ' + ' : ''}{event.sendSmsReminder ? 'text' : ''}
+                                    </div>
+                                )}
                                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                                     <button
                                         onClick={() => beginEditEvent(event)}
@@ -460,6 +481,38 @@ const CalendarWidget = () => {
                             onChange={(e) => setEventForm(prev => ({ ...prev, reminderMinutes: e.target.value }))}
                             style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
                         />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
+                            <input
+                                type="checkbox"
+                                checked={Boolean(eventForm.sendEmailReminder)}
+                                onChange={(e) => setEventForm(prev => ({ ...prev, sendEmailReminder: e.target.checked }))}
+                            />
+                            Send email reminder
+                        </label>
+                        {eventForm.sendEmailReminder && (
+                            <input
+                                value={eventForm.reminderEmail}
+                                onChange={(e) => setEventForm(prev => ({ ...prev, reminderEmail: e.target.value }))}
+                                placeholder="Reminder email"
+                                style={{ width: '100%', marginBottom: '10px', padding: '10px' }}
+                            />
+                        )}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
+                            <input
+                                type="checkbox"
+                                checked={Boolean(eventForm.sendSmsReminder)}
+                                onChange={(e) => setEventForm(prev => ({ ...prev, sendSmsReminder: e.target.checked }))}
+                            />
+                            Send text reminder
+                        </label>
+                        {eventForm.sendSmsReminder && (
+                            <input
+                                value={eventForm.reminderPhone}
+                                onChange={(e) => setEventForm(prev => ({ ...prev, reminderPhone: e.target.value }))}
+                                placeholder="Reminder phone (e.g. +15551234567)"
+                                style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
+                            />
+                        )}
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <button
                                 onClick={saveEditedEvent}

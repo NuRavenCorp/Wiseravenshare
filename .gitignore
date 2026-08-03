@@ -7,6 +7,7 @@
 **/publish/
 **/build-verify/
 **/publish-test/
+_buildcheck*/
 
 # Compiled binaries / runtime artifacts at any level
 *.dll

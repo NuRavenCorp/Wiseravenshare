@@ -85,6 +85,38 @@ const newsCategoryRules = [
     { category: 'Headlines', words: ['headline', 'top story', 'breaking news', 'major', 'exclusive', 'report'] }
 ];
 
+const toSafeAbsoluteUrl = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    try {
+        const parsed = new URL(raw);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.toString();
+        }
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+const buildSearchUrl = (...parts) => {
+    const query = parts
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+    if (!query) return null;
+    return `https://news.google.com/search?q=${encodeURIComponent(query)}`;
+};
+
+const normalizeTopicValue = (value) => String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/^#+/, '');
+
 const inferNewsCategory = (item) => {
     const normalized = `${item?.title || ''} ${item?.summary || ''} ${item?.content || ''} ${item?.source || ''}`.toLowerCase();
     const hit = newsCategoryRules.find((rule) => rule.words.some((word) => normalized.includes(word)));
@@ -97,16 +129,19 @@ const normalizeNewsItem = (item, index) => ({
     title: item.title || 'AI News update',
     source: item.source || 'WiseRaven',
     summary: item.summary || item.content || 'News summary unavailable.',
-    externalUrl: item.externalUrl || item.url || null,
+    externalUrl: toSafeAbsoluteUrl(item.externalUrl || item.url || item.link || item.sourceUrl)
+        || buildSearchUrl(item.title, item.source),
     category: inferNewsCategory(item)
 });
 
-const DiscoverPage = () => {
+const DiscoverPage = ({ onNavigate }) => {
     const [posts, setPosts] = useState([]);
     const [topics, setTopics] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeSection, setActiveSection] = useState('people');
     const [followingIds, setFollowingIds] = useState([]);
+    const [selectedGroupId, setSelectedGroupId] = useState(null);
+    const [focusedTopic, setFocusedTopic] = useState('');
     const { user } = useAuth();
 
     useEffect(() => {
@@ -118,6 +153,23 @@ const DiscoverPage = () => {
         socialGraphService.registerUserProfile(user);
         setFollowingIds(socialGraphService.getFollowingIds(user.id));
     }, [user?.id]);
+
+    useEffect(() => {
+        try {
+            const storedFocus = JSON.parse(localStorage.getItem('wiseDiscoverFocus') || 'null');
+            const nextSection = String(storedFocus?.section || '').trim();
+            const nextTopic = normalizeTopicValue(storedFocus?.topic);
+
+            if (nextSection) {
+                setActiveSection(nextSection);
+            }
+
+            setFocusedTopic(nextTopic);
+            localStorage.removeItem('wiseDiscoverFocus');
+        } catch {
+            setFocusedTopic('');
+        }
+    }, []);
 
     const loadDiscoverContent = async () => {
         setLoading(true);
@@ -163,6 +215,25 @@ const DiscoverPage = () => {
         setFollowingIds(socialGraphService.getFollowingIds(user.id));
     };
 
+    const handleOpenProfile = (person) => {
+        if (!person) return;
+
+        try {
+            localStorage.setItem('wiseProfileFocus', JSON.stringify({
+                id: person.id,
+                name: person.name,
+                handle: person.handle,
+                avatar: person.avatar,
+                followers: person.followers,
+                following: person.following
+            }));
+        } catch {
+            // Ignore storage failures and still navigate.
+        }
+
+        onNavigate?.('profile');
+    };
+
     const discoverBuckets = useMemo(() => {
         const peopleMap = new Map();
         posts.forEach((post) => {
@@ -187,7 +258,9 @@ const DiscoverPage = () => {
                 id: topic.id || `topic-${index}`,
                 name: topic.name || topic.topic || `Topic ${index + 1}`,
                 count: Number(topic.count) || Number(topic.posts) || 0,
-                description: `Explore the latest activity around ${topic.name || topic.topic || 'this topic'}.`
+                description: `Explore the latest activity around ${topic.name || topic.topic || 'this topic'}.`,
+                externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
+                    || buildSearchUrl(topic.name || topic.topic)
             }));
 
         let storedNews = [];
@@ -215,10 +288,18 @@ const DiscoverPage = () => {
             name: `${topic.name} Circle`,
             description: `A community focused on ${topic.name.toLowerCase()}.`,
             members: Math.max(50, topic.count || 0),
-            focus: topic.name
+            focus: topic.name,
+            externalUrl: buildSearchUrl(topic.name, 'community')
         }));
 
-        const groups = [...fallbackGroups, ...dynamicGroups].filter((group, index, arr) => arr.findIndex((item) => item.id === group.id) === index);
+        const groups = [...fallbackGroups, ...dynamicGroups]
+            .map((group) => ({
+                ...group,
+                externalUrl: toSafeAbsoluteUrl(group.externalUrl || group.url || group.link)
+                    || group.externalUrl
+                    || buildSearchUrl(group.name, group.focus)
+            }))
+            .filter((group, index, arr) => arr.findIndex((item) => item.id === group.id) === index);
 
         return {
             people: Array.from(peopleMap.values()).slice(0, 8),
@@ -248,6 +329,11 @@ const DiscoverPage = () => {
         { id: 'headlines', label: 'Headlines', icon: 'fas fa-rss', count: discoverBuckets.headlines.length, helper: 'Top stories and headlines' },
         { id: 'political', label: 'Political', icon: 'fas fa-landmark', count: discoverBuckets.political.length, helper: 'Policy, elections, civic coverage' }
     ]), [discoverBuckets]);
+
+    const selectedGroup = useMemo(() => {
+        if (!selectedGroupId) return null;
+        return discoverBuckets.groups.find((group) => group.id === selectedGroupId) || null;
+    }, [discoverBuckets.groups, selectedGroupId]);
 
     const activeDiscoverType = discoverSections.find((section) => section.id === activeSection) || discoverSections[0] || null;
 
@@ -301,6 +387,20 @@ const DiscoverPage = () => {
                                 >
                                     {person.isFollowing ? 'Following' : 'Follow'}
                                 </button>
+                                <button
+                                    onClick={() => handleOpenProfile(person)}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        background: 'transparent',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '7px 12px',
+                                        cursor: 'pointer',
+                                        fontSize: '12px'
+                                    }}
+                                >
+                                    View profile
+                                </button>
                             </div>
                         ))}
                     </div>
@@ -328,6 +428,22 @@ const DiscoverPage = () => {
                                     </span>
                                 </div>
                                 <div style={{ marginTop: '8px', color: 'var(--light-color)' }}>{group.description}</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedGroupId(group.id)}
+                                    style={{
+                                        marginTop: '8px',
+                                        display: 'inline-block',
+                                        fontSize: '12px',
+                                        color: 'var(--highlight-color)',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        padding: 0
+                                    }}
+                                >
+                                    Open group context
+                                </button>
                             </div>
                         ))}
                     </div>
@@ -337,20 +453,44 @@ const DiscoverPage = () => {
                 return (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                         {discoverBuckets.topics.map((topic) => (
+                            (() => {
+                                const isFocusedTopic = normalizeTopicValue(topic.name) === focusedTopic;
+
+                                return (
                             <div
                                 key={topic.id}
                                 style={{
                                     minWidth: '220px',
                                     flex: '1 1 220px',
-                                    border: '1px solid var(--border-color)',
+                                    border: `1px solid ${isFocusedTopic ? 'var(--highlight-color)' : 'var(--border-color)'}`,
                                     borderRadius: '12px',
-                                    padding: '12px'
+                                    padding: '12px',
+                                    background: isFocusedTopic ? 'rgba(79, 116, 214, 0.14)' : 'transparent'
                                 }}
                             >
-                                <div style={{ fontWeight: 700 }}>#{topic.name}</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                                    <div style={{ fontWeight: 700 }}>#{topic.name}</div>
+                                    {isFocusedTopic && (
+                                        <span style={{ fontSize: '11px', color: 'var(--highlight-color)', border: '1px solid var(--highlight-color)', borderRadius: '999px', padding: '3px 8px', whiteSpace: 'nowrap' }}>
+                                            Selected
+                                        </span>
+                                    )}
+                                </div>
                                 <div style={{ color: 'var(--highlight-color)', fontSize: '12px' }}>{topic.count.toLocaleString()} mentions</div>
                                 <div style={{ color: 'var(--light-color)', marginTop: '6px', fontSize: '13px' }}>{topic.description}</div>
+                                {topic.externalUrl && (
+                                    <a
+                                        href={topic.externalUrl}
+                                        target="_blank"
+                                        rel="noreferrer noopener"
+                                        style={{ marginTop: '8px', display: 'inline-block', fontSize: '12px', color: 'var(--highlight-color)' }}
+                                    >
+                                        Open topic coverage
+                                    </a>
+                                )}
                             </div>
+                                );
+                            })()
                         ))}
                     </div>
                 );
@@ -488,6 +628,77 @@ const DiscoverPage = () => {
                         </div>
                         <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>{activeDiscoverType.count} items available</span>
                     </div>
+
+                    {activeSection === 'groups' && selectedGroup && (
+                        <div
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '12px',
+                                padding: '12px',
+                                marginBottom: '14px',
+                                background: 'rgba(255,255,255,0.03)'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', marginBottom: '8px' }}>
+                                <div>
+                                    <strong>{selectedGroup.name}</strong>
+                                    <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                        {selectedGroup.members.toLocaleString()} members • {selectedGroup.focus}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedGroupId(null)}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        background: 'transparent',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '4px 10px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                            <div style={{ color: 'var(--light-color)', fontSize: '14px', marginBottom: '8px' }}>
+                                {selectedGroup.description}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSection('topics')}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '6px 10px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    View related topics
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSection('news')}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '6px 10px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Open related news
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {renderLaneContent()}
                 </div>

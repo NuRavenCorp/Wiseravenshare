@@ -4,7 +4,7 @@ import { toast } from 'react-hot-toast';
 import { FiExternalLink, FiRefreshCcw, FiSend } from 'react-icons/fi';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { socialService, type PublishSocialContentRequest } from '../../services/socialService';
+import { socialService, type PublishSocialContentRequest } from '../../Services/socialService';
 
 export const SocialBridge: React.FC = () => {
   const [message, setMessage] = useState('');

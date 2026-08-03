@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiService } from '../services/api';
+import { apiService } from '../Services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
 
@@ -23,16 +23,17 @@ export const usePosts = (initialFilters = {}) => {
                 page: currentPage,
                 ...filters
             });
+            const nextPagePosts = Array.isArray(response?.data) ? response.data : [];
 
             if (reset) {
-                setPosts(response.data);
+                setPosts(nextPagePosts);
                 setPage(2);
             } else {
-                setPosts(prev => [...prev, ...response.data]);
+                setPosts(prev => [...prev, ...nextPagePosts]);
                 setPage(prev => prev + 1);
             }
 
-            setHasMore(response.hasMore);
+            setHasMore(nextPagePosts.length >= 20);
         } catch (err) {
             setError(err.message);
             addToast('Failed to load posts', 'error');
@@ -44,8 +45,11 @@ export const usePosts = (initialFilters = {}) => {
     const createPost = useCallback(async (postData) => {
         setLoading(true);
         try {
-            const newPost = await apiService.createPost(postData);
-            setPosts(prev => [newPost, ...prev]);
+            const response = await apiService.createPost(postData);
+            const newPost = response?.data;
+            if (newPost) {
+                setPosts(prev => [newPost, ...prev]);
+            }
             addToast('Post created successfully!', 'success');
             return newPost;
         } catch (err) {

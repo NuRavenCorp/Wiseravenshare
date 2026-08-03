@@ -32,6 +32,45 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+const buildMediaUploadUrls = () => {
+    const toApiBase = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        if (/\/api$/i.test(raw)) return raw;
+        return `${raw.replace(/\/+$/, '')}/api`;
+    };
+
+    const bases = new Set();
+    bases.add(API_BASE_URL.replace(/\/+$/, ''));
+
+    const configured = (import.meta.env.VITE_API_URL || '').trim();
+    if (configured) {
+        bases.add(toApiBase(configured));
+    }
+
+    const ravensightApi = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
+    if (ravensightApi) {
+        const trimmed = ravensightApi.replace(/\/+$/, '');
+        bases.add(trimmed.replace(/\/api\/ravensight$/i, '/api'));
+        bases.add(toApiBase(trimmed));
+    }
+
+    if (typeof window !== 'undefined' && window.location?.origin) {
+        bases.add(`${window.location.origin.replace(/\/+$/, '')}/api`);
+    }
+
+    const endpoints = [];
+    const routes = ['/media/upload', '/fileupload/upload'];
+    for (const base of bases) {
+        if (!base) continue;
+        for (const route of routes) {
+            endpoints.push(`${base}${route}`);
+        }
+    }
+
+    return [...new Set(endpoints)];
+};
+
 const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 10000,
@@ -75,7 +114,24 @@ export const apiService = {
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),
 
     // Posts endpoints
-    getPosts: (params) => api.get('/posts', { params }),
+    getPosts: (params = {}) => {
+        const page = Number(params.page) > 0 ? Number(params.page) : 1;
+        const pageSize = Number(params.pageSize || params.limit) > 0 ? Number(params.pageSize || params.limit) : 20;
+
+        if (params.userId) {
+            return api.get(`/posts/user/${encodeURIComponent(params.userId)}`, {
+                params: { page, pageSize }
+            });
+        }
+
+        if (String(params.sort || '').toLowerCase() === 'trending') {
+            return api.get('/posts/trending', { params: { count: pageSize } });
+        }
+
+        return api.get('/posts/feed', {
+            params: { page, pageSize }
+        });
+    },
     getPost: (postId) => api.get(`/posts/${postId}`),
     createPost: (postData) => api.post('/posts', postData),
     updatePost: (postId, updates) => api.put(`/posts/${postId}`, updates),
@@ -113,7 +169,7 @@ export const apiService = {
     removeBookmark: (postId) => api.delete(`/bookmarks/${postId}`),
 
     // Media endpoints
-    uploadMedia: (file, type, options = {}) => {
+    uploadMedia: async (file, type, options = {}) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('title', options.title || file?.name || 'Uploaded media');
@@ -127,12 +183,40 @@ export const apiService = {
         formData.append('youTubePermissionGranted', String(Boolean(options.youTubePermissionGranted)));
         formData.append('tikTokPermissionGranted', String(Boolean(options.tikTokPermissionGranted)));
         formData.append('facebookPermissionGranted', String(Boolean(options.facebookPermissionGranted)));
-        return api.post('/media/upload', formData, {
+
+        const requestConfig = {
             headers: { 'Content-Type': 'multipart/form-data' },
             onUploadProgress: (progressEvent) => {
                 Math.round((progressEvent.loaded * 100) / progressEvent.total);
             }
-        });
+        };
+
+        const candidateUrls = buildMediaUploadUrls();
+        let lastError = null;
+
+        for (const url of candidateUrls) {
+            try {
+                return await axios.post(url, formData, {
+                    ...requestConfig,
+                    headers: {
+                        ...requestConfig.headers,
+                        ...(localStorage.getItem('auth_token')
+                            ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+                            : {})
+                    }
+                });
+            } catch (error) {
+                lastError = error;
+                const status = error?.response?.status;
+
+                // Preserve validation/auth failures from the first attempted route.
+                if (status && status !== 404 && status !== 405) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Media upload failed.');
     },
 
     // Search endpoints
@@ -140,6 +224,15 @@ export const apiService = {
 
     // Trends endpoints
     getTrending: () => api.get('/trending'),
+
+    // Market data endpoints
+    getMarketQuotes: (symbols = []) => api.get('/market/quotes', {
+        params: {
+            ...(Array.isArray(symbols) && symbols.length > 0
+                ? { symbols: symbols.join(',') }
+                : {})
+        }
+    }),
 
     // Payments endpoints
     createCheckoutSession: (payload) => api.post('/payments/checkout-session', payload),
@@ -149,7 +242,54 @@ export const apiService = {
     sendCalendarReminder: (payload) => api.post('/notifications/reminder', payload),
 
     // Admin diagnostics endpoints
-    getPersistenceStatus: (refresh = false) => api.get('/persistence/status', { params: { refresh } })
+    getPersistenceStatus: (refresh = false) => api.get('/persistence/status', { params: { refresh } }),
+
+    // Growth/onboarding endpoints
+    getOnboardingState: () => api.get('/growth/onboarding'),
+    trackGrowthEvent: (eventName, metadata = {}) => api.post('/growth/events', { eventName, metadata }),
+    getGrowthFunnelSummary: (days = 30) => api.get('/growth/funnel', { params: { days } }),
+    createReferralInvite: (inviteeEmail, message = '') => api.post('/growth/referrals/invite', { inviteeEmail, message }),
+    getReferralStats: () => api.get('/growth/referrals'),
+    initializeRevenueAgent: () => api.post('/growth/revenue/initialize'),
+    getRevenueAgent: () => api.get('/growth/revenue/agent'),
+    getRevenueSummary: () => api.get('/growth/revenue/summary'),
+    getRevenueActions: (weekNumber, status = 'all') =>
+        api.get('/growth/revenue/actions', {
+            params: {
+                ...(Number.isFinite(weekNumber) ? { weekNumber } : {}),
+                status
+            }
+        }),
+    updateRevenueActionStatus: (actionId, status) =>
+        api.post(`/growth/revenue/actions/${encodeURIComponent(actionId)}/status`, { status }),
+    addRevenueEvidence: (payload) => api.post('/growth/revenue/evidence', payload),
+    verifyRevenueEvidence: (evidenceId, verified) =>
+        api.post(`/growth/revenue/evidence/${encodeURIComponent(evidenceId)}/verify`, { verified }),
+    getRevenueEvidence: (weekNumber, verified) =>
+        api.get('/growth/revenue/evidence', {
+            params: {
+                ...(Number.isFinite(weekNumber) ? { weekNumber } : {}),
+                ...(typeof verified === 'boolean' ? { verified } : {})
+            }
+        }),
+
+    // Moderation and anti-spam endpoints
+    checkModeration: (content) => api.post('/growth/moderation/check', { content }),
+    submitModerationReport: (targetType, targetId, reason, details = '') =>
+        api.post('/growth/moderation/report', { targetType, targetId, reason, details }),
+    getModerationReports: (options = {}) => {
+        const page = Number.isFinite(options.page) ? options.page : 1;
+        const pageSize = Number.isFinite(options.pageSize) ? options.pageSize : 20;
+        const status = typeof options.status === 'string' ? options.status : 'open';
+        const targetType = typeof options.targetType === 'string' ? options.targetType : 'all';
+        const includeResolved = Boolean(options.includeResolved);
+
+        return api.get('/growth/moderation/reports', {
+            params: { page, pageSize, status, targetType, includeResolved }
+        });
+    },
+    resolveModerationReport: (reportId, outcome, notes = '') =>
+        api.post(`/growth/moderation/reports/${encodeURIComponent(reportId)}/resolve`, { outcome, notes })
 };
 
 export default api;

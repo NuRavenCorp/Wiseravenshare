@@ -27,6 +27,8 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.HasDefaultSchema("app_data");
+
         modelBuilder.Entity<Follow>(entity =>
         {
             entity.HasOne(f => f.Follower)

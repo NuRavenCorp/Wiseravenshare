@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Stripe;
+using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -24,9 +26,24 @@ public class BillingController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateCheckoutSession([FromBody] global::Wiseravenshare.Server.DTOs.CreateCheckoutSessionRequest request)
     {
-        var userId = User.GetUserId();
-        var result = await _subscriptionService.CreateCheckoutSessionAsync(userId, request);
-        return Ok(result);
+        try
+        {
+            var userId = User.GetUserId();
+            var result = await _subscriptionService.CreateCheckoutSessionAsync(userId, request);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.Message });
+        }
+        catch (StripeException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.StripeError?.Message ?? ex.Message });
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(new ErrorResponse { Message = ex.Message });
+        }
     }
 
     [Authorize]
@@ -35,9 +52,24 @@ public class BillingController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreatePortalSession([FromBody] global::Wiseravenshare.Server.DTOs.CreatePortalSessionRequest request)
     {
-        var userId = User.GetUserId();
-        var result = await _subscriptionService.CreatePortalSessionAsync(userId, request);
-        return Ok(result);
+        try
+        {
+            var userId = User.GetUserId();
+            var result = await _subscriptionService.CreatePortalSessionAsync(userId, request);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.Message });
+        }
+        catch (StripeException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.StripeError?.Message ?? ex.Message });
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(new ErrorResponse { Message = ex.Message });
+        }
     }
 
     [Authorize]
@@ -58,7 +90,18 @@ public class BillingController : ControllerBase
         var payload = await reader.ReadToEndAsync();
         var signature = Request.Headers["Stripe-Signature"].ToString();
 
-        await _subscriptionService.HandleWebhookAsync(payload, signature);
-        return Ok();
+        try
+        {
+            await _subscriptionService.HandleWebhookAsync(payload, signature);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.Message });
+        }
+        catch (StripeException ex)
+        {
+            return BadRequest(new ErrorResponse { Message = ex.StripeError?.Message ?? ex.Message });
+        }
     }
 }

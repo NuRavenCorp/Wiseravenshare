@@ -2,6 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { socialGraphService } from '../../Services/SocialGraph';
 import WiseRavenLogo from './WiseRavenLogo';
 
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
+
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
     for (const key of keys) {
@@ -30,8 +39,38 @@ const normalizeConnection = (connection, platform) => {
     };
 };
 
+const readCachedFeeds = () => {
+    try {
+        const raw = localStorage.getItem('wiseSocialFeeds');
+        return raw ? JSON.parse(raw) : {};
+    } catch {
+        return {};
+    }
+};
+
+const hasConfiguredFeeds = (feeds) => {
+    const source = feeds || {};
+    const entries = [
+        getConnection(source, 'facebook', 'Facebook'),
+        getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
+        getConnection(source, 'instagram', 'Instagram')
+    ];
+
+    return entries.some((connection) => {
+        if (!connection || typeof connection !== 'object') return false;
+        return Boolean(
+            connection.enabled ||
+            String(connection.username || '').trim() ||
+            String(connection.profileUrl || '').trim() ||
+            String(connection.feedUrl || '').trim()
+        );
+    });
+};
+
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
+    const adminEmails = parseAdminEmails();
+    const isAdminUser = adminEmails.has(String(user?.email || '').trim().toLowerCase());
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -62,6 +101,10 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'profile', icon: 'fas fa-user', label: 'Profile' }
     ];
 
+    if (isAdminUser) {
+        menuItems.splice(8, 0, { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' });
+    }
+
     const profile = {
         name: user?.name || 'Alex Raven',
         avatar: user?.avatar || (user?.name ? user.name.charAt(0).toUpperCase() : 'AR'),
@@ -71,7 +114,9 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
 
     const hasImageAvatar = typeof profile.avatar === 'string' && (profile.avatar.startsWith('data:image/') || profile.avatar.startsWith('http'));
 
-    const feeds = user?.socialFeeds || {};
+    const feeds = hasConfiguredFeeds(user?.socialFeeds)
+        ? (user?.socialFeeds || {})
+        : readCachedFeeds();
     const socialFeedItems = [
         {
             id: 'facebook-feed',
@@ -244,7 +289,20 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                             Open
                                         </a>
                                     ) : (
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--light-color)' }}>Not set</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigate('profile')}
+                                            style={{
+                                                fontSize: '0.75rem',
+                                                color: 'var(--highlight-color)',
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                padding: 0
+                                            }}
+                                        >
+                                            Set up
+                                        </button>
                                     )}
                                 </div>
 

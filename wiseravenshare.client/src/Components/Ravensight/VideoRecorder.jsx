@@ -189,6 +189,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
         try {
             const formData = new FormData();
             formData.append('video', file);
+            formData.append('file', file);
             formData.append('title', videoTitle || `Recording ${new Date().toLocaleString()}`);
             formData.append('description', videoDescription);
             formData.append('privacyStatus', privacyStatus);
@@ -220,7 +221,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             resetRecording();
         } catch (error) {
             console.error('Upload error:', error);
-            onNotification(libraryOnly ? 'Failed to save to library' : 'Failed to upload video', 'error');
+            onNotification(error?.message || (libraryOnly ? 'Failed to save to library' : 'Failed to upload video'), 'error');
         } finally {
             setIsUploading(false);
             setUploadProgress(0);

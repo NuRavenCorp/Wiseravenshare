@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { computeTrendingTopics } from '../../Services/EngagementAlgorithms';
+import { apiService } from '../../Services/api';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 
 const MAX_POSTS_FOR_SIDEBAR = 200;
+const MARKET_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
 
 const seedUsers = [
     { id: 'seed-wiseravenshare', name: 'WiseravenShare Community', handle: '@wiseravenshare', avatar: 'WS' },
@@ -32,6 +34,8 @@ const normalizeSearchValue = (value) => String(value || '')
     .trim()
     .toLowerCase()
     .replace(/^@+/, '');
+
+const normalizeTopicValue = (value) => normalizeSearchValue(value).replace(/^#+/, '');
 
 const collapseForNameMatch = (value) => normalizeSearchValue(value).replace(/[^a-z0-9]/g, '');
 
@@ -83,6 +87,104 @@ const parseAdminEmails = () => {
 
 const asPercent = (value) => `${Math.round((Number(value) || 0) * 100)}%`;
 
+const formatCurrency = (value, currency = 'USD') => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) {
+        return '--';
+    }
+
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currency || 'USD',
+            maximumFractionDigits: 2
+        }).format(amount);
+    } catch {
+        return `$${amount.toFixed(2)}`;
+    }
+};
+
+const formatVolume = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return null;
+    }
+
+    if (numeric >= 1000000000) return `${(numeric / 1000000000).toFixed(1)}B`;
+    if (numeric >= 1000000) return `${(numeric / 1000000).toFixed(1)}M`;
+    if (numeric >= 1000) return `${(numeric / 1000).toFixed(1)}K`;
+    return `${Math.round(numeric)}`;
+};
+
+const normalizeMarketState = (value) => String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const normalizeMarketQuote = (quote = {}) => ({
+    symbol: String(quote.symbol || '').trim(),
+    name: String(quote.name || quote.symbol || 'Market quote').trim(),
+    price: Number(quote.price),
+    changePercent: Number(quote.changePercent),
+    volume: Number(quote.volume),
+    currency: String(quote.currency || 'USD').trim() || 'USD',
+    marketState: normalizeMarketState(quote.marketState),
+    asOf: quote.asOf || null
+});
+
+const isImageAvatar = (value) => {
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim();
+    return normalized.startsWith('data:image/') || /^https?:\/\//i.test(normalized);
+};
+
+const avatarFallback = (profile) => {
+    const base = String(profile?.name || profile?.handle || profile?.avatar || 'U').trim();
+    if (!base) return 'U';
+
+    const tokens = base
+        .replace(/^@+/, '')
+        .split(/\s+/)
+        .filter(Boolean);
+
+    if (tokens.length >= 2) {
+        return `${tokens[0][0]}${tokens[1][0]}`.toUpperCase();
+    }
+
+    return tokens[0].slice(0, 2).toUpperCase();
+};
+
+const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
+    const avatar = String(profile?.avatar || '').trim();
+    const canRenderImage = isImageAvatar(avatar);
+
+    return (
+        <div style={{
+            width: `${size}px`,
+            height: `${size}px`,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontWeight: 'bold',
+            fontSize: `${fontSize}px`,
+            overflow: 'hidden',
+            flexShrink: 0
+        }}>
+            {canRenderImage ? (
+                <img
+                    src={avatar}
+                    alt={String(profile?.name || 'User avatar')}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+            ) : (
+                avatarFallback(profile)
+            )}
+        </div>
+    );
+};
+
 const RightSidebar = ({ onNavigate }) => {
     const [trendingTopics, setTrendingTopics] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
@@ -90,14 +192,11 @@ const RightSidebar = ({ onNavigate }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [showFollowDebug, setShowFollowDebug] = useState(false);
+    const [stockData, setStockData] = useState([]);
+    const [marketLoading, setMarketLoading] = useState(true);
+    const [marketError, setMarketError] = useState('');
     const { user } = useAuth();
     const isAdminUser = parseAdminEmails().has(String(user?.email || '').trim().toLowerCase());
-
-    const [stockData, setStockData] = useState([
-        { symbol: 'WRAV', name: 'Wise Raven', price: 145.23, change: 1.2 },
-        { symbol: 'DSEEK', name: 'DeepSeek AI', price: 234.56, change: -0.8 },
-        { symbol: 'TECH', name: 'Tech Giants', price: 189.75, change: 2.5 }
-    ]);
 
     useEffect(() => {
         let refreshTimer;
@@ -202,17 +301,7 @@ const RightSidebar = ({ onNavigate }) => {
         window.addEventListener('wiseraven:posts-updated', listener);
         window.addEventListener('wiseraven:social-updated', listener);
 
-        // Simulate real-time stock updates
-        const interval = setInterval(() => {
-            setStockData(prev => prev.map(stock => ({
-                ...stock,
-                price: Math.max(0, stock.price + (Math.random() - 0.5) * 2),
-                change: parseFloat((stock.change + (Math.random() - 0.5) * 0.3).toFixed(2))
-            })));
-        }, 30000);
-
         return () => {
-            clearInterval(interval);
             if (refreshTimer) {
                 clearTimeout(refreshTimer);
             }
@@ -220,6 +309,52 @@ const RightSidebar = ({ onNavigate }) => {
             window.removeEventListener('wiseraven:social-updated', listener);
         };
     }, [user?.id]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const refreshMarketData = async ({ silent = false } = {}) => {
+            if (!silent && isMounted) {
+                setMarketLoading(true);
+            }
+
+            try {
+                const response = await apiService.getMarketQuotes(MARKET_SYMBOLS);
+                const quotes = Array.isArray(response?.data?.quotes) ? response.data.quotes : [];
+                const normalizedQuotes = quotes
+                    .map(normalizeMarketQuote)
+                    .filter((quote) => quote.symbol && Number.isFinite(quote.price));
+
+                if (!isMounted) {
+                    return;
+                }
+
+                setStockData(normalizedQuotes);
+                setMarketError(normalizedQuotes.length === 0 ? 'Live market data is temporarily unavailable.' : '');
+            } catch (error) {
+                if (!isMounted) {
+                    return;
+                }
+
+                setStockData([]);
+                setMarketError('Live market data is temporarily unavailable.');
+            } finally {
+                if (isMounted) {
+                    setMarketLoading(false);
+                }
+            }
+        };
+
+        refreshMarketData();
+        const interval = setInterval(() => {
+            refreshMarketData({ silent: true });
+        }, 60000);
+
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, []);
 
     useEffect(() => {
         const query = normalizeSearchValue(searchQuery);
@@ -294,10 +429,28 @@ const RightSidebar = ({ onNavigate }) => {
     };
 
     const handleTrendingClick = (topicLabel) => {
-        const normalized = String(topicLabel || '').toLowerCase();
+        const normalized = normalizeTopicValue(topicLabel);
+        if (!normalized) {
+            return;
+        }
+
+        try {
+            localStorage.setItem('wiseDiscoverFocus', JSON.stringify({
+                section: 'topics',
+                topic: normalized,
+                source: 'sidebar-trending',
+                updatedAt: Date.now()
+            }));
+        } catch {
+            // Ignore storage failures and still navigate when possible.
+        }
+
         if (normalized.includes('breakingnews') || normalized.includes('breaking')) {
             onNavigate?.('breakingnews');
+            return;
         }
+
+        onNavigate?.('discover');
     };
 
     return (
@@ -354,23 +507,11 @@ const RightSidebar = ({ onNavigate }) => {
                                 gap: '12px'
                             }}
                         >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <div style={{
-                                    width: '34px',
-                                    height: '34px',
-                                    borderRadius: '50%',
-                                    background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontWeight: 'bold',
-                                    fontSize: '12px'
-                                }}>
-                                    {result.avatar}
-                                </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                <AvatarBadge profile={result} size={34} fontSize={12} />
                                 <div>
-                                    <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{result.name}</div>
-                                    <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{result.handle}</div>
+                                    <div style={{ fontWeight: 'bold', fontSize: '13px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{result.name}</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--highlight-color)', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{result.handle}</div>
                                     <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>{result.followers} followers</div>
                                 </div>
                             </div>
@@ -440,9 +581,18 @@ const RightSidebar = ({ onNavigate }) => {
                 marginBottom: '20px',
                 border: '1px solid var(--border-color)'
             }}>
-                <h3 style={{ marginBottom: '15px', color: 'var(--light-color)' }}>
-                    <i className="fas fa-chart-line"></i> Market Watch
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '15px' }}>
+                    <h3 style={{ marginBottom: 0, color: 'var(--light-color)' }}>
+                        <i className="fas fa-chart-line"></i> Market Watch
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>Live quotes</span>
+                </div>
+                {marketLoading && stockData.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading live market data...</div>
+                )}
+                {!marketLoading && marketError && stockData.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.5 }}>{marketError}</div>
+                )}
                 {stockData.map(stock => (
                     <div
                         key={stock.symbol}
@@ -457,12 +607,22 @@ const RightSidebar = ({ onNavigate }) => {
                         <div>
                             <div style={{ fontWeight: 'bold' }}>{stock.symbol}</div>
                             <div style={{ fontSize: '11px', opacity: 0.7 }}>{stock.name}</div>
+                            {stock.marketState && (
+                                <div style={{ fontSize: '10px', color: 'var(--light-color)', marginTop: '4px' }}>{stock.marketState}</div>
+                            )}
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                            <div>${stock.price.toFixed(2)}</div>
-                            <div style={{ color: stock.change >= 0 ? '#4caf50' : '#f44336', fontSize: '12px' }}>
-                                ({stock.change >= 0 ? '+' : ''}{stock.change}%)
+                            <div>{formatCurrency(stock.price, stock.currency)}</div>
+                            <div style={{ color: stock.changePercent >= 0 ? '#4caf50' : '#f44336', fontSize: '12px' }}>
+                                {Number.isFinite(stock.changePercent)
+                                    ? `(${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%)`
+                                    : '(--%)'}
                             </div>
+                            {formatVolume(stock.volume) && (
+                                <div style={{ fontSize: '10px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                    Vol {formatVolume(stock.volume)}
+                                </div>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -507,20 +667,11 @@ const RightSidebar = ({ onNavigate }) => {
                             alignItems: 'center'
                         }}
                     >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '50%',
-                                background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontWeight: 'bold'
-                            }}>{user.avatar}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                            <AvatarBadge profile={user} size={40} fontSize={13} />
                             <div>
-                                <div style={{ fontWeight: 'bold' }}>{user.name}</div>
-                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{user.handle}</div>
+                                <div style={{ fontWeight: 'bold', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{user.name}</div>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{user.handle}</div>
                                 <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
                                     {user.followers} followers
                                     {user.mutualCount > 0 ? ` • ${user.mutualCount} mutual` : ''}

@@ -7,6 +7,9 @@ using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -24,16 +27,27 @@ public class AuthController : ControllerBase
 
     private readonly IConfiguration _configuration;
     private readonly UserStore _userStore;
+    private readonly IUserRepository _userRepository;
+    private readonly GrowthService _growthService;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IConfiguration configuration, UserStore userStore)
+    public AuthController(
+        IConfiguration configuration,
+        UserStore userStore,
+        IUserRepository userRepository,
+        GrowthService growthService,
+        ILogger<AuthController> logger)
     {
         _configuration = configuration;
         _userStore = userStore;
+        _userRepository = userRepository;
+        _growthService = growthService;
+        _logger = logger;
     }
 
     [HttpPost("register")]
     [AllowAnonymous]
-    public IActionResult Register([FromBody] RegisterRequest request)
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
         EnsureConfiguredUsersSeeded();
 
@@ -62,22 +76,53 @@ public class AuthController : ControllerBase
             return Conflict(new { message = "An account with that email already exists." });
         }
 
-        var user = _userStore.CreateUser(
-            request.Name,
-            request.Email,
-            request.Password,
-            request.Bio,
-            request.Location,
-            request.Website,
-            request.Avatar);
+        UserRecord user;
+        try
+        {
+            user = _userStore.CreateUser(
+                request.Name,
+                request.Email,
+                request.Password,
+                request.Bio,
+                request.Location,
+                request.Website,
+                request.Avatar);
+        }
+        catch (InvalidOperationException ex) when (string.Equals(ex.Message, "Database persistence is unavailable. Profile and social feed changes were not saved.", StringComparison.Ordinal))
+        {
+            if (!_userStore.TryGetByEmail(request.Email.Trim(), out var createdUser) || createdUser is null)
+            {
+                throw;
+            }
 
-        var token = GenerateToken(user.Id, user.Email, user.Name);
-        return Ok(new { token, user = UserStore.ToResponse(user) });
+            user = createdUser;
+            _logger.LogWarning(ex, "Proceeding with signup despite persistence availability warning for {Email}.", user.Email);
+        }
+
+        try
+        {
+            _growthService.TrackEvent(user.Id, user.Email, "signup_completed");
+            if (!string.IsNullOrWhiteSpace(request.ReferralCode))
+            {
+                _growthService.TryRedeemInvite(request.ReferralCode, user.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Growth tracking failed during signup for {Email}.", user.Email);
+        }
+
+        var domainUserId = await EnsureDomainUserAsync(user);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+
+        var responseUser = UserStore.ToResponse(user);
+        responseUser.Id = domainUserId.ToString("N");
+        return Ok(new { token, user = responseUser });
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
-    public IActionResult Login([FromBody] LoginRequest request)
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         EnsureConfiguredUsersSeeded();
 
@@ -102,13 +147,26 @@ public class AuthController : ControllerBase
 
         ClearFailedLogins(attemptKey);
 
-        var token = GenerateToken(user.Id, user.Email, user.Name);
-        return Ok(new { token, user = UserStore.ToResponse(user) });
+        try
+        {
+            _growthService.TrackEvent(user.Id, user.Email, "login_success");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Growth tracking failed during login for {Email}.", user.Email);
+        }
+
+        var domainUserId = await EnsureDomainUserAsync(user);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+
+        var responseUser = UserStore.ToResponse(user);
+        responseUser.Id = domainUserId.ToString("N");
+        return Ok(new { token, user = responseUser });
     }
 
     [HttpPost("verify")]
     [AllowAnonymous]
-    public IActionResult Verify([FromBody] VerifyRequest? request)
+    public async Task<IActionResult> Verify([FromBody] VerifyRequest? request)
     {
         EnsureConfiguredUsersSeeded();
 
@@ -145,7 +203,10 @@ public class AuthController : ControllerBase
                 user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
             }
 
-            return Ok(new { valid = true, user = UserStore.ToResponse(user) });
+            var domainUserId = await EnsureDomainUserAsync(user);
+            var responseUser = UserStore.ToResponse(user);
+            responseUser.Id = domainUserId.ToString("N");
+            return Ok(new { valid = true, user = responseUser });
         }
         catch
         {
@@ -397,6 +458,65 @@ public class AuthController : ControllerBase
         _userStore.EnsureSeeded(configuredUsers);
     }
 
+    private async Task<Guid> EnsureDomainUserAsync(UserRecord authUser)
+    {
+        if (!Guid.TryParse(authUser.Id, out var parsedId))
+        {
+            parsedId = Guid.NewGuid();
+            _logger.LogWarning("Auth user id '{AuthUserId}' is not a valid GUID. Generated a replacement domain user id for {Email}.", authUser.Id, authUser.Email);
+        }
+
+        var existingById = await _userRepository.GetByIdAsync(parsedId);
+        if (existingById is not null)
+        {
+            return existingById.Id;
+        }
+
+        var existingByEmail = await _userRepository.GetByEmailAsync(authUser.Email);
+        if (existingByEmail is not null)
+        {
+            if (!existingByEmail.IsActive)
+            {
+                existingByEmail.IsActive = true;
+                await _userRepository.UpdateAsync(existingByEmail);
+            }
+
+            return existingByEmail.Id;
+        }
+
+        var normalizedEmail = (authUser.Email ?? string.Empty).Trim();
+        var displayName = string.IsNullOrWhiteSpace(authUser.Name)
+            ? normalizedEmail.Split('@')[0]
+            : authUser.Name.Trim();
+        var usernameSeed = string.IsNullOrWhiteSpace(authUser.Handle)
+            ? normalizedEmail.Split('@')[0]
+            : authUser.Handle.Trim().TrimStart('@');
+        var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(sanitizedUsername))
+        {
+            sanitizedUsername = $"user{parsedId.ToString("N")[..8]}";
+        }
+
+        var newUser = new Wiseravenshare.Server.Entities.User
+        {
+            Id = parsedId,
+            Email = normalizedEmail,
+            Username = sanitizedUsername.ToLowerInvariant(),
+            DisplayName = displayName,
+            PasswordHash = authUser.PasswordHash ?? string.Empty,
+            Bio = string.IsNullOrWhiteSpace(authUser.Bio) ? null : authUser.Bio.Trim(),
+            AvatarUrl = string.IsNullOrWhiteSpace(authUser.Avatar) ? null : authUser.Avatar.Trim(),
+            Location = string.IsNullOrWhiteSpace(authUser.Location) ? null : authUser.Location.Trim(),
+            Website = string.IsNullOrWhiteSpace(authUser.Website) ? null : authUser.Website.Trim(),
+            IsActive = true,
+            TruthScore = 50.00m
+        };
+
+        await _userRepository.AddAsync(newUser);
+        _logger.LogInformation("Provisioned EF user record for auth user {Email} ({UserId}).", newUser.Email, newUser.Id);
+        return newUser.Id;
+    }
+
     private sealed class ConfiguredUser
     {
         public string Name { get; set; } = string.Empty;
@@ -433,6 +553,7 @@ public sealed class RegisterRequest
     public string Location { get; set; } = string.Empty;
     public string Website { get; set; } = string.Empty;
     public string Avatar { get; set; } = string.Empty;
+    public string ReferralCode { get; set; } = string.Empty;
 }
 
 public sealed class VerifyRequest

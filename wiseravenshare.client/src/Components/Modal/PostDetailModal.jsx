@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import PostCard from '../feed/PostCard';
-import { apiService } from '../../services/api';
+import { apiService } from '../../Services/api';
 import { useAuth } from '../../contexts/AuthContext';
 
 const PostDetailModal = ({ isOpen, onClose, post }) => {

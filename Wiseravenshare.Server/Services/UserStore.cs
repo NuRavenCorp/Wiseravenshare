@@ -237,7 +237,7 @@ public sealed class UserStore
             throw new InvalidOperationException("An account with that email already exists.");
         }
 
-        PersistUsers();
+        PersistUsers(user);
         return user;
     }
 
@@ -260,7 +260,7 @@ public sealed class UserStore
         };
 
         _usersByEmail.TryAdd(user.Email, user);
-        PersistUsers();
+        PersistUsers(user);
         return user;
     }
 
@@ -309,7 +309,7 @@ public sealed class UserStore
         }
 
         user.UpdatedAtUtc = DateTime.UtcNow;
-        PersistUsers();
+        PersistUsers(user);
         return user;
     }
 
@@ -339,7 +339,7 @@ public sealed class UserStore
 
         user.SocialFeeds = current;
         user.UpdatedAtUtc = DateTime.UtcNow;
-        PersistUsers();
+        PersistUsers(user);
         return user;
     }
 
@@ -352,7 +352,7 @@ public sealed class UserStore
 
         user.PasswordHash = HashPassword(newPassword);
         user.UpdatedAtUtc = DateTime.UtcNow;
-        PersistUsers();
+        PersistUsers(user);
     }
 
     public static UserResponse ToResponse(UserRecord user)
@@ -483,9 +483,9 @@ public sealed class UserStore
         }
     }
 
-    private void PersistUsers()
+    private void PersistUsers(UserRecord? changedUser = null)
     {
-        if (TryPersistUsersToDatabase())
+        if (TryPersistUsersToDatabase(changedUser))
         {
             return;
         }
@@ -603,7 +603,7 @@ ORDER BY email;";
         return new SocialFeedSettings();
     }
 
-    private bool TryPersistUsersToDatabase()
+    private bool TryPersistUsersToDatabase(UserRecord? changedUser = null)
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
         {
@@ -618,25 +618,33 @@ ORDER BY email;";
 
                 lock (_persistenceLock)
                 {
-                    var users = _usersByEmail.Values
-                        .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
+                    var users = changedUser is null
+                        ? _usersByEmail.Values.OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase).ToList()
+                        : [changedUser];
 
                     using var connection = new NpgsqlConnection(_connectionString);
                     connection.Open();
                     using var tx = connection.BeginTransaction();
 
-                    using (var truncate = new NpgsqlCommand($"TRUNCATE TABLE {_usersTable};", connection, tx))
-                    {
-                        truncate.ExecuteNonQuery();
-                    }
-
                     var insertSql = $@"
 INSERT INTO {_usersTable} (
     id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, created_at_utc, updated_at_utc
 ) VALUES (
-    @id, @email, @name, @handle, @password_hash, @bio, @location, @website, @avatar, @social_feeds, @created_at_utc, @updated_at_utc
-);";
+    @id, @email, @name, @handle, @password_hash, @bio, @location, @website, @avatar, CAST(@social_feeds AS jsonb), @created_at_utc, @updated_at_utc
+) ON CONFLICT (email) DO NOTHING;";
+
+                    var updateSql = $@"
+UPDATE {_usersTable}
+SET name = @name,
+    handle = @handle,
+    password_hash = @password_hash,
+    bio = @bio,
+    location = @location,
+    website = @website,
+    avatar = @avatar,
+    social_feeds = CAST(@social_feeds AS jsonb),
+    updated_at_utc = @updated_at_utc
+WHERE email = @email;";
 
                     foreach (var user in users)
                     {
@@ -653,7 +661,23 @@ INSERT INTO {_usersTable} (
                         insert.Parameters.AddWithValue("social_feeds", JsonSerializer.Serialize(user.SocialFeeds ?? new SocialFeedSettings()));
                         insert.Parameters.AddWithValue("created_at_utc", user.CreatedAtUtc);
                         insert.Parameters.AddWithValue("updated_at_utc", user.UpdatedAtUtc);
-                        insert.ExecuteNonQuery();
+                        var inserted = insert.ExecuteNonQuery();
+
+                        if (inserted == 0)
+                        {
+                            using var update = new NpgsqlCommand(updateSql, connection, tx);
+                            update.Parameters.AddWithValue("email", user.Email);
+                            update.Parameters.AddWithValue("name", user.Name);
+                            update.Parameters.AddWithValue("handle", user.Handle);
+                            update.Parameters.AddWithValue("password_hash", user.PasswordHash);
+                            update.Parameters.AddWithValue("bio", user.Bio ?? string.Empty);
+                            update.Parameters.AddWithValue("location", user.Location ?? string.Empty);
+                            update.Parameters.AddWithValue("website", user.Website ?? string.Empty);
+                            update.Parameters.AddWithValue("avatar", user.Avatar ?? string.Empty);
+                            update.Parameters.AddWithValue("social_feeds", JsonSerializer.Serialize(user.SocialFeeds ?? new SocialFeedSettings()));
+                            update.Parameters.AddWithValue("updated_at_utc", user.UpdatedAtUtc);
+                            update.ExecuteNonQuery();
+                        }
                     }
 
                     tx.Commit();
@@ -722,6 +746,22 @@ INSERT INTO {_usersTable} (
         using var connection = new NpgsqlConnection(_connectionString);
         connection.Open();
 
+        // Prefer binding to existing tables first to support least-privilege DB users
+        // that can read/write data but cannot run CREATE statements.
+        if (TryBindExistingUsersTable(connection, "app_data"))
+        {
+            _usersTable = "app_data.app_users";
+            _dbSchemaEnsured = true;
+            return;
+        }
+
+        if (TryBindExistingUsersTable(connection, "public"))
+        {
+            _usersTable = "public.app_users";
+            _dbSchemaEnsured = true;
+            return;
+        }
+
         if (TryEnsureUsersTable(connection, "app_data", ensureSchema: true))
         {
             _usersTable = "app_data.app_users";
@@ -737,6 +777,25 @@ INSERT INTO {_usersTable} (
         }
 
         throw new InvalidOperationException("Unable to create or access user persistence table in app_data or public schema.");
+    }
+
+    private static bool TryBindExistingUsersTable(NpgsqlConnection connection, string schemaName)
+    {
+        try
+        {
+            var tableName = $"{schemaName}.app_users";
+            const string sql = @"SELECT
+    to_regclass(@table_name) IS NOT NULL
+    AND has_table_privilege(@table_name, 'INSERT');";
+            using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("table_name", tableName);
+            var exists = command.ExecuteScalar();
+            return exists is bool b && b;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryEnsureUsersTable(NpgsqlConnection connection, string schemaName, bool ensureSchema)

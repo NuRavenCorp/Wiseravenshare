@@ -1,0 +1,147 @@
+databases:
+- engine: PG
+  name: wiseravenshare-db
+  version: "16"
+domains:
+- domain: wise-ravens.com
+  type: PRIMARY
+- domain: www.wise-ravens.com
+  type: ALIAS
+envs:
+- key: Restricted
+  scope: RUN_AND_BUILD_TIME
+  value: REDACTED_FOR_GIT
+- key: Publishable
+  scope: RUN_AND_BUILD_TIME
+  value: REDACTED_FOR_GIT
+- key: Secrets
+  scope: RUN_AND_BUILD_TIME
+  value: REDACTED_FOR_GIT
+ingress:
+  rules:
+  - component:
+      name: api
+      preserve_path_prefix: true
+    match:
+      path:
+        prefix: /api
+  - component:
+      name: api
+      preserve_path_prefix: true
+    match:
+      path:
+        prefix: /health
+  - component:
+      name: api
+      preserve_path_prefix: true
+    match:
+      path:
+        prefix: /weatherforecast
+  - component:
+      name: web
+    match:
+      path:
+        prefix: /
+name: wiseravenshare
+region: nyc
+services:
+- envs:
+  - key: ASPNETCORE_ENVIRONMENT
+    scope: RUN_AND_BUILD_TIME
+    value: Production
+  - key: ASPNETCORE_URLS
+    scope: RUN_AND_BUILD_TIME
+    value: http://0.0.0.0:10000
+  - key: CLIENT_ORIGIN
+    scope: RUN_AND_BUILD_TIME
+    value: ${web.PUBLIC_URL}
+  - key: Authentication__AllowSelfRegistration
+    scope: RUN_AND_BUILD_TIME
+    value: "true"
+  - key: Authentication__Users__0__Name
+    scope: RUN_AND_BUILD_TIME
+    value: Wiseraven Admin
+  - key: Authentication__Users__0__Email
+    scope: RUN_AND_BUILD_TIME
+    value: admin@wise-ravens.com
+  - key: Authentication__Users__0__Password
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:FsFi9HuC4DWqOkSXAIst6s5Lsgs9xVdt:VPk1F1dVXp9XFtLllmCHjhJ8nfko56Ce/A/yjoQ=]
+  - key: Authentication__Jwt__ExpiresMinutes
+    scope: RUN_AND_BUILD_TIME
+    value: "43200"
+  - key: DATABASE_URL
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:/3/luc7qChREzHXIkUIX8RJRPpVEbTjk:XHZiAXbpqjyNY48x3nwunDbUndtOu9tOKQAn/Gy7Xp1q4OcpkFFw3B/52kdizqO1TolT1I2+hYyyc10BZPEeMGQ8YVG2b+Au8zEA1SJc3NzSxtaNWS8rRO0kA6tHnzNbbMXUegvfjnIJC6FfHK0W716/Inr1ioOdX8rlM2ruinypN2ERXoCevVRJpEGH2rv4Pin+UEOq6m7QZIJN87gvbAgrDeg5]
+  - key: ConnectionStrings__DefaultConnection
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:RNBOTXlHNNBJaR02rKl4+sAxVFG25g/7:qP4ssHQtjaBm2FeT6rVhM3s9fXxLDM2Kt9kQ54fbINl4LwVpy+mzGqmYw6Wz/TUV7GvsJfMEBMNqonh2IUK0CUXf5OjMLxraaTWdeZERRyRuWh0uzrpzBTG7Ky6Z7KG2wkwl/6qR9xKBInE1iLlbHXAHQEToT+08SKOvggV3Og8AHWWOzRz3mxY5cjCVCXtYwsiWdN/XWXqlcYDCBRzX+Eu+NSy/]
+  - key: Stripe__SecretKey
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: REDACTED_FOR_GIT
+  - key: Stripe__WebhookSecret
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:bGLI2sSuLrJd4Ecd0fl3errcQ1JxsK4j:1IAUwqkEXA9O8k8IGor3fAVqVQdeptv5JG/C/IrhB2POse7asPpBLg==]
+  - key: Social__Facebook__PageId
+    scope: RUN_AND_BUILD_TIME
+    value: ${FACEBOOK_PAGE_ID}
+  - key: Social__Facebook__PageAccessToken
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:QQRwPsWZBW2zv+SqZen1fw20iKkec0j6:yRZS7PKRg4lQrcDy5en+bWRPFWC1utFFvmUzoEIlLpj6eTy93vQpM85mxXps]
+  - key: Social__TikTok__Username
+    scope: RUN_AND_BUILD_TIME
+    value: ${TIKTOK_USERNAME}
+  - key: Social__TikTok__AccessToken
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:bklEat3nck3rTQ3Bzn8Xih2mk8okC7Hn:Dn/n4RFK06R8w2g5lqwhQ6I+rpE9XNPx2sJ7R8SfigOClHTyH2M=]
+  - key: NewsApis__NewsDataIo__ApiKey
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: EV[1:iWe8HFi4jw+YlEcefILlQmshF+mNLS3X:veOTupkF3GnWrH+6c2EaUIV3P/PyHswJm2LWIqXsRILvzSI7folWkKQc3B3leDTOyjyX6bXRfD7S]
+  - key: STRIPE_LIVE_KEY
+    scope: RUN_AND_BUILD_TIME
+    value: REDACTED_FOR_GIT
+  - key: STRIPE_SECRET_KEY
+    scope: RUN_AND_BUILD_TIME
+    value: REDACTED_FOR_GIT
+  - key: STRIPE_PUBLISHABLE_KEY
+    scope: RUN_AND_BUILD_TIME
+    value: REDACTED_FOR_GIT
+  - key: Stripe__PublishableKey
+    scope: RUN_AND_BUILD_TIME
+    value: REDACTED_FOR_GIT
+  health_check:
+    failure_threshold: 3
+    http_path: /health
+    initial_delay_seconds: 20
+    period_seconds: 30
+    success_threshold: 1
+  http_port: 10000
+  image:
+    registry: wiseravenshare
+    registry_type: DOCR
+    repository: wiseravenshare-web
+    tag: api-direct-20260802-085554
+  instance_count: 1
+  instance_size_slug: basic-xs
+  name: api
+- envs:
+  - key: VITE_STRIPE_PAYMENT_LINK
+    scope: RUN_AND_BUILD_TIME
+    value: https://buy.stripe.com/9B67sL9h13oZ4vTe8Tf7i00
+  http_port: 8080
+  image:
+    registry: wiseravenshare
+    registry_type: DOCR
+    repository: wiseravenshare-web
+    tag: direct-20260802-085554
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  name: web

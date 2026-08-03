@@ -12,10 +12,12 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class UsersController : ControllerBase
 {
     private readonly UserStore _userStore;
+    private readonly GrowthService _growthService;
 
-    public UsersController(UserStore userStore)
+    public UsersController(UserStore userStore, GrowthService growthService)
     {
         _userStore = userStore;
+        _growthService = growthService;
     }
 
     [HttpGet("{id}")]
@@ -79,6 +81,7 @@ public sealed class UsersController : ControllerBase
         try
         {
             var user = _userStore.UpdateProfile(id, request);
+            _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
             return Ok(UserStore.ToResponse(user));
         }
         catch (InvalidOperationException ex)
@@ -118,6 +121,7 @@ public sealed class UsersController : ControllerBase
         try
         {
             var user = _userStore.UpdateSocialFeeds(id, request);
+            _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
             return Ok(user.SocialFeeds);
         }
         catch (InvalidOperationException ex)

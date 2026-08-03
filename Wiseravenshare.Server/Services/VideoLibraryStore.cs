@@ -6,12 +6,14 @@ namespace Wiseravenshare.Server.Services;
 public sealed class VideoLibraryStore
 {
     private readonly string _connectionString;
+    private string _videosTable = "app_data.ravensight_videos";
+    private string _commentsTable = "app_data.ravensight_video_comments";
     private bool _schemaEnsured;
     private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
     public VideoLibraryStore(IConfiguration configuration)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+        _connectionString = NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
     }
 
     public async Task EnsureSchemaAsync(CancellationToken cancellationToken = default)
@@ -32,9 +34,100 @@ public sealed class VideoLibraryStore
             var connection = await OpenWithDatabaseProvisioningAsync(cancellationToken);
             await using (connection)
             {
+                // Prefer binding to existing tables first so runtime users without CREATE
+                // permissions can still operate on already-provisioned schemas.
+                if (await TryBindExistingSchemaAsync(connection, "app_data", cancellationToken)
+                    || await TryBindExistingSchemaAsync(connection, "public", cancellationToken))
+                {
+                    _schemaEnsured = true;
+                    return;
+                }
 
-            var sql = @"
-CREATE TABLE IF NOT EXISTS ravensight_videos (
+                if (await TryEnsureSchemaAsync(connection, "app_data", ensureSchema: true, cancellationToken))
+                {
+                    _schemaEnsured = true;
+                    return;
+                }
+
+                if (await TryEnsureSchemaAsync(connection, "public", ensureSchema: false, cancellationToken))
+                {
+                    _schemaEnsured = true;
+                    return;
+                }
+
+                throw new InvalidOperationException("Unable to create or access video persistence tables in app_data or public schema.");
+            }
+        }
+        finally
+        {
+            _schemaLock.Release();
+        }
+    }
+
+    private async Task<bool> TryBindExistingSchemaAsync(NpgsqlConnection connection, string schemaName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var videosTable = $"{schemaName}.ravensight_videos";
+            var commentsTable = $"{schemaName}.ravensight_video_comments";
+
+            var videosExists = await TableExistsAsync(connection, videosTable, cancellationToken);
+            if (!videosExists)
+            {
+                return false;
+            }
+
+            var commentsExists = await TableExistsAsync(connection, commentsTable, cancellationToken);
+
+            _videosTable = videosTable;
+            _commentsTable = commentsTable;
+            await EnsureTableCompatibilityAsync(connection, cancellationToken, includeCommentsTableChanges: commentsExists);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> TableExistsAsync(NpgsqlConnection connection, string tableName, CancellationToken cancellationToken)
+    {
+        const string sql = "SELECT to_regclass(@table_name) IS NOT NULL;";
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("table_name", tableName);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is bool exists && exists;
+    }
+
+    public async Task<bool> IsDatabasePersistenceAvailableAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return false;
+        }
+
+        try
+        {
+            await EnsureSchemaAsync(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> TryEnsureSchemaAsync(NpgsqlConnection connection, string schemaName, bool ensureSchema, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var videosTable = $"{schemaName}.ravensight_videos";
+            var commentsTable = $"{schemaName}.ravensight_video_comments";
+            var createSchemaSql = ensureSchema ? $"CREATE SCHEMA IF NOT EXISTS {schemaName};" : string.Empty;
+            var sql = $@"
+{createSchemaSql}
+
+CREATE TABLE IF NOT EXISTS {videosTable} (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -55,33 +148,86 @@ CREATE TABLE IF NOT EXISTS ravensight_videos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ravensight_videos_user_id_created_at
-    ON ravensight_videos (user_id, created_at DESC);
+    ON {videosTable} (user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ravensight_videos_created_at
-    ON ravensight_videos (created_at DESC);
+    ON {videosTable} (created_at DESC);
 
-CREATE TABLE IF NOT EXISTS ravensight_video_comments (
+CREATE TABLE IF NOT EXISTS {commentsTable} (
     id TEXT PRIMARY KEY,
     video_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     comment TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT fk_ravensight_video_comments_video
-        FOREIGN KEY (video_id) REFERENCES ravensight_videos (id) ON DELETE CASCADE
+        FOREIGN KEY (video_id) REFERENCES {videosTable} (id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
-    ON ravensight_video_comments (video_id, created_at DESC);
+    ON {commentsTable} (video_id, created_at DESC);
 ";
 
-                await using var command = new NpgsqlCommand(sql, connection);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-            _schemaEnsured = true;
+            await using var command = new NpgsqlCommand(sql, connection);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            _videosTable = videosTable;
+            _commentsTable = commentsTable;
+            await EnsureTableCompatibilityAsync(connection, cancellationToken, includeCommentsTableChanges: true);
+            return true;
         }
-        finally
+        catch
         {
-            _schemaLock.Release();
+            return false;
+        }
+    }
+
+    private async Task EnsureTableCompatibilityAsync(NpgsqlConnection connection, CancellationToken cancellationToken, bool includeCommentsTableChanges)
+    {
+        var compatibilitySql = $@"
+ALTER TABLE {_videosTable}
+    ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'published',
+    ADD COLUMN IF NOT EXISTS privacy_status TEXT NOT NULL DEFAULT 'unlisted',
+    ADD COLUMN IF NOT EXISTS youtube_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS tiktok_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS facebook_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS views INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS likes INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS comments INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_ravensight_videos_user_id_created_at
+    ON {_videosTable} (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ravensight_videos_created_at
+    ON {_videosTable} (created_at DESC);";
+
+        if (includeCommentsTableChanges)
+        {
+            compatibilitySql += $@"
+
+ALTER TABLE {_commentsTable}
+    ADD COLUMN IF NOT EXISTS comment TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
+    ON {_commentsTable} (video_id, created_at DESC);";
+        }
+
+        try
+        {
+            await using var command = new NpgsqlCommand(compatibilitySql, connection);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42501")
+        {
+            // Table already exists but runtime principal lacks ALTER/INDEX privileges.
+            // Continue with existing schema so read/write paths can still operate.
         }
     }
 
@@ -164,8 +310,8 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
-INSERT INTO ravensight_videos (
+        var sql = $@"
+INSERT INTO {_videosTable} (
     id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
     youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
 ) VALUES (
@@ -201,10 +347,10 @@ INSERT INTO ravensight_videos (
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
+        var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
        youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
-FROM ravensight_videos
+    FROM {_videosTable}
 WHERE user_id = @user_id
 ORDER BY created_at DESC;";
 
@@ -235,7 +381,7 @@ ORDER BY created_at DESC;";
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
        youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
-FROM ravensight_videos
+    FROM {_videosTable}
 {whereClause}
 ORDER BY created_at DESC
 LIMIT @limit_plus_one OFFSET @offset;";
@@ -266,10 +412,10 @@ LIMIT @limit_plus_one OFFSET @offset;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
+        var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
        youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
-FROM ravensight_videos
+    FROM {_videosTable}
 WHERE id = @id
 LIMIT 1;";
 
@@ -288,8 +434,8 @@ LIMIT 1;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
-UPDATE ravensight_videos
+        var sql = $@"
+    UPDATE {_videosTable}
 SET title = COALESCE(@title, title),
     description = COALESCE(@description, description),
     tags = COALESCE(@tags, tags),
@@ -335,7 +481,7 @@ WHERE id = @id AND user_id = @user_id;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = "DELETE FROM ravensight_videos WHERE id = @id AND user_id = @user_id;";
+        var sql = $"DELETE FROM {_videosTable} WHERE id = @id AND user_id = @user_id;";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("user_id", userId);
@@ -360,8 +506,8 @@ WHERE id = @id AND user_id = @user_id;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
-UPDATE ravensight_videos
+        var sql = $@"
+    UPDATE {_videosTable}
 SET likes = GREATEST(likes + @delta, 0),
     updated_at = @updated_at
 WHERE id = @id;";
@@ -397,8 +543,8 @@ WHERE id = @id;";
         await connection.OpenAsync(cancellationToken);
         await using var tx = await connection.BeginTransactionAsync(cancellationToken);
 
-        const string insertComment = @"
-INSERT INTO ravensight_video_comments (id, video_id, user_id, comment, created_at)
+        var insertComment = $@"
+    INSERT INTO {_commentsTable} (id, video_id, user_id, comment, created_at)
 VALUES (@id, @video_id, @user_id, @comment, @created_at);";
 
         await using (var insert = new NpgsqlCommand(insertComment, connection, tx))
@@ -411,8 +557,8 @@ VALUES (@id, @video_id, @user_id, @comment, @created_at);";
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        const string incrementCount = @"
-UPDATE ravensight_videos
+        var incrementCount = $@"
+    UPDATE {_videosTable}
 SET comments = comments + 1,
     updated_at = @updated_at
 WHERE id = @id;";
@@ -440,9 +586,9 @@ WHERE id = @id;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = @"
+        var sql = $@"
 SELECT id, video_id, user_id, comment, created_at
-FROM ravensight_video_comments
+    FROM {_commentsTable}
 WHERE video_id = @video_id
 ORDER BY created_at DESC
 LIMIT @limit OFFSET @offset;";
@@ -507,5 +653,72 @@ LIMIT @limit OFFSET @offset;";
         {
             throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required for video library persistence.");
         }
+    }
+
+    private static string NormalizeConnectionString(string connectionString)
+    {
+        var value = connectionString?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (!value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            && !value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        if (value.EndsWith("?sslmode", StringComparison.OrdinalIgnoreCase))
+        {
+            return value + "=require";
+        }
+
+        value = value.Replace("?sslmode&", "?sslmode=require&", StringComparison.OrdinalIgnoreCase);
+        value = value.Replace("&sslmode&", "&sslmode=require&", StringComparison.OrdinalIgnoreCase);
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return value;
+        }
+
+        var userName = string.Empty;
+        var password = string.Empty;
+        if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+            userName = Uri.UnescapeDataString(parts[0]);
+            if (parts.Length > 1)
+            {
+                password = Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.IsDefaultPort ? 5432 : uri.Port,
+            Username = userName,
+            Password = password,
+            Database = uri.AbsolutePath.Trim('/'),
+            SslMode = SslMode.Require,
+            TrustServerCertificate = true
+        };
+
+        var query = uri.Query?.TrimStart('?') ?? string.Empty;
+        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = segment.Split('=', 2);
+            var key = Uri.UnescapeDataString(kv[0]);
+            var val = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+            if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase)
+                && Enum.TryParse<SslMode>(val, true, out var mode))
+            {
+                builder.SslMode = mode;
+            }
+        }
+
+        return builder.ConnectionString;
     }
 }

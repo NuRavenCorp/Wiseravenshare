@@ -1,6 +1,7 @@
 // JavaScript source code
 // Planner State Management System
 import { computeTaskPriorityScore, getRecommendedPriority } from './EngagementAlgorithms';
+import { apiService } from './api';
 
 class PlannerState {
     constructor() {
@@ -32,8 +33,10 @@ class PlannerState {
             pendingTasks: 0,
             goalsAchieved: 0
         };
+        this.reminderDispatchInFlight = new Set();
         this.listeners = [];
         this.loadState();
+        this.startReminderWatcher();
     }
 
     subscribe(listener) {
@@ -118,7 +121,7 @@ class PlannerState {
             const state = JSON.parse(saved);
             this.goals = state.goals || this.goals;
             this.tasks = state.tasks || this.tasks;
-            this.calendarEvents = state.calendarEvents || this.calendarEvents;
+            this.calendarEvents = (state.calendarEvents || this.calendarEvents).map((entry) => this.normalizeCalendarEntry(entry));
             this.analyticsEntries = state.analyticsEntries || this.analyticsEntries;
             this.completedTasks = state.completedTasks || this.completedTasks;
             this.settings = state.settings || this.settings;
@@ -128,6 +131,183 @@ class PlannerState {
         }
         this.recomputeTaskSignals();
         this.calculateStats();
+    }
+
+    normalizeCalendarEntry(entry) {
+        const safeEntry = entry || {};
+        return {
+            ...safeEntry,
+            reminderMinutes: Number(safeEntry.reminderMinutes) || 0,
+            sendEmailReminder: Boolean(safeEntry.sendEmailReminder),
+            reminderEmail: String(safeEntry.reminderEmail || '').trim(),
+            sendSmsReminder: Boolean(safeEntry.sendSmsReminder),
+            reminderPhone: String(safeEntry.reminderPhone || '').trim(),
+            reminderDispatch: {
+                emailSentAt: safeEntry?.reminderDispatch?.emailSentAt || null,
+                smsSentAt: safeEntry?.reminderDispatch?.smsSentAt || null,
+                lastAttemptAt: safeEntry?.reminderDispatch?.lastAttemptAt || null,
+                lastError: safeEntry?.reminderDispatch?.lastError || ''
+            }
+        };
+    }
+
+    startReminderWatcher() {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        this.processCalendarReminders();
+        window.setInterval(() => {
+            this.processCalendarReminders();
+        }, 60 * 1000);
+    }
+
+    shouldDispatchReminder(entry) {
+        if (!entry || !entry.startAt) {
+            return false;
+        }
+
+        if (!entry.sendEmailReminder && !entry.sendSmsReminder) {
+            return false;
+        }
+
+        const startAt = new Date(entry.startAt);
+        if (Number.isNaN(startAt.getTime())) {
+            return false;
+        }
+
+        const reminderOffsetMs = Math.max(Number(entry.reminderMinutes) || 0, 0) * 60 * 1000;
+        const dueAt = startAt.getTime() - reminderOffsetMs;
+        if (Date.now() < dueAt) {
+            return false;
+        }
+
+        const lastAttemptAt = entry.reminderDispatch?.lastAttemptAt
+            ? new Date(entry.reminderDispatch.lastAttemptAt).getTime()
+            : 0;
+        const retryCooldownMs = 10 * 60 * 1000;
+        if (lastAttemptAt && Date.now() - lastAttemptAt < retryCooldownMs) {
+            return false;
+        }
+
+        if (entry.sendEmailReminder && !entry.reminderDispatch?.emailSentAt) {
+            return true;
+        }
+
+        if (entry.sendSmsReminder && !entry.reminderDispatch?.smsSentAt) {
+            return true;
+        }
+
+        return false;
+    }
+
+    getFallbackReminderEmail() {
+        try {
+            const rawUser = localStorage.getItem('user_data');
+            if (!rawUser) {
+                return '';
+            }
+
+            const parsed = JSON.parse(rawUser);
+            return String(parsed?.email || '').trim();
+        } catch {
+            return '';
+        }
+    }
+
+    updateReminderDispatch(entryId, updates) {
+        const index = this.calendarEvents.findIndex((entry) => entry.id === entryId);
+        if (index === -1) {
+            return;
+        }
+
+        this.calendarEvents[index] = {
+            ...this.calendarEvents[index],
+            reminderDispatch: {
+                ...(this.calendarEvents[index].reminderDispatch || {}),
+                ...updates
+            },
+            updatedAt: new Date().toISOString()
+        };
+
+        this.saveState();
+    }
+
+    async processCalendarReminders() {
+        const hasAuthToken = typeof window !== 'undefined' && Boolean(localStorage.getItem('auth_token'));
+        if (!hasAuthToken) {
+            return;
+        }
+
+        const entries = [...(this.calendarEvents || [])];
+        for (const entry of entries) {
+            if (!entry?.id || this.reminderDispatchInFlight.has(entry.id)) {
+                continue;
+            }
+
+            if (!this.shouldDispatchReminder(entry)) {
+                continue;
+            }
+
+            this.reminderDispatchInFlight.add(entry.id);
+            try {
+                const emailTo = String(entry.reminderEmail || '').trim() || this.getFallbackReminderEmail();
+                const phoneTo = String(entry.reminderPhone || '').trim();
+                const response = await apiService.sendCalendarReminder({
+                    title: entry.title,
+                    description: entry.description,
+                    startAt: entry.startAt,
+                    reminderMinutes: Number(entry.reminderMinutes) || 0,
+                    sendEmail: Boolean(entry.sendEmailReminder),
+                    emailTo,
+                    sendSms: Boolean(entry.sendSmsReminder),
+                    phoneTo
+                });
+
+                const dispatchResult = response?.data || {};
+                const now = new Date().toISOString();
+                this.updateReminderDispatch(entry.id, {
+                    emailSentAt: dispatchResult.emailSent ? now : entry.reminderDispatch?.emailSentAt || null,
+                    smsSentAt: dispatchResult.smsSent ? now : entry.reminderDispatch?.smsSentAt || null,
+                    lastAttemptAt: now,
+                    lastError: ''
+                });
+
+                const partialFailure = (dispatchResult.emailRequested && !dispatchResult.emailSent)
+                    || (dispatchResult.smsRequested && !dispatchResult.smsSent);
+
+                if (partialFailure) {
+                    this.emitPlannerNotification({
+                        type: 'warning',
+                        toastType: 'warning',
+                        title: 'Reminder partially sent',
+                        message: `${entry.title}: verify your email/SMS provider settings.`
+                    });
+                } else {
+                    this.emitPlannerNotification({
+                        type: 'success',
+                        toastType: 'success',
+                        title: 'Reminder sent',
+                        message: `Reminder delivered for ${entry.title}.`
+                    });
+                }
+            } catch (error) {
+                const now = new Date().toISOString();
+                this.updateReminderDispatch(entry.id, {
+                    lastAttemptAt: now,
+                    lastError: String(error?.message || 'Reminder dispatch failed')
+                });
+
+                this.emitPlannerNotification({
+                    type: 'warning',
+                    toastType: 'warning',
+                    title: 'Reminder failed',
+                    message: `Could not send reminder for ${entry.title}.`
+                });
+            } finally {
+                this.reminderDispatchInFlight.delete(entry.id);
+            }
+        }
     }
 
     recomputeTaskSignals() {
@@ -348,26 +528,31 @@ class PlannerState {
     }
 
     addCalendarEntry(data) {
-        const entry = {
+        const normalizedEntry = this.normalizeCalendarEntry({
             id: 'calendar-' + Date.now(),
             title: data.title,
             description: data.description,
             startAt: data.startAt,
             endAt: data.endAt,
             reminderMinutes: data.reminderMinutes,
+            sendEmailReminder: data.sendEmailReminder,
+            reminderEmail: data.reminderEmail,
+            sendSmsReminder: data.sendSmsReminder,
+            reminderPhone: data.reminderPhone,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
-        };
+        });
 
-        this.calendarEvents.push(entry);
+        this.calendarEvents.push(normalizedEntry);
         this.saveState();
         this.emitPlannerNotification({
             type: 'info',
             toastType: 'success',
             title: 'Calendar event recorded',
-            message: `${entry.title} was added to your calendar.`
+            message: `${normalizedEntry.title} was added to your calendar.`
         });
-        return entry;
+        this.processCalendarReminders();
+        return normalizedEntry;
     }
 
     updateCalendarEntry(entryId, updates) {
@@ -376,11 +561,11 @@ class PlannerState {
             return false;
         }
 
-        this.calendarEvents[index] = {
+        this.calendarEvents[index] = this.normalizeCalendarEntry({
             ...this.calendarEvents[index],
             ...updates,
             updatedAt: new Date().toISOString()
-        };
+        });
         this.saveState();
         this.emitPlannerNotification({
             type: 'info',
@@ -388,6 +573,7 @@ class PlannerState {
             title: 'Calendar event updated',
             message: `${this.calendarEvents[index].title} was updated.`
         });
+        this.processCalendarReminders();
         return true;
     }
 

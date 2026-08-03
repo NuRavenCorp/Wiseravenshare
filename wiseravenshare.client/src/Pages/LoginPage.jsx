@@ -11,6 +11,7 @@ const LoginPage = ({ onAuth }) => {
     const [bio, setBio] = useState('');
     const [location, setLocation] = useState('');
     const [website, setWebsite] = useState('');
+    const [referralCode, setReferralCode] = useState('');
     const [avatarFile, setAvatarFile] = useState(null);
     const [avatarPreview, setAvatarPreview] = useState('');
     const [cameraOpen, setCameraOpen] = useState(false);
@@ -20,6 +21,27 @@ const LoginPage = ({ onAuth }) => {
     const [info, setInfo] = useState('');
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const referralFromUrl =
+            params.get('ref') ||
+            params.get('referral') ||
+            params.get('referralCode');
+
+        const normalizedCode = referralFromUrl?.trim();
+        if (!normalizedCode) {
+            return;
+        }
+
+        setReferralCode(normalizedCode);
+        setMode('signup');
+        setInfo('Referral code detected. Complete signup to redeem it.');
+    }, []);
 
     useEffect(() => {
         if (cameraOpen && videoRef.current && cameraStream) {
@@ -172,7 +194,8 @@ const LoginPage = ({ onAuth }) => {
                 location,
                 website,
                 avatar: avatarPreview,
-                avatarFile
+                avatarFile,
+                referralCode
             });
         } catch (err) {
             setError(err?.message || 'Authentication failed.');
@@ -300,6 +323,21 @@ const LoginPage = ({ onAuth }) => {
                             placeholder="Website"
                             value={website}
                             onChange={(e) => setWebsite(e.target.value)}
+                            style={{
+                                width: '100%',
+                                marginBottom: '12px',
+                                padding: '12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.05)',
+                                color: 'var(--text-color)'
+                            }}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Referral code (optional)"
+                            value={referralCode}
+                            onChange={(e) => setReferralCode(e.target.value)}
                             style={{
                                 width: '100%',
                                 marginBottom: '12px',

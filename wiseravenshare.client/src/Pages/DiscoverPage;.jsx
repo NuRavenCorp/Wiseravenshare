@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PostCard from '../components/feed/PostCard';
-import { apiService } from '../services/api';
+import { apiService } from '../Services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 const DiscoverPage = () => {

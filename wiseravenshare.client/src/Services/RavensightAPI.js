@@ -1,9 +1,37 @@
 import axios from 'axios';
 
+const getAuthToken = () => {
+    return localStorage.getItem('auth_token')
+        || localStorage.getItem('ws.accessToken')
+        || localStorage.getItem('wise-raven-token');
+};
+
+const extractErrorMessage = (error, fallback) => {
+    const responseData = error?.response?.data;
+    if (typeof responseData === 'string' && responseData.trim().length > 0) {
+        return responseData;
+    }
+
+    const serverMessage = responseData?.message || responseData?.error || responseData?.title;
+    if (typeof serverMessage === 'string' && serverMessage.trim().length > 0) {
+        return serverMessage;
+    }
+
+    if (typeof error?.message === 'string' && error.message.trim().length > 0) {
+        return error.message;
+    }
+
+    return fallback;
+};
+
 const resolveRavensightBaseUrl = () => {
     const configured = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
     if (configured) {
-        return configured;
+        const normalized = configured.replace(/\/+$/, '');
+        if (/\/api$/i.test(normalized)) {
+            return `${normalized}/ravensight`;
+        }
+        return normalized;
     }
 
     if (typeof window === 'undefined') {
@@ -14,29 +42,42 @@ const resolveRavensightBaseUrl = () => {
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = window.location.port === '5173' || window.location.port === '4173';
 
-    if (isLocalHost && !isViteDevServer) {
-        return `${window.location.origin}/api/ravensight`;
+    if (isLocalHost || isViteDevServer) {
+        const apiBase = (import.meta.env.VITE_API_URL || '').trim() || 'http://localhost:5242/api';
+        return `${apiBase.replace(/\/+$/, '')}/ravensight`;
     }
 
-    const apiBase = (import.meta.env.VITE_API_URL || '').trim() || 'http://localhost:5242/api';
-    return `${apiBase.replace(/\/+$/, '')}/ravensight`;
+    // In production/non-local environments always target same-origin API.
+    return `${window.location.origin}/api/ravensight`;
 };
 
 const RAVENSIGHT_API_URL = resolveRavensightBaseUrl();
 
+const resolveGeneralApiBaseUrl = () => {
+    const configuredApi = (import.meta.env.VITE_API_URL || '').trim();
+    if (configuredApi) {
+        return configuredApi.replace(/\/+$/, '');
+    }
+
+    if (typeof window !== 'undefined') {
+        return `${window.location.origin}/api`;
+    }
+
+    return 'http://localhost:5242/api';
+};
+
 class RavensightAPI {
     constructor() {
+        this.generalApiBaseUrl = resolveGeneralApiBaseUrl();
         this.api = axios.create({
             baseURL: RAVENSIGHT_API_URL,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: {}
         });
 
         // Add token to requests
         this.api.interceptors.request.use(
             (config) => {
-                const token = localStorage.getItem('auth_token');
+                const token = getAuthToken();
                 if (token) {
                     config.headers.Authorization = `Bearer ${token}`;
                 }
@@ -48,18 +89,33 @@ class RavensightAPI {
 
     // Video Upload
     async uploadVideo(formData, onProgress) {
-        const response = await this.api.post('/videos/upload', formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data'
-            },
+        const requestConfig = {
             onUploadProgress: (progressEvent) => {
                 if (onProgress) {
-                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const total = progressEvent.total || progressEvent.loaded || 1;
+                    const percentCompleted = Math.round((progressEvent.loaded * 100) / total);
                     onProgress(percentCompleted);
                 }
             }
-        });
-        return response.data;
+        };
+
+        try {
+            const response = await this.api.post('/videos/upload', formData, requestConfig);
+            return response.data;
+        } catch (primaryError) {
+            const status = primaryError?.response?.status;
+            if (status === 404 || status === 405) {
+                try {
+                    const fallbackUrl = `${this.generalApiBaseUrl}/media/upload`;
+                    const fallbackResponse = await this.api.post(fallbackUrl, formData, requestConfig);
+                    return fallbackResponse.data;
+                } catch (fallbackError) {
+                    throw new Error(extractErrorMessage(fallbackError, 'Video upload failed.'));
+                }
+            }
+
+            throw new Error(extractErrorMessage(primaryError, 'Video upload failed.'));
+        }
     }
 
     // Get Video Feed

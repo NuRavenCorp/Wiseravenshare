@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Header from './Components/Common/Header';
 import Sidebar from './Components/Common/Sidebar';
 import RightSidebar from './Components/Common/RightSidebar';
@@ -16,9 +16,20 @@ import ArticlePage from './Pages/ArticlePage';
 import RavensightVideo from './Components/Ravensight/RavensightVideo';
 import TruthSeeker from './Components/Truth/TruthSeeker';
 import AINews from './Components/News/AINews';
+import GrowthPage from './Pages/GrowthPage';
+import RevenueConsolePage from './Pages/RevenueConsolePage';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
 import './Styles/Global.css';
+
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
 
 const App = () => {
     const [currentPage, setCurrentPage] = useState('feed');
@@ -34,6 +45,11 @@ const App = () => {
     const [articleBackPage, setArticleBackPage] = useState('ainews');
     const { user, isAuthenticated, loading, login, register, logout } = useAuth();
     const { addToast } = useNotification();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
 
     useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';
@@ -127,9 +143,9 @@ const App = () => {
         }, 8000);
     };
 
-    const handleLogin = async ({ mode, name, email, password, bio, location, website, avatar }) => {
+    const handleLogin = async ({ mode, name, email, password, bio, location, website, avatar, referralCode }) => {
         if (mode === 'signup') {
-            await register({ name, email, password, bio, location, website, avatar });
+            await register({ name, email, password, bio, location, website, avatar, referralCode });
             addToast('Account created successfully.', 'success');
             setCurrentPage('profile');
             addToast('You are signed in. Finish your profile on this page.', 'info');
@@ -185,9 +201,9 @@ const App = () => {
 
         switch (currentPage) {
             case 'feed':
-                return <FeedPage addTruthAlert={addTruthAlert} />;
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
             case 'discover':
-                return <DiscoverPage />;
+                return <DiscoverPage onNavigate={setCurrentPage} />;
             case 'bookmarks':
                 return <BookmarksPage />;
             case 'messages':
@@ -206,10 +222,18 @@ const App = () => {
                 return <ArticlePage article={selectedArticle} onBack={() => setCurrentPage(articleBackPage)} />;
             case 'profile':
                 return <ProfilePage />;
+            case 'growth':
+                return isAdminUser
+                    ? <GrowthPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'revenue':
+                return isAdminUser
+                    ? <RevenueConsolePage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'ravensight':
                 return <RavensightVideo />;
             default:
-                return <FeedPage addTruthAlert={addTruthAlert} />;
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
         }
     };
 
@@ -232,6 +256,10 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'profile', label: 'Profile' }
     ];
+
+    if (isAdminUser) {
+        navItems.splice(8, 0, { id: 'growth', label: 'Growth' }, { id: 'revenue', label: 'Revenue' });
+    }
 
     if (isRavensightMode) {
         return (
