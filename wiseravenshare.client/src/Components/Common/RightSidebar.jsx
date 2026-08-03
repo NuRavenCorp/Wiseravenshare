@@ -5,7 +5,7 @@ import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 
 const MAX_POSTS_FOR_SIDEBAR = 200;
-const MARKET_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+const MARKET_SYMBOLS = ['MSFT', 'IBM'];
 
 const seedUsers = [
     { id: 'seed-wiseravenshare', name: 'WiseravenShare Community', handle: '@wiseravenshare', avatar: 'WS' },
