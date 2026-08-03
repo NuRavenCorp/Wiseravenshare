@@ -204,16 +204,21 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             }}>
                 {menuItems.map(item => (
                     <li key={item.id}>
-                        <a
-                            href="#"
-                            onClick={(e) => { e.preventDefault(); onNavigate(item.id); }}
+                        <button
+                            type="button"
+                            onClick={() => onNavigate(item.id)}
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 padding: '12px 20px',
+                                width: '100%',
                                 color: 'var(--text-color)',
                                 textDecoration: 'none',
                                 gap: '10px',
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer',
+                                textAlign: 'left',
                                 transition: 'all 0.3s ease',
                                 ...(currentPage === item.id ? {
                                     color: 'var(--light-color)',
@@ -237,7 +242,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                         >
                             <i className={item.icon}></i>
                             <span>{item.label}</span>
-                        </a>
+                        </button>
                     </li>
                 ))}
             </ul>
