@@ -1,0 +1,102 @@
+[
+  {
+    "id": "t1",
+    "claim": "Water boils at 100C at sea level.",
+    "expected": "true"
+  },
+  {
+    "id": "t2",
+    "claim": "The sky is blue during daytime.",
+    "expected": "true"
+  },
+  {
+    "id": "t3",
+    "claim": "Earth is flat.",
+    "expected": "false"
+  },
+  {
+    "id": "t4",
+    "claim": "Vaccines cause autism.",
+    "expected": "false"
+  },
+  {
+    "id": "t5",
+    "claim": "5G causes covid.",
+    "expected": "false"
+  },
+  {
+    "id": "t6",
+    "claim": "Humans have three lungs.",
+    "expected": "false"
+  },
+  {
+    "id": "t7",
+    "claim": "The Milky Way has only one planet.",
+    "expected": "false"
+  },
+  {
+    "id": "t8",
+    "claim": "The sky is orange at sunset.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t9",
+    "claim": "Everyone always lies.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t10",
+    "claim": "This startup will 10x revenue in 12 months.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t11",
+    "claim": "Grass is red.",
+    "expected": "false"
+  },
+  {
+    "id": "t12",
+    "claim": "Birds are real.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t13",
+    "claim": "Fire is cold.",
+    "expected": "false"
+  },
+  {
+    "id": "t14",
+    "claim": "The sun revolves around Earth.",
+    "expected": "false"
+  },
+  {
+    "id": "t15",
+    "claim": "The sky appears purple at sunrise.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t16",
+    "claim": "Water is dry.",
+    "expected": "false"
+  },
+  {
+    "id": "t17",
+    "claim": "Planets are square.",
+    "expected": "false"
+  },
+  {
+    "id": "t18",
+    "claim": "No one can prove this 97% statistic.",
+    "expected": "unknown"
+  },
+  {
+    "id": "t19",
+    "claim": "The sky is frozen.",
+    "expected": "false"
+  },
+  {
+    "id": "t20",
+    "claim": "Climate change is fake.",
+    "expected": "false"
+  }
+]

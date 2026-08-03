@@ -5,6 +5,20 @@ class TruthEngine {
         this.knowledgeBase = new Map();
         this.initializeKnowledgeBase();
         this.disputeHistory = [];
+        this.sourceReliability = new Map([
+            ['NASA', 0.99],
+            ['IPCC', 0.98],
+            ['CDC', 0.98],
+            ['WHO', 0.98],
+            ['Atmospheric Physics', 0.96],
+            ['Astronomy', 0.96],
+            ['Human Anatomy', 0.96],
+            ['Physics', 0.95],
+            ['Botany', 0.95],
+            ['Science', 0.94],
+            ['Common knowledge', 0.75],
+            ['Truth Engine', 0.72]
+        ]);
     }
 
     initializeKnowledgeBase() {
@@ -147,6 +161,77 @@ class TruthEngine {
         });
     }
 
+    normalizeClaim(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^\w\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    clampConfidence(value, min = 0.35, max = 0.995) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, numeric));
+    }
+
+    calibrateFinding(finding) {
+        const evidenceMultiplier = {
+            knowledge_base_exact: 1.0,
+            pattern_rule: 0.93,
+            soft_signal: 0.74
+        }[finding.evidenceType] || 0.9;
+
+        const baseConfidence = this.clampConfidence(finding.confidence, 0.2, 0.999);
+        const sourceConfidence = this.sourceReliability.get(finding.source) || 0.72;
+        const nullVerdictPenalty = finding.isTrue === null ? 0.72 : 1;
+
+        const blended = ((baseConfidence * 0.75) + (sourceConfidence * 0.25)) * evidenceMultiplier * nullVerdictPenalty;
+
+        return {
+            ...finding,
+            confidence: Number(this.clampConfidence(blended).toFixed(3))
+        };
+    }
+
+    dedupeAndResolveFindings(findings) {
+        const byClaim = new Map();
+
+        for (const finding of findings) {
+            const key = this.normalizeClaim(finding.claim);
+            if (!key) {
+                continue;
+            }
+
+            const existing = byClaim.get(key);
+            if (!existing) {
+                byClaim.set(key, finding);
+                continue;
+            }
+
+            if (existing.isTrue === finding.isTrue) {
+                if (finding.confidence > existing.confidence) {
+                    byClaim.set(key, finding);
+                }
+                continue;
+            }
+
+            // Conflicting verdicts become explicitly inconclusive.
+            byClaim.set(key, {
+                claim: existing.claim,
+                isTrue: null,
+                correction: 'Conflicting evidence found for this claim. More authoritative sources are required.',
+                source: 'Truth Engine',
+                confidence: Number((Math.max(existing.confidence, finding.confidence) * 0.6).toFixed(3)),
+                evidenceType: 'soft_signal'
+            });
+        }
+
+        return Array.from(byClaim.values()).sort((a, b) => b.confidence - a.confidence);
+    }
+
     analyzeContent(content) {
         const lowerContent = content.toLowerCase();
         const findings = [];
@@ -159,7 +244,8 @@ class TruthEngine {
                     isTrue: data.truth,
                     correction: data.correction,
                     source: data.source,
-                    confidence: data.confidence
+                    confidence: data.confidence,
+                    evidenceType: 'knowledge_base_exact'
                 });
             }
         }
@@ -194,7 +280,8 @@ class TruthEngine {
                             ? `The sky only appears ${prop} briefly at sunrise or sunset, not as a general statement.`
                             : `The sky is part of Earth's atmosphere — it cannot be "${prop}". It appears blue during the day due to Rayleigh scattering.`,
                         source: 'Atmospheric Physics',
-                        confidence: 0.97
+                        confidence: 0.97,
+                        evidenceType: 'pattern_rule'
                     });
                 }
             }
@@ -213,7 +300,8 @@ class TruthEngine {
                         isTrue: false,
                         correction: `Grass is green due to chlorophyll, not ${color}.`,
                         source: 'Botany',
-                        confidence: 0.97
+                        confidence: 0.97,
+                        evidenceType: 'pattern_rule'
                     });
                 }
             }
@@ -235,7 +323,8 @@ class TruthEngine {
                     isTrue: false,
                     correction: `${body.charAt(0).toUpperCase() + body.slice(1)} are not ${shape}. Planets, moons, and stars are roughly spherical due to gravitational forces.`,
                     source: 'Astronomy',
-                    confidence: 0.99
+                    confidence: 0.99,
+                    evidenceType: 'pattern_rule'
                 });
             }
         }
@@ -251,7 +340,8 @@ class TruthEngine {
                     isTrue: false,
                     correction: 'The Milky Way contains billions of planets, not one.',
                     source: 'Astronomy',
-                    confidence: 0.99
+                    confidence: 0.99,
+                    evidenceType: 'pattern_rule'
                 });
             }
         }
@@ -273,7 +363,8 @@ class TruthEngine {
                         isTrue: false,
                         correction: `Humans normally have ${correctCount} ${organ}, not ${statedCount}.`,
                         source: 'Human Anatomy',
-                        confidence: 0.99
+                        confidence: 0.99,
+                        evidenceType: 'pattern_rule'
                     });
                 }
             }
@@ -287,7 +378,8 @@ class TruthEngine {
                 isTrue: null,
                 correction: 'Please provide a source for this statistic.',
                 source: 'Truth Engine',
-                confidence: 0.5
+                confidence: 0.5,
+                evidenceType: 'soft_signal'
             });
         }
 
@@ -299,12 +391,14 @@ class TruthEngine {
                     isTrue: null,
                     correction: 'Consider using more nuanced language as absolute statements are rarely accurate.',
                     source: 'Truth Engine',
-                    confidence: 0.7
+                    confidence: 0.7,
+                    evidenceType: 'soft_signal'
                 });
             }
         });
 
-        return findings;
+        const calibrated = findings.map((finding) => this.calibrateFinding(finding));
+        return this.dedupeAndResolveFindings(calibrated);
     }
 
     async disputePost(postId, postContent, reason) {
@@ -335,26 +429,44 @@ class TruthEngine {
 
     getTruthScore(content) {
         const analysis = this.analyzeContent(content);
-        const falseClaims = analysis.filter(f => f.isTrue === false && f.confidence > 0.8);
-        const trueClaims = analysis.filter(f => f.isTrue === true && f.confidence > 0.8);
-        const totalVerifiable = falseClaims.length + trueClaims.length;
+        const trueClaims = analysis.filter((f) => f.isTrue === true);
+        const falseClaims = analysis.filter((f) => f.isTrue === false);
+        const unknownClaims = analysis.filter((f) => f.isTrue === null);
 
-        // No known claims matched — content is unverified, not automatically true
-        if (totalVerifiable === 0) return 72;
+        // Conservative abstention: no hard evidence should not imply correctness.
+        if (trueClaims.length === 0 && falseClaims.length === 0) {
+            return 50;
+        }
 
-        const falseWeight = falseClaims.reduce((sum, f) => sum + f.confidence, 0);
-        const trueWeight = trueClaims.reduce((sum, f) => sum + f.confidence, 0);
-        const totalWeight = falseWeight + trueWeight;
+        const trueWeight = trueClaims.reduce((sum, finding) => sum + (finding.confidence * finding.confidence), 0);
+        const falseWeight = falseClaims.reduce((sum, finding) => sum + (finding.confidence * finding.confidence), 0);
+        const evidenceWeight = trueWeight + falseWeight;
 
-        if (totalWeight === 0) return 72;
+        if (evidenceWeight < 0.55) {
+            return 50;
+        }
 
-        const rawScore = (trueWeight / totalWeight) * 100;
-        return Math.max(0, Math.min(100, Math.round(rawScore)));
+        // Jeffreys prior preserves uncertainty while allowing strong single facts to be decisive.
+        const posteriorMean = (trueWeight + 0.5) / (evidenceWeight + 1);
+        let score = posteriorMean * 100;
+
+        const uncertaintyPenalty = Math.min(12, unknownClaims.length * 3);
+        const contradictionPenalty = (trueClaims.length > 0 && falseClaims.length > 0) ? 10 : 0;
+        const coverage = Math.min(1, evidenceWeight / Math.max(1, analysis.length));
+        const shrink = 0.78 + (0.22 * coverage);
+
+        score = 50 + ((score - 50) * shrink);
+        score -= uncertaintyPenalty;
+        score -= contradictionPenalty;
+
+        return Math.max(0, Math.min(100, Math.round(score)));
     }
 
     getTruthBadge(score) {
         if (score >= 90) return { text: `✓ Truth Score: ${score}%`, class: 'truth-score', icon: '✅' };
-        if (score >= 60) return { text: `📊 Partially Verified: ${score}%`, class: 'truth-partial', icon: '📊' };
+        if (score >= 70) return { text: `📊 Highly Supported: ${score}%`, class: 'truth-partial', icon: '📊' };
+        if (score >= 55) return { text: `🟡 Mixed Evidence: ${score}%`, class: 'truth-partial', icon: '🟡' };
+        if (score >= 45) return { text: `❔ Inconclusive: ${score}%`, class: 'truth-inconclusive', icon: '❔' };
         if (score >= 30) return { text: `⚠️ Questionable: ${score}%`, class: 'truth-questionable', icon: '⚠️' };
         return { text: `❗ Needs Fact Check: ${score}%`, class: 'truth-false', icon: '❗' };
     }
