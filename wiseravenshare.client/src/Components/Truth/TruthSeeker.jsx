@@ -6,6 +6,25 @@ const TruthSeeker = () => {
     const [claim, setClaim] = useState('');
     const [history, setHistory] = useState([]);
     const [tick, setTick] = useState(0);
+    const [analysisError, setAnalysisError] = useState('');
+
+    const analyzeClaim = (input) => {
+        try {
+            const findings = truthEngine.analyzeContent(input);
+            const score = truthEngine.getTruthScore(input);
+            const badge = truthEngine.getTruthBadge(score);
+            setAnalysisError('');
+            return { findings, score, badge };
+        } catch (error) {
+            console.error('Truth analysis failed:', error);
+            setAnalysisError('Truth analysis is temporarily unavailable. Please try again.');
+            return {
+                findings: [],
+                score: 72,
+                badge: truthEngine.getTruthBadge(72)
+            };
+        }
+    };
 
     // tick forces re-evaluation when user explicitly hits Check Claim,
     // ensuring the singleton engine is re-queried even after HMR.
@@ -14,10 +33,7 @@ const TruthSeeker = () => {
             return { findings: [], score: 72, badge: truthEngine.getTruthBadge(72) };
         }
 
-        const findings = truthEngine.analyzeContent(claim);
-        const score = truthEngine.getTruthScore(claim);
-        const badge = truthEngine.getTruthBadge(score);
-        return { findings, score, badge };
+        return analyzeClaim(claim);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [claim, tick]);
 
@@ -27,9 +43,10 @@ const TruthSeeker = () => {
         }
 
         // Compute fresh values at click-time so history never stores stale memoized scores.
-        const findings = truthEngine.analyzeContent(claim);
-        const score = truthEngine.getTruthScore(claim);
-        const badge = truthEngine.getTruthBadge(score);
+        const snapshot = analyzeClaim(claim);
+        const findings = snapshot.findings;
+        const score = snapshot.score;
+        const badge = snapshot.badge;
 
         setTick((t) => t + 1); // force useMemo re-run with fresh engine state
 
@@ -126,6 +143,20 @@ const TruthSeeker = () => {
                     </button>
                     <span style={{ color: 'var(--highlight-color)', fontSize: '13px' }}>{analysis.badge.text}</span>
                 </div>
+
+                {analysisError && (
+                    <div style={{
+                        marginBottom: '16px',
+                        border: '1px solid #f59e0b',
+                        borderRadius: '8px',
+                        padding: '10px',
+                        fontSize: '13px',
+                        color: '#fcd34d',
+                        background: 'rgba(245, 158, 11, 0.12)'
+                    }}>
+                        {analysisError}
+                    </div>
+                )}
 
                 <div style={{
                     border: '1px solid var(--border-color)',

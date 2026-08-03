@@ -18,6 +18,7 @@ import TruthSeeker from './Components/Truth/TruthSeeker';
 import AINews from './Components/News/AINews';
 import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
+import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
 import './Styles/Global.css';
@@ -99,6 +100,29 @@ const App = () => {
         sanitizeStoredArray('wiseMessagesConversations', sanitizePosts);
         localStorage.setItem(migrationKey, 'done');
     }, []);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return undefined;
+        }
+
+        let isMounted = true;
+        const engine = EvolutionEngine.getInstance();
+
+        engine.initialize().catch((error) => {
+            if (!isMounted) {
+                return;
+            }
+
+            console.error('Failed to initialize evolution agents:', error);
+            addToast('Agent initialization is temporarily unavailable.', 'warning');
+        });
+
+        return () => {
+            isMounted = false;
+            engine.destroy();
+        };
+    }, [isAuthenticated, addToast]);
 
     useEffect(() => {
         const perfTrimKey = 'wisePerfTrimV2';
