@@ -15,6 +15,10 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
     const [calendarStartAt, setCalendarStartAt] = useState('');
     const [calendarEndAt, setCalendarEndAt] = useState('');
     const [calendarReminderMinutes, setCalendarReminderMinutes] = useState(30);
+    const [calendarSendEmailReminder, setCalendarSendEmailReminder] = useState(false);
+    const [calendarReminderEmail, setCalendarReminderEmail] = useState('');
+    const [calendarSendSmsReminder, setCalendarSendSmsReminder] = useState(false);
+    const [calendarReminderPhone, setCalendarReminderPhone] = useState('');
     const [editingCalendarId, setEditingCalendarId] = useState(null);
 
     const [analyticsTitle, setAnalyticsTitle] = useState('');
@@ -63,6 +67,10 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarStartAt('');
         setCalendarEndAt('');
         setCalendarReminderMinutes(30);
+        setCalendarSendEmailReminder(false);
+        setCalendarReminderEmail('');
+        setCalendarSendSmsReminder(false);
+        setCalendarReminderPhone('');
         setAnalyticsTitle('');
         setAnalyticsInsight('');
         setAnalyticsMetric('');
@@ -78,7 +86,11 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
             description: calendarDescription.trim(),
             startAt: calendarStartAt,
             endAt: calendarEndAt,
-            reminderMinutes: Number(calendarReminderMinutes) || 0
+            reminderMinutes: Number(calendarReminderMinutes) || 0,
+            sendEmailReminder: calendarSendEmailReminder,
+            reminderEmail: calendarReminderEmail.trim(),
+            sendSmsReminder: calendarSendSmsReminder,
+            reminderPhone: calendarReminderPhone.trim()
         };
 
         if (editingCalendarId) {
@@ -93,6 +105,10 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarStartAt('');
         setCalendarEndAt('');
         setCalendarReminderMinutes(30);
+        setCalendarSendEmailReminder(false);
+        setCalendarReminderEmail('');
+        setCalendarSendSmsReminder(false);
+        setCalendarReminderPhone('');
     };
 
     const editCalendarEntry = (entry) => {
@@ -102,6 +118,10 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarStartAt(entry.startAt || '');
         setCalendarEndAt(entry.endAt || '');
         setCalendarReminderMinutes(entry.reminderMinutes || 30);
+        setCalendarSendEmailReminder(Boolean(entry.sendEmailReminder));
+        setCalendarReminderEmail(entry.reminderEmail || '');
+        setCalendarSendSmsReminder(Boolean(entry.sendSmsReminder));
+        setCalendarReminderPhone(entry.reminderPhone || '');
         setActiveSection('calendar');
     };
 
@@ -217,6 +237,38 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
                             <input type="datetime-local" value={calendarStartAt} onChange={(event) => setCalendarStartAt(event.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px' }} />
                             <input type="datetime-local" value={calendarEndAt} onChange={(event) => setCalendarEndAt(event.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px' }} />
                             <input type="number" min="0" step="5" value={calendarReminderMinutes} onChange={(event) => setCalendarReminderMinutes(event.target.value)} placeholder="Reminder minutes before" style={{ width: '100%', marginBottom: '12px', padding: '10px' }} />
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={calendarSendEmailReminder}
+                                    onChange={(event) => setCalendarSendEmailReminder(event.target.checked)}
+                                />
+                                Send email reminder
+                            </label>
+                            {calendarSendEmailReminder && (
+                                <input
+                                    value={calendarReminderEmail}
+                                    onChange={(event) => setCalendarReminderEmail(event.target.value)}
+                                    placeholder="Reminder email (optional if profile email should be used)"
+                                    style={{ width: '100%', marginBottom: '10px', padding: '10px' }}
+                                />
+                            )}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={calendarSendSmsReminder}
+                                    onChange={(event) => setCalendarSendSmsReminder(event.target.checked)}
+                                />
+                                Send text reminder
+                            </label>
+                            {calendarSendSmsReminder && (
+                                <input
+                                    value={calendarReminderPhone}
+                                    onChange={(event) => setCalendarReminderPhone(event.target.value)}
+                                    placeholder="Reminder phone (E.164 preferred, e.g. +15551234567)"
+                                    style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
+                                />
+                            )}
                             <div style={{ display: 'flex', gap: '10px' }}>
                                 <button onClick={saveCalendarEntry} style={{ padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--highlight-color)', color: 'white', cursor: 'pointer' }}>
                                     {editingCalendarId ? 'Update Entry' : 'Save Entry'}
@@ -229,6 +281,10 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
                                         setCalendarStartAt('');
                                         setCalendarEndAt('');
                                         setCalendarReminderMinutes(30);
+                                        setCalendarSendEmailReminder(false);
+                                        setCalendarReminderEmail('');
+                                        setCalendarSendSmsReminder(false);
+                                        setCalendarReminderPhone('');
                                     }} style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer' }}>
                                         Reset
                                     </button>
@@ -243,6 +299,11 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
                                             <strong>{entry.title}</strong>
                                             <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>{entry.description}</div>
                                             <div style={{ fontSize: '12px', marginTop: '6px' }}>{entry.startAt ? new Date(entry.startAt).toLocaleString() : 'No time set'}</div>
+                                            {(entry.sendEmailReminder || entry.sendSmsReminder) && (
+                                                <div style={{ fontSize: '12px', marginTop: '6px', color: 'var(--highlight-color)' }}>
+                                                    Reminder via {entry.sendEmailReminder ? 'email' : ''}{entry.sendEmailReminder && entry.sendSmsReminder ? ' + ' : ''}{entry.sendSmsReminder ? 'text' : ''}
+                                                </div>
+                                            )}
                                             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                                                 <button onClick={() => editCalendarEntry(entry)} style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer' }}>Edit</button>
                                                 <button onClick={() => plannerState.deleteCalendarEntry(entry.id)} style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--error-color)', cursor: 'pointer' }}>Delete</button>

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Npgsql;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -14,17 +15,19 @@ public class MediaController : ControllerBase
     private readonly IWebHostEnvironment _environment;
     private readonly IYouTubeService _youTubeService;
     private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly ILogger<MediaController> _logger;
 
-    public MediaController(IWebHostEnvironment environment, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore)
+    public MediaController(IWebHostEnvironment environment, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoLibraryStore = videoLibraryStore;
+        _logger = logger;
     }
 
     [HttpPost("upload")]
     [RequestSizeLimit(500_000_000)]
-    public async Task<IActionResult> UploadMedia([FromForm] MediaUploadDto upload)
+    public async Task<IActionResult> UploadMedia([FromForm] MediaUploadDto upload, CancellationToken cancellationToken)
     {
         if (upload.File == null || upload.File.Length == 0)
         {
@@ -39,14 +42,15 @@ public class MediaController : ControllerBase
             return BadRequest("Invalid file type.");
         }
 
-        var uniqueFileName = $"{Guid.NewGuid()}{extension}";
-        var uploadsFolder = Path.Combine(_environment.ContentRootPath, "MediaStorage");
-        Directory.CreateDirectory(uploadsFolder);
-
-        var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-        await using (var stream = new FileStream(filePath, FileMode.Create))
+        string uniqueFileName;
+        try
         {
-            await upload.File.CopyToAsync(stream);
+            uniqueFileName = await SaveMediaFileAsync(upload.File, extension, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist uploaded media file.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
         var isVideo = extension is ".mp4" or ".mov" or ".webm";
@@ -112,21 +116,75 @@ public class MediaController : ControllerBase
             }
 
             var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
-            video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+            try
             {
-                UserId = userId,
-                Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(upload.File.FileName) : upload.Title,
-                Description = upload.Description ?? string.Empty,
-                VideoUrl = absoluteVideoUrl,
-                PrivacyStatus = "unlisted",
-                Status = "published",
-                YouTubeUrl = youtubeUrl,
-                TikTokUrl = tiktokUrl,
-                FacebookUrl = facebookUrl
-            });
+                video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId,
+                    Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(upload.File.FileName) : upload.Title,
+                    Description = upload.Description ?? string.Empty,
+                    VideoUrl = absoluteVideoUrl,
+                    PrivacyStatus = "unlisted",
+                    Status = "published",
+                    YouTubeUrl = youtubeUrl,
+                    TikTokUrl = tiktokUrl,
+                    FacebookUrl = facebookUrl
+                }, cancellationToken);
+            }
+            catch (PostgresException ex)
+            {
+                _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}.", userId);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Video library database is temporarily unavailable." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}.", userId);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
+            }
         }
 
-        return Ok(new { filePath, fileName = uniqueFileName, youtubeUrl, tiktokUrl, facebookUrl, video });
+        var mediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        return Ok(new
+        {
+            fileName = uniqueFileName,
+            filePath = mediaUrl,
+            mediaUrl,
+            youtubeUrl,
+            tiktokUrl,
+            facebookUrl,
+            video
+        });
+    }
+
+    private async Task<string> SaveMediaFileAsync(IFormFile file, string extension, CancellationToken cancellationToken)
+    {
+        var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
+        var candidateFolders = new[]
+        {
+            Path.Combine(_environment.ContentRootPath, "MediaStorage"),
+            Path.Combine(AppContext.BaseDirectory, "MediaStorage"),
+            Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage")
+        };
+
+        Exception? lastFailure = null;
+        foreach (var folder in candidateFolders)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                var filePath = Path.Combine(folder, uniqueFileName);
+                await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await file.CopyToAsync(stream, cancellationToken);
+                return uniqueFileName;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                lastFailure = ex;
+                _logger.LogWarning(ex, "Media upload write attempt failed for folder {Folder}", folder);
+            }
+        }
+
+        throw new InvalidOperationException("Unable to write uploaded media to any configured storage path.", lastFailure);
     }
 }
 

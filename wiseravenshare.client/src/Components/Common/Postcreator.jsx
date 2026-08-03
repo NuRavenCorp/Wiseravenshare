@@ -17,6 +17,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
     const [facebookPermissionGranted, setFacebookPermissionGranted] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
+    const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
     const user = { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
 
@@ -43,8 +44,19 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
         }
 
         input.onchange = (e) => {
-            if (e.target.files[0]) {
-                setMediaFile(e.target.files[0]);
+            const selected = e.target.files?.[0];
+            if (!selected) return;
+
+            setMediaFile(selected);
+
+            // Trust the browser-reported MIME first so upload toggles are accurate.
+            if (selected.type?.startsWith('video/')) {
+                setMediaType('video');
+            } else if (selected.type?.startsWith('image/')) {
+                setMediaType('photo');
+            } else if (selected.type?.startsWith('audio/')) {
+                setMediaType('audio');
+            } else {
                 setMediaType(type);
             }
         };
@@ -52,9 +64,28 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
     };
 
     const handleSubmit = async () => {
-        if (!content.trim() && !mediaFile) {
-            addTruthAlert('warning', 'Please add some content or media to your post.', null);
+        if (!content.trim()) {
+            addTruthAlert('warning', 'Please add text content to publish your post.', null);
             return;
+        }
+
+        try {
+            const moderationResponse = await apiService.checkModeration(content || '');
+            const moderation = moderationResponse?.data;
+
+            if (moderation && moderation.allowed === false) {
+                const reason = Array.isArray(moderation.reasons) && moderation.reasons.length > 0
+                    ? ` ${moderation.reasons[0]}`
+                    : '';
+                addTruthAlert('warning', `Post blocked by anti-spam checks.${reason}`, null);
+                return;
+            }
+
+            if (moderation && moderation.flagged) {
+                addTruthAlert('info', 'This post may look spammy. Consider editing before publishing.', null);
+            }
+        } catch {
+            // Keep posting flow available if moderation endpoint is unavailable.
         }
 
         setIsUploading(true);
@@ -102,8 +133,14 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     facebookPermissionGranted
                 });
 
-                if (uploadResponse?.data?.filePath) {
-                    uploadedMediaUrl = uploadResponse.data.filePath;
+                const persistedMediaUrl = uploadResponse?.data?.filePath
+                    || uploadResponse?.data?.mediaUrl
+                    || (uploadResponse?.data?.fileName
+                        ? `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(uploadResponse.data.fileName)}`
+                        : null);
+
+                if (persistedMediaUrl) {
+                    uploadedMediaUrl = persistedMediaUrl;
                 }
 
                 if (uploadResponse?.data?.youtubeUrl) {
@@ -118,31 +155,47 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     uploadedFacebookUrl = uploadResponse.data.facebookUrl;
                 }
             } catch (error) {
-                addTruthAlert('warning', 'Media upload service unavailable, using local preview instead.', null);
+                const status = error?.response?.status;
+                const serverMessage = error?.response?.data?.message || error?.response?.data;
+                const normalizedServerMessage = typeof serverMessage === 'string' ? serverMessage.trim() : '';
+
+                let uploadMessage = 'Media upload endpoint unreachable, using local preview instead.';
+
+                if (status === 401 || status === 403) {
+                    uploadMessage = 'Media upload requires an active login. Using local preview instead.';
+                } else if (status === 400 && normalizedServerMessage) {
+                    uploadMessage = `${normalizedServerMessage} Using local preview instead.`;
+                } else if (normalizedServerMessage) {
+                    uploadMessage = `${normalizedServerMessage} Using local preview instead.`;
+                }
+
+                addTruthAlert('warning', uploadMessage, null);
             }
         }
 
-        const newPost = {
-            id: Date.now().toString(),
-            user: user,
+        const payload = {
             content: content,
-            mediaUrl: uploadedMediaUrl,
-            mediaType: mediaType,
-            podcastUrl: mediaType === 'audio' ? URL.createObjectURL(mediaFile) : null,
-            youtubeUrl: uploadedYoutubeUrl,
-            tiktokUrl: uploadedTikTokUrl,
-            facebookUrl: uploadedFacebookUrl,
-            likes: 0,
-            reposts: 0,
-            comments: 0,
-            createdAt: new Date(),
-            correction: correction,
-            truthScore: truthScore,
-            isLiked: false
+            type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
+            mediaUrls: uploadedMediaUrl || null,
+            isSensitive: false
         };
 
-        setTimeout(() => {
-            onPostCreate(newPost);
+        setTimeout(async () => {
+            try {
+                const createResponse = await apiService.createPost(payload);
+                const createdPost = createResponse?.data;
+                if (!createdPost?.id) {
+                    throw new Error('Post API did not return a created post.');
+                }
+
+                apiService.trackGrowthEvent('first_post_created').catch(() => null);
+                onPostCreate(createdPost);
+            } catch (error) {
+                addTruthAlert('error', 'Failed to save post to server. Please try again.', null);
+                setIsUploading(false);
+                return;
+            }
+
             setContent('');
             setMediaFile(null);
             setMediaType(null);
@@ -236,7 +289,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     type="checkbox"
                     id="youtube"
                     checked={publishToYouTube}
-                    disabled={mediaType !== 'video'}
+                    disabled={!canPublishVideo}
                     onChange={(e) => setPublishToYouTube(e.target.checked)}
                 />
                 <label htmlFor="youtube" style={{ cursor: 'pointer' }}>
@@ -248,7 +301,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     type="checkbox"
                     id="tiktok"
                     checked={publishToTikTok}
-                    disabled={mediaType !== 'video'}
+                    disabled={!canPublishVideo}
                     onChange={(e) => setPublishToTikTok(e.target.checked)}
                 />
                 <label htmlFor="tiktok" style={{ cursor: 'pointer' }}>
@@ -260,14 +313,14 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     type="checkbox"
                     id="facebook"
                     checked={publishToFacebook}
-                    disabled={mediaType !== 'video'}
+                    disabled={!canPublishVideo}
                     onChange={(e) => setPublishToFacebook(e.target.checked)}
                 />
                 <label htmlFor="facebook" style={{ cursor: 'pointer' }}>
                     📘 Publish video to Facebook via Ravensight
                 </label>
             </div>
-            {publishToYouTube && mediaType === 'video' && (
+            {publishToYouTube && canPublishVideo && (
                 <div style={{ marginTop: '8px' }}>
                     <input
                         type="text"
@@ -293,7 +346,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     </label>
                 </div>
             )}
-            {publishToTikTok && mediaType === 'video' && (
+            {publishToTikTok && canPublishVideo && (
                 <div style={{ marginTop: '8px' }}>
                     <input
                         type="text"
@@ -319,7 +372,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     </label>
                 </div>
             )}
-            {publishToFacebook && mediaType === 'video' && (
+            {publishToFacebook && canPublishVideo && (
                 <div style={{ marginTop: '8px' }}>
                     <input
                         type="text"
@@ -345,7 +398,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     </label>
                 </div>
             )}
-            {mediaType !== 'video' && (
+            {!canPublishVideo && (
                 <div style={{ fontSize: '12px', color: 'var(--highlight-color)', marginTop: '-6px' }}>
                     Select a video file to enable YouTube, TikTok, or Facebook publishing.
                 </div>
@@ -362,7 +415,16 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     alignItems: 'center'
                 }}>
                     <span>{mediaFile.name}</span>
-                    <button onClick={() => setMediaFile(null)} style={{
+                    <button onClick={() => {
+                        setMediaFile(null);
+                        setMediaType(null);
+                        setPublishToYouTube(false);
+                        setPublishToTikTok(false);
+                        setPublishToFacebook(false);
+                        setYouTubePermissionGranted(false);
+                        setTikTokPermissionGranted(false);
+                        setFacebookPermissionGranted(false);
+                    }} style={{
                         background: 'none',
                         border: 'none',
                         color: 'var(--error-color)',

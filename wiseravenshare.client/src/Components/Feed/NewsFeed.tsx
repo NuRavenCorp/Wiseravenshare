@@ -1,26 +1,33 @@
 ﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
-interface Post {
-    id: string;
-    user: { name: string; avatar: string };
-    content: string;
+interface NewsArticle {
+    provider: string;
+    source?: string;
+    title: string;
+    description?: string;
+    url?: string;
     mediaUrl?: string;
-    mediaType: 'image' | 'video' | 'podcast';
-    createdAt: Date;
+    imageUrl?: string;
+    publishedAtUtc?: string;
+}
+
+interface NewsResponse {
+    articles: NewsArticle[];
 }
 
 const NewsFeed: React.FC = () => {
-    const [posts, setPosts] = useState<Post[]>([]);
+    const [articles, setArticles] = useState<NewsArticle[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchFeed = async () => {
             try {
-                const response = await axios.get('/api/feed');
-                setPosts(response.data);
+                const response = await axios.get<NewsResponse>('/api/news/trending?limit=20');
+                setArticles(Array.isArray(response.data?.articles) ? response.data.articles : []);
             } catch (error) {
                 console.error('Failed to load feed:', error);
+                setArticles([]);
             } finally {
                 setLoading(false);
             }
@@ -37,25 +44,25 @@ const NewsFeed: React.FC = () => {
 
     return (
         <div className="news-feed">
-            {posts.map(post => (
-                <article key={post.id} className="post-card">
+            {articles.map((article, index) => (
+                <article key={`${article.url ?? article.title}-${index}`} className="post-card">
                     <div className="post-header">
-                        <img src={post.user.avatar} alt={post.user.name} />
-                        <h3>{post.user.name}</h3>
+                        <h3>{article.title}</h3>
                     </div>
 
-                    <p>{post.content}</p>
+                    <p>{article.description ?? 'No summary available.'}</p>
+                    <p>
+                        <strong>Source:</strong> {article.source ?? article.provider}
+                    </p>
 
-                    {post.mediaUrl && post.mediaType === 'image' && (
-                        <img src={post.mediaUrl} alt="Post media" />
+                    {article.imageUrl && (
+                        <img src={article.imageUrl} alt={article.title} />
                     )}
 
-                    {post.mediaUrl && post.mediaType === 'video' && (
-                        <video controls src={post.mediaUrl} />
-                    )}
-
-                    {post.mediaUrl && post.mediaType === 'podcast' && (
-                        <audio controls src={post.mediaUrl} />
+                    {article.url && (
+                        <a href={article.url} target="_blank" rel="noreferrer">
+                            Read full story
+                        </a>
                     )}
                 </article>
             ))}

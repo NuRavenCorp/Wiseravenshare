@@ -8,10 +8,27 @@ import { socialGraphService } from '../Services/SocialGraph';
 import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
 import { truthEngine } from '../Services/TruthDetectionEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
+import OnboardingCard from '../Components/Common/OnboardingCard';
+import { apiService } from '../Services/api';
 
 const MAX_STORED_POSTS = 120;
 
-const FeedPage = ({ addTruthAlert }) => {
+const normalizePost = (post) => ({
+    ...post,
+    likes: Number(post?.likes ?? post?.likesCount ?? 0),
+    reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
+    comments: Array.isArray(post?.comments) ? post.comments : [],
+    truthScore: post?.truthScore,
+    user: {
+        ...(post?.user || {}),
+        id: post?.user?.id || post?.userId,
+        name: post?.user?.displayName || post?.user?.name || post?.user?.username || 'User',
+        handle: post?.user?.handle || (post?.user?.username ? `@${post.user.username}` : '@user'),
+        avatar: post?.user?.avatar || post?.user?.avatarUrl || 'U'
+    }
+});
+
+const FeedPage = ({ addTruthAlert, onNavigate }) => {
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
@@ -36,7 +53,6 @@ const FeedPage = ({ addTruthAlert }) => {
     };
 
     useEffect(() => {
-        // Load sample posts
         const samplePosts = [
             {
                 id: '1',
@@ -67,7 +83,18 @@ const FeedPage = ({ addTruthAlert }) => {
                 truthScore: 88
             }
         ];
-        setPosts(samplePosts);
+
+        const loadFeed = async () => {
+            try {
+                const response = await apiService.getPosts({ page: 1, pageSize: 40 });
+                const backendPosts = Array.isArray(response?.data) ? response.data.map(normalizePost) : [];
+                setPosts(backendPosts.length > 0 ? backendPosts : samplePosts);
+            } catch {
+                setPosts(samplePosts);
+            }
+        };
+
+        loadFeed();
 
         socialGraphService.registerUserProfile(currentUser);
         samplePosts.forEach((post) => socialGraphService.registerUserProfile(post.user));
@@ -87,10 +114,11 @@ const FeedPage = ({ addTruthAlert }) => {
     }, [posts]);
 
     const handlePostCreate = (newPost) => {
-        setPosts(prev => [newPost, ...prev]);
+        setPosts(prev => [normalizePost(newPost), ...prev]);
     };
 
     const handleLike = (postId) => {
+        apiService.likePost(postId).catch(() => null);
         setPosts((prev) => {
             const next = prev.map((post) =>
                 post.id === postId
@@ -109,6 +137,7 @@ const FeedPage = ({ addTruthAlert }) => {
     };
 
     const handleRepost = (postId) => {
+        apiService.repostPost(postId).catch(() => null);
         setPosts(prev => prev.map(post =>
             post.id === postId
                 ? { ...post, reposts: post.reposts + 1 }
@@ -125,6 +154,7 @@ const FeedPage = ({ addTruthAlert }) => {
         } else {
             socialGraphService.followUser(currentUser.id, userId);
             addTruthAlert('success', 'Started following user.', null);
+            apiService.trackGrowthEvent('first_follow').catch(() => null);
         }
 
         setFollowing(socialGraphService.getFollowingIds(currentUser.id));
@@ -236,6 +266,7 @@ const FeedPage = ({ addTruthAlert }) => {
                 </div>
             </div>
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} />
+            <OnboardingCard onNavigate={onNavigate} />
             <VideoFeedMini posts={rankedFeedPosts} />
             <SocialFeedsTimeline user={currentUser} />
             <div style={{ marginTop: '20px' }}>

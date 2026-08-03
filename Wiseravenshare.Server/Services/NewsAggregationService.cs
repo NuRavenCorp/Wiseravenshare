@@ -6,6 +6,7 @@ namespace Wiseravenshare.Server.Services;
 public interface INewsAggregationService
 {
     Task<NewsSearchResponse> SearchNewsAsync(string query, string? language, int limit, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BbcLanguageOption>> GetBbcSupportedLanguagesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class NewsAggregationService : INewsAggregationService
@@ -13,6 +14,40 @@ public sealed class NewsAggregationService : INewsAggregationService
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
+    };
+
+    private static readonly Dictionary<string, string> BbcLanguageMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en"] = "english",
+        ["english"] = "english",
+        ["ar"] = "arabic",
+        ["arabic"] = "arabic",
+        ["zh"] = "chinese",
+        ["chinese"] = "chinese",
+        ["id"] = "indonesian",
+        ["indonesian"] = "indonesian",
+        ["fr"] = "french",
+        ["french"] = "french",
+        ["es"] = "spanish",
+        ["spanish"] = "spanish",
+        ["ru"] = "russian",
+        ["russian"] = "russian",
+        ["pt"] = "portuguese",
+        ["portuguese"] = "portuguese",
+        ["bn"] = "bengali",
+        ["bengali"] = "bengali",
+        ["hi"] = "hindi",
+        ["hindi"] = "hindi",
+        ["ur"] = "urdu",
+        ["urdu"] = "urdu",
+        ["ja"] = "japanese",
+        ["japanese"] = "japanese",
+        ["ko"] = "korean",
+        ["korean"] = "korean",
+        ["tr"] = "turkish",
+        ["turkish"] = "turkish",
+        ["vi"] = "vietnamese",
+        ["vietnamese"] = "vietnamese"
     };
 
     private readonly HttpClient _httpClient;
@@ -25,7 +60,8 @@ public sealed class NewsAggregationService : INewsAggregationService
         _configuration = configuration;
         _logger = logger;
 
-        _httpClient.Timeout = TimeSpan.FromSeconds(20);
+        // Keep each provider call short to avoid request timeout amplification.
+        _httpClient.Timeout = TimeSpan.FromSeconds(8);
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Wiseravenshare-News/1.0");
@@ -38,12 +74,14 @@ public sealed class NewsAggregationService : INewsAggregationService
         var normalizedLanguage = string.IsNullOrWhiteSpace(language) ? "en" : language.Trim().ToLowerInvariant();
         var normalizedLimit = Math.Clamp(limit, 1, 50);
 
-        var providers = new List<ProviderFetchResult>(capacity: 3)
+        var providerTasks = new[]
         {
-            await FetchNewsDataIoAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
-            await FetchMediastackAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
-            await FetchSerpApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken)
+            FetchBbcNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            FetchNewsDataIoAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            FetchMediastackAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            FetchSerpApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken)
         };
+        var providers = (await Task.WhenAll(providerTasks)).ToList();
 
         var merged = providers
             .SelectMany(p => p.Articles)
@@ -75,9 +113,150 @@ public sealed class NewsAggregationService : INewsAggregationService
         };
     }
 
+    public async Task<IReadOnlyList<BbcLanguageOption>> GetBbcSupportedLanguagesAsync(CancellationToken cancellationToken = default)
+    {
+        var baseUrl = (_configuration["NewsApis:BbcNewsApi:BaseUrl"] ?? "https://bbc-news-api.vercel.app").TrimEnd('/');
+        var url = $"{baseUrl}/languages";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("BBC languages request failed with status {StatusCode}: {Body}", (int)response.StatusCode, TrimError(body));
+                return [];
+            }
+
+            var payload = JsonSerializer.Deserialize<BbcLanguagesEnvelope>(body, JsonOptions);
+            if (payload?.Languages is null)
+            {
+                return [];
+            }
+
+            return payload.Languages
+                .Where(language => !string.IsNullOrWhiteSpace(language.Code))
+                .Select(language => new BbcLanguageOption
+                {
+                    Code = language.Code,
+                    Name = string.IsNullOrWhiteSpace(language.Name) ? language.Code : language.Name,
+                    Url = language.Url,
+                    Description = language.Description
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "BBC languages request failed.");
+            return [];
+        }
+    }
+
+    private async Task<ProviderFetchResult> FetchBbcNewsApiAsync(string query, string language, int limit, CancellationToken cancellationToken)
+    {
+        const string providerName = "bbcapi";
+        var enabled = !_configuration.GetValue<bool?>("NewsApis:BbcNewsApi:Enabled").HasValue
+            || _configuration.GetValue<bool>("NewsApis:BbcNewsApi:Enabled");
+        if (!enabled)
+        {
+            return ProviderFetchResult.NotConfigured(providerName, "BBC provider is disabled by configuration.");
+        }
+
+        var baseUrl = (_configuration["NewsApis:BbcNewsApi:BaseUrl"] ?? "https://bbc-news-api.vercel.app").TrimEnd('/');
+        var bbcLanguage = ToBbcLanguage(language);
+        var url = $"{baseUrl}/latest?lang={Uri.EscapeDataString(bbcLanguage)}";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return ProviderFetchResult.Failed(providerName, $"HTTP {(int)response.StatusCode}: {TrimError(body)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+
+            if (root.TryGetProperty("status", out var statusNode)
+                && statusNode.TryGetInt32(out var remoteStatus)
+                && remoteStatus >= 400)
+            {
+                var remoteError = root.TryGetProperty("error", out var errorNode) ? errorNode.GetString() : "BBC API returned error status.";
+                return ProviderFetchResult.Failed(providerName, remoteError ?? "BBC API returned error status.");
+            }
+
+            var articles = new List<NewsArticle>();
+            foreach (var section in root.EnumerateObject())
+            {
+                var sectionName = section.Name;
+                if (sectionName.Equals("status", StringComparison.OrdinalIgnoreCase)
+                    || sectionName.Equals("timestamp", StringComparison.OrdinalIgnoreCase)
+                    || sectionName.Equals("elapsed time", StringComparison.OrdinalIgnoreCase)
+                    || sectionName.Equals("error", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (section.Value.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var item in section.Value.EnumerateArray())
+                {
+                    var title = item.TryGetProperty("title", out var titleNode) ? titleNode.GetString() : null;
+                    var summary = item.TryGetProperty("summary", out var summaryNode) ? summaryNode.GetString() : null;
+                    var link = item.TryGetProperty("news_link", out var linkNode) ? linkNode.GetString() : null;
+                    var imageLink = item.TryGetProperty("image_link", out var imageNode) ? imageNode.GetString() : null;
+
+                    if (string.IsNullOrWhiteSpace(title))
+                    {
+                        continue;
+                    }
+
+                    if (!IsMatchForQuery(query, title, summary))
+                    {
+                        continue;
+                    }
+
+                    articles.Add(new NewsArticle
+                    {
+                        Provider = providerName,
+                        Source = "BBC News",
+                        Title = title,
+                        Description = summary,
+                        Url = link,
+                        ImageUrl = imageLink,
+                        Author = null,
+                        PublishedAtUtc = null
+                    });
+                }
+            }
+
+            if (articles.Count > limit)
+            {
+                articles = articles.Take(limit).ToList();
+            }
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "BBC API request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "BBC API request failed.");
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
+    }
+
     private async Task<ProviderFetchResult> FetchNewsDataIoAsync(string query, string language, int limit, CancellationToken cancellationToken)
     {
         const string providerName = "newsdataio";
+        var providerLimit = Math.Min(limit, 10);
         var apiKey = _configuration["NewsApis:NewsDataIo:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -85,7 +264,7 @@ public sealed class NewsAggregationService : INewsAggregationService
         }
 
         var url =
-            $"https://newsdata.io/api/1/latest?apikey={Uri.EscapeDataString(apiKey)}&q={Uri.EscapeDataString(query)}&language={Uri.EscapeDataString(language)}&size={limit}";
+            $"https://newsdata.io/api/1/latest?apikey={Uri.EscapeDataString(apiKey)}&q={Uri.EscapeDataString(query)}&language={Uri.EscapeDataString(language)}&size={providerLimit}";
 
         try
         {
@@ -125,6 +304,11 @@ public sealed class NewsAggregationService : INewsAggregationService
             }
 
             return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "NewsDataIO request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
         }
         catch (Exception ex)
         {
@@ -178,6 +362,11 @@ public sealed class NewsAggregationService : INewsAggregationService
             }
 
             return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Mediastack request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
         }
         catch (Exception ex)
         {
@@ -240,6 +429,11 @@ public sealed class NewsAggregationService : INewsAggregationService
 
             return ProviderFetchResult.Success(providerName, articles);
         }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "SerpApi request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SerpApi request failed.");
@@ -285,6 +479,30 @@ public sealed class NewsAggregationService : INewsAggregationService
         return body.Length <= 400 ? body : body[..400];
     }
 
+    private static bool IsMatchForQuery(string query, string? title, string? summary)
+    {
+        var normalizedQuery = (query ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedQuery) || normalizedQuery.Equals("breaking news", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return (title?.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (summary?.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string ToBbcLanguage(string language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return "english";
+        }
+
+        return BbcLanguageMap.TryGetValue(language.Trim(), out var mapped)
+            ? mapped
+            : "english";
+    }
+
     private sealed class ProviderFetchResult
     {
         public required string Provider { get; init; }
@@ -323,6 +541,19 @@ public sealed class NewsAggregationService : INewsAggregationService
                 Error = message
             };
     }
+
+    private sealed class BbcLanguagesEnvelope
+    {
+        public List<BbcLanguageDto>? Languages { get; set; }
+    }
+
+    private sealed class BbcLanguageDto
+    {
+        public string Code { get; set; } = string.Empty;
+        public string? Name { get; set; }
+        public string? Url { get; set; }
+        public string? Description { get; set; }
+    }
 }
 
 public sealed class NewsSearchResponse
@@ -353,4 +584,12 @@ public sealed class NewsProviderStatus
     public bool Succeeded { get; set; }
     public int ReturnedCount { get; set; }
     public string? Error { get; set; }
+}
+
+public sealed class BbcLanguageOption
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string? Description { get; set; }
 }

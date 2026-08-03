@@ -63,7 +63,7 @@ const MediaUploader: React.FC = () => {
                     disabled={!canPublishVideo}
                     onChange={(e) => setPublishToYouTube(e.target.checked)}
                 />
-                Publish to YouTube (Ravensight)
+                Publish video to YouTube via Ravensight
             </label>
 
             <label>
@@ -73,7 +73,7 @@ const MediaUploader: React.FC = () => {
                     disabled={!canPublishVideo}
                     onChange={(e) => setPublishToTikTok(e.target.checked)}
                 />
-                Publish to TikTok (Ravensight)
+                🎵 Publish video to TikTok via Ravensight
             </label>
 
             <label>
@@ -83,7 +83,7 @@ const MediaUploader: React.FC = () => {
                     disabled={!canPublishVideo}
                     onChange={(e) => setPublishToFacebook(e.target.checked)}
                 />
-                Publish to Facebook (Ravensight)
+                📘 Publish video to Facebook via Ravensight
             </label>
 
             {publishToYouTube && canPublishVideo && (

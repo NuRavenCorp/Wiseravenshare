@@ -16,6 +16,26 @@ export type VideoItem = {
 
 const apiBase = import.meta.env.VITE_API_URL || '';
 
+function normalizeBaseUrl(base: string): string {
+  return base.endsWith('/') ? base.slice(0, -1) : base;
+}
+
+function resolveRavensightBaseUrl(): string {
+  const normalized = normalizeBaseUrl(apiBase);
+
+  if (normalized.length > 0) {
+    return `${normalized}/api/ravensight/videos`;
+  }
+
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api/ravensight/videos`;
+  }
+
+  return 'http://localhost:5242/api/ravensight/videos';
+}
+
+const ravensightBase = resolveRavensightBaseUrl();
+
 function normalizeAssetUrl(url?: string): string {
   if (!url) {
     return '';
@@ -63,7 +83,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
 async function uploadVideo(formData: FormData): Promise<UploadVideoResponse> {
   const token = getAuthToken();
 
-  const response = await fetch(`${apiBase}/api/video/upload`, {
+  const response = await fetch(`${ravensightBase}/upload`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: formData,
@@ -77,65 +97,50 @@ async function uploadVideo(formData: FormData): Promise<UploadVideoResponse> {
   return response.json();
 }
 
-async function getCurrentUserId(): Promise<string> {
+async function getMyLibraryVideos(page = 1, pageSize = 24): Promise<VideoItem[]> {
   const token = getAuthToken();
   if (!token) {
     throw new Error('You must be logged in to view My Library.');
   }
 
-  const response = await fetch(`${apiBase}/api/auth/profile`, {
+  const response = await fetch(`${ravensightBase}/user?page=${page}&limit=${pageSize}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
-
-  if (!response.ok) {
-    const message = await parseError(response, `Failed to load user profile (${response.status})`);
-    throw new Error(message);
-  }
-
-  const user = await response.json();
-  if (!user?.id) {
-    throw new Error('Profile response did not include user id.');
-  }
-
-  return String(user.id);
-}
-
-async function getMyLibraryVideos(page = 1, pageSize = 24): Promise<VideoItem[]> {
-  const userId = await getCurrentUserId();
-
-  const response = await fetch(
-    `${apiBase}/api/video/user/${userId}?page=${page}&pageSize=${pageSize}`,
-    { method: 'GET' }
-  );
 
   if (!response.ok) {
     const message = await parseError(response, `Failed to load library videos (${response.status})`);
     throw new Error(message);
   }
 
-  const videos: VideoItem[] = await response.json();
+  const payload = await response.json();
+  const videos: VideoItem[] = Array.isArray(payload?.videos) ? payload.videos : [];
   return videos.map(mapVideoItem);
 }
 
 async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<VideoItem[]> {
   const query = new URLSearchParams({
     page: String(page),
-    pageSize: String(pageSize),
+    limit: String(pageSize),
   });
 
   if (filter && filter.trim().length > 0) {
     query.append('filter', filter.trim());
   }
 
-  const response = await fetch(`${apiBase}/api/video/feed?${query.toString()}`, { method: 'GET' });
+  const token = getAuthToken();
+  const response = await fetch(`${ravensightBase}/feed?${query.toString()}`, {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
 
   if (!response.ok) {
     const message = await parseError(response, `Failed to load video feed (${response.status})`);
     throw new Error(message);
   }
 
-  const videos: VideoItem[] = await response.json();
+  const payload = await response.json();
+  const videos: VideoItem[] = Array.isArray(payload?.videos) ? payload.videos : [];
   return videos.map(mapVideoItem);
 }
 

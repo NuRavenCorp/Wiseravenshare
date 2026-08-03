@@ -27,16 +27,6 @@ public sealed class NewsController : ControllerBase
         }
 
         var response = await _newsAggregationService.SearchNewsAsync(query, language, limit, cancellationToken);
-        var providerConfigured = response.ProviderStatuses.Any(s => s.Configured);
-        if (!providerConfigured)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                message = "No news providers are configured. Set NewsApis keys in environment or user-secrets.",
-                response.ProviderStatuses
-            });
-        }
-
         return Ok(response);
     }
 
@@ -48,5 +38,12 @@ public sealed class NewsController : ControllerBase
     {
         var response = await _newsAggregationService.SearchNewsAsync("breaking news", language, limit, cancellationToken);
         return Ok(response);
+    }
+
+    [HttpGet("languages")]
+    public async Task<IActionResult> Languages(CancellationToken cancellationToken = default)
+    {
+        var response = await _newsAggregationService.GetBbcSupportedLanguagesAsync(cancellationToken);
+        return Ok(new { provider = "bbcapi", languages = response });
     }
 }

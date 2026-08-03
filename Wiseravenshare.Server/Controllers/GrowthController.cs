@@ -56,6 +56,11 @@ public sealed class GrowthController : ControllerBase
     [HttpGet("funnel")]
     public IActionResult GetFunnelSummary([FromQuery] int days = 30)
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         var summary = _growthService.GetFunnelSummary(days);
         return Ok(summary);
     }
@@ -199,9 +204,32 @@ public sealed class GrowthController : ControllerBase
         }
     }
 
+    [HttpPost("revenue/initialize")]
+    public IActionResult InitializeRevenueAgent()
+    {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
+        if (!TryGetCurrentUser(out var user))
+        {
+            return Unauthorized(new { message = "Unable to resolve current user." });
+        }
+
+        var plan = _growthService.GetOrCreateRevenueAgent(user.Id, user.Email);
+        var summary = _growthService.GetRevenueSummary(user.Id, user.Email);
+        return Ok(new { plan, summary, initialized = true });
+    }
+
     [HttpGet("revenue/agent")]
     public IActionResult GetRevenueAgent()
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });
@@ -215,6 +243,11 @@ public sealed class GrowthController : ControllerBase
     [HttpGet("revenue/summary")]
     public IActionResult GetRevenueSummary()
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });
@@ -227,6 +260,11 @@ public sealed class GrowthController : ControllerBase
     [HttpGet("revenue/actions")]
     public IActionResult GetRevenueActions([FromQuery] int? weekNumber = null, [FromQuery] string? status = null)
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });
@@ -239,6 +277,11 @@ public sealed class GrowthController : ControllerBase
     [HttpPost("revenue/actions/{actionId}/status")]
     public IActionResult UpdateRevenueActionStatus(string actionId, [FromBody] RevenueActionStatusRequest request)
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });
@@ -272,6 +315,11 @@ public sealed class GrowthController : ControllerBase
     [HttpPost("revenue/evidence")]
     public IActionResult AddRevenueEvidence([FromBody] RevenueEvidenceCreateRequest request)
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });
@@ -309,14 +357,14 @@ public sealed class GrowthController : ControllerBase
     [HttpPost("revenue/evidence/{evidenceId}/verify")]
     public IActionResult VerifyRevenueEvidence(string evidenceId, [FromBody] RevenueEvidenceVerifyRequest request)
     {
-        if (!TryGetCurrentUser(out var user))
-        {
-            return Unauthorized(new { message = "Unable to resolve current user." });
-        }
-
         if (!IsAdminRequest())
         {
             return Forbid();
+        }
+
+        if (!TryGetCurrentUser(out var user))
+        {
+            return Unauthorized(new { message = "Unable to resolve current user." });
         }
 
         if (string.IsNullOrWhiteSpace(evidenceId))
@@ -345,6 +393,11 @@ public sealed class GrowthController : ControllerBase
     [HttpGet("revenue/evidence")]
     public IActionResult GetRevenueEvidence([FromQuery] int? weekNumber = null, [FromQuery] bool? verified = null)
     {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
         if (!TryGetCurrentUser(out var user))
         {
             return Unauthorized(new { message = "Unable to resolve current user." });

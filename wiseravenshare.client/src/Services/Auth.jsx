@@ -5,6 +5,8 @@ class AuthService {
         const bases = [];
         const primaryBase = (api?.defaults?.baseURL || '').replace(/\/+$/, '');
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const host = typeof window !== 'undefined' ? (window.location.hostname || '').toLowerCase() : '';
+        const isLocalHost = /localhost|127\.0\.0\.1/i.test(host);
         const ravensightUrl = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
 
         if (primaryBase) {
@@ -29,7 +31,19 @@ class AuthService {
             bases.push('https://localhost:7146');
         }
 
-        return [...new Set(bases.filter(Boolean))];
+        const filtered = bases.filter((base) => {
+            if (!base) {
+                return false;
+            }
+
+            if (isLocalHost) {
+                return true;
+            }
+
+            return !/\/\/localhost(?::\d+)?$|\/\/127\.0\.0\.1(?::\d+)?$/i.test(base.replace(/\/+$/, ''));
+        });
+
+        return [...new Set(filtered)];
     }
 
     async postAuthWithFallback(path, payload = {}, options = {}) {
@@ -50,10 +64,10 @@ class AuthService {
         // Try conventional /api/auth path first, then /auth path as compatibility fallback.
         for (const base of bases) {
             const normalizedBase = base.replace(/\/+$/, '');
-            attempts.push(`${normalizedBase}/auth${path}`);
             if (!/\/api$/i.test(normalizedBase)) {
                 attempts.push(`${normalizedBase}/api/auth${path}`);
             }
+            attempts.push(`${normalizedBase}/auth${path}`);
         }
 
         const token = this.getToken();
@@ -66,16 +80,16 @@ class AuthService {
                     return await response.json();
                 }
 
-                if (response.status !== 404) {
+                if (response.status !== 404 && response.status !== 405) {
                     const body = await response.json().catch(() => ({}));
                     const error = new Error(body?.message || 'Server error');
                     error.status = response.status;
                     throw error;
                 }
 
-                lastError = { status: 404 };
+                lastError = { status: response.status };
             } catch (error) {
-                if (error?.status && error.status !== 404) {
+                if (error?.status && error.status !== 404 && error.status !== 405) {
                     throw error;
                 }
                 lastError = error;

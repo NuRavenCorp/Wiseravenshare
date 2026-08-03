@@ -3,6 +3,11 @@ using Npgsql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Infrastructure.Data.Repositories;
+using Wiseravenshare.Server.Infrastructure.External;
+using Wiseravenshare.Server.Interfaces.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -88,7 +93,18 @@ if (!builder.Environment.IsDevelopment())
 // ── Services ─────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IPostRepository, PostRepository>();
+builder.Services.AddScoped<ITruthRepository, TruthRepository>();
+builder.Services.AddScoped<IPostService, PostService>();
+builder.Services.AddScoped<ITruthService, TruthService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
@@ -170,6 +186,16 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        await dbContext.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogCritical(ex, "Automatic EF migration failed during startup. Service will continue with existing schema.");
+    }
+
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
     var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
@@ -254,36 +280,129 @@ app.MapGet("/health/db", async () =>
         await using var pingCommand = new NpgsqlCommand("SELECT 1", connection);
         var result = await pingCommand.ExecuteScalarAsync();
 
-        const string schemaCheckSql = @"
-SELECT
-    (to_regclass('app_data.app_users') IS NOT NULL OR to_regclass('public.app_users') IS NOT NULL) AS app_users_exists,
-    (to_regclass('app_data.ravensight_videos') IS NOT NULL OR to_regclass('public.ravensight_videos') IS NOT NULL) AS ravensight_videos_exists,
-    (to_regclass('app_data.ravensight_video_comments') IS NOT NULL OR to_regclass('public.ravensight_video_comments') IS NOT NULL) AS ravensight_video_comments_exists;";
-
-        await using var schemaCommand = new NpgsqlCommand(schemaCheckSql, connection);
-        await using var reader = await schemaCommand.ExecuteReaderAsync();
-
-        var appUsersExists = false;
-        var ravensightVideosExists = false;
-        var ravensightVideoCommentsExists = false;
-
-        if (await reader.ReadAsync())
+        var expectedEfTableNames = new[]
         {
-            appUsersExists = reader.GetBoolean(0);
-            ravensightVideosExists = reader.GetBoolean(1);
-            ravensightVideoCommentsExists = reader.GetBoolean(2);
+            "__EFMigrationsHistory",
+            "Agents",
+            "AgentEvolutions",
+            "AgentInteractions",
+            "Users",
+            "Posts",
+            "PostBookmarks",
+            "PostLikes",
+            "PostReposts",
+            "UserFollows",
+            "UserSettings",
+            "UserSubscriptions",
+            "TruthClaims",
+            "TruthDisputes",
+            "TruthVerificationVotes",
+            "Videos",
+            "VideoLike",
+            "VideoComment",
+            "Conversation",
+            "ConversationParticipant",
+            "Message",
+            "Comment",
+            "CommentLike"
+        };
+
+        var expectedLegacyRetentionTables = new[]
+        {
+            "app_data.app_users",
+            "public.app_users",
+            "app_data.ravensight_videos",
+            "public.ravensight_videos",
+            "app_data.ravensight_video_comments",
+            "public.ravensight_video_comments"
+        };
+
+        const string tableInventorySql = @"
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE'
+  AND table_schema IN ('public', 'app_data');";
+
+        var actualTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var tablesCommand = new NpgsqlCommand(tableInventorySql, connection))
+        await using (var tablesReader = await tablesCommand.ExecuteReaderAsync())
+        {
+            while (await tablesReader.ReadAsync())
+            {
+                var schema = tablesReader.GetString(0);
+                var table = tablesReader.GetString(1);
+                actualTables.Add($"{schema}.{table}");
+            }
         }
+
+        const string historyExistsSql = @"
+SELECT
+    (to_regclass('app_data.""__EFMigrationsHistory""') IS NOT NULL)
+    OR (to_regclass('public.""__EFMigrationsHistory""') IS NOT NULL);";
+        var historyExists = false;
+        await using (var historyExistsCommand = new NpgsqlCommand(historyExistsSql, connection))
+        {
+            var raw = await historyExistsCommand.ExecuteScalarAsync();
+            historyExists = raw is bool value && value;
+        }
+
+        var appliedMigrations = new List<string>();
+        if (historyExists)
+        {
+            var historyTable = actualTables.Contains("app_data.__EFMigrationsHistory")
+                ? "app_data.\"__EFMigrationsHistory\""
+                : "public.\"__EFMigrationsHistory\"";
+
+            var migrationsSql = $@"
+SELECT ""MigrationId""
+FROM {historyTable}
+ORDER BY ""MigrationId"";";
+
+            await using var migrationsCommand = new NpgsqlCommand(migrationsSql, connection);
+            await using var migrationsReader = await migrationsCommand.ExecuteReaderAsync();
+            while (await migrationsReader.ReadAsync())
+            {
+                appliedMigrations.Add(migrationsReader.GetString(0));
+            }
+        }
+
+        var missingEfTables = expectedEfTableNames
+            .Select(name => new
+            {
+                Name = name,
+                Exists = actualTables.Contains($"app_data.{name}") || actualTables.Contains($"public.{name}")
+            })
+            .Where(entry => !entry.Exists)
+            .Select(entry => entry.Name)
+            .ToArray();
+
+        var hasUserTable = actualTables.Contains("app_data.app_users") || actualTables.Contains("public.app_users");
+        var hasVideoTable = actualTables.Contains("app_data.ravensight_videos") || actualTables.Contains("public.ravensight_videos");
+        var hasVideoCommentsTable = actualTables.Contains("app_data.ravensight_video_comments") || actualTables.Contains("public.ravensight_video_comments");
+
+        var missingLegacyRetentionTables = expectedLegacyRetentionTables
+            .Where(expected => !actualTables.Contains(expected))
+            .ToArray();
 
         return Results.Ok(new
         {
             status = "ok",
             database = "postgres",
             result,
+            migration = new
+            {
+                efHistoryExists = historyExists,
+                appliedMigrationCount = appliedMigrations.Count,
+                latestMigration = appliedMigrations.LastOrDefault() ?? string.Empty
+            },
             schema = new
             {
-                appUsersExists,
-                ravensightVideosExists,
-                ravensightVideoCommentsExists
+                fullEfSchemaReady = missingEfTables.Length == 0,
+                missingEfTables,
+                hasUserRetentionTable = hasUserTable,
+                hasVideoRetentionTable = hasVideoTable,
+                hasVideoCommentsRetentionTable = hasVideoCommentsTable,
+                missingLegacyRetentionTables
             }
         });
     }

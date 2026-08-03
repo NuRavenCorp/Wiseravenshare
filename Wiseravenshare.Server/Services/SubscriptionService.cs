@@ -11,37 +11,32 @@ using Wiseravenshare.Server.Infrastructure.Data;
 
 namespace Wiseravenshare.Server.Services;
 
-public interface ISubscriptionService
-{
-    Task<CheckoutSessionResponse> CreateCheckoutSessionAsync(Guid userId, CreateCheckoutSessionRequest request);
-    Task<PortalSessionResponse> CreatePortalSessionAsync(Guid userId, CreatePortalSessionRequest request);
-    Task<SubscriptionStatusDto> GetSubscriptionStatusAsync(Guid userId);
-    Task HandleWebhookAsync(string payload, string signatureHeader);
-}
-
 public class SubscriptionService : ISubscriptionService
 {
     private readonly AppDbContext _dbContext;
     private readonly ILogger<SubscriptionService> _logger;
+    private readonly GrowthService _growthService;
+    private readonly string _secretKey;
     private readonly string _webhookSecret;
 
-    public SubscriptionService(AppDbContext dbContext, IConfiguration configuration, ILogger<SubscriptionService> logger)
+    public SubscriptionService(
+        AppDbContext dbContext,
+        IConfiguration configuration,
+        ILogger<SubscriptionService> logger,
+        GrowthService growthService)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _growthService = growthService;
 
-        var secretKey = configuration["Stripe:SecretKey"];
-        if (string.IsNullOrWhiteSpace(secretKey))
-        {
-            throw new InvalidOperationException("Stripe:SecretKey is not configured.");
-        }
-
-        StripeConfiguration.ApiKey = secretKey;
-        _webhookSecret = configuration["Stripe:WebhookSecret"] ?? string.Empty;
+        _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_KEY");
+        _webhookSecret = ResolveConfig(configuration, "Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
     }
 
     public async Task<CheckoutSessionResponse> CreateCheckoutSessionAsync(Guid userId, CreateCheckoutSessionRequest request)
     {
+        EnsureStripeConfigured();
+
         if (string.IsNullOrWhiteSpace(request.PriceId))
         {
             throw new InvalidOperationException("PriceId is required.");
@@ -98,6 +93,8 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task<PortalSessionResponse> CreatePortalSessionAsync(Guid userId, CreatePortalSessionRequest request)
     {
+        EnsureStripeConfigured();
+
         if (string.IsNullOrWhiteSpace(request.ReturnUrl))
         {
             throw new InvalidOperationException("ReturnUrl is required.");
@@ -154,6 +151,8 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task HandleWebhookAsync(string payload, string signatureHeader)
     {
+        EnsureStripeConfigured();
+
         Event stripeEvent;
 
         if (!string.IsNullOrWhiteSpace(_webhookSecret))
@@ -263,6 +262,91 @@ public class SubscriptionService : ISubscriptionService
         subscription.UpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync();
+
+        try
+        {
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == subscription.UserId && !u.IsDeleted);
+
+            var email = user?.Email ?? string.Empty;
+            var metadataPayload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["stripeSubscriptionId"] = stripeSubscription.Id ?? string.Empty,
+                ["stripePriceId"] = stripePriceId,
+                ["status"] = status,
+                ["eventId"] = eventId
+            };
+
+            _growthService.TrackEvent(subscription.UserId.ToString(), email, "subscription_status_updated", metadataPayload);
+
+            if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "trialing", StringComparison.OrdinalIgnoreCase))
+            {
+                _growthService.TrackEvent(subscription.UserId.ToString(), email, "subscription_activated", metadataPayload);
+
+                var sourceReference = BuildRevenueEvidenceSourceReference(eventId, stripeSubscription.Id);
+                var existingEvidence = _growthService.GetRevenueEvidence(subscription.UserId.ToString(), email, null, null)
+                    .Any(entry => string.Equals(entry.SourceReference, sourceReference, StringComparison.OrdinalIgnoreCase));
+
+                if (!existingEvidence)
+                {
+                    var amountUsd = ResolveSubscriptionAmountUsd(stripeSubscription);
+                    if (amountUsd > 0)
+                    {
+                        var evidence = _growthService.AddRevenueEvidence(
+                            subscription.UserId.ToString(),
+                            email,
+                            null,
+                            amountUsd,
+                            "stripe_subscription_activation",
+                            sourceReference,
+                            $"Auto-captured from Stripe webhook event {eventId}.");
+
+                        _logger.LogInformation(
+                            "Recorded revenue evidence {EvidenceId} for user {UserId} from Stripe event {EventId}.",
+                            evidence.Id,
+                            subscription.UserId,
+                            eventId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Skipped auto revenue evidence for Stripe event {EventId} because amount could not be resolved.",
+                            eventId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Growth tracking failed for subscription webhook event {EventId}.", eventId);
+        }
+    }
+
+    private static string BuildRevenueEvidenceSourceReference(string eventId, string? subscriptionId)
+    {
+        var sub = string.IsNullOrWhiteSpace(subscriptionId) ? "unknown-subscription" : subscriptionId.Trim();
+        return $"stripe-event:{eventId}|subscription:{sub}";
+    }
+
+    private static decimal ResolveSubscriptionAmountUsd(Stripe.Subscription stripeSubscription)
+    {
+        var price = stripeSubscription.Items.Data.FirstOrDefault()?.Price;
+        if (price is null)
+        {
+            return 0;
+        }
+
+        var amountCents = price.UnitAmountDecimal
+            ?? (price.UnitAmount.HasValue ? Convert.ToDecimal(price.UnitAmount.Value) : 0m);
+
+        if (amountCents <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Round(amountCents / 100m, 2);
     }
 
     private async Task<string> GetOrCreateCustomerIdAsync(Guid userId, string email, string displayName)
@@ -310,5 +394,20 @@ public class SubscriptionService : ISubscriptionService
 
         await _dbContext.SaveChangesAsync();
         return customer.Id;
+    }
+
+    private void EnsureStripeConfigured()
+    {
+        if (string.IsNullOrWhiteSpace(_secretKey))
+        {
+            throw new InvalidOperationException("Stripe secret key is not configured.");
+        }
+
+        StripeConfiguration.ApiKey = _secretKey;
+    }
+
+    private static string ResolveConfig(IConfiguration configuration, string sectionKey, string envKey)
+    {
+        return (configuration[sectionKey] ?? configuration[envKey] ?? string.Empty).Trim();
     }
 }

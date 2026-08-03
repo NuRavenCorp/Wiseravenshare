@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import VideoRecorder from './VideoRecorder';
 import VideoFeed from './VideoFeed';
 import VideoUploader from './VideoUploader';
@@ -6,6 +6,7 @@ import VideoLibrary from './VideoLibrary';
 import WiseRavenLogo from '../Common/WiseRavenLogo';
 import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
+import { subscriptionService } from '../../Services/subscriptionService';
 
 const CREATOR_PRO = {
     tier: 'Creator Pro',
@@ -15,7 +16,33 @@ const CREATOR_PRO = {
     annualCycleDays: 365
 };
 
+const PAYWALL_VARIANTS = {
+    control: {
+        id: 'control',
+        heading: 'Creator Pro',
+        subheading: 'Unlock direct video uploads to YouTube and TikTok with scheduling and creator controls.',
+        monthlyCta: 'Subscribe Monthly',
+        annualCta: 'Subscribe Annual (Save 9%)',
+        annualNote: 'Annual plan saves about 9% compared with monthly billing.'
+    },
+    value: {
+        id: 'value',
+        heading: 'Creator Pro Revenue Mode',
+        subheading: 'Publish faster, keep audience momentum, and turn each post into measurable growth.',
+        monthlyCta: 'Start Monthly Creator Revenue',
+        annualCta: 'Lock Annual And Save 9%',
+        annualNote: 'Annual billing lowers effective monthly cost and protects your publishing cadence.'
+    }
+};
+
+const allowLocalCheckoutFallback =
+    import.meta.env.DEV || String(import.meta.env.VITE_STRIPE_CHECKOUT_LOCAL_FALLBACK || '').toLowerCase() === 'true';
+
+const hostedStripePaymentLink =
+    String(import.meta.env.VITE_STRIPE_PAYMENT_LINK || 'https://buy.stripe.com/9B67sL9h13oZ4vTe8Tf7i00').trim();
+
 const buildSubscriptionStorageKey = (userId) => `wiseRavensightSubscription_${userId || 'guest'}`;
+const buildPaywallVariantStorageKey = (userId) => `wiseRavensightPaywallVariant_${userId || 'guest'}`;
 
 const buildRenewDate = (days) => {
     const date = new Date();
@@ -28,6 +55,7 @@ const RavensightVideo = () => {
     const [notifications, setNotifications] = useState([]);
     const { user } = useAuth();
     const subscriptionStorageKey = buildSubscriptionStorageKey(user?.id);
+    const paywallVariantStorageKey = buildPaywallVariantStorageKey(user?.id);
     const [subscription, setSubscription] = useState(() => {
         try {
             const raw = localStorage.getItem(subscriptionStorageKey);
@@ -50,6 +78,20 @@ const RavensightVideo = () => {
             };
         }
     });
+    const [paywallVariant, setPaywallVariant] = useState(() => {
+        try {
+            const savedVariant = localStorage.getItem(paywallVariantStorageKey);
+            if (savedVariant && PAYWALL_VARIANTS[savedVariant]) {
+                return savedVariant;
+            }
+
+            const assigned = Math.random() < 0.5 ? 'control' : 'value';
+            localStorage.setItem(paywallVariantStorageKey, assigned);
+            return assigned;
+        } catch {
+            return 'control';
+        }
+    });
 
     const addNotification = (message, type = 'info') => {
         const id = Date.now();
@@ -64,9 +106,96 @@ const RavensightVideo = () => {
         localStorage.setItem(subscriptionStorageKey, JSON.stringify(nextSubscription));
     };
 
+    const safeTrackGrowthEvent = (eventName, metadata = {}) => {
+        apiService.trackGrowthEvent(eventName, metadata).catch(() => null);
+    };
+
+    useEffect(() => {
+        try {
+            const savedVariant = localStorage.getItem(paywallVariantStorageKey);
+            if (savedVariant && PAYWALL_VARIANTS[savedVariant]) {
+                setPaywallVariant(savedVariant);
+                return;
+            }
+
+            const assigned = Math.random() < 0.5 ? 'control' : 'value';
+            localStorage.setItem(paywallVariantStorageKey, assigned);
+            setPaywallVariant(assigned);
+        } catch {
+            setPaywallVariant('control');
+        }
+    }, [paywallVariantStorageKey]);
+
+    useEffect(() => {
+        safeTrackGrowthEvent('paywall_variant_assigned', {
+            source: 'ravensight_video',
+            plan: 'creator_pro',
+            variant: paywallVariant
+        });
+    }, [paywallVariant]);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search || '');
+        const subscriptionResult = params.get('subscription');
+
+        if (!subscriptionResult) {
+            return;
+        }
+
+        if (subscriptionResult === 'success') {
+            addNotification('Checkout completed. Subscription verification is processing.', 'success');
+            safeTrackGrowthEvent('subscription_checkout_success_landing', {
+                source: 'ravensight_video',
+                queryValue: 'success'
+            });
+        } else if (subscriptionResult === 'cancelled') {
+            addNotification('Checkout was cancelled before completion.', 'warning');
+            safeTrackGrowthEvent('subscription_checkout_cancelled_landing', {
+                source: 'ravensight_video',
+                queryValue: 'cancelled'
+            });
+        }
+
+        params.delete('subscription');
+        const nextQuery = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
+        window.history.replaceState({}, document.title, nextUrl);
+    }, []);
+
+    useEffect(() => {
+        if (activeTab !== 'subscribe') {
+            return;
+        }
+
+        safeTrackGrowthEvent('paywall_viewed', {
+            source: 'ravensight_video',
+            plan: 'creator_pro',
+            variant: paywallVariant
+        });
+    }, [activeTab, paywallVariant]);
+
     const subscribeNow = async (billingCycle = 'monthly') => {
+        if (hostedStripePaymentLink) {
+            safeTrackGrowthEvent('checkout_redirected_payment_link', {
+                source: 'ravensight_video',
+                plan: 'creator_pro',
+                billingCycle,
+                variant: paywallVariant,
+                checkoutUrl: hostedStripePaymentLink
+            });
+            window.location.assign(hostedStripePaymentLink);
+            return;
+        }
+
         const successUrl = `${window.location.origin}/?subscription=success`;
         const cancelUrl = `${window.location.origin}/?subscription=cancelled`;
+
+        safeTrackGrowthEvent('checkout_started', {
+            source: 'ravensight_video',
+            plan: 'creator_pro',
+            billingCycle,
+            variant: paywallVariant
+        });
 
         try {
             const response = await apiService.createCheckoutSession({
@@ -78,13 +207,37 @@ const RavensightVideo = () => {
 
             const checkoutUrl = response?.data?.url;
             if (checkoutUrl) {
+                safeTrackGrowthEvent('checkout_redirected', {
+                    source: 'ravensight_video',
+                    plan: 'creator_pro',
+                    billingCycle,
+                    variant: paywallVariant,
+                    checkoutSessionId: response?.data?.id || ''
+                });
                 window.location.assign(checkoutUrl);
                 return;
             }
 
             throw new Error('Missing Stripe checkout URL.');
         } catch (error) {
-            // Fallback keeps local test workflow functional if Stripe is not configured yet.
+            const serverMessage = error?.response?.data?.message;
+            const resolvedMessage = typeof serverMessage === 'string' && serverMessage.trim().length > 0
+                ? serverMessage.trim()
+                : (error?.message || 'Stripe checkout is unavailable right now.');
+
+            if (!allowLocalCheckoutFallback) {
+                safeTrackGrowthEvent('checkout_failed', {
+                    source: 'ravensight_video',
+                    plan: 'creator_pro',
+                    billingCycle,
+                    variant: paywallVariant,
+                    reason: resolvedMessage
+                });
+                addNotification(`Stripe checkout unavailable: ${resolvedMessage}`, 'error');
+                return;
+            }
+
+            // Local fallback keeps development/testing workflow functional.
             const isAnnual = billingCycle === 'annual';
             const next = {
                 tier: CREATOR_PRO.tier,
@@ -95,25 +248,52 @@ const RavensightVideo = () => {
             };
 
             persistSubscription(next);
+            safeTrackGrowthEvent('checkout_fallback_enabled', {
+                source: 'ravensight_video',
+                plan: 'creator_pro',
+                billingCycle,
+                variant: paywallVariant,
+                reason: resolvedMessage
+            });
             addNotification(
                 isAnnual
-                    ? `Stripe checkout is unavailable. Local ${CREATOR_PRO.tier} annual test mode enabled.`
-                    : `Stripe checkout is unavailable. Local ${CREATOR_PRO.tier} monthly test mode enabled.`,
+                    ? `Stripe checkout unavailable (${resolvedMessage}). Local ${CREATOR_PRO.tier} annual test mode enabled.`
+                    : `Stripe checkout unavailable (${resolvedMessage}). Local ${CREATOR_PRO.tier} monthly test mode enabled.`,
                 'warning'
             );
         }
     };
 
-    const cancelSubscription = () => {
-        const next = {
-            tier: CREATOR_PRO.tier,
-            isActive: false,
-            billingCycle: subscription?.billingCycle || 'monthly',
-            price: subscription?.billingCycle === 'annual' ? CREATOR_PRO.annualPrice : CREATOR_PRO.monthlyPrice,
-            renewsAt: null
-        };
-        persistSubscription(next);
-        addNotification('Subscription canceled. Direct upload is now locked.', 'warning');
+    const openStripeCustomerPortal = async () => {
+        safeTrackGrowthEvent('stripe_portal_open_started', {
+            source: 'ravensight_video',
+            plan: 'creator_pro'
+        });
+
+        try {
+            const response = await subscriptionService.createPortalSession({
+                returnUrl: `${window.location.origin}/?subscription=manage`
+            });
+
+            const portalUrl = response?.url;
+            if (!portalUrl) {
+                throw new Error('Missing Stripe portal URL.');
+            }
+
+            safeTrackGrowthEvent('stripe_portal_open_redirected', {
+                source: 'ravensight_video',
+                plan: 'creator_pro'
+            });
+            window.location.assign(portalUrl);
+        } catch (error) {
+            const reason = error?.message || 'Stripe portal unavailable right now.';
+            safeTrackGrowthEvent('stripe_portal_open_failed', {
+                source: 'ravensight_video',
+                plan: 'creator_pro',
+                reason
+            });
+            addNotification(`Stripe portal unavailable: ${reason}`, 'error');
+        }
     };
 
     const tabs = [
@@ -215,7 +395,7 @@ const RavensightVideo = () => {
                             background: 'linear-gradient(145deg, rgba(79,116,214,0.18), rgba(163,58,93,0.14))',
                             padding: '24px'
                         }}>
-                            <h3 style={{ marginTop: 0, marginBottom: '8px' }}>{CREATOR_PRO.tier}</h3>
+                            <h3 style={{ marginTop: 0, marginBottom: '8px' }}>Creator Pro</h3>
                             <p style={{ margin: 0, color: 'var(--light-color)' }}>
                                 Unlock direct video uploads to YouTube and TikTok with scheduling and creator controls.
                             </p>
@@ -229,13 +409,16 @@ const RavensightVideo = () => {
                                 }}>
                                     ${CREATOR_PRO.monthlyPrice.toFixed(2)}/month
                                 </span>
+                                <span style={{ fontWeight: 700, alignSelf: 'center' }}>
+                                    ${CREATOR_PRO.annualPrice.toFixed(2)}/year
+                                </span>
                                 <span style={{
                                     border: '1px solid var(--border-color)',
                                     borderRadius: '999px',
                                     padding: '6px 12px',
                                     fontWeight: 700
                                 }}>
-                                    ${CREATOR_PRO.annualPrice.toFixed(2)}/year
+                                    Annual plan saves about 9% compared with monthly billing.
                                 </span>
                             </div>
 
@@ -284,7 +467,7 @@ const RavensightVideo = () => {
                                             {subscription?.renewsAt ? ` • Renews ${new Date(subscription.renewsAt).toLocaleDateString()}` : ''}
                                         </div>
                                         <button
-                                            onClick={cancelSubscription}
+                                            onClick={openStripeCustomerPortal}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 background: 'transparent',

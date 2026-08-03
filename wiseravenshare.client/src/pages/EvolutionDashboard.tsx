@@ -1,4 +1,4 @@
-﻿// src/pages/EvolutionDashboard.tsx
+// src/pages/EvolutionDashboard.tsx
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -13,7 +13,7 @@ import { Card } from '../components/ui/Card';
 import { AgentCard } from '../components/evolution/AgentCard';
 import { EvolutionTimeline } from '../components/evolution/EvolutionTimeline';
 import { SystemStatus } from '../components/evolution/SystemStatus';
-import { api } from '../services/api';
+import { api } from '../Services/api';
 
 const EvolutionDashboard: React.FC = () => {
     const { agents, evolutions, systemStatus, refreshData } = useEvolution();
