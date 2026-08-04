@@ -29,6 +29,30 @@ class TruthEngine {
             source: 'NASA',
             confidence: 0.99
         });
+        this.knowledgeBase.set('earth is oblong', {
+            truth: false,
+            correction: 'The Earth is not oblong. It is an oblate spheroid (slightly flattened at the poles).',
+            source: 'NASA',
+            confidence: 0.98
+        });
+        this.knowledgeBase.set('earth is oblate spheroid', {
+            truth: true,
+            correction: null,
+            source: 'NASA',
+            confidence: 0.99
+        });
+        this.knowledgeBase.set('earth is spherical', {
+            truth: true,
+            correction: 'More precisely, Earth is an oblate spheroid rather than a perfect sphere.',
+            source: 'NASA',
+            confidence: 0.97
+        });
+        this.knowledgeBase.set('earth is round', {
+            truth: true,
+            correction: 'More precisely, Earth is an oblate spheroid.',
+            source: 'NASA',
+            confidence: 0.96
+        });
         this.knowledgeBase.set('climate change is fake', {
             truth: false,
             correction: '97% of climate scientists agree that climate change is real and human-caused.',
@@ -232,9 +256,49 @@ class TruthEngine {
         return Array.from(byClaim.values()).sort((a, b) => b.confidence - a.confidence);
     }
 
+    addKnowledgeFinding(findings, claim) {
+        const normalized = this.normalizeClaim(claim);
+        const data = this.knowledgeBase.get(normalized);
+        if (!data) {
+            return;
+        }
+
+        const alreadyCaught = findings.some((finding) => this.normalizeClaim(finding.claim) === normalized);
+        if (alreadyCaught) {
+            return;
+        }
+
+        findings.push({
+            claim: normalized,
+            isTrue: data.truth,
+            correction: data.correction,
+            source: data.source,
+            confidence: data.confidence,
+            evidenceType: 'knowledge_base_exact'
+        });
+    }
+
+    mapQuestionClaimsToKnowledge(findings, lowerContent) {
+        const mappings = [
+            { pattern: /\bis\s+(?:the\s+)?earth\s+flat\b/, claim: 'earth is flat' },
+            { pattern: /\bis\s+(?:the\s+)?earth\s+oblong\b/, claim: 'earth is oblong' },
+            { pattern: /\bis\s+(?:the\s+)?earth\s+round\b/, claim: 'earth is round' },
+            { pattern: /\bis\s+(?:the\s+)?earth\s+spherical\b/, claim: 'earth is spherical' },
+            { pattern: /\bis\s+(?:the\s+)?earth\s+(?:an\s+)?oblate\s+spheroid\b/, claim: 'earth is oblate spheroid' }
+        ];
+
+        for (const mapping of mappings) {
+            if (mapping.pattern.test(lowerContent)) {
+                this.addKnowledgeFinding(findings, mapping.claim);
+            }
+        }
+    }
+
     analyzeContent(content) {
         const lowerContent = content.toLowerCase();
         const findings = [];
+
+        this.mapQuestionClaimsToKnowledge(findings, lowerContent);
 
         // --- Exact KB matches ---
         for (const [claim, data] of this.knowledgeBase) {
