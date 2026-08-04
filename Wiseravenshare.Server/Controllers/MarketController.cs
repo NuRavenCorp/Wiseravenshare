@@ -16,6 +16,8 @@ public sealed class MarketController : ControllerBase
     };
 
     private static readonly TimeSpan QuoteCacheDuration = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan ProviderTimeout = TimeSpan.FromSeconds(4);
+    private static readonly SemaphoreSlim RefreshLock = new(1, 1);
     private const string DemoApiKey = "demo";
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -51,14 +53,38 @@ public sealed class MarketController : ControllerBase
             });
         }
 
+        await RefreshLock.WaitAsync(HttpContext.RequestAborted);
         try
         {
-            var liveResponse = await FetchAlphaVantageQuotesAsync(requestedSymbols, HttpContext.RequestAborted);
+            // Double-check cache after lock acquisition to avoid thundering herd refreshes.
+            if (_cache.TryGetValue<CachedMarketResponse>(cacheKey, out cachedResponse) && cachedResponse is not null)
+            {
+                return Ok(new
+                {
+                    quotes = cachedResponse.Quotes,
+                    source = cachedResponse.Source,
+                    fetchedAt = cachedResponse.FetchedAt,
+                    stale = false,
+                    cached = true
+                });
+            }
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            timeoutCts.CancelAfter(ProviderTimeout);
+
+            var liveResponse = await FetchAlphaVantageQuotesAsync(requestedSymbols, timeoutCts.Token);
             if (liveResponse.Quotes.Count == 0)
             {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                var fallback = BuildFallbackResponse(requestedSymbols, "Provider returned no live quotes");
+                _cache.Set(cacheKey, fallback, TimeSpan.FromMinutes(2));
+                return Ok(new
                 {
-                    message = "Market data provider returned no quotes."
+                    quotes = fallback.Quotes,
+                    source = fallback.Source,
+                    fetchedAt = fallback.FetchedAt,
+                    stale = true,
+                    cached = false,
+                    warning = "Live provider returned no quotes; serving fallback market snapshot."
                 });
             }
 
@@ -88,11 +114,21 @@ public sealed class MarketController : ControllerBase
                 });
             }
 
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            var fallback = BuildFallbackResponse(requestedSymbols, ex.Message);
+            _cache.Set(cacheKey, fallback, TimeSpan.FromMinutes(2));
+            return Ok(new
             {
-                message = "Failed to fetch market data.",
-                detail = ex.Message
+                quotes = fallback.Quotes,
+                source = fallback.Source,
+                fetchedAt = fallback.FetchedAt,
+                stale = true,
+                cached = false,
+                warning = "Live provider failed; serving fallback market snapshot."
             });
+        }
+        finally
+        {
+            RefreshLock.Release();
         }
     }
 
@@ -130,6 +166,49 @@ public sealed class MarketController : ControllerBase
             Quotes = quotes,
             Source = apiKey == DemoApiKey ? "Alpha Vantage (demo)" : "Alpha Vantage",
             FetchedAt = DateTime.UtcNow
+        };
+    }
+
+    private static CachedMarketResponse BuildFallbackResponse(IReadOnlyCollection<string> symbols, string reason)
+    {
+        var seed = new Dictionary<string, (decimal Price, decimal Change, decimal ChangePercent, long Volume)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MSFT"] = (487.65m, 22.93m, 4.9342m, 66663409),
+            ["IBM"] = (226.13m, 1.45m, 0.6453m, 4288300),
+            ["AAPL"] = (219.44m, -0.72m, -0.3270m, 51200438),
+            ["NVDA"] = (126.19m, 2.02m, 1.6252m, 453991124),
+            ["TSLA"] = (251.80m, -3.14m, -1.2317m, 97212581)
+        };
+
+        var asOf = DateTime.UtcNow;
+        var quotes = symbols.Select((symbol) =>
+        {
+            var key = symbol.ToUpperInvariant();
+            if (!seed.TryGetValue(key, out var sample))
+            {
+                sample = (100m, 0m, 0m, 0);
+            }
+
+            return (object)new
+            {
+                symbol = key,
+                name = key,
+                price = sample.Price,
+                change = sample.Change,
+                changePercent = sample.ChangePercent,
+                volume = sample.Volume,
+                marketState = "Fallback Snapshot",
+                asOf,
+                note = "Fallback quote",
+                reason
+            };
+        }).ToList();
+
+        return new CachedMarketResponse
+        {
+            Quotes = quotes,
+            Source = "Wiseravenshare fallback snapshot",
+            FetchedAt = asOf
         };
     }
 
