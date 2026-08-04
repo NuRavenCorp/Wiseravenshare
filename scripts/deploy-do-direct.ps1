@@ -1,5 +1,5 @@
 param(
-    [string]$AppId = "f63e23f6-3709-403f-bac4-9cdfafee211b",
+    [string]$AppId = "29b375ab-404f-42c4-898c-ba5a6666ebd1",
     [string]$Registry = "wiseravenshare",
     [string]$Repository = "wiseravenshare-web",
     [string]$ApiDockerfile = "Wiseravenshare.Server/Dockerfile",
