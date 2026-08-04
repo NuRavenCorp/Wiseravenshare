@@ -145,9 +145,12 @@ ingress:
 # ── Managed Postgres database ─────────────────────────────────────────────────
 databases:
   - name: wiseravenshare-db
+    cluster_name: wiseravenshare-db
+    db_name: defaultdb
+    db_user: wiseravenshare_app
     engine: PG
     version: "16"
-    production: false
+    production: true
 
 domains:
   - domain: wise-ravens.com
