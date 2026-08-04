@@ -1,5 +1,5 @@
 import { ModuleRegistry } from './ModuleRegistry';
-import { api } from '../../Services/api';
+import api from '../../Services/api';
 
 class PluginManager {
     static plugins = new Map();
@@ -89,8 +89,8 @@ class PluginManager {
     // Discover plugins from server
     static async discoverPlugins() {
         try {
-            const response = await api.get('/api/evolution/plugins/discover');
-            const plugins = response.plugins || [];
+            const response = await api.get('/evolution/plugins/discover');
+            const plugins = response?.data?.plugins || [];
 
             plugins.forEach(plugin => {
                 this.register(plugin.id, plugin);

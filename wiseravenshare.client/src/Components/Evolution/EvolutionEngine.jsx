@@ -1,8 +1,7 @@
 import { ModuleRegistry } from './ModuleRegistry';
 import { PluginManager } from './PluginManager';
-import { FeatureFlags } from './FeatureFlags';
 import { storage } from '../../Services/storage';
-import { api } from '../../Services/api';
+import api from '../../Services/api';
 
 class EvolutionEngine {
     static instance = null;
@@ -70,6 +69,9 @@ class EvolutionEngine {
 
         // Check for module updates
         await this.checkForUpdates();
+
+        // Discover and register available plugins/agents.
+        await PluginManager.discoverPlugins();
 
         console.log('🧬 Evolution Engine initialized');
         this.emit('initialized', { timestamp: Date.now() });
@@ -275,7 +277,8 @@ class EvolutionEngine {
 
         try {
             // Fetch latest version from server
-            const latest = await api.get(`/api/evolution/modules/${moduleId}/latest`);
+            const response = await api.get(`/evolution/modules/${moduleId}/latest`);
+            const latest = response?.data;
 
             if (latest && latest.version) {
                 // Update module registration
@@ -395,7 +398,8 @@ class EvolutionEngine {
     // Check for module updates
     async checkForUpdates() {
         try {
-            const updates = await api.get('/api/evolution/updates');
+            const response = await api.get('/evolution/updates');
+            const updates = Array.isArray(response?.data) ? response.data : [];
 
             for (const update of updates) {
                 if (ModuleRegistry.has(update.id)) {
