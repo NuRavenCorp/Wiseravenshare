@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
@@ -82,7 +83,7 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('auth_token');
+        const token = getAuthToken();
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
@@ -200,8 +201,8 @@ export const apiService = {
                     ...requestConfig,
                     headers: {
                         ...requestConfig.headers,
-                        ...(localStorage.getItem('auth_token')
-                            ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+                        ...(getAuthToken()
+                            ? { Authorization: `Bearer ${getAuthToken()}` }
                             : {})
                     }
                 });
