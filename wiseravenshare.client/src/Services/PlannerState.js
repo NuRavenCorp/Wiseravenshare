@@ -234,7 +234,7 @@ class PlannerState {
     }
 
     async processCalendarReminders() {
-        const hasAuthToken = typeof window !== 'undefined' && Boolean(localStorage.getItem('auth_token'));
+        const hasAuthToken = typeof window !== 'undefined' && Boolean(getAuthToken());
         if (!hasAuthToken) {
             return;
         }

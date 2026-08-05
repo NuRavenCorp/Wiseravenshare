@@ -1,4 +1,5 @@
 import api from './api';
+import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
 class AuthService {
     buildAuthFallbackBases() {
@@ -189,16 +190,16 @@ class AuthService {
     }
 
     setToken(token) {
-        localStorage.setItem('auth_token', token);
+        setAuthToken(token);
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
 
     getToken() {
-        return localStorage.getItem('auth_token');
+        return getAuthToken();
     }
 
     clearToken() {
-        localStorage.removeItem('auth_token');
+        clearAuthToken();
         delete api.defaults.headers.common['Authorization'];
     }
 

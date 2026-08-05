@@ -65,13 +65,15 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user_data');
         localStorage.removeItem('wiseSocialFeeds');
+        localStorage.removeItem('ws.accessToken');
+        localStorage.removeItem('wise-raven-token');
         setUser(null);
         window.dispatchEvent(new Event('wiseraven:social-updated'));
     };
 
     const checkAuth = async () => {
         try {
-            const token = localStorage.getItem('auth_token');
+            const token = authService.getToken();
             if (token) {
                 const userData = normalizeUser(await authService.verifyToken(token));
                 setUser(userData);
@@ -84,7 +86,7 @@ export const AuthProvider = ({ children }) => {
         } catch (err) {
             console.error('Auth check failed:', err);
             const cachedUser = authService.getUser();
-            const hasToken = Boolean(localStorage.getItem('auth_token'));
+            const hasToken = Boolean(authService.getToken());
             if (cachedUser && hasToken) {
                 const normalizedCachedUser = normalizeUser(cachedUser);
                 setUser(normalizedCachedUser);
@@ -106,7 +108,7 @@ export const AuthProvider = ({ children }) => {
             const response = await authService.login(email, password);
             const normalizedUser = normalizeUser(response.user);
             setUser(normalizedUser);
-            localStorage.setItem('auth_token', response.token);
+            authService.setToken(response.token);
             localStorage.setItem('user_data', JSON.stringify(normalizedUser));
             localStorage.setItem('wiseSocialFeeds', JSON.stringify(normalizedUser?.socialFeeds || {}));
             window.dispatchEvent(new Event('wiseraven:social-updated'));
@@ -127,7 +129,7 @@ export const AuthProvider = ({ children }) => {
             const response = await authService.register(userData);
             const normalizedUser = normalizeUser(response.user);
             setUser(normalizedUser);
-            localStorage.setItem('auth_token', response.token);
+            authService.setToken(response.token);
             localStorage.setItem('user_data', JSON.stringify(normalizedUser));
             localStorage.setItem('wiseSocialFeeds', JSON.stringify(normalizedUser?.socialFeeds || {}));
             window.dispatchEvent(new Event('wiseraven:social-updated'));

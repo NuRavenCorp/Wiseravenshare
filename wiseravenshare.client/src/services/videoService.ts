@@ -1,3 +1,5 @@
+import { getAuthToken as getSharedAuthToken } from './authStorage.js';
+
 type UploadVideoResponse = Record<string, unknown>;
 
 export type VideoItem = {
@@ -63,9 +65,7 @@ function mapVideoItem(video: VideoItem): VideoItem {
 }
 
 function getAuthToken(): string | null {
-  return localStorage.getItem('ws.accessToken') ||
-    localStorage.getItem('auth_token') ||
-    localStorage.getItem('wise-raven-token');
+  return getSharedAuthToken();
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
