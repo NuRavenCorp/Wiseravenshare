@@ -1,10 +1,5 @@
 import axios from 'axios';
-
-const getAuthToken = () => {
-    return localStorage.getItem('auth_token')
-        || localStorage.getItem('ws.accessToken')
-        || localStorage.getItem('wise-raven-token');
-};
+import { getAuthToken } from './authStorage.js';
 
 const extractErrorMessage = (error, fallback) => {
     const responseData = error?.response?.data;

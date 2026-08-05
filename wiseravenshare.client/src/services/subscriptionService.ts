@@ -1,9 +1,9 @@
+import { getAuthToken as getSharedAuthToken } from './authStorage.js';
+
 const apiBase = import.meta.env.VITE_API_URL || '';
 
 function getAuthToken(): string | null {
-  return localStorage.getItem('ws.accessToken') ||
-    localStorage.getItem('auth_token') ||
-    localStorage.getItem('wise-raven-token');
+  return getSharedAuthToken();
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
