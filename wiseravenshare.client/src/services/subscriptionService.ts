@@ -1,4 +1,4 @@
-import { getAuthToken as getSharedAuthToken } from './authStorage.js';
+import { getAuthToken as getSharedAuthToken } from '../Services/authStorage.js';
 
 const apiBase = import.meta.env.VITE_API_URL || '';
 
