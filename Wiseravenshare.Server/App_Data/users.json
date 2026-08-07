@@ -1,5 +1,38 @@
 [
   {
+    "Id": "708e938c34884814968b03aa5f027c60",
+    "Name": "Wiseraven Admin",
+    "Email": "admin@wise-ravens.com",
+    "Handle": "wiseravenadmin",
+    "PasswordHash": "M72QJwPtj/pJ0hdSumC/6A==.bO/ZvqdMKnC/uExfIqUOt5yqovOcNd3Iqp3AGk1kWJs=",
+    "Bio": "",
+    "Location": "",
+    "Website": "",
+    "Avatar": "",
+    "CreatedAtUtc": "2026-08-06T01:01:18.1591741Z",
+    "UpdatedAtUtc": "2026-08-06T01:14:52.3578134Z",
+    "SocialFeeds": {
+      "TikTok": {
+        "Enabled": false,
+        "Username": "",
+        "ProfileUrl": "",
+        "FeedUrl": ""
+      },
+      "Facebook": {
+        "Enabled": false,
+        "Username": "",
+        "ProfileUrl": "",
+        "FeedUrl": ""
+      },
+      "Instagram": {
+        "Enabled": false,
+        "Username": "",
+        "ProfileUrl": "",
+        "FeedUrl": ""
+      }
+    }
+  },
+  {
     "Id": "28d5080911fc4bd28f33e0bfcd4a6fe2",
     "Name": "Arnold Spence",
     "Email": "arnold3_spence08@outlook.com",

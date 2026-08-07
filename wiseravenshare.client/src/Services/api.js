@@ -15,20 +15,17 @@ const resolveApiBaseUrl = () => {
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = VITE_DEV_PORTS.has(window.location.port);
 
-    if (isLocalHost) {
+    if (isLocalHost || isViteDevServer) {
         return configured || localhostApi;
     }
 
-    if (isViteDevServer) {
-        return configured || localhostApi;
+    // In production/non-local environments prefer configured API host when provided.
+    if (configured) {
+        return configured;
     }
 
-    // In production/non-local environments always prefer same-origin /api.
-    if (!isLocalHost) {
-        return `${window.location.origin}/api`;
-    }
-
-    return configured || localhostApi;
+    // Fallback for same-origin ingress deployments.
+    return `${window.location.origin}/api`;
 };
 
 const API_BASE_URL = resolveApiBaseUrl();

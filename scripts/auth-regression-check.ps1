@@ -70,7 +70,7 @@ else {
 }
 
 # 2) Registration should be blocked by default.
-$badRegister = Invoke-JsonPost -Url $registerUrl -Body @{ name = "x"; email = "x@x.com"; password = "StrongPass123!" }
+$badRegister = Invoke-JsonPost -Url $registerUrl -Body @{ name = "x"; email = "x@x.com"; password = "1@Chinchin234" }
 if ($badRegister.StatusCode -eq 403) {
     Add-Result -Check "self_registration_blocked" -Status "ok" -Details "Status 403"
 }
@@ -93,7 +93,7 @@ if ($null -ne $ValidCredential) {
 Write-Host "Auth regression report for $BaseUrl"
 $results | Format-Table -AutoSize
 
-$failCount = ($results | Where-Object { $_.Status -eq "fail" }).Count
+$failCount = @($results | Where-Object { $_.Status -eq "fail" }).Count
 if ($failCount -gt 0) {
     Write-Host "Summary: fail=$failCount"
     exit 2

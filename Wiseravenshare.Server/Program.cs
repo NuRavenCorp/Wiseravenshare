@@ -80,6 +80,10 @@ static string NormalizeConnectionString(string connectionString)
 
 // ── Configuration ────────────────────────────────────────────────────────────
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
+var configuredClientOrigins = (clientOrigin ?? string.Empty)
+    .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 var defaultConnectionString = NormalizeConnectionString(builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
 
 // ── Logging ──────────────────────────────────────────────────────────────────
@@ -157,9 +161,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ClientPolicy", policy =>
     {
-        if (!string.IsNullOrWhiteSpace(clientOrigin))
+        if (configuredClientOrigins.Length > 0)
         {
-            policy.WithOrigins(clientOrigin)
+            policy.WithOrigins(configuredClientOrigins)
                   .AllowAnyHeader()
                   .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
         }
@@ -184,6 +188,11 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authentication:AllowSelfRegistration", false))
+{
+    app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
+}
 
 using (var scope = app.Services.CreateScope())
 {

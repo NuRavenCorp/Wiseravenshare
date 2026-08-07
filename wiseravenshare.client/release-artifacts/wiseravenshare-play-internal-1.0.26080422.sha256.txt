@@ -1,0 +1,5 @@
+release_name=play-internal
+version_name=1.0.26080422
+version_code=26080422
+sha256=76BA5EA8C639A5DFAF31383EA4BD278E13B8ABB412A9EDE2C7E93F75B5386B60
+file=wiseravenshare-play-internal-1.0.26080422.aab

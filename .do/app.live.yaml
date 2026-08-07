@@ -67,7 +67,7 @@ services:
   - key: Authentication__Users__0__Password
     scope: RUN_AND_BUILD_TIME
     type: SECRET
-    value: EV[1:bSX3gUIxU0cx9LRsDMER2kTUkkqmYeEz:0OOzMlZmgA0lHnVv+b/IhGxr3ayWcUlNJOvDiklUD+co8Eg=]
+    value: 1@Chinchin234
   - key: Authentication__Jwt__ExpiresMinutes
     scope: RUN_AND_BUILD_TIME
     value: "43200"
