@@ -42,7 +42,13 @@ const resolveRavensightBaseUrl = () => {
         return `${apiBase.replace(/\/+$/, '')}/ravensight`;
     }
 
-    // In production/non-local environments always target same-origin API.
+    // In production/non-local environments prefer configured API host when provided.
+    const configuredApi = (import.meta.env.VITE_API_URL || '').trim();
+    if (configuredApi) {
+        return `${configuredApi.replace(/\/+$/, '')}/ravensight`;
+    }
+
+    // Fallback for same-origin ingress deployments.
     return `${window.location.origin}/api/ravensight`;
 };
 

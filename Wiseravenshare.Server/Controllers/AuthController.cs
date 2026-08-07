@@ -221,6 +221,27 @@ public class AuthController : ControllerBase
         return Ok(new { success = true });
     }
 
+    [HttpGet("status")]
+    [AllowAnonymous]
+    public IActionResult Status()
+    {
+        var jwtIssuerConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Issuer"]);
+        var jwtAudienceConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Audience"]);
+        var jwtKey = _configuration["Authentication:Jwt:Key"];
+        var jwtKeyConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
+
+        return Ok(new
+        {
+            selfRegistrationEnabled = IsSelfRegistrationAllowed(),
+            jwt = new
+            {
+                issuerConfigured = jwtIssuerConfigured,
+                audienceConfigured = jwtAudienceConfigured,
+                keyConfigured = jwtKeyConfigured
+            }
+        });
+    }
+
     [HttpPost("forgot-password")]
     [AllowAnonymous]
     public IActionResult ForgotPassword([FromBody] ForgotPasswordRequest request)
@@ -453,9 +474,64 @@ public class AuthController : ControllerBase
 
     private void EnsureConfiguredUsersSeeded()
     {
-        var configuredUsers = (_configuration.GetSection("Authentication:Users").Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>())
-            .Select(u => (u.Name, u.Email, u.Password));
+        var configuredUsers = ReadConfiguredUsers().ToList();
+        _logger.LogWarning("Bootstrapping auth with {ConfiguredUserCount} configured user(s).", configuredUsers.Count);
+        foreach (var configuredUser in configuredUsers.Take(3))
+        {
+            _logger.LogWarning("Configured auth user: Name='{Name}', Email='{Email}', PasswordPresent={PasswordPresent}", configuredUser.Name, configuredUser.Email, !string.IsNullOrWhiteSpace(configuredUser.Password));
+        }
+
         _userStore.EnsureSeeded(configuredUsers);
+    }
+
+    private IEnumerable<(string Name, string Email, string Password)> ReadConfiguredUsers()
+    {
+        var section = _configuration.GetSection("Authentication:Users");
+        var userSections = section.GetChildren().ToList();
+        if (userSections.Count > 0)
+        {
+            foreach (var childSection in userSections)
+            {
+                var name = childSection["Name"] ?? childSection["name"] ?? string.Empty;
+                var email = childSection["Email"] ?? childSection["email"] ?? string.Empty;
+                var password = childSection["Password"] ?? childSection["password"] ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                yield return (name, email, password);
+            }
+
+            yield break;
+        }
+
+        var boundUsers = section.Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>();
+        foreach (var user in boundUsers)
+        {
+            if (string.IsNullOrWhiteSpace(user.Email) && string.IsNullOrWhiteSpace(user.Password) && string.IsNullOrWhiteSpace(user.Name))
+            {
+                continue;
+            }
+
+            yield return (user.Name, user.Email, user.Password);
+        }
+
+        var index = 0;
+        while (true)
+        {
+            var email = _configuration[$"Authentication:Users:{index}:Email"] ?? _configuration[$"Authentication:Users:{index}:email"];
+            var password = _configuration[$"Authentication:Users:{index}:Password"] ?? _configuration[$"Authentication:Users:{index}:password"];
+            var name = _configuration[$"Authentication:Users:{index}:Name"] ?? _configuration[$"Authentication:Users:{index}:name"];
+            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(name))
+            {
+                break;
+            }
+
+            yield return (name ?? string.Empty, email ?? string.Empty, password ?? string.Empty);
+            index++;
+        }
     }
 
     private async Task<Guid> EnsureDomainUserAsync(UserRecord authUser)
@@ -466,55 +542,69 @@ public class AuthController : ControllerBase
             _logger.LogWarning("Auth user id '{AuthUserId}' is not a valid GUID. Generated a replacement domain user id for {Email}.", authUser.Id, authUser.Email);
         }
 
-        var existingById = await _userRepository.GetByIdAsync(parsedId);
-        if (existingById is not null)
+        if (!_userStore.IsDatabasePersistenceAvailable())
         {
-            return existingById.Id;
+            _logger.LogWarning("Skipping domain-user repository operations for {Email} because database persistence is unavailable.", authUser.Email);
+            return parsedId;
         }
 
-        var existingByEmail = await _userRepository.GetByEmailAsync(authUser.Email);
-        if (existingByEmail is not null)
+        try
         {
-            if (!existingByEmail.IsActive)
+            var existingById = await _userRepository.GetByIdAsync(parsedId);
+            if (existingById is not null)
             {
-                existingByEmail.IsActive = true;
-                await _userRepository.UpdateAsync(existingByEmail);
+                return existingById.Id;
             }
 
-            return existingByEmail.Id;
+            var existingByEmail = await _userRepository.GetByEmailAsync(authUser.Email);
+            if (existingByEmail is not null)
+            {
+                if (!existingByEmail.IsActive)
+                {
+                    existingByEmail.IsActive = true;
+                    await _userRepository.UpdateAsync(existingByEmail);
+                }
+
+                return existingByEmail.Id;
+            }
+
+            var normalizedEmail = (authUser.Email ?? string.Empty).Trim();
+            var displayName = string.IsNullOrWhiteSpace(authUser.Name)
+                ? normalizedEmail.Split('@')[0]
+                : authUser.Name.Trim();
+            var usernameSeed = string.IsNullOrWhiteSpace(authUser.Handle)
+                ? normalizedEmail.Split('@')[0]
+                : authUser.Handle.Trim().TrimStart('@');
+            var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray());
+            if (string.IsNullOrWhiteSpace(sanitizedUsername))
+            {
+                sanitizedUsername = $"user{parsedId.ToString("N")[..8]}";
+            }
+
+            var newUser = new Wiseravenshare.Server.Entities.User
+            {
+                Id = parsedId,
+                Email = normalizedEmail,
+                Username = sanitizedUsername.ToLowerInvariant(),
+                DisplayName = displayName,
+                PasswordHash = authUser.PasswordHash ?? string.Empty,
+                Bio = string.IsNullOrWhiteSpace(authUser.Bio) ? null : authUser.Bio.Trim(),
+                AvatarUrl = string.IsNullOrWhiteSpace(authUser.Avatar) ? null : authUser.Avatar.Trim(),
+                Location = string.IsNullOrWhiteSpace(authUser.Location) ? null : authUser.Location.Trim(),
+                Website = string.IsNullOrWhiteSpace(authUser.Website) ? null : authUser.Website.Trim(),
+                IsActive = true,
+                TruthScore = 50.00m
+            };
+
+            await _userRepository.AddAsync(newUser);
+            _logger.LogInformation("Provisioned EF user record for auth user {Email} ({UserId}).", newUser.Email, newUser.Id);
+            return newUser.Id;
         }
-
-        var normalizedEmail = (authUser.Email ?? string.Empty).Trim();
-        var displayName = string.IsNullOrWhiteSpace(authUser.Name)
-            ? normalizedEmail.Split('@')[0]
-            : authUser.Name.Trim();
-        var usernameSeed = string.IsNullOrWhiteSpace(authUser.Handle)
-            ? normalizedEmail.Split('@')[0]
-            : authUser.Handle.Trim().TrimStart('@');
-        var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray());
-        if (string.IsNullOrWhiteSpace(sanitizedUsername))
+        catch (Exception ex)
         {
-            sanitizedUsername = $"user{parsedId.ToString("N")[..8]}";
+            _logger.LogWarning(ex, "Falling back to auth-only identity for {Email} because the domain user repository is unavailable.", authUser.Email);
+            return parsedId;
         }
-
-        var newUser = new Wiseravenshare.Server.Entities.User
-        {
-            Id = parsedId,
-            Email = normalizedEmail,
-            Username = sanitizedUsername.ToLowerInvariant(),
-            DisplayName = displayName,
-            PasswordHash = authUser.PasswordHash ?? string.Empty,
-            Bio = string.IsNullOrWhiteSpace(authUser.Bio) ? null : authUser.Bio.Trim(),
-            AvatarUrl = string.IsNullOrWhiteSpace(authUser.Avatar) ? null : authUser.Avatar.Trim(),
-            Location = string.IsNullOrWhiteSpace(authUser.Location) ? null : authUser.Location.Trim(),
-            Website = string.IsNullOrWhiteSpace(authUser.Website) ? null : authUser.Website.Trim(),
-            IsActive = true,
-            TruthScore = 50.00m
-        };
-
-        await _userRepository.AddAsync(newUser);
-        _logger.LogInformation("Provisioned EF user record for auth user {Email} ({UserId}).", newUser.Email, newUser.Id);
-        return newUser.Id;
     }
 
     private sealed class ConfiguredUser

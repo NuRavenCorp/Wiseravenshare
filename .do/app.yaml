@@ -28,6 +28,14 @@ services:
         value: ${web.PUBLIC_URL}
       - key: Admin__Emails
         value: admin@wise-ravens.com
+      - key: Authentication__AllowSelfRegistration
+        value: "true"
+      - key: Authentication__Users__0__Name
+        value: Wiseraven Admin
+      - key: Authentication__Users__0__Email
+        value: admin@wise-ravens.com
+      - key: Authentication__Users__0__Password
+        value: 1@Chinchin234
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET

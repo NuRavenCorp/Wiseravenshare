@@ -18,6 +18,7 @@ import TruthSeeker from './Components/Truth/TruthSeeker';
 import AINews from './Components/News/AINews';
 import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
+import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
@@ -33,7 +34,9 @@ const parseAdminEmails = () => {
 };
 
 const App = () => {
-    const [currentPage, setCurrentPage] = useState('feed');
+    const [currentPage, setCurrentPage] = useState(() =>
+        window.location.pathname === '/privacy' ? 'privacy' : 'feed'
+    );
     const [isRavensightMode, setIsRavensightMode] = useState(false);
     const [truthAlerts, setTruthAlerts] = useState([]);
     const [selectedArticle, setSelectedArticle] = useState(() => {
@@ -256,6 +259,8 @@ const App = () => {
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'ravensight':
                 return <RavensightVideo />;
+            case 'privacy':
+                return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             default:
                 return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
         }
@@ -361,6 +366,15 @@ const App = () => {
                     <RightSidebar onNavigate={setCurrentPage} />
                 </div>
             </div>
+            <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: '12px', color: 'var(--light-color)' }}>
+                <button
+                    onClick={() => setCurrentPage('privacy')}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                >
+                    Privacy Policy
+                </button>
+                &nbsp;·&nbsp;© {new Date().getFullYear()} NuRaven Corp
+            </footer>
         </div>
     );
 };
