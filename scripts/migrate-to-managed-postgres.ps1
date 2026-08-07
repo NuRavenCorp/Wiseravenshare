@@ -1,5 +1,5 @@
 param(
-    [string]$SourceConnectionString = "Host=localhost;Port=5432;Database=wiseravnshare-db;Username=wiseravenshare-user;Password=wiseravenshare_password;SSL Mode=Disable;Trust Server Certificate=true",
+    [string]$SourceConnectionString = "Host=localhost;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=1@Chinchin234;SSL Mode=Disable;Trust Server Certificate=true",
     [string]$TargetConnectionString = $env:DATABASE_URL,
     [string]$DumpFile = "./postgres-migration.dump"
 )

@@ -175,3 +175,64 @@ Optional allowlisted user verification:
 $cred = Get-Credential
 pwsh -File ./scripts/auth-regression-check.ps1 -BaseUrl https://wise-ravens.com -ValidCredential $cred
 ```
+
+## 9) Production DB/Auth Recovery Runbook (DigitalOcean Managed Postgres)
+
+Use this sequence when auth fails after database changes, migrations, or credential rotation.
+
+1. Confirm app and DB health endpoints:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health | Select-Object -ExpandProperty Content
+Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health/db | Select-Object -ExpandProperty Content
+```
+
+2. Verify latest deployment status:
+
+```powershell
+doctl apps list
+doctl apps list-deployments <APP_ID> --format ID,Phase,Progress,CreatedAt --no-header
+```
+
+3. If build fails, fetch build logs and fix the exact compile/runtime error before retrying deploy:
+
+```powershell
+doctl apps logs <APP_ID> --type build --deployment <DEPLOYMENT_ID> --tail 400
+```
+
+4. Ensure App Platform is trusted by Managed Postgres firewall:
+
+```powershell
+doctl databases firewalls append <DB_CLUSTER_ID> --rule app:<APP_ID>
+```
+
+5. Trigger a fresh deployment after config/source fixes:
+
+```powershell
+doctl apps create-deployment <APP_ID> --wait
+```
+
+6. Re-run health checks:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health | Select-Object -ExpandProperty Content
+Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health/db | Select-Object -ExpandProperty Content
+```
+
+7. Run auth regression checks (required):
+
+```powershell
+pwsh -File ./scripts/auth-regression-check.ps1 -BaseUrl https://wise-ravens.com
+```
+
+8. Optional allowlisted login verification:
+
+```powershell
+$cred = Get-Credential
+pwsh -File ./scripts/auth-regression-check.ps1 -BaseUrl https://wise-ravens.com -ValidCredential $cred
+```
+
+Operational notes:
+- Managed Postgres may not allow direct `ALTER ROLE ... PASSWORD ...` for certain managed users. Use provider-supported password reset and update app secrets.
+- Keep `ConnectionStrings__DefaultConnection` secret-only in App Platform config.
+- Keep local Compose password references aligned (`docker-compose.yml`, `docker-compose.full.yml`, migration/reset scripts) for reproducible local reset/migration runs.

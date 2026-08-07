@@ -8,19 +8,20 @@ services:
     depends_on:
       - db
     environment:
-      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=wiseravenshare;Username=postgres;Password=postgres
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=1@Chinchin234;SSL Mode=Disable;Trust Server Certificate=true
     networks:
       - app-network
 
   db:
     image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=wiseravenshare
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=wiseravenshare-db
+      - POSTGRES_USER=wiseravenshare_user
+      - POSTGRES_PASSWORD=1@Chinchin234
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U wiseravenshare_user -d wiseravenshare-db"]
       interval: 10s
       timeout: 5s
       retries: 5

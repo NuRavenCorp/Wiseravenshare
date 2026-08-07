@@ -60,8 +60,38 @@ jobs:
           if [ -z "$VERSION_NAME" ] || [ "$VERSION_NAME" = "$GITHUB_REF_NAME" ]; then
             VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
           fi
+          RELEASE_NAME="android-${VERSION_NAME}"
           echo "ANDROID_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "ANDROID_RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_ENV"
+
+      - name: Prepare release artifacts and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+
+          RELEASE_SLUG="${ANDROID_RELEASE_NAME//[^A-Za-z0-9_.-]/_}"
+          VERSION_SLUG="${ANDROID_VERSION_NAME//[^A-Za-z0-9_.-]/_}"
+          AAB_OUT="build/wiseravenshare-${RELEASE_SLUG}-${VERSION_SLUG}.aab"
+          APK_OUT="build/wiseravenshare-${RELEASE_SLUG}-${VERSION_SLUG}.apk"
+          SHA_OUT="build/wiseravenshare-${RELEASE_SLUG}-${VERSION_SLUG}.sha256.txt"
+
+          cp android/app/build/outputs/bundle/release/app-release.aab "$AAB_OUT"
+          cp android/app/build/outputs/apk/release/app-release.apk "$APK_OUT"
+
+          SHA_VALUE="$(sha256sum "$AAB_OUT" | awk '{print $1}')"
+          {
+            echo "release_name=${ANDROID_RELEASE_NAME}"
+            echo "version_name=${ANDROID_VERSION_NAME}"
+            echo "version_code=${ANDROID_VERSION_CODE}"
+            echo "sha256=${SHA_VALUE}"
+            echo "file=$(basename "$AAB_OUT")"
+          } > "$SHA_OUT"
+
+          echo "ANDROID_AAB_ARTIFACT=$AAB_OUT" >> "$GITHUB_ENV"
+          echo "ANDROID_APK_ARTIFACT=$APK_OUT" >> "$GITHUB_ENV"
+          echo "ANDROID_SHA_ARTIFACT=$SHA_OUT" >> "$GITHUB_ENV"
 
       - name: Prepare signing keystore
         if: env.ANDROID_KEYSTORE_BASE64 != ''
@@ -117,13 +147,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
-          path: wiseravenshare.client/android/app/build/outputs/apk/release/app-release.apk
+          path: wiseravenshare.client/${{ env.ANDROID_APK_ARTIFACT }}
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab
-          path: wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+          path: wiseravenshare.client/${{ env.ANDROID_AAB_ARTIFACT }}
+
+      - name: Upload SHA256 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-sha256
+          path: wiseravenshare.client/${{ env.ANDROID_SHA_ARTIFACT }}
 
       - name: Upload release notes artifact
         uses: actions/upload-artifact@v4
@@ -137,8 +173,9 @@ jobs:
         with:
           body_path: build/RELEASE_NOTES.md
           files: |
-            wiseravenshare.client/android/app/build/outputs/apk/release/app-release.apk
-            wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+            wiseravenshare.client/${{ env.ANDROID_APK_ARTIFACT }}
+            wiseravenshare.client/${{ env.ANDROID_AAB_ARTIFACT }}
+            wiseravenshare.client/${{ env.ANDROID_SHA_ARTIFACT }}
 
       - name: Upload to Google Play (optional)
         if: env.ANDROID_PLAY_SERVICE_ACCOUNT_JSON != '' && env.ANDROID_KEYSTORE_BASE64 != ''
@@ -146,6 +183,6 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ env.ANDROID_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: ${{ env.ANDROID_PACKAGE_NAME }}
-          releaseFiles: wiseravenshare.client/android/app/build/outputs/bundle/release/app-release.aab
+          releaseFiles: wiseravenshare.client/${{ env.ANDROID_AAB_ARTIFACT }}
           track: ${{ env.ANDROID_PLAY_TRACK }}
           status: completed

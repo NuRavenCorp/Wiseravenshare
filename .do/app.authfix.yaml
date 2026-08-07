@@ -67,7 +67,7 @@ services:
   - key: Authentication__Users__0__Password
     scope: RUN_AND_BUILD_TIME
     type: SECRET
-    value: TempAuth!2026Raven#
+    value: 1@Chinchin234
   - key: DATABASE_URL
     scope: RUN_AND_BUILD_TIME
     type: SECRET

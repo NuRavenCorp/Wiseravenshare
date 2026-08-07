@@ -555,6 +555,17 @@ const LoginPage = ({ onAuth }) => {
                     {mode === 'forgot' && 'Request Reset Token'}
                     {mode === 'reset' && 'Set New Password'}
                 </button>
+                <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '12px', color: 'var(--light-color)' }}>
+                    By using Wise-Ravens you agree to our{' '}
+                    <a
+                        href="https://wise-ravens.com/privacy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'var(--highlight-color)', textDecoration: 'underline' }}
+                    >
+                        Privacy Policy
+                    </a>.
+                </p>
             </div>
         </div>
     );
