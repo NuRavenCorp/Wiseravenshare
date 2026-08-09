@@ -17,6 +17,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
     const [facebookPermissionGranted, setFacebookPermissionGranted] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
+    const [destinationFolder, setDestinationFolder] = useState('/wiseravenshare/ravensight/video');
     const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
     const user = { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
@@ -52,6 +53,18 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
             // Trust the browser-reported MIME first so upload toggles are accurate.
             if (selected.type?.startsWith('video/')) {
                 setMediaType('video');
+                try {
+                    const pickedDestination = window.prompt(
+                        'Choose destination folder for this video upload:',
+                        destinationFolder || '/wiseravenshare/ravensight/video'
+                    );
+
+                    if (typeof pickedDestination === 'string' && pickedDestination.trim().length > 0) {
+                        setDestinationFolder(pickedDestination.trim());
+                    }
+                } catch {
+                    // Ignore prompt failures in restricted runtimes.
+                }
             } else if (selected.type?.startsWith('image/')) {
                 setMediaType('photo');
             } else if (selected.type?.startsWith('audio/')) {
@@ -122,6 +135,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                 const uploadResponse = await apiService.uploadMedia(mediaFile, mediaType, {
                     title: content.slice(0, 60) || mediaFile.name,
                     description: content,
+                    destinationFolder,
                     publishToYouTube,
                     publishToTikTok,
                     publishToFacebook,
@@ -228,6 +242,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
             setYouTubePermissionGranted(false);
             setTikTokPermissionGranted(false);
             setFacebookPermissionGranted(false);
+            setDestinationFolder('/wiseravenshare/ravensight/video');
             setUploadProgress(0);
             setIsUploading(false);
 
