@@ -3,8 +3,14 @@ import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
+const ensureApiBase = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return /\/api$/i.test(raw) ? raw : `${raw.replace(/\/+$/, '')}/api`;
+};
+
 const resolveApiBaseUrl = () => {
-    const configured = (import.meta.env.VITE_API_URL || '').trim();
+    const configured = ensureApiBase(import.meta.env.VITE_API_URL || '');
     const localhostApi = 'http://localhost:5242/api';
     const productionApi = 'https://wise-ravens.com/api';
 
