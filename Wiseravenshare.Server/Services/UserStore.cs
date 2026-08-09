@@ -35,11 +35,22 @@ public sealed class UserStore
     public UserStore(IWebHostEnvironment environment, IConfiguration configuration)
     {
         _environment = environment;
-        _connectionString = NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+        _connectionString = ResolveConnectionString(configuration);
         var configuredRequirement = configuration["Persistence:RequireDatabase"];
         var parsedRequirement = false;
         var hasConfiguredRequirement = bool.TryParse(configuredRequirement, out parsedRequirement);
         _requireDatabasePersistence = hasConfiguredRequirement ? parsedRequirement : _environment.IsProduction();
+    }
+
+    private static string ResolveConnectionString(IConfiguration configuration)
+    {
+        var databaseUrl = configuration["DATABASE_URL"];
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        {
+            return NormalizeConnectionString(databaseUrl);
+        }
+
+        return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
     }
 
     public void EnsureSeeded(IEnumerable<(string Name, string Email, string Password)> configuredUsers)

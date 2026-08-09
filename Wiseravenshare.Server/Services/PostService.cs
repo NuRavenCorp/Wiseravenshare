@@ -1,4 +1,5 @@
 ﻿// Wiseravenshare.Server/Services/PostService.cs
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
@@ -60,6 +61,7 @@ public class PostService : IPostService
             Content = dto.Content,
             Type = Enum.Parse<PostType>(dto.Type, true),
             MediaUrls = dto.MediaUrls?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+            MediaMetadata = BuildMediaMetadata(dto),
             ReplyToId = dto.ReplyToId,
             RepostOfId = dto.RepostOfId,
             QuoteOfId = dto.QuoteOfId,
@@ -274,6 +276,9 @@ public class PostService : IPostService
             Content = post.Content,
             Type = post.Type.ToString(),
             MediaUrls = post.MediaUrls,
+            YoutubeUrl = ReadMediaMetadataValue(post.MediaMetadata, "youtubeUrl"),
+            TikTokUrl = ReadMediaMetadataValue(post.MediaMetadata, "tiktokUrl"),
+            FacebookUrl = ReadMediaMetadataValue(post.MediaMetadata, "facebookUrl"),
             TruthScore = post.TruthScore,
             TruthCorrection = post.TruthCorrection,
             LocationName = post.LocationName,
@@ -292,6 +297,45 @@ public class PostService : IPostService
         };
 
         return dto;
+    }
+
+    private static JsonDocument? BuildMediaMetadata(CreatePostDto dto)
+    {
+        var metadata = new Dictionary<string, string?>();
+
+        if (!string.IsNullOrWhiteSpace(dto.YoutubeUrl))
+        {
+            metadata["youtubeUrl"] = dto.YoutubeUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.TikTokUrl))
+        {
+            metadata["tiktokUrl"] = dto.TikTokUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.FacebookUrl))
+        {
+            metadata["facebookUrl"] = dto.FacebookUrl.Trim();
+        }
+
+        if (metadata.Count == 0)
+        {
+            return null;
+        }
+
+        return JsonDocument.Parse(JsonSerializer.Serialize(metadata));
+    }
+
+    private static string? ReadMediaMetadataValue(JsonDocument? metadata, string key)
+    {
+        if (metadata?.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metadata.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
     }
 
     private async Task<IEnumerable<PostDto>> MapToPostDtosAsync(IEnumerable<Post> posts)

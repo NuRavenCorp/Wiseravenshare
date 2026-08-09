@@ -1,5 +1,6 @@
 ﻿// Wiseravenshare.Server/DTOs/Post/PostDto.cs
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Wiseravenshare.Server.DTOs.Post
 {
@@ -11,6 +12,14 @@ namespace Wiseravenshare.Server.DTOs.Post
         public string Content { get; set; } = string.Empty;
         public string Type { get; set; } = "Text";
         public string[]? MediaUrls { get; set; }
+        [JsonPropertyName("youtubeUrl")]
+        public string? YoutubeUrl { get; set; }
+
+        [JsonPropertyName("tiktokUrl")]
+        public string? TikTokUrl { get; set; }
+
+        [JsonPropertyName("facebookUrl")]
+        public string? FacebookUrl { get; set; }
         public decimal? TruthScore { get; set; }
         public string? TruthCorrection { get; set; }
         public string? LocationName { get; set; }
@@ -41,6 +50,14 @@ namespace Wiseravenshare.Server.DTOs.Post
         public string Content { get; set; } = string.Empty;
 
         public string? MediaUrls { get; set; }
+        [JsonPropertyName("youtubeUrl")]
+        public string? YoutubeUrl { get; set; }
+
+        [JsonPropertyName("tiktokUrl")]
+        public string? TikTokUrl { get; set; }
+
+        [JsonPropertyName("facebookUrl")]
+        public string? FacebookUrl { get; set; }
         public string Type { get; set; } = "Text";
         public Guid? ReplyToId { get; set; }
         public Guid? RepostOfId { get; set; }
