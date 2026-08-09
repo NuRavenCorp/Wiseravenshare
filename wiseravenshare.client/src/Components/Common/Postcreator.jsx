@@ -177,13 +177,21 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
             content: content,
             type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
             mediaUrls: uploadedMediaUrl || null,
+            youtubeUrl: uploadedYoutubeUrl,
+            tiktokUrl: uploadedTikTokUrl,
+            facebookUrl: uploadedFacebookUrl,
             isSensitive: false
         };
 
         setTimeout(async () => {
             try {
                 const createResponse = await apiService.createPost(payload);
-                const createdPost = createResponse?.data;
+                const createdPost = {
+                    ...(createResponse?.data || {}),
+                    youtubeUrl: createResponse?.data?.youtubeUrl || uploadedYoutubeUrl,
+                    tiktokUrl: createResponse?.data?.tiktokUrl || uploadedTikTokUrl,
+                    facebookUrl: createResponse?.data?.facebookUrl || uploadedFacebookUrl
+                };
                 if (!createdPost?.id) {
                     throw new Error('Post API did not return a created post.');
                 }
@@ -191,7 +199,19 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                 apiService.trackGrowthEvent('first_post_created').catch(() => null);
                 onPostCreate(createdPost);
             } catch (error) {
-                addTruthAlert('error', 'Failed to save post to server. Please try again.', null);
+                const status = error?.response?.status;
+                const serverMessage = error?.response?.data?.message || error?.message;
+                let saveMessage = 'Failed to save post to server. Please try again.';
+
+                if (status === 401 || status === 403) {
+                    saveMessage = 'Your session expired. Please sign in again and retry posting.';
+                } else if (status === 400 && serverMessage) {
+                    saveMessage = `Unable to publish post: ${serverMessage}`;
+                } else if (typeof serverMessage === 'string' && serverMessage.trim().length > 0) {
+                    saveMessage = serverMessage.trim();
+                }
+
+                addTruthAlert('error', saveMessage, null);
                 setIsUploading(false);
                 return;
             }
