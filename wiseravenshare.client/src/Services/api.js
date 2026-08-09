@@ -44,6 +44,20 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+const handleUnauthorized = () => {
+    clearAuthToken();
+    try {
+        localStorage.removeItem('user_data');
+        localStorage.removeItem('wiseSocialFeeds');
+    } catch {
+        // Ignore storage cleanup failures.
+    }
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('wiseraven:auth-expired'));
+    }
+};
+
 const buildMediaUploadUrls = () => {
     const toApiBase = (value) => {
         const raw = String(value || '').trim();
@@ -94,6 +108,13 @@ const api = axios.create({
 const normalizeApiError = (error, fallbackMessage) => {
     const status = error?.response?.status;
     const data = error?.response?.data;
+
+    if (status === 401 || status === 403) {
+        const authError = new Error('Your session expired. Please sign in again and retry.');
+        authError.status = status;
+        authError.response = error?.response;
+        return authError;
+    }
 
     if (typeof data?.message === 'string' && data.message.trim().length > 0) {
         const normalized = new Error(data.message.trim());
@@ -156,8 +177,10 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     async (error) => {
-        // Do not force logout globally on every 401.
-        // AuthContext/AuthService owns token lifecycle decisions.
+        const status = error?.response?.status;
+        if (status === 401 || status === 403) {
+            handleUnauthorized();
+        }
         return Promise.reject(error);
     }
 );

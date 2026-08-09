@@ -59,6 +59,16 @@ export const AuthProvider = ({ children }) => {
         checkAuth();
     }, []);
 
+    useEffect(() => {
+        const handleAuthExpired = () => {
+            clearAuthState();
+            setError('Your session expired. Please sign in again.');
+        };
+
+        window.addEventListener('wiseraven:auth-expired', handleAuthExpired);
+        return () => window.removeEventListener('wiseraven:auth-expired', handleAuthExpired);
+    }, []);
+
     const clearAuthState = () => {
         authService.clearToken();
         authService.clearUser();

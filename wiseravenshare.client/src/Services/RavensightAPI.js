@@ -29,10 +29,16 @@ const resolveRavensightBaseUrl = () => {
     const configured = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
     if (configured) {
         const normalized = configured.replace(/\/+$/, '');
+        if (/\/api\/ravensight\/videos$/i.test(normalized)) {
+            return normalized.replace(/\/videos$/i, '');
+        }
+        if (/\/api\/ravensight$/i.test(normalized)) {
+            return normalized;
+        }
         if (/\/api$/i.test(normalized)) {
             return `${normalized}/ravensight`;
         }
-        return normalized;
+        return `${normalized}/api/ravensight`;
     }
 
     if (typeof window === 'undefined') {
@@ -99,6 +105,21 @@ class RavensightAPI {
                 return config;
             },
             (error) => Promise.reject(error)
+        );
+
+        this.api.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                const status = error?.response?.status;
+                if (status === 401 || status === 403) {
+                    const authError = new Error('Session expired. Please sign in again.');
+                    authError.status = status;
+                    authError.response = error?.response;
+                    return Promise.reject(authError);
+                }
+
+                return Promise.reject(error);
+            }
         );
     }
 
