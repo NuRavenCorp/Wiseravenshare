@@ -13,7 +13,18 @@ public sealed class VideoLibraryStore
 
     public VideoLibraryStore(IConfiguration configuration)
     {
-        _connectionString = NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+        _connectionString = ResolveConnectionString(configuration);
+    }
+
+    private static string ResolveConnectionString(IConfiguration configuration)
+    {
+        var databaseUrl = configuration["DATABASE_URL"];
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        {
+            return NormalizeConnectionString(databaseUrl);
+        }
+
+        return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
     }
 
     public async Task EnsureSchemaAsync(CancellationToken cancellationToken = default)
@@ -651,7 +662,7 @@ LIMIT @limit OFFSET @offset;";
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
         {
-            throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required for video library persistence.");
+            throw new InvalidOperationException("DATABASE_URL or ConnectionStrings:DefaultConnection is required for video library persistence.");
         }
     }
 

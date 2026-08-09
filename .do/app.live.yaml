@@ -79,6 +79,15 @@ services:
     scope: RUN_AND_BUILD_TIME
     type: SECRET
     value: REDACTED_FOR_GIT
+  - key: Database__ExpectedName
+    scope: RUN_AND_BUILD_TIME
+    value: wiseravenshare-db
+  - key: Storage__Blob__ProjectFolder
+    scope: RUN_AND_BUILD_TIME
+    value: wiseravenshare/
+  - key: Storage__Blob__BucketName
+    scope: RUN_AND_BUILD_TIME
+    value: allbuckets1786108292029
   - key: Stripe__SecretKey
     scope: RUN_AND_BUILD_TIME
     type: SECRET

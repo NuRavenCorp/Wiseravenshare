@@ -236,3 +236,30 @@ Operational notes:
 - Managed Postgres may not allow direct `ALTER ROLE ... PASSWORD ...` for certain managed users. Use provider-supported password reset and update app secrets.
 - Keep `ConnectionStrings__DefaultConnection` secret-only in App Platform config.
 - Keep local Compose password references aligned (`docker-compose.yml`, `docker-compose.full.yml`, migration/reset scripts) for reproducible local reset/migration runs.
+
+## 10) One-Shot Schema Repair + Diff (DigitalOcean)
+
+Use this script when posts/videos/auth persistence appear to save inconsistently due to schema drift or wrong DB target.
+
+It will:
+- connect using `DATABASE_URL`
+- run EF migrations
+- ensure runtime retention tables (`app_users`, `ravensight_videos`, `ravensight_video_comments`, `bucket_objects`)
+- enforce bucket folder default (`wiseravenshare/`)
+- print before/after missing-table diff and fail if anything is still missing
+
+Run:
+
+```powershell
+pwsh -File ./scripts/repair-do-schema.ps1 `
+  -TargetConnectionString $env:DATABASE_URL `
+  -ExpectedDatabaseName wiseravenshare-db `
+  -BucketName allbuckets1786108292029 `
+  -ProjectFolder wiseravenshare/
+```
+
+Then verify API reports healthy schema:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health/db | Select-Object -ExpandProperty Content
+```

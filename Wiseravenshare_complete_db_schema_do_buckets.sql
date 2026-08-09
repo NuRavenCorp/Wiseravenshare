@@ -578,9 +578,8 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
 
 -- DigitalOcean Buckets/Spaces object registry.
 -- Store each uploaded object key + metadata for retrieval/auditing/CDN mapping.
--- Hardcoded location requested by owner:
--- bucket: allbuckets1786108292029
--- folder: wiseravensharefolder/
+-- Project default folder:
+-- folder: wiseravenshare/
 CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     id TEXT PRIMARY KEY,
     owner_user_id UUID NULL,
@@ -588,7 +587,7 @@ CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     bucket_name TEXT NOT NULL DEFAULT 'allbuckets1786108292029',
     region TEXT NOT NULL,
     endpoint TEXT NOT NULL,
-    folder_path TEXT NOT NULL DEFAULT 'wiseravensharefolder/',
+    folder_path TEXT NOT NULL DEFAULT 'wiseravenshare/',
     object_key TEXT NOT NULL,
     original_file_name TEXT NOT NULL,
     content_type TEXT NOT NULL,
@@ -604,10 +603,6 @@ CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     deleted_at TIMESTAMPTZ NULL,
     CONSTRAINT fk_bucket_objects_owner
         FOREIGN KEY (owner_user_id) REFERENCES app_data."Users" ("Id") ON DELETE SET NULL,
-    CONSTRAINT ck_bucket_objects_bucket_hardcoded
-        CHECK (bucket_name = 'allbuckets1786108292029'),
-    CONSTRAINT ck_bucket_objects_folder_hardcoded
-        CHECK (folder_path = 'wiseravensharefolder/'),
     CONSTRAINT uq_bucket_objects_bucket_key UNIQUE (bucket_name, object_key)
 );
 
