@@ -40,7 +40,7 @@ services:
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
       - key: Database__ExpectedName
-        value: wiseravenshare-db
+        value: defaultdb
       - key: Storage__Blob__ProjectFolder
         value: wiseravenshare/
       - key: Storage__Blob__BucketName
@@ -160,7 +160,7 @@ ingress:
 databases:
   - name: wiseravenshare-db
     cluster_name: wiseravenshare-db
-    db_name: wiseravenshare-db
+    db_name: defaultdb
     db_user: wiseravenshare_app
     engine: PG
     version: "16"
