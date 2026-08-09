@@ -16,5 +16,9 @@ dotnet ef database update `
     --startup-project $Project `
     --connection "$TargetConnectionString"
 
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet ef database update failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Migration apply complete."
 Write-Host "Next verification step: call /health/db on the deployed API and confirm schema flags are true."
