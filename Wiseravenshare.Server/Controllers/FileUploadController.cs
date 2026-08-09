@@ -16,13 +16,24 @@ public class MediaController : ControllerBase
     private readonly IYouTubeService _youTubeService;
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly ILogger<MediaController> _logger;
+    private readonly string _videoStorageFolderName;
+    private readonly string _defaultVideoDestination;
 
-    public MediaController(IWebHostEnvironment environment, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger)
+    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoLibraryStore = videoLibraryStore;
         _logger = logger;
+        _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
+        if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
+        {
+            _videoStorageFolderName = "ravensight_videos";
+        }
+
+        _defaultVideoDestination = NormalizeDestinationFolder(
+            configuration["Storage:Video:DefaultFolder"],
+            "wiseravenshare/ravensight/video");
     }
 
     [HttpPost("upload")]
@@ -45,7 +56,7 @@ public class MediaController : ControllerBase
         string uniqueFileName;
         try
         {
-            uniqueFileName = await SaveMediaFileAsync(upload.File, extension, cancellationToken);
+            uniqueFileName = await SaveMediaFileAsync(upload.File, extension, upload.DestinationFolder, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -156,11 +167,19 @@ public class MediaController : ControllerBase
         });
     }
 
-    private async Task<string> SaveMediaFileAsync(IFormFile file, string extension, CancellationToken cancellationToken)
+    private async Task<string> SaveMediaFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, CancellationToken cancellationToken)
     {
         var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
-        var candidateFolders = new[]
+        var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
+        var destinationParts = normalizedDestination.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        var candidateFolders = new List<string>
         {
+            Path.Combine(new[] { _environment.ContentRootPath, _videoStorageFolderName }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { AppContext.BaseDirectory, _videoStorageFolderName }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", _videoStorageFolderName }.Concat(destinationParts).ToArray()),
+
+            // Backward-compatible fallback.
             Path.Combine(_environment.ContentRootPath, "MediaStorage"),
             Path.Combine(AppContext.BaseDirectory, "MediaStorage"),
             Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage")
@@ -186,11 +205,36 @@ public class MediaController : ControllerBase
 
         throw new InvalidOperationException("Unable to write uploaded media to any configured storage path.", lastFailure);
     }
+
+    private static string NormalizeDestinationFolder(string? requested, string defaultFolder)
+    {
+        var value = string.IsNullOrWhiteSpace(requested) ? defaultFolder : requested.Trim();
+        value = value.Replace('\\', '/').Trim('/');
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            value = defaultFolder;
+        }
+
+        var safeSegments = value
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => new string(segment.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.').ToArray()))
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+
+        if (safeSegments.Length == 0)
+        {
+            return defaultFolder;
+        }
+
+        return string.Join('/', safeSegments);
+    }
 }
 
 public sealed class MediaUploadDto
 {
     public IFormFile? File { get; set; }
+    public string DestinationFolder { get; set; } = string.Empty;
     public bool PublishToYouTube { get; set; }
     public bool PublishToTikTok { get; set; }
     public bool PublishToFacebook { get; set; }

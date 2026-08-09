@@ -261,6 +261,7 @@ export const apiService = {
         formData.append('youTubePermissionGranted', String(Boolean(options.youTubePermissionGranted)));
         formData.append('tikTokPermissionGranted', String(Boolean(options.tikTokPermissionGranted)));
         formData.append('facebookPermissionGranted', String(Boolean(options.facebookPermissionGranted)));
+        formData.append('destinationFolder', options.destinationFolder || '');
 
         const requestConfig = {
             headers: { 'Content-Type': 'multipart/form-data' },
