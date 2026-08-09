@@ -6,14 +6,22 @@ const VITE_DEV_PORTS = new Set(['5173', '4173']);
 const resolveApiBaseUrl = () => {
     const configured = (import.meta.env.VITE_API_URL || '').trim();
     const localhostApi = 'http://localhost:5242/api';
+    const productionApi = 'https://wise-ravens.com/api';
 
     if (typeof window === 'undefined') {
         return configured || localhostApi;
     }
 
     const host = (window.location.hostname || '').toLowerCase();
+    const protocol = (window.location.protocol || '').toLowerCase();
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = VITE_DEV_PORTS.has(window.location.port);
+    const isHybridRuntime = protocol === 'capacitor:' || protocol === 'file:';
+
+    // Hybrid runtimes do not host the API at localhost from the device perspective.
+    if (isHybridRuntime) {
+        return configured || productionApi;
+    }
 
     if (isLocalHost || isViteDevServer) {
         return configured || localhostApi;
