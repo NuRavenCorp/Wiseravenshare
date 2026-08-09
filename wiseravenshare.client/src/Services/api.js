@@ -71,11 +71,58 @@ const buildMediaUploadUrls = () => {
 
 const api = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 10000,
+    timeout: 30000,
     headers: {
         'Content-Type': 'application/json'
     }
 });
+
+const normalizeApiError = (error, fallbackMessage) => {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+
+    if (typeof data?.message === 'string' && data.message.trim().length > 0) {
+        const normalized = new Error(data.message.trim());
+        normalized.status = status;
+        normalized.response = error.response;
+        return normalized;
+    }
+
+    if (typeof data?.title === 'string' && data.title.trim().length > 0) {
+        let details = '';
+        if (data?.errors && typeof data.errors === 'object') {
+            const parts = Object.values(data.errors)
+                .flatMap((value) => Array.isArray(value) ? value : [value])
+                .filter((value) => typeof value === 'string' && value.trim().length > 0);
+            if (parts.length > 0) {
+                details = ` ${parts[0].trim()}`;
+            }
+        }
+
+        const normalized = new Error(`${data.title.trim()}${details}`.trim());
+        normalized.status = status;
+        normalized.response = error.response;
+        return normalized;
+    }
+
+    if (error?.code === 'ECONNABORTED') {
+        const timeoutError = new Error('Post request timed out. Please try again.');
+        timeoutError.status = status || 0;
+        timeoutError.response = error?.response;
+        return timeoutError;
+    }
+
+    if (!error?.response) {
+        const networkError = new Error('Network error while saving post. Please check your connection and retry.');
+        networkError.status = 0;
+        return networkError;
+    }
+
+    const normalized = new Error(fallbackMessage);
+    normalized.status = status;
+    normalized.response = error?.response;
+    return normalized;
+};
 
 // Request interceptor
 api.interceptors.request.use(
@@ -131,7 +178,26 @@ export const apiService = {
         });
     },
     getPost: (postId) => api.get(`/posts/${postId}`),
-    createPost: (postData) => api.post('/posts', postData),
+    createPost: async (postData) => {
+        try {
+            return await api.post('/posts', postData);
+        } catch (error) {
+            const status = error?.response?.status;
+            const isTimeout = error?.code === 'ECONNABORTED';
+            const isTransientNetwork = !error?.response;
+
+            // Single retry for transient connectivity/timeouts.
+            if (isTimeout || isTransientNetwork || status === 502 || status === 503 || status === 504) {
+                try {
+                    return await api.post('/posts', postData);
+                } catch (retryError) {
+                    throw normalizeApiError(retryError, 'Failed to save post to server. Please try again.');
+                }
+            }
+
+            throw normalizeApiError(error, 'Failed to save post to server. Please try again.');
+        }
+    },
     updatePost: (postId, updates) => api.put(`/posts/${postId}`, updates),
     deletePost: (postId) => api.delete(`/posts/${postId}`),
     likePost: (postId) => api.post(`/posts/${postId}/like`),
