@@ -16,20 +16,32 @@ export type VideoItem = {
   createdAt?: string;
 };
 
-const apiBase = import.meta.env.VITE_API_URL || '';
+const apiBase = String(import.meta.env.VITE_API_URL || '');
 
 function normalizeBaseUrl(base: string): string {
   return base.endsWith('/') ? base.slice(0, -1) : base;
 }
 
+function ensureApiSuffix(base: string): string {
+  const normalized = normalizeBaseUrl(String(base || '').trim());
+  if (!normalized) {
+    return '';
+  }
+  return /\/api$/i.test(normalized) ? normalized : `${normalized}/api`;
+}
+
 function resolveRavensightBaseUrl(): string {
-  const normalized = normalizeBaseUrl(apiBase);
+  const normalized = ensureApiSuffix(apiBase);
 
   if (normalized.length > 0) {
-    return `${normalized}/api/ravensight/videos`;
+    return `${normalized}/ravensight/videos`;
   }
 
   if (typeof window !== 'undefined') {
+    const protocol = String(window.location.protocol || '').toLowerCase();
+    if (protocol === 'capacitor:' || protocol === 'file:') {
+      return 'https://wise-ravens.com/api/ravensight/videos';
+    }
     return `${window.location.origin}/api/ravensight/videos`;
   }
 
@@ -51,7 +63,7 @@ function normalizeAssetUrl(url?: string): string {
     return url;
   }
 
-  const base = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+  const base = normalizeBaseUrl(apiBase);
   const path = url.startsWith('/') ? url : `/${url}`;
   return `${base}${path}`;
 }

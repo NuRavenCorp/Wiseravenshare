@@ -32,7 +32,22 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     const mediaRecorderRef = useRef(null);
     const streamRef = useRef(null);
     const timerRef = useRef(null);
+    const recordedChunksRef = useRef([]);
     const { user } = useAuth();
+
+    const askDestinationFolder = () => {
+        if (typeof window === 'undefined') {
+            return '/wiseravenshare/ravensight/video';
+        }
+
+        const input = window.prompt(
+            'Choose a destination folder for this video (default: /wiseravenshare/ravensight/video)',
+            '/wiseravenshare/ravensight/video'
+        );
+
+        const value = String(input || '').trim();
+        return value || '/wiseravenshare/ravensight/video';
+    };
 
     const persistLocalVideo = (video) => {
         try {
@@ -85,20 +100,37 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
 
             mediaRecorderRef.current = mediaRecorder;
             setRecordedChunks([]);
+            recordedChunksRef.current = [];
 
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
+                    recordedChunksRef.current.push(event.data);
                     setRecordedChunks(prev => [...prev, event.data]);
                 }
             };
 
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            mediaRecorder.onstop = async () => {
+                const chunks = recordedChunksRef.current;
+                if (!chunks.length) {
+                    onNotification('No video data captured. Please try recording again.', 'error');
+                    return;
+                }
+
+                const blob = new Blob(chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
                 setVideoURL(url);
                 if (videoRef.current) {
                     videoRef.current.srcObject = null;
                     videoRef.current.src = url;
+                }
+
+                const shouldSave = typeof window !== 'undefined'
+                    ? window.confirm('Save this recording now?')
+                    : true;
+
+                if (shouldSave) {
+                    const destinationFolder = askDestinationFolder();
+                    await uploadVideo({ libraryOnly: true, destinationFolder, chunksOverride: chunks });
                 }
             };
 
@@ -169,18 +201,22 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
         onNotification('Recording reset', 'info');
     };
 
-    const uploadVideo = async ({ libraryOnly = false } = {}) => {
+    const uploadVideo = async ({ libraryOnly = false, destinationFolder = '', chunksOverride = null } = {}) => {
         if (!libraryOnly && !canDirectUpload) {
             onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
             return;
         }
 
-        if (recordedChunks.length === 0) {
+        const sourceChunks = Array.isArray(chunksOverride) && chunksOverride.length
+            ? chunksOverride
+            : recordedChunksRef.current;
+
+        if (sourceChunks.length === 0) {
             onNotification('No video to upload', 'error');
             return;
         }
 
-        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const blob = new Blob(sourceChunks, { type: 'video/webm' });
         const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'video/webm' });
 
         setIsUploading(true);
@@ -202,6 +238,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('youTubePermissionGranted', String(!libraryOnly && youTubePermissionGranted));
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
+            formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
 
             const response = await ravensightAPI.uploadVideo(formData, (progress) => {
                 setUploadProgress(progress);
