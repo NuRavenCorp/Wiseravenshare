@@ -78,13 +78,151 @@ static string NormalizeConnectionString(string connectionString)
     return builder.ConnectionString;
 }
 
+static string ResolvePrimaryConnectionString(IConfiguration configuration)
+{
+    var databaseUrl = configuration["DATABASE_URL"];
+    if (!string.IsNullOrWhiteSpace(databaseUrl))
+    {
+        return NormalizeConnectionString(databaseUrl);
+    }
+
+    return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+}
+
+static string ResolveExpectedDatabaseName(IConfiguration configuration)
+{
+    var configured = configuration["Database:ExpectedName"]?.Trim();
+    return string.IsNullOrWhiteSpace(configured) ? "wiseravenshare-db" : configured;
+}
+
+static string ExtractDatabaseName(string connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return string.Empty;
+    }
+
+    try
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        return builder.Database?.Trim() ?? string.Empty;
+    }
+    catch
+    {
+        return string.Empty;
+    }
+}
+
+static string NormalizeFolderPath(string? folder)
+{
+    var normalized = (folder ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(normalized))
+    {
+        return "wiseravenshare/";
+    }
+
+    normalized = normalized.Replace('\\', '/').Trim('/');
+    return normalized + "/";
+}
+
+static string ToSqlLiteral(string value)
+{
+    return "'" + value.Replace("'", "''") + "'";
+}
+
+static async Task EnsureBucketObjectsRegistryAsync(
+    string connectionString,
+    string bucketName,
+    string folderPath,
+    CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var safeBucketName = string.IsNullOrWhiteSpace(bucketName) ? "allbuckets1786108292029" : bucketName.Trim();
+    var safeFolderPath = NormalizeFolderPath(folderPath);
+
+    var bucketLiteral = ToSqlLiteral(safeBucketName);
+    var folderLiteral = ToSqlLiteral(safeFolderPath);
+
+    var sql = $@"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
+    id TEXT PRIMARY KEY,
+    owner_user_id UUID NULL,
+    provider TEXT NOT NULL DEFAULT 'digitalocean_spaces',
+    bucket_name TEXT NOT NULL DEFAULT {bucketLiteral},
+    region TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    folder_path TEXT NOT NULL DEFAULT {folderLiteral},
+    object_key TEXT NOT NULL,
+    original_file_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+    etag TEXT NULL,
+    acl TEXT NOT NULL DEFAULT 'private',
+    cdn_base_url TEXT NULL,
+    public_url TEXT NULL,
+    upload_status TEXT NOT NULL DEFAULT 'uploaded',
+    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ NULL,
+    CONSTRAINT fk_bucket_objects_owner
+        FOREIGN KEY (owner_user_id) REFERENCES app_data.""Users"" (""Id"") ON DELETE SET NULL,
+    CONSTRAINT uq_bucket_objects_bucket_key UNIQUE (bucket_name, object_key)
+);
+
+ALTER TABLE app_data.bucket_objects
+    ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
+    ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_owner_created
+    ON app_data.bucket_objects (owner_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_folder_created
+    ON app_data.bucket_objects (folder_path, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_status_created
+    ON app_data.bucket_objects (upload_status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_metadata_gin
+    ON app_data.bucket_objects USING GIN (metadata);
+
+CREATE OR REPLACE FUNCTION app_data.set_updated_at_timestamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_bucket_objects_updated_at ON app_data.bucket_objects;
+CREATE TRIGGER trg_bucket_objects_updated_at
+BEFORE UPDATE ON app_data.bucket_objects
+FOR EACH ROW EXECUTE FUNCTION app_data.set_updated_at_timestamp();";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 // ── Configuration ────────────────────────────────────────────────────────────
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
-var defaultConnectionString = NormalizeConnectionString(builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
+var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
+var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "allbuckets1786108292029";
+var configuredProjectFolder = builder.Configuration["Storage:Blob:ProjectFolder"] ?? "wiseravenshare/";
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 builder.Logging.ClearProviders();
@@ -189,6 +327,16 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+var activeDatabaseName = ExtractDatabaseName(defaultConnectionString);
+if (!string.IsNullOrWhiteSpace(activeDatabaseName)
+    && !string.Equals(activeDatabaseName, expectedDatabaseName, StringComparison.OrdinalIgnoreCase))
+{
+    app.Logger.LogWarning(
+        "Active database '{ActiveDatabase}' does not match expected '{ExpectedDatabase}'. Posts may persist to the wrong database.",
+        activeDatabaseName,
+        expectedDatabaseName);
+}
+
 if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authentication:AllowSelfRegistration", false))
 {
     app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
@@ -204,6 +352,15 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogCritical(ex, "Automatic EF migration failed during startup. Service will continue with existing schema.");
+    }
+
+    try
+    {
+        await EnsureBucketObjectsRegistryAsync(defaultConnectionString, configuredBucketName, configuredProjectFolder);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Bucket registry table verification failed during startup.");
     }
 
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
@@ -324,7 +481,9 @@ app.MapGet("/health/db", async () =>
             "app_data.ravensight_videos",
             "public.ravensight_videos",
             "app_data.ravensight_video_comments",
-            "public.ravensight_video_comments"
+            "public.ravensight_video_comments",
+            "app_data.bucket_objects",
+            "public.bucket_objects"
         };
 
         const string tableInventorySql = @"
@@ -389,6 +548,7 @@ ORDER BY ""MigrationId"";";
         var hasUserTable = actualTables.Contains("app_data.app_users") || actualTables.Contains("public.app_users");
         var hasVideoTable = actualTables.Contains("app_data.ravensight_videos") || actualTables.Contains("public.ravensight_videos");
         var hasVideoCommentsTable = actualTables.Contains("app_data.ravensight_video_comments") || actualTables.Contains("public.ravensight_video_comments");
+        var hasBucketObjectsTable = actualTables.Contains("app_data.bucket_objects") || actualTables.Contains("public.bucket_objects");
 
         var missingLegacyRetentionTables = expectedLegacyRetentionTables
             .Where(expected => !actualTables.Contains(expected))
@@ -405,6 +565,14 @@ ORDER BY ""MigrationId"";";
                 appliedMigrationCount = appliedMigrations.Count,
                 latestMigration = appliedMigrations.LastOrDefault() ?? string.Empty
             },
+            connection = new
+            {
+                expectedDatabaseName,
+                activeDatabaseName,
+                databaseNameMatchesExpectation = string.IsNullOrWhiteSpace(activeDatabaseName)
+                    ? false
+                    : string.Equals(activeDatabaseName, expectedDatabaseName, StringComparison.OrdinalIgnoreCase)
+            },
             schema = new
             {
                 fullEfSchemaReady = missingEfTables.Length == 0,
@@ -412,6 +580,9 @@ ORDER BY ""MigrationId"";";
                 hasUserRetentionTable = hasUserTable,
                 hasVideoRetentionTable = hasVideoTable,
                 hasVideoCommentsRetentionTable = hasVideoCommentsTable,
+                hasBucketRegistryTable = hasBucketObjectsTable,
+                expectedBucketName = configuredBucketName,
+                expectedProjectFolder = NormalizeFolderPath(configuredProjectFolder),
                 missingLegacyRetentionTables
             }
         });

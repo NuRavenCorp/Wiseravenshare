@@ -390,7 +390,7 @@ public class AuthController : ControllerBase
 
     private bool IsSelfRegistrationAllowed()
     {
-        return _configuration.GetValue("Authentication:AllowSelfRegistration", false);
+        return _configuration.GetValue("Authentication:AllowSelfRegistration", true);
     }
 
     private static bool MeetsPasswordPolicy(string password)
