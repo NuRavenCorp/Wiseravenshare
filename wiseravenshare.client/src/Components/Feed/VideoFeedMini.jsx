@@ -1,7 +1,9 @@
 import React from 'react';
 
 const VideoFeedMini = ({ posts = [] }) => {
-    const videoPosts = posts.filter((post) => post.mediaType === 'video' && post.mediaUrl);
+    const videoPosts = posts.filter((post) =>
+        post.mediaType === 'video' && (post.mediaUrl || post.youtubeUrl || post.tiktokUrl || post.facebookUrl)
+    );
 
     return (
         <section
@@ -38,11 +40,18 @@ const VideoFeedMini = ({ posts = [] }) => {
                     <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '6px' }}>
                         {post.user?.name || 'Unknown'}
                     </div>
-                    <video
-                        src={post.mediaUrl}
-                        controls
-                        style={{ width: '100%', maxHeight: '180px', borderRadius: '8px', background: '#000' }}
-                    />
+                    {post.mediaUrl && (
+                        <video
+                            src={post.mediaUrl}
+                            controls
+                            style={{ width: '100%', maxHeight: '180px', borderRadius: '8px', background: '#000' }}
+                        />
+                    )}
+                    {!post.mediaUrl && (
+                        <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', fontSize: '12px', color: 'var(--light-color)' }}>
+                            Video published through Ravensight.
+                        </div>
+                    )}
                     {post.youtubeUrl && (
                         <a
                             href={post.youtubeUrl}

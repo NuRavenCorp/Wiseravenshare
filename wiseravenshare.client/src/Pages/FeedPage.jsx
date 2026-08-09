@@ -15,6 +15,8 @@ const MAX_STORED_POSTS = 120;
 
 const normalizePost = (post) => ({
     ...post,
+    mediaType: post?.mediaType || (String(post?.type || '').toLowerCase() === 'video' ? 'video' : null),
+    mediaUrl: post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null),
     likes: Number(post?.likes ?? post?.likesCount ?? 0),
     reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
     comments: Array.isArray(post?.comments) ? post.comments : [],
