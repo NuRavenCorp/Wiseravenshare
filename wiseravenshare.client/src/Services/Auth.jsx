@@ -1,6 +1,8 @@
 import api from './api';
 import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
+const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 12000;
+
 class AuthService {
     buildAuthFallbackBases() {
         const bases = [];
@@ -50,15 +52,26 @@ class AuthService {
     async postAuthWithFallback(path, payload = {}, options = {}) {
         const bases = this.buildAuthFallbackBases();
         const attempts = [];
+        const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_AUTH_REQUEST_TIMEOUT_MS;
 
         const requestOnce = async (url, headers = {}) => {
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeoutId = controller
+                ? window.setTimeout(() => controller.abort(), timeoutMs)
+                : null;
+
             return fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     ...headers
                 },
+                signal: controller?.signal,
                 body: JSON.stringify(payload)
+            }).finally(() => {
+                if (timeoutId !== null) {
+                    window.clearTimeout(timeoutId);
+                }
             });
         };
 
@@ -90,6 +103,11 @@ class AuthService {
 
                 lastError = { status: response.status };
             } catch (error) {
+                if (error?.name === 'AbortError') {
+                    lastError = { status: 0, message: 'Request timed out' };
+                    continue;
+                }
+
                 if (error?.status && error.status !== 404 && error.status !== 405) {
                     throw error;
                 }

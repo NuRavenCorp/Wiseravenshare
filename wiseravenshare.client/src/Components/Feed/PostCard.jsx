@@ -53,6 +53,12 @@ const PostCard = ({
         };
     }, [post.predictedEngagementScore, post.confidence]);
 
+    const platformLinks = [
+        post.youtubeUrl && { href: post.youtubeUrl, label: 'YouTube', color: '#ff0000' },
+        post.tiktokUrl && { href: post.tiktokUrl, label: 'TikTok', color: '#ffffff' },
+        post.facebookUrl && { href: post.facebookUrl, label: 'Facebook', color: '#1877f2' }
+    ].filter(Boolean);
+
     const addComment = () => {
         if (!commentText.trim()) {
             return;
@@ -115,6 +121,34 @@ const PostCard = ({
             >
                 {post.content}
             </p>
+
+            {platformLinks.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {platformLinks.map((link) => (
+                        <a
+                            key={link.label}
+                            href={link.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '6px 10px',
+                                borderRadius: '999px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: link.color,
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                textDecoration: 'none'
+                            }}
+                        >
+                            Open on {link.label}
+                        </a>
+                    ))}
+                </div>
+            )}
 
             <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{truthBadge.text}</div>
