@@ -1,6 +1,12 @@
 import axios from 'axios';
 import { getAuthToken } from './authStorage.js';
 
+const ensureApiBase = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return /\/api$/i.test(raw) ? raw : `${raw.replace(/\/+$/, '')}/api`;
+};
+
 const extractErrorMessage = (error, fallback) => {
     const responseData = error?.response?.data;
     if (typeof responseData === 'string' && responseData.trim().length > 0) {
@@ -34,16 +40,24 @@ const resolveRavensightBaseUrl = () => {
     }
 
     const host = (window.location.hostname || '').toLowerCase();
+    const protocol = (window.location.protocol || '').toLowerCase();
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = window.location.port === '5173' || window.location.port === '4173';
+    const isHybridRuntime = protocol === 'capacitor:' || protocol === 'file:';
+
+    if (isHybridRuntime) {
+        const configuredApi = ensureApiBase(import.meta.env.VITE_API_URL || '');
+        const base = configuredApi || 'https://wise-ravens.com/api';
+        return `${base.replace(/\/+$/, '')}/ravensight`;
+    }
 
     if (isLocalHost || isViteDevServer) {
-        const apiBase = (import.meta.env.VITE_API_URL || '').trim() || 'http://localhost:5242/api';
+        const apiBase = ensureApiBase(import.meta.env.VITE_API_URL || '') || 'http://localhost:5242/api';
         return `${apiBase.replace(/\/+$/, '')}/ravensight`;
     }
 
     // In production/non-local environments prefer configured API host when provided.
-    const configuredApi = (import.meta.env.VITE_API_URL || '').trim();
+    const configuredApi = ensureApiBase(import.meta.env.VITE_API_URL || '');
     if (configuredApi) {
         return `${configuredApi.replace(/\/+$/, '')}/ravensight`;
     }
@@ -55,7 +69,7 @@ const resolveRavensightBaseUrl = () => {
 const RAVENSIGHT_API_URL = resolveRavensightBaseUrl();
 
 const resolveGeneralApiBaseUrl = () => {
-    const configuredApi = (import.meta.env.VITE_API_URL || '').trim();
+    const configuredApi = ensureApiBase(import.meta.env.VITE_API_URL || '');
     if (configuredApi) {
         return configuredApi.replace(/\/+$/, '');
     }

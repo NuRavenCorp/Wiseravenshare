@@ -29,6 +29,20 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     const fileInputRef = useRef(null);
     const { user } = useAuth();
 
+    const askDestinationFolder = () => {
+        if (typeof window === 'undefined') {
+            return '/wiseravenshare/ravensight/video';
+        }
+
+        const input = window.prompt(
+            'Choose a destination folder for this video (default: /wiseravenshare/ravensight/video)',
+            '/wiseravenshare/ravensight/video'
+        );
+
+        const value = String(input || '').trim();
+        return value || '/wiseravenshare/ravensight/video';
+    };
+
     const persistLocalVideo = (video) => {
         try {
             const current = JSON.parse(localStorage.getItem('wiseRavensightVideos') || '[]');
@@ -70,7 +84,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         }));
     };
 
-    const uploadVideo = async ({ libraryOnly = false } = {}) => {
+    const uploadVideo = async ({ libraryOnly = false, destinationFolder = '' } = {}) => {
         if (!libraryOnly && !canDirectUpload) {
             onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
             return;
@@ -106,6 +120,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('youTubePermissionGranted', String(!libraryOnly && videoDetails.youTubePermissionGranted));
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
+        formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
         if (videoDetails.scheduledPublish) {
             formData.append('scheduledPublish', videoDetails.scheduledPublish);
         }
@@ -135,7 +150,10 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     };
 
     const handleUpload = () => uploadVideo({ libraryOnly: false });
-    const handleSaveToLibrary = () => uploadVideo({ libraryOnly: true });
+    const handleSaveToLibrary = () => {
+        const destinationFolder = askDestinationFolder();
+        uploadVideo({ libraryOnly: true, destinationFolder });
+    };
 
     const resetForm = () => {
         setSelectedFile(null);
