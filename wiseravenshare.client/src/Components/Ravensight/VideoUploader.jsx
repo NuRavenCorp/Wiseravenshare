@@ -86,11 +86,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     };
 
     const uploadVideo = async ({ libraryOnly = false, destinationFolder = '' } = {}) => {
-        if (!libraryOnly && !canDirectUpload) {
-            onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
-            return;
-        }
-
         if (!selectedFile) {
             onNotification('Please select a video file first', 'error');
             return;
@@ -121,7 +116,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('youTubePermissionGranted', String(!libraryOnly && videoDetails.youTubePermissionGranted));
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
-        const wantsPermanentStorage = Boolean(savePermanently && canDirectUpload);
+        const wantsPermanentStorage = Boolean(savePermanently);
         formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
         formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
         formData.append('isPermanent', String(wantsPermanentStorage));
@@ -157,7 +152,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                 thumbnailUrl: '',
                 status: 'published',
                 privacyStatus: videoDetails.privacyStatus,
-                storageMode: savePermanently && canDirectUpload ? 'permanent' : 'temporary',
+                storageMode: savePermanently ? 'permanent' : 'temporary',
                 retentionStatus: 'active',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -170,7 +165,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
             persistLocalVideo(fallbackVideo);
             setUploadedVideos(prev => [fallbackVideo, ...prev]);
-            onNotification(libraryOnly ? 'Video saved locally while the service is unavailable.' : 'Video saved locally while the service is unavailable.', 'warning');
+            onNotification(libraryOnly ? 'Your video is still visible in your current session while the service is temporarily unavailable.' : 'Your video is still visible in your current session while the service is temporarily unavailable.', 'warning');
             resetForm();
         } finally {
             setIsUploading(false);
@@ -245,21 +240,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
             }}>
                 {/* Upload Area */}
                 <div>
-                    {!canDirectUpload && (
-                        <div style={{
-                            marginBottom: '12px',
-                            borderRadius: '10px',
-                            border: '1px solid var(--border-color)',
-                            background: 'rgba(255, 152, 0, 0.12)',
-                            padding: '12px'
-                        }}>
-                            <strong>Subscription required for direct upload.</strong>
-                            <div style={{ fontSize: '13px', marginTop: '4px', color: 'var(--light-color)' }}>
-                                Activate Creator Pro to upload directly to YouTube, TikTok, and Facebook for ${Number(subscriptionPriceMonthly).toFixed(2)}/month.
-                            </div>
-                        </div>
-                    )}
-
                     <div style={{
                         border: `2px dashed ${selectedFile ? 'var(--success-color)' : 'var(--border-color)'}`,
                         borderRadius: '12px',
@@ -484,20 +464,14 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                         </div>
 
                         <div style={{ marginBottom: '15px' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: canDirectUpload ? 'pointer' : 'not-allowed' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                                 <input
                                     type="checkbox"
                                     checked={savePermanently}
-                                    disabled={!canDirectUpload}
                                     onChange={(e) => setSavePermanently(e.target.checked)}
                                 />
-                                Keep this video in permanent storage (Creator Pro)
+                                Keep this video in permanent storage
                             </label>
-                            {!canDirectUpload && (
-                                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                    Activate Creator Pro to keep this video in permanent storage.
-                                </div>
-                            )}
                         </div>
 
                         <div style={{ marginBottom: '15px' }}>
@@ -527,7 +501,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                 <input
                                     type="checkbox"
                                     checked={videoDetails.publishToYouTube}
-                                    disabled={!canDirectUpload}
                                     onChange={(e) => setVideoDetails(prev => ({ ...prev, publishToYouTube: e.target.checked }))}
                                 />
                                 Publish directly to YouTube
@@ -539,7 +512,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                 <input
                                     type="checkbox"
                                     checked={videoDetails.publishToTikTok}
-                                    disabled={!canDirectUpload}
                                     onChange={(e) => setVideoDetails(prev => ({ ...prev, publishToTikTok: e.target.checked }))}
                                 />
                                 Publish directly to TikTok
@@ -551,7 +523,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                 <input
                                     type="checkbox"
                                     checked={videoDetails.publishToFacebook}
-                                    disabled={!canDirectUpload}
                                     onChange={(e) => setVideoDetails(prev => ({ ...prev, publishToFacebook: e.target.checked }))}
                                 />
                                 Publish directly to Facebook
@@ -694,16 +665,16 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
                             <button
                                 onClick={handleUpload}
-                                disabled={!selectedFile || isUploading || !canDirectUpload}
+                                disabled={!selectedFile || isUploading}
                                 style={{
                                     width: '100%',
                                     padding: '12px',
                                     borderRadius: '30px',
                                     border: 'none',
-                                    background: !selectedFile || isUploading || !canDirectUpload ? 'var(--accent-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                    background: !selectedFile || isUploading ? 'var(--accent-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                                     color: 'white',
                                     fontWeight: 'bold',
-                                    cursor: !selectedFile || isUploading || !canDirectUpload ? 'not-allowed' : 'pointer',
+                                    cursor: !selectedFile || isUploading ? 'not-allowed' : 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
@@ -711,7 +682,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                 }}
                             >
                                 {isUploading ? <FaSpinner className="spinning" /> : <FaUpload />}
-                                {isUploading ? 'Uploading...' : (!canDirectUpload ? 'Subscribe to Unlock Direct Upload' : 'Upload to Socials')}
+                                {isUploading ? 'Uploading...' : 'Upload to Socials'}
                             </button>
                         </div>
                     </div>

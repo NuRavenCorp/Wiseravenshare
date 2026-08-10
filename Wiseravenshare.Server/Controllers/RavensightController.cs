@@ -24,25 +24,30 @@ public class RavensightController : ControllerBase
     private readonly VideoLibraryStore _videoStore;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightController> _logger;
+    private readonly IBlobStorageService _blobStorageService;
+    private readonly IConfiguration _configuration;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger)
+    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoStore = videoStore;
         _dbContext = dbContext;
         _logger = logger;
+        _blobStorageService = blobStorageService;
+        _configuration = configuration;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
         {
             _videoStorageFolderName = "ravensight_videos";
         }
 
-        _defaultVideoDestination = NormalizeDestinationFolder(
-            configuration["Storage:Video:DefaultFolder"],
-            "wiseravenshare/ravensight/video");
+        _defaultVideoDestination = StoragePathResolver.ResolveDefaultVideoDestination(
+            configuration,
+            environment.ContentRootPath,
+            "wiseravenshare");
     }
 
     [HttpPost("upload")]
@@ -128,6 +133,14 @@ public class RavensightController : ControllerBase
         }
 
         var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        if (_blobStorageService.IsConfigured)
+        {
+            var publicUrl = await TryUploadToBlobStorageAsync(file, uniqueFileName, upload.DestinationFolder, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(publicUrl))
+            {
+                absoluteVideoUrl = publicUrl;
+            }
+        }
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
         var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(upload.StorageMode, upload.IsPermanent, hasActiveSubscription);
 
@@ -209,6 +222,60 @@ public class RavensightController : ControllerBase
         }
 
         throw new InvalidOperationException("Unable to write uploaded video to any configured storage path.", lastFailure);
+    }
+
+    private async Task<string?> TryUploadToBlobStorageAsync(IFormFile file, string uniqueFileName, string? requestedDestinationFolder, CancellationToken cancellationToken)
+    {
+        if (!_blobStorageService.IsConfigured)
+        {
+            return null;
+        }
+
+        var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
+        var objectKey = BuildBlobObjectKey(normalizedDestination, uniqueFileName);
+
+        try
+        {
+            var localTempPath = Path.Combine(Path.GetTempPath(), "Wiseravenshare", "uploads", uniqueFileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(localTempPath)!);
+            await using (var localStream = new FileStream(localTempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await file.CopyToAsync(localStream, cancellationToken);
+            }
+
+            await using (var uploadStream = System.IO.File.OpenRead(localTempPath))
+            {
+                var result = await _blobStorageService.UploadAsync(objectKey, uploadStream, file.ContentType, cancellationToken);
+                return result.PublicUrl;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to upload video {FileName} to blob storage", uniqueFileName);
+            return null;
+        }
+    }
+
+    private string BuildBlobObjectKey(string destinationFolder, string fileName)
+    {
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        var normalizedDestination = destinationFolder.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(projectFolder))
+        {
+            return string.IsNullOrWhiteSpace(normalizedDestination) ? fileName : $"{normalizedDestination}/{fileName}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedDestination) && normalizedDestination.StartsWith(projectFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            var remainingDestination = normalizedDestination[projectFolder.Length..].Trim('/');
+            return string.IsNullOrWhiteSpace(remainingDestination)
+                ? $"{projectFolder}/{fileName}"
+                : $"{projectFolder}/{remainingDestination}/{fileName}";
+        }
+
+        return string.IsNullOrWhiteSpace(normalizedDestination)
+            ? $"{projectFolder}/{fileName}"
+            : $"{projectFolder}/{normalizedDestination}/{fileName}";
     }
 
     private static string NormalizeDestinationFolder(string? requested, string defaultFolder)

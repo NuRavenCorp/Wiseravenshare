@@ -204,11 +204,6 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     };
 
     const uploadVideo = async ({ libraryOnly = false, destinationFolder = '', chunksOverride = null } = {}) => {
-        if (!libraryOnly && !canDirectUpload) {
-            onNotification(`Direct video upload requires Creator Pro ($${Number(subscriptionPriceMonthly).toFixed(2)}/month).`, 'warning');
-            return;
-        }
-
         const sourceChunks = Array.isArray(chunksOverride) && chunksOverride.length
             ? chunksOverride
             : recordedChunksRef.current;
@@ -240,7 +235,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('youTubePermissionGranted', String(!libraryOnly && youTubePermissionGranted));
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
-            const wantsPermanentStorage = Boolean(savePermanently && canDirectUpload);
+            const wantsPermanentStorage = Boolean(savePermanently);
             formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
             formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
             formData.append('isPermanent', String(wantsPermanentStorage));
@@ -506,21 +501,6 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                         }}>
                             <h3 style={{ marginBottom: '15px' }}>Upload to YouTube/TikTok/Facebook</h3>
 
-                            {!canDirectUpload && (
-                                <div style={{
-                                    marginBottom: '15px',
-                                    borderRadius: '10px',
-                                    border: '1px solid var(--border-color)',
-                                    background: 'rgba(255, 152, 0, 0.12)',
-                                    padding: '12px'
-                                }}>
-                                    <strong>Subscription required for direct upload.</strong>
-                                    <div style={{ fontSize: '13px', marginTop: '4px', color: 'var(--light-color)' }}>
-                                        Activate Creator Pro to upload recordings for ${Number(subscriptionPriceMonthly).toFixed(2)}/month.
-                                    </div>
-                                </div>
-                            )}
-
                             <div style={{ marginBottom: '15px' }}>
                                 <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
                                     Title
@@ -563,20 +543,14 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                             </div>
 
                             <div style={{ marginBottom: '15px' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: canDirectUpload ? 'pointer' : 'not-allowed' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                                     <input
                                         type="checkbox"
                                         checked={savePermanently}
-                                        disabled={!canDirectUpload}
                                         onChange={(e) => setSavePermanently(e.target.checked)}
                                     />
-                                    Keep this recording in permanent storage (Creator Pro)
+                                    Keep this recording in permanent storage
                                 </label>
-                                {!canDirectUpload && (
-                                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                        Activate Creator Pro to keep recordings in permanent storage.
-                                    </div>
-                                )}
                             </div>
 
                             <div style={{ marginBottom: '15px' }}>
@@ -760,18 +734,18 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
 
                                 <button
                                     onClick={handleUploadToSocials}
-                                    disabled={isUploading || !canDirectUpload}
+                                    disabled={isUploading}
                                     style={{
                                         width: '100%',
                                         padding: '12px',
                                         borderRadius: '30px',
                                         border: 'none',
-                                        background: isUploading || !canDirectUpload
+                                        background: isUploading
                                             ? 'var(--accent-color)'
                                             : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                                         color: 'white',
                                         fontWeight: 'bold',
-                                        cursor: isUploading || !canDirectUpload ? 'not-allowed' : 'pointer',
+                                        cursor: isUploading ? 'not-allowed' : 'pointer',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',

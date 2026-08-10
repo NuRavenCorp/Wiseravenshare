@@ -269,7 +269,10 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
 
     private async Task EnsureDatabaseExistsAsync(CancellationToken cancellationToken)
     {
-        var source = new NpgsqlConnectionStringBuilder(_connectionString);
+        var source = new NpgsqlConnectionStringBuilder(_connectionString)
+        {
+            Pooling = true
+        };
         if (string.IsNullOrWhiteSpace(source.Database))
         {
             throw new InvalidOperationException("Connection string must include a database name.");
@@ -278,7 +281,8 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
         var targetDatabase = source.Database;
         var admin = new NpgsqlConnectionStringBuilder(_connectionString)
         {
-            Database = "postgres"
+            Database = "postgres",
+            Pooling = true
         };
 
         await using var adminConnection = new NpgsqlConnection(admin.ConnectionString);
@@ -735,7 +739,8 @@ LIMIT @limit OFFSET @offset;";
             Password = password,
             Database = uri.AbsolutePath.Trim('/'),
             SslMode = SslMode.Require,
-            TrustServerCertificate = true
+            TrustServerCertificate = true,
+            Pooling = true
         };
 
         var query = uri.Query?.TrimStart('?') ?? string.Empty;

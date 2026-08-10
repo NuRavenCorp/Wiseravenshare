@@ -893,7 +893,8 @@ CREATE INDEX IF NOT EXISTS idx_app_users_handle ON {prefix}(handle);
             Password = password,
             Database = uri.AbsolutePath.Trim('/'),
             SslMode = SslMode.Require,
-            TrustServerCertificate = true
+            TrustServerCertificate = true,
+            Pooling = true
         };
 
         var query = uri.Query?.TrimStart('?') ?? string.Empty;

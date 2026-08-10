@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 import { apiService } from '../../Services/api';
+import { appendStoredFeedPost, normalizeFeedPost } from '../../Services/postFeedPayload';
 
-const PostCreator = ({ onPostCreate, addTruthAlert }) => {
+const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
     const [content, setContent] = useState('');
     const [mediaFile, setMediaFile] = useState(null);
     const [mediaType, setMediaType] = useState(null);
@@ -20,7 +21,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
     const [destinationFolder, setDestinationFolder] = useState('/wiseravenshare/ravensight/video');
     const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
-    const user = { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
+    const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
 
     const handleFileUpload = (type) => {
         const input = document.createElement('input');
@@ -256,7 +257,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     saveMessage = serverMessage.trim();
                 }
 
-                const fallbackPost = {
+                const fallbackPost = normalizeFeedPost({
                     id: `local-post-${Date.now()}`,
                     content,
                     type: payload.type,
@@ -266,7 +267,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     tiktokUrl: uploadedTikTokUrl,
                     facebookUrl: uploadedFacebookUrl,
                     createdAt: new Date().toISOString(),
-                    user: { id: 'local-user', name: 'You', username: 'you', handle: '@you', avatar: 'Y' },
+                    user: { id: currentUser?.id || 'local-user', name: currentUser?.name || 'You', username: currentUser?.username || 'you', handle: currentUser?.handle || '@you', avatar: currentUser?.avatar || 'Y' },
                     likesCount: 0,
                     repostsCount: 0,
                     commentsCount: 0,
@@ -274,10 +275,11 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     bookmarksCount: 0,
                     viewsCount: 0,
                     truthScore: truthScore ?? 70
-                };
+                }, currentUser);
 
+                appendStoredFeedPost(fallbackPost, currentUser);
                 onPostCreate(fallbackPost);
-                addTruthAlert('warning', 'Saved locally while the server is unavailable. Your post is still visible in the feed.', null);
+                addTruthAlert('warning', 'Your post is still visible in the feed while the service is temporarily unavailable.', null);
                 setIsUploading(false);
                 return;
             }
