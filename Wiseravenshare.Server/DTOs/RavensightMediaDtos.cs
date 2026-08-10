@@ -9,6 +9,8 @@ public sealed class SaveRavensightVideoDto
     public string Description { get; set; } = string.Empty;
     public string DestinationFolder { get; set; } = string.Empty;
     public string Privacy { get; set; } = "unlisted";
+    public string StorageMode { get; set; } = "temporary";
+    public bool IsPermanent { get; set; }
 }
 
 public sealed class SaveRavensightPhotoDto

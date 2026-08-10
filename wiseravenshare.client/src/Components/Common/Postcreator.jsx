@@ -76,6 +76,37 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
         input.click();
     };
 
+    const normalizeUploadedMedia = (uploadResponse) => {
+        const payload = uploadResponse?.data || uploadResponse || {};
+        const resolvedMediaUrl = payload?.mediaUrl
+            || payload?.filePath
+            || payload?.file?.mediaUrl
+            || payload?.file?.MediaUrl
+            || payload?.video?.mediaUrl
+            || payload?.video?.MediaUrl
+            || payload?.video?.videoUrl
+            || payload?.video?.VideoUrl
+            || payload?.video?.video_url
+            || null;
+
+        const fileName = payload?.fileName
+            || payload?.file?.fileName
+            || payload?.file?.FileName
+            || payload?.file?.file_name
+            || null;
+
+        const normalizedMediaUrl = resolvedMediaUrl || (fileName
+            ? `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
+            : null);
+
+        return {
+            mediaUrl: normalizedMediaUrl,
+            youtubeUrl: payload?.youtubeUrl || payload?.file?.youtubeUrl || payload?.video?.youtubeUrl || null,
+            tiktokUrl: payload?.tiktokUrl || payload?.file?.tiktokUrl || payload?.video?.tiktokUrl || null,
+            facebookUrl: payload?.facebookUrl || payload?.file?.facebookUrl || payload?.video?.facebookUrl || null
+        };
+    };
+
     const handleSubmit = async () => {
         if (!content.trim()) {
             addTruthAlert('warning', 'Please add text content to publish your post.', null);
@@ -147,26 +178,22 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     facebookPermissionGranted
                 });
 
-                const persistedMediaUrl = uploadResponse?.data?.filePath
-                    || uploadResponse?.data?.mediaUrl
-                    || (uploadResponse?.data?.fileName
-                        ? `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(uploadResponse.data.fileName)}`
-                        : null);
+                const normalizedMedia = normalizeUploadedMedia(uploadResponse);
 
-                if (persistedMediaUrl) {
-                    uploadedMediaUrl = persistedMediaUrl;
+                if (normalizedMedia.mediaUrl) {
+                    uploadedMediaUrl = normalizedMedia.mediaUrl;
                 }
 
-                if (uploadResponse?.data?.youtubeUrl) {
-                    uploadedYoutubeUrl = uploadResponse.data.youtubeUrl;
+                if (normalizedMedia.youtubeUrl) {
+                    uploadedYoutubeUrl = normalizedMedia.youtubeUrl;
                 }
 
-                if (uploadResponse?.data?.tiktokUrl) {
-                    uploadedTikTokUrl = uploadResponse.data.tiktokUrl;
+                if (normalizedMedia.tiktokUrl) {
+                    uploadedTikTokUrl = normalizedMedia.tiktokUrl;
                 }
 
-                if (uploadResponse?.data?.facebookUrl) {
-                    uploadedFacebookUrl = uploadResponse.data.facebookUrl;
+                if (normalizedMedia.facebookUrl) {
+                    uploadedFacebookUrl = normalizedMedia.facebookUrl;
                 }
             } catch (error) {
                 const status = error?.response?.status;
