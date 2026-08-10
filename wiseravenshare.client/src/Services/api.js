@@ -87,9 +87,13 @@ const buildMediaUploadUrls = (type = '') => {
 
     const endpoints = [];
     const routes = ['/media/upload', '/fileupload/upload'];
-    const ravensightRoutes = type === 'video'
-        ? ['/ravensight/videos/upload', '/ravensight/media/videos/save']
-        : [];
+    const ravensightRoutes = [];
+
+    if (type === 'video') {
+        ravensightRoutes.push('/ravensight/videos/upload', '/ravensight/media/videos/save');
+    } else if (type === 'photo') {
+        ravensightRoutes.push('/ravensight/media/photos/save');
+    }
 
     for (const base of bases) {
         if (!base) continue;
@@ -108,6 +112,29 @@ const api = axios.create({
         'Content-Type': 'application/json'
     }
 });
+
+const normalizeRequestPath = (url = '', baseUrl = '') => {
+    if (typeof url !== 'string' || url.length === 0) {
+        return url;
+    }
+
+    if (/^https?:\/\//i.test(url) || url.startsWith('//')) {
+        return url;
+    }
+
+    const trimmedBase = String(baseUrl || '').replace(/\/+$/, '');
+    let trimmedUrl = url.replace(/^\/+/, '');
+
+    if (!trimmedBase) {
+        return trimmedUrl;
+    }
+
+    if (trimmedBase.endsWith('/api') && trimmedUrl.startsWith('api/')) {
+        trimmedUrl = trimmedUrl.replace(/^api\//, '');
+    }
+
+    return trimmedUrl;
+};
 
 const normalizeApiError = (error, fallbackMessage) => {
     const status = error?.response?.status;
@@ -170,6 +197,11 @@ api.interceptors.request.use(
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+
+        if (config?.url) {
+            config.url = normalizeRequestPath(config.url, config.baseURL || API_BASE_URL);
+        }
+
         return config;
     },
     (error) => {

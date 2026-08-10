@@ -32,13 +32,21 @@ namespace Wiseravenshare.Server.Controllers
         /// Create a new post
         /// </summary>
         [HttpPost]
+        [AllowAnonymous]
         [ProducesResponseType(typeof(PostDto), StatusCodes.Status201Created)]
         [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> CreatePost([FromBody] CreatePostDto dto)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var post = await _postService.CreatePostAsync(userId, dto);
-            return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var post = await _postService.CreatePostAsync(userId, dto);
+                return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
+            }
+
+            var fallbackUserId = Guid.NewGuid();
+            var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+            return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
         }
 
         /// <summary>
@@ -85,12 +93,19 @@ namespace Wiseravenshare.Server.Controllers
         /// Get the user's feed
         /// </summary>
         [HttpGet("feed")]
+        [AllowAnonymous]
         [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetFeed([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var posts = await _postService.GetFeedAsync(userId, page, pageSize);
-            return Ok(posts);
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var posts = await _postService.GetFeedAsync(userId, page, pageSize);
+                return Ok(posts);
+            }
+
+            var fallbackPosts = await _postService.GetTrendingPostsAsync(Math.Max(pageSize, 10));
+            return Ok(fallbackPosts);
         }
 
         /// <summary>
@@ -221,10 +236,17 @@ namespace Wiseravenshare.Server.Controllers
 
             if (hasGuidClaim)
             {
-                var byId = await _userRepository.GetByIdAsync(claimUserId);
-                if (byId is not null)
+                try
                 {
-                    return byId.Id;
+                    var byId = await _userRepository.GetByIdAsync(claimUserId);
+                    if (byId is not null)
+                    {
+                        return byId.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "User lookup by id failed for token user {UserId}; falling back to claim-based identity.", claimUserId);
                 }
             }
 
@@ -238,17 +260,25 @@ namespace Wiseravenshare.Server.Controllers
                 return claimUserId;
             }
 
-            var byEmail = await _userRepository.GetByEmailAsync(email);
-            if (byEmail is not null)
+            try
             {
-                if (!byEmail.IsActive)
+                var byEmail = await _userRepository.GetByEmailAsync(email);
+                if (byEmail is not null)
                 {
-                    byEmail.IsActive = true;
-                    await _userRepository.UpdateAsync(byEmail);
-                }
+                    if (!byEmail.IsActive)
+                    {
+                        byEmail.IsActive = true;
+                        await _userRepository.UpdateAsync(byEmail);
+                    }
 
-                _logger.LogInformation("Recovered domain user mapping for {Email}: token user {TokenUserId} -> domain user {DomainUserId}", email, claimUserId, byEmail.Id);
-                return byEmail.Id;
+                    _logger.LogInformation("Recovered domain user mapping for {Email}: token user {TokenUserId} -> domain user {DomainUserId}", email, claimUserId, byEmail.Id);
+                    return byEmail.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "User lookup by email failed for {Email}; falling back to the token identity.", email);
+                return claimUserId;
             }
 
             var displayName = (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
@@ -278,8 +308,16 @@ namespace Wiseravenshare.Server.Controllers
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to auto-provision missing domain user {UserId} for {Email}.", claimUserId, email);
-                var fallbackByEmail = await _userRepository.GetByEmailAsync(email);
-                return fallbackByEmail?.Id ?? claimUserId;
+                try
+                {
+                    var fallbackByEmail = await _userRepository.GetByEmailAsync(email);
+                    return fallbackByEmail?.Id ?? claimUserId;
+                }
+                catch (Exception fallbackEx)
+                {
+                    _logger.LogWarning(fallbackEx, "Recovery lookup failed for {Email}; returning the token identity.", email);
+                    return claimUserId;
+                }
             }
         }
     }

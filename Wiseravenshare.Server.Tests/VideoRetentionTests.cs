@@ -22,4 +22,20 @@ public class VideoRetentionTests
 
         Assert.Equal("active", status);
     }
+
+    [Fact]
+    public void PermanentStorageRequiresActiveSubscription()
+    {
+        var resolvedMode = VideoRetentionPolicy.ResolveStorageMode("temporary", isPermanent: true, hasActiveSubscription: false);
+
+        Assert.Equal("temporary", resolvedMode);
+    }
+
+    [Fact]
+    public void PermanentStorageIsAllowedForActiveSubscription()
+    {
+        var resolvedMode = VideoRetentionPolicy.ResolveStorageMode("temporary", isPermanent: true, hasActiveSubscription: true);
+
+        Assert.Equal("permanent", resolvedMode);
+    }
 }
