@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../Services/api';
+import { normalizePostsPayload } from '../Services/postFeedPayload';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
 
@@ -23,7 +24,10 @@ export const usePosts = (initialFilters = {}) => {
                 page: currentPage,
                 ...filters
             });
-            const nextPagePosts = Array.isArray(response?.data) ? response.data : [];
+            const nextPagePosts = normalizePostsPayload(response?.data ?? response).map((post) => ({
+                ...post,
+                mediaUrl: post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null)
+            }));
 
             if (reset) {
                 setPosts(nextPagePosts);

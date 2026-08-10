@@ -3,6 +3,67 @@ import { FaTrash, FaEdit, FaYoutube, FaEye, FaThumbsUp, FaComment, FaCalendar, F
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
+const safeReadJson = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const normalizeVideo = (video, index = 0) => ({
+    id: video.id || `local-video-${Date.now()}-${index}`,
+    title: video.title || 'Saved Video',
+    description: video.description || '',
+    tags: Array.isArray(video.tags) ? video.tags : [],
+    videoUrl: video.videoUrl || video.mediaUrl || '',
+    thumbnailUrl: video.thumbnailUrl || '',
+    status: video.status || 'published',
+    privacyStatus: video.privacyStatus || 'unlisted',
+    storageMode: video.storageMode || 'temporary',
+    retentionStatus: video.retentionStatus || 'active',
+    expiresAt: video.expiresAt || null,
+    youtubeUrl: video.youtubeUrl || null,
+    tiktokUrl: video.tiktokUrl || null,
+    facebookUrl: video.facebookUrl || null,
+    views: Number(video.views) || 0,
+    likes: Number(video.likes) || 0,
+    comments: Number(video.comments) || 0,
+    createdAt: video.createdAt || new Date().toISOString(),
+    updatedAt: video.updatedAt || video.createdAt || new Date().toISOString(),
+    userId: video.userId || video.user?.id || null,
+    channelName: video.channelName || video.user?.name || 'WiseRaven Creator',
+    channelAvatar: video.channelAvatar || video.user?.avatar || ''
+});
+
+const getLocalFallbackVideos = (currentUserId) => {
+    const cachedVideos = safeReadJson('wiseRavensightVideos', [])
+        .map((video, index) => normalizeVideo(video, index));
+
+    const recentPosts = safeReadJson('wiseRecentPosts', [])
+        .filter((post) => post?.mediaType === 'video' && (post?.mediaUrl || post?.videoUrl))
+        .map((post, index) => normalizeVideo({
+            id: `post-video-${post.id || index}`,
+            title: post.content?.slice(0, 70) || 'Saved Video',
+            description: post.content || '',
+            videoUrl: post.mediaUrl || post.videoUrl,
+            thumbnailUrl: post.thumbnailUrl || '',
+            createdAt: post.createdAt,
+            userId: post.userId || post.user?.id,
+            channelName: post.user?.name || 'WiseRaven Creator',
+            channelAvatar: post.user?.avatar || ''
+        }, index));
+
+    const combined = [...cachedVideos, ...recentPosts]
+        .filter((video) => !!video.videoUrl)
+        .filter((video, idx, all) => all.findIndex((item) => item.videoUrl === video.videoUrl) === idx);
+
+    return currentUserId
+        ? combined.filter((video) => !video.userId || video.userId === currentUserId)
+        : combined;
+};
+
 const VideoLibrary = ({ onNotification }) => {
     const [videos, setVideos] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -20,10 +81,29 @@ const VideoLibrary = ({ onNotification }) => {
         setLoading(true);
         try {
             const response = await ravensightAPI.getUserVideos();
-            setVideos(response.videos);
+            const responseVideos = Array.isArray(response?.videos)
+                ? response.videos.map((video, index) => normalizeVideo(video, index))
+                : [];
+
+            if (responseVideos.length === 0) {
+                const fallbackVideos = getLocalFallbackVideos(user?.id);
+                setVideos(fallbackVideos);
+                if (fallbackVideos.length > 0) {
+                    onNotification('Showing locally saved videos from your library.', 'info');
+                }
+                return;
+            }
+
+            setVideos(responseVideos);
         } catch (error) {
             console.error('Error loading videos:', error);
-            onNotification('Failed to load videos', 'error');
+            const fallbackVideos = getLocalFallbackVideos(user?.id);
+            setVideos(fallbackVideos);
+            if (fallbackVideos.length > 0) {
+                onNotification('Showing locally saved videos while the service is unavailable.', 'warning');
+            } else {
+                onNotification('Failed to load videos', 'error');
+            }
         } finally {
             setLoading(false);
         }
@@ -55,8 +135,10 @@ const VideoLibrary = ({ onNotification }) => {
     };
 
     const filteredVideos = videos.filter(video => {
-        const matchesSearch = video.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            video.description?.toLowerCase().includes(searchTerm.toLowerCase());
+        const title = String(video?.title || '').toLowerCase();
+        const description = String(video?.description || '').toLowerCase();
+        const search = String(searchTerm || '').toLowerCase();
+        const matchesSearch = title.includes(search) || description.includes(search);
         const matchesFilter = filter === 'all' ||
             (filter === 'published' && video.status === 'published') ||
             (filter === 'processing' && video.status === 'processing') ||
@@ -177,7 +259,7 @@ const VideoLibrary = ({ onNotification }) => {
                                     <span><FaComment /> {video.comments}</span>
                                     <span><FaCalendar /> {new Date(video.createdAt).toLocaleDateString()}</span>
                                 </div>
-                                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                                     <span style={{
                                         display: 'inline-block',
                                         padding: '2px 8px',
@@ -188,6 +270,21 @@ const VideoLibrary = ({ onNotification }) => {
                                     }}>
                                         {status.text}
                                     </span>
+                                    <span style={{
+                                        display: 'inline-block',
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '11px',
+                                        background: video.storageMode === 'permanent' ? '#4caf50' : '#ff9800',
+                                        color: video.storageMode === 'permanent' ? '#fff' : '#fff'
+                                    }}>
+                                        {video.storageMode === 'permanent' ? 'Permanent storage' : 'Temporary storage'}
+                                    </span>
+                                    {video.expiresAt && (
+                                        <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                            Expires {new Date(video.expiresAt).toLocaleDateString()}
+                                        </span>
+                                    )}
                                     {video.youtubeUrl && (
                                         <a
                                             href={video.youtubeUrl}

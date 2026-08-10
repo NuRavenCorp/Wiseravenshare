@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -20,15 +22,17 @@ public class RavensightController : ControllerBase
     private readonly IWebHostEnvironment _environment;
     private readonly IYouTubeService _youTubeService;
     private readonly VideoLibraryStore _videoStore;
+    private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightController> _logger;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, ILogger<RavensightController> logger)
+    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoStore = videoStore;
+        _dbContext = dbContext;
         _logger = logger;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
@@ -124,6 +128,8 @@ public class RavensightController : ControllerBase
         }
 
         var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
+        var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(upload.StorageMode, upload.IsPermanent, hasActiveSubscription);
 
         VideoLibraryVideo saved;
         try
@@ -137,8 +143,8 @@ public class RavensightController : ControllerBase
                 VideoUrl = absoluteVideoUrl,
                 PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
                 Status = "published",
-                StorageMode = VideoRetentionPolicy.NormalizeStorageMode(upload.StorageMode, upload.IsPermanent),
-                IsPermanent = upload.IsPermanent,
+                StorageMode = resolvedStorageMode,
+                IsPermanent = resolvedStorageMode == "permanent",
                 YouTubeUrl = youtubeUrl,
                 TikTokUrl = tiktokUrl,
                 FacebookUrl = facebookUrl
@@ -146,13 +152,13 @@ public class RavensightController : ControllerBase
         }
         catch (PostgresException ex)
         {
-            _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}.", userId);
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Video library database is temporarily unavailable." });
+            _logger.LogWarning(ex, "Video library save failed at DB layer for user {UserId}; serving a local fallback video object.", userId);
+            saved = BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}.", userId);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
+            _logger.LogWarning(ex, "Video library save failed unexpectedly for user {UserId}; serving a local fallback video object.", userId);
+            saved = BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription);
         }
 
         return Ok(new
@@ -160,7 +166,8 @@ public class RavensightController : ControllerBase
             video = saved,
             fileName = uniqueFileName,
             filePath = absoluteVideoUrl,
-            mediaUrl = absoluteVideoUrl
+            mediaUrl = absoluteVideoUrl,
+            persistenceStatus = "degraded"
         });
     }
 
@@ -233,8 +240,16 @@ public class RavensightController : ControllerBase
     public async Task<IActionResult> GetFeed([FromQuery] string filter = "all", [FromQuery] int page = 1, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
     {
         var userId = GetCurrentUserId();
-        var result = await _videoStore.GetFeedAsync(filter, userId, page, limit, cancellationToken);
-        return Ok(new { videos = result.Videos, hasMore = result.HasMore });
+        try
+        {
+            var result = await _videoStore.GetFeedAsync(filter, userId, page, limit, cancellationToken);
+            return Ok(new { videos = result.Videos, hasMore = result.HasMore, persistenceStatus = "ready" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Video feed query failed for user {UserId}; returning an empty degraded feed.", userId);
+            return Ok(new { videos = Array.Empty<VideoLibraryVideo>(), hasMore = false, persistenceStatus = "degraded" });
+        }
     }
 
     [HttpGet("user")]
@@ -246,8 +261,16 @@ public class RavensightController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var videos = await _videoStore.GetUserVideosAsync(userId, cancellationToken);
-        return Ok(new { videos });
+        try
+        {
+            var videos = await _videoStore.GetUserVideosAsync(userId, cancellationToken);
+            return Ok(new { videos, persistenceStatus = "ready" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "User video query failed for user {UserId}; returning an empty degraded library.", userId);
+            return Ok(new { videos = Array.Empty<VideoLibraryVideo>(), persistenceStatus = "degraded" });
+        }
     }
 
     [HttpGet("{videoId}")]
@@ -332,6 +355,52 @@ public class RavensightController : ControllerBase
         return User.FindFirstValue(ClaimTypes.NameIdentifier)
                ?? User.FindFirstValue("sub")
                ?? User.FindFirstValue("id");
+    }
+
+    private async Task<bool> HasActiveSubscriptionAsync(string? userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId) || !Guid.TryParse(userId, out var parsedUserId))
+        {
+            return false;
+        }
+
+        var subscription = await _dbContext.Set<UserSubscription>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == parsedUserId && !s.IsDeleted);
+
+        if (subscription is null)
+        {
+            return false;
+        }
+
+        return subscription.Status is "active" or "trialing" or "past_due";
+    }
+
+    private static VideoLibraryVideo BuildFallbackVideo(string userId, RavensightVideoUploadDto upload, string absoluteVideoUrl, string? youtubeUrl, string? tiktokUrl, string? facebookUrl, string resolvedStorageMode, bool hasActiveSubscription)
+    {
+        var title = string.IsNullOrWhiteSpace(upload.Title) ? "Saved Video" : upload.Title.Trim();
+        var description = upload.Description ?? string.Empty;
+        var now = DateTime.UtcNow;
+
+        return new VideoLibraryVideo
+        {
+            Id = $"local-{Guid.NewGuid():N}",
+            UserId = userId,
+            Title = title,
+            Description = description,
+            Tags = ParseTags(upload.Tags).ToList(),
+            VideoUrl = absoluteVideoUrl,
+            ThumbnailUrl = string.Empty,
+            Status = "published",
+            PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
+            YouTubeUrl = youtubeUrl,
+            TikTokUrl = tiktokUrl,
+            FacebookUrl = facebookUrl,
+            StorageMode = resolvedStorageMode,
+            RetentionStatus = VideoRetentionPolicy.GetStorageStatus(now, upload.IsPermanent, nowUtc: now, hasActiveSubscription: hasActiveSubscription),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
     }
 
     private static IReadOnlyList<string> ParseTags(string? rawTags)

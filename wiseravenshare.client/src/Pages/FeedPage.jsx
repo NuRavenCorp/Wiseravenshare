@@ -10,6 +10,7 @@ import { truthEngine } from '../Services/TruthDetectionEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
 import { apiService } from '../Services/api';
+import { normalizePostsPayload, readStoredFeedPosts } from '../Services/postFeedPayload';
 
 const MAX_STORED_POSTS = 120;
 
@@ -89,10 +90,12 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
         const loadFeed = async () => {
             try {
                 const response = await apiService.getPosts({ page: 1, pageSize: 40 });
-                const backendPosts = Array.isArray(response?.data) ? response.data.map(normalizePost) : [];
-                setPosts(backendPosts.length > 0 ? backendPosts : samplePosts);
+                const normalizedPayload = normalizePostsPayload(response?.data ?? response);
+                const backendPosts = normalizedPayload.map(normalizePost);
+                setPosts(backendPosts.length > 0 ? backendPosts : readStoredFeedPosts().map(normalizePost).length > 0 ? readStoredFeedPosts().map(normalizePost) : samplePosts);
             } catch {
-                setPosts(samplePosts);
+                const storedPosts = readStoredFeedPosts().map(normalizePost);
+                setPosts(storedPosts.length > 0 ? storedPosts : samplePosts);
             }
         };
 

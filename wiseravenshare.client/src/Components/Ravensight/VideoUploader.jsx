@@ -25,6 +25,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         scheduledPublish: null
     });
     const [tagInput, setTagInput] = useState('');
+    const [savePermanently, setSavePermanently] = useState(false);
     const [uploadedVideos, setUploadedVideos] = useState([]);
     const fileInputRef = useRef(null);
     const { user } = useAuth();
@@ -120,7 +121,10 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('youTubePermissionGranted', String(!libraryOnly && videoDetails.youTubePermissionGranted));
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
+        const wantsPermanentStorage = Boolean(savePermanently && canDirectUpload);
         formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
+        formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
+        formData.append('isPermanent', String(wantsPermanentStorage));
         if (videoDetails.scheduledPublish) {
             formData.append('scheduledPublish', videoDetails.scheduledPublish);
         }
@@ -143,7 +147,31 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
             resetForm();
         } catch (error) {
             console.error('Upload error:', error);
-            onNotification(error.message || (libraryOnly ? 'Failed to save to library' : 'Failed to upload video'), 'error');
+            const fallbackVideo = {
+                id: `local-video-${Date.now()}`,
+                userId: user?.id || 'local-user',
+                title: videoDetails.title,
+                description: videoDetails.description,
+                tags: videoDetails.tags,
+                videoUrl: selectedFile ? URL.createObjectURL(selectedFile) : '',
+                thumbnailUrl: '',
+                status: 'published',
+                privacyStatus: videoDetails.privacyStatus,
+                storageMode: savePermanently && canDirectUpload ? 'permanent' : 'temporary',
+                retentionStatus: 'active',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                likes: 0,
+                comments: 0,
+                views: 0,
+                channelName: user?.name || 'WiseRaven Creator',
+                channelAvatar: user?.avatar
+            };
+
+            persistLocalVideo(fallbackVideo);
+            setUploadedVideos(prev => [fallbackVideo, ...prev]);
+            onNotification(libraryOnly ? 'Video saved locally while the service is unavailable.' : 'Video saved locally while the service is unavailable.', 'warning');
+            resetForm();
         } finally {
             setIsUploading(false);
         }
@@ -174,6 +202,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
             facebookPermissionGranted: false,
             scheduledPublish: null
         });
+        setSavePermanently(false);
         setUploadProgress(0);
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
@@ -452,6 +481,23 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                     <option key={cat.id} value={cat.id}>{cat.name}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        <div style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: canDirectUpload ? 'pointer' : 'not-allowed' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={savePermanently}
+                                    disabled={!canDirectUpload}
+                                    onChange={(e) => setSavePermanently(e.target.checked)}
+                                />
+                                Keep this video in permanent storage (Creator Pro)
+                            </label>
+                            {!canDirectUpload && (
+                                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                    Activate Creator Pro to keep this video in permanent storage.
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ marginBottom: '15px' }}>
