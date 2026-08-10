@@ -25,6 +25,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     const [facebookPageOrProfile, setFacebookPageOrProfile] = useState('');
     const [youTubePermissionGranted, setYouTubePermissionGranted] = useState(false);
     const [tikTokPermissionGranted, setTikTokPermissionGranted] = useState(false);
+    const [savePermanently, setSavePermanently] = useState(false);
     const [facebookPermissionGranted, setFacebookPermissionGranted] = useState(false);
     const [privacyStatus, setPrivacyStatus] = useState('unlisted');
 
@@ -192,6 +193,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
         setVideoDescription('');
         setPublishToTikTok(false);
         setPublishToFacebook(false);
+        setSavePermanently(false);
         setYouTubeChannelOrEmail('');
         setTikTokUsername('');
         setFacebookPageOrProfile('');
@@ -238,7 +240,10 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('youTubePermissionGranted', String(!libraryOnly && youTubePermissionGranted));
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
+            const wantsPermanentStorage = Boolean(savePermanently && canDirectUpload);
             formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
+            formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
+            formData.append('isPermanent', String(wantsPermanentStorage));
 
             const response = await ravensightAPI.uploadVideo(formData, (progress) => {
                 setUploadProgress(progress);
@@ -555,6 +560,23 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                                         resize: 'vertical'
                                     }}
                                 />
+                            </div>
+
+                            <div style={{ marginBottom: '15px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: canDirectUpload ? 'pointer' : 'not-allowed' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={savePermanently}
+                                        disabled={!canDirectUpload}
+                                        onChange={(e) => setSavePermanently(e.target.checked)}
+                                    />
+                                    Keep this recording in permanent storage (Creator Pro)
+                                </label>
+                                {!canDirectUpload && (
+                                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                        Activate Creator Pro to keep recordings in permanent storage.
+                                    </div>
+                                )}
                             </div>
 
                             <div style={{ marginBottom: '15px' }}>

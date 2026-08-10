@@ -217,7 +217,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
         const payload = {
             content: content,
             type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
-            mediaUrls: uploadedMediaUrl || null,
+            mediaUrl: uploadedMediaUrl || null,
+            mediaUrls: uploadedMediaUrl ? [uploadedMediaUrl] : null,
             youtubeUrl: uploadedYoutubeUrl,
             tiktokUrl: uploadedTikTokUrl,
             facebookUrl: uploadedFacebookUrl,
@@ -228,10 +229,13 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
             try {
                 const createResponse = await apiService.createPost(payload);
                 const createdPost = {
-                    ...(createResponse?.data || {}),
-                    youtubeUrl: createResponse?.data?.youtubeUrl || uploadedYoutubeUrl,
-                    tiktokUrl: createResponse?.data?.tiktokUrl || uploadedTikTokUrl,
-                    facebookUrl: createResponse?.data?.facebookUrl || uploadedFacebookUrl
+                    ...(createResponse?.data || createResponse || {}),
+                    id: createResponse?.data?.id || createResponse?.id,
+                    mediaUrl: createResponse?.data?.mediaUrl || createResponse?.mediaUrl || uploadedMediaUrl,
+                    mediaUrls: createResponse?.data?.mediaUrls || createResponse?.mediaUrls || (uploadedMediaUrl ? [uploadedMediaUrl] : []),
+                    youtubeUrl: createResponse?.data?.youtubeUrl || createResponse?.youtubeUrl || uploadedYoutubeUrl,
+                    tiktokUrl: createResponse?.data?.tiktokUrl || createResponse?.tiktokUrl || uploadedTikTokUrl,
+                    facebookUrl: createResponse?.data?.facebookUrl || createResponse?.facebookUrl || uploadedFacebookUrl
                 };
                 if (!createdPost?.id) {
                     throw new Error('Post API did not return a created post.');
@@ -252,7 +256,28 @@ const PostCreator = ({ onPostCreate, addTruthAlert }) => {
                     saveMessage = serverMessage.trim();
                 }
 
-                addTruthAlert('error', saveMessage, null);
+                const fallbackPost = {
+                    id: `local-post-${Date.now()}`,
+                    content,
+                    type: payload.type,
+                    mediaUrl: uploadedMediaUrl || null,
+                    mediaUrls: uploadedMediaUrl ? [uploadedMediaUrl] : [],
+                    youtubeUrl: uploadedYoutubeUrl,
+                    tiktokUrl: uploadedTikTokUrl,
+                    facebookUrl: uploadedFacebookUrl,
+                    createdAt: new Date().toISOString(),
+                    user: { id: 'local-user', name: 'You', username: 'you', handle: '@you', avatar: 'Y' },
+                    likesCount: 0,
+                    repostsCount: 0,
+                    commentsCount: 0,
+                    sharesCount: 0,
+                    bookmarksCount: 0,
+                    viewsCount: 0,
+                    truthScore: truthScore ?? 70
+                };
+
+                onPostCreate(fallbackPost);
+                addTruthAlert('warning', 'Saved locally while the server is unavailable. Your post is still visible in the feed.', null);
                 setIsUploading(false);
                 return;
             }

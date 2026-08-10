@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -16,12 +18,14 @@ public sealed class RavensightVideoMediaController : ControllerBase
 {
     private readonly IRavensightVideoService _videoService;
     private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightVideoMediaController> _logger;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, ILogger<RavensightVideoMediaController> logger)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger)
     {
         _videoService = videoService;
         _videoLibraryStore = videoLibraryStore;
+        _dbContext = dbContext;
         _logger = logger;
     }
 
@@ -56,6 +60,9 @@ public sealed class RavensightVideoMediaController : ControllerBase
             privacy,
             cancellationToken);
 
+        var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
+        var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(dto.StorageMode, dto.IsPermanent, hasActiveSubscription);
+
         var mediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.File.FileName)}";
         var response = new RavensightSavedMediaDto
         {
@@ -80,8 +87,8 @@ public sealed class RavensightVideoMediaController : ControllerBase
                 VideoUrl = mediaUrl,
                 PrivacyStatus = "unlisted",
                 Status = "published",
-                StorageMode = VideoRetentionPolicy.NormalizeStorageMode(dto.StorageMode, dto.IsPermanent),
-                IsPermanent = dto.IsPermanent
+                StorageMode = resolvedStorageMode,
+                IsPermanent = resolvedStorageMode == "permanent"
             }, cancellationToken);
         }
         catch (PostgresException ex)
@@ -103,6 +110,20 @@ public sealed class RavensightVideoMediaController : ControllerBase
             mediaUrl,
             video = persistedVideo
         });
+    }
+
+    private async Task<bool> HasActiveSubscriptionAsync(Guid userId)
+    {
+        var subscription = await _dbContext.Set<UserSubscription>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted);
+
+        if (subscription is null)
+        {
+            return false;
+        }
+
+        return subscription.Status is "active" or "trialing" or "past_due";
     }
 
     private bool TryResolveUserId(out Guid userId)
