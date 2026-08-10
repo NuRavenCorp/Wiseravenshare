@@ -11,6 +11,7 @@ namespace Wiseravenshare.Server.DTOs.Post
         public Guid UserId { get; set; }
         public string Content { get; set; } = string.Empty;
         public string Type { get; set; } = "Text";
+        public string? MediaUrl { get; set; }
         public string[]? MediaUrls { get; set; }
         [JsonPropertyName("youtubeUrl")]
         public string? YoutubeUrl { get; set; }
@@ -50,6 +51,8 @@ namespace Wiseravenshare.Server.DTOs.Post
         public string Content { get; set; } = string.Empty;
 
         public string? MediaUrls { get; set; }
+        [JsonPropertyName("mediaUrl")]
+        public string? MediaUrl { get; set; }
         [JsonPropertyName("youtubeUrl")]
         public string? YoutubeUrl { get; set; }
 

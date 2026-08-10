@@ -58,7 +58,7 @@ const handleUnauthorized = () => {
     }
 };
 
-const buildMediaUploadUrls = () => {
+const buildMediaUploadUrls = (type = '') => {
     const toApiBase = (value) => {
         const raw = String(value || '').trim();
         if (!raw) return '';
@@ -87,9 +87,13 @@ const buildMediaUploadUrls = () => {
 
     const endpoints = [];
     const routes = ['/media/upload', '/fileupload/upload'];
+    const ravensightRoutes = type === 'video'
+        ? ['/ravensight/videos/upload', '/ravensight/media/videos/save']
+        : [];
+
     for (const base of bases) {
         if (!base) continue;
-        for (const route of routes) {
+        for (const route of [...ravensightRoutes, ...routes]) {
             endpoints.push(`${base}${route}`);
         }
     }
@@ -293,7 +297,7 @@ export const apiService = {
             }
         };
 
-        const candidateUrls = buildMediaUploadUrls();
+        const candidateUrls = buildMediaUploadUrls(type);
         let lastError = null;
 
         for (const url of candidateUrls) {

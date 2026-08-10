@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -41,6 +41,11 @@
   <ItemGroup>
     <None Remove="Wiseravenshare.Server.deps.json;Wiseravenshare.Server.runtimeconfig.json;Wiseravenshare.Server.staticwebassets.endpoints.json" />
     <Content Remove="Wiseravenshare.Server.deps.json;Wiseravenshare.Server.runtimeconfig.json;Wiseravenshare.Server.staticwebassets.endpoints.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="MediaStorage\RavnensightMedia\Videos\" />
+    <Folder Include="MediaStorage\RavnensightMedia\Photos\" />
   </ItemGroup>
 
 </Project>
