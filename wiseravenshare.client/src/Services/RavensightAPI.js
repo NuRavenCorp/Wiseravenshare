@@ -135,23 +135,28 @@ class RavensightAPI {
             }
         };
 
-        try {
-            const response = await this.api.post('/videos/upload', formData, requestConfig);
-            return response.data;
-        } catch (primaryError) {
-            const status = primaryError?.response?.status;
-            if (status === 404 || status === 405) {
-                try {
-                    const fallbackUrl = `${this.generalApiBaseUrl}/media/upload`;
-                    const fallbackResponse = await this.api.post(fallbackUrl, formData, requestConfig);
-                    return fallbackResponse.data;
-                } catch (fallbackError) {
-                    throw new Error(extractErrorMessage(fallbackError, 'Video upload failed.'));
+        const candidateUrls = [
+            '/videos/upload',
+            '/media/videos/save',
+            `${this.generalApiBaseUrl}/media/upload`
+        ];
+
+        let lastError = null;
+
+        for (const url of candidateUrls) {
+            try {
+                const response = await (url.startsWith('http') ? this.api.post(url, formData, requestConfig) : this.api.post(url, formData, requestConfig));
+                return response.data;
+            } catch (error) {
+                lastError = error;
+                const status = error?.response?.status;
+                if (status !== 404 && status !== 405) {
+                    throw new Error(extractErrorMessage(error, 'Video upload failed.'));
                 }
             }
-
-            throw new Error(extractErrorMessage(primaryError, 'Video upload failed.'));
         }
+
+        throw new Error(extractErrorMessage(lastError, 'Video upload failed.'));
     }
 
     // Get Video Feed

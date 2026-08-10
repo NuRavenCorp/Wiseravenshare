@@ -130,7 +130,10 @@ const VideoFeed = ({ onNotification }) => {
             if (page === 1) {
                 const fallback = getLocalFallbackVideos(user?.id, filter);
                 setVideos(fallback);
-                if (fallback.length > 0) {
+                const status = Number(error?.status ?? error?.response?.status ?? 0);
+                if (status === 401 || status === 403) {
+                    onNotification('Sign in to load your Ravensight feed.', 'warning');
+                } else if (fallback.length > 0) {
                     onNotification('Showing local video feed while Ravensight API is unavailable.', 'warning');
                 } else {
                     onNotification('Video feed is unavailable right now.', 'error');

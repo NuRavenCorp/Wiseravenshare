@@ -151,6 +151,9 @@ CREATE TABLE IF NOT EXISTS {videosTable} (
     youtube_url TEXT NULL,
     tiktok_url TEXT NULL,
     facebook_url TEXT NULL,
+    storage_mode TEXT NOT NULL DEFAULT 'temporary',
+    retention_status TEXT NOT NULL DEFAULT 'active',
+    expires_at TIMESTAMPTZ NULL,
     views INTEGER NOT NULL DEFAULT 0,
     likes INTEGER NOT NULL DEFAULT 0,
     comments INTEGER NOT NULL DEFAULT 0,
@@ -206,6 +209,9 @@ ALTER TABLE {_videosTable}
     ADD COLUMN IF NOT EXISTS youtube_url TEXT NULL,
     ADD COLUMN IF NOT EXISTS tiktok_url TEXT NULL,
     ADD COLUMN IF NOT EXISTS facebook_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS storage_mode TEXT NOT NULL DEFAULT 'temporary',
+    ADD COLUMN IF NOT EXISTS retention_status TEXT NOT NULL DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL,
     ADD COLUMN IF NOT EXISTS views INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS likes INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS comments INTEGER NOT NULL DEFAULT 0,
@@ -318,16 +324,22 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_video_id_created_at
             UpdatedAt = DateTime.UtcNow
         };
 
+        var storageMode = VideoRetentionPolicy.NormalizeStorageMode(request.StorageMode, request.IsPermanent);
+        var expiresAt = VideoRetentionPolicy.GetExpiresAt(entity.CreatedAt, request.IsPermanent);
+        entity.StorageMode = storageMode;
+        entity.RetentionStatus = VideoRetentionPolicy.GetStorageStatus(entity.CreatedAt, request.IsPermanent);
+        entity.ExpiresAt = request.IsPermanent ? null : expiresAt;
+
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var sql = $@"
 INSERT INTO {_videosTable} (
     id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-    youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
+    youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
 ) VALUES (
     @id, @user_id, @title, @description, @tags, @video_url, @thumbnail_url, @status, @privacy_status,
-    @youtube_url, @tiktok_url, @facebook_url, 0, 0, 0, @created_at, @updated_at
+    @youtube_url, @tiktok_url, @facebook_url, @storage_mode, @retention_status, @expires_at, 0, 0, 0, @created_at, @updated_at
 );";
 
         await using var command = new NpgsqlCommand(sql, connection);
@@ -343,6 +355,9 @@ INSERT INTO {_videosTable} (
         command.Parameters.AddWithValue("youtube_url", (object?)entity.YouTubeUrl ?? DBNull.Value);
         command.Parameters.AddWithValue("tiktok_url", (object?)entity.TikTokUrl ?? DBNull.Value);
         command.Parameters.AddWithValue("facebook_url", (object?)entity.FacebookUrl ?? DBNull.Value);
+        command.Parameters.AddWithValue("storage_mode", entity.StorageMode);
+        command.Parameters.AddWithValue("retention_status", entity.RetentionStatus);
+        command.Parameters.AddWithValue("expires_at", (object?)entity.ExpiresAt ?? DBNull.Value);
         command.Parameters.AddWithValue("created_at", entity.CreatedAt);
         command.Parameters.AddWithValue("updated_at", entity.UpdatedAt);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -360,9 +375,10 @@ INSERT INTO {_videosTable} (
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE user_id = @user_id
+  AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
 ORDER BY created_at DESC;";
 
         await using var command = new NpgsqlCommand(sql, connection);
@@ -383,15 +399,17 @@ ORDER BY created_at DESC;";
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var whereClause = string.Empty;
+        var whereClauses = new List<string> { "(storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())" };
         if (string.Equals(filter, "my_videos", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(userId))
         {
-            whereClause = "WHERE user_id = @user_id";
+            whereClauses.Add("user_id = @user_id");
         }
+
+        var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 {whereClause}
 ORDER BY created_at DESC
@@ -400,7 +418,7 @@ LIMIT @limit_plus_one OFFSET @offset;";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("limit_plus_one", safeLimit + 1);
         command.Parameters.AddWithValue("offset", offset);
-        if (!string.IsNullOrWhiteSpace(whereClause))
+        if (whereClauses.Any(clause => clause.Contains("user_id", StringComparison.OrdinalIgnoreCase)))
         {
             command.Parameters.AddWithValue("user_id", userId!);
         }
@@ -425,9 +443,10 @@ LIMIT @limit_plus_one OFFSET @offset;";
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE id = @id
+  AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
 LIMIT 1;";
 
         await using var command = new NpgsqlCommand(sql, connection);
@@ -647,11 +666,14 @@ LIMIT @limit OFFSET @offset;";
                 YouTubeUrl = reader.IsDBNull(9) ? null : reader.GetString(9),
                 TikTokUrl = reader.IsDBNull(10) ? null : reader.GetString(10),
                 FacebookUrl = reader.IsDBNull(11) ? null : reader.GetString(11),
-                Views = reader.GetInt32(12),
-                Likes = reader.GetInt32(13),
-                Comments = reader.GetInt32(14),
-                CreatedAt = reader.GetDateTime(15),
-                UpdatedAt = reader.GetDateTime(16)
+                StorageMode = reader.IsDBNull(12) ? "temporary" : reader.GetString(12),
+                RetentionStatus = reader.IsDBNull(13) ? "active" : reader.GetString(13),
+                ExpiresAt = reader.IsDBNull(14) ? null : reader.GetDateTime(14),
+                Views = reader.GetInt32(15),
+                Likes = reader.GetInt32(16),
+                Comments = reader.GetInt32(17),
+                CreatedAt = reader.GetDateTime(18),
+                UpdatedAt = reader.GetDateTime(19)
             });
         }
 

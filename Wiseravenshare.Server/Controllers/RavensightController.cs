@@ -137,6 +137,8 @@ public class RavensightController : ControllerBase
                 VideoUrl = absoluteVideoUrl,
                 PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
                 Status = "published",
+                StorageMode = VideoRetentionPolicy.NormalizeStorageMode(upload.StorageMode, upload.IsPermanent),
+                IsPermanent = upload.IsPermanent,
                 YouTubeUrl = youtubeUrl,
                 TikTokUrl = tiktokUrl,
                 FacebookUrl = facebookUrl
@@ -153,7 +155,13 @@ public class RavensightController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
         }
 
-        return Ok(new { video = saved });
+        return Ok(new
+        {
+            video = saved,
+            fileName = uniqueFileName,
+            filePath = absoluteVideoUrl,
+            mediaUrl = absoluteVideoUrl
+        });
     }
 
     private async Task<string> SaveVideoFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, CancellationToken cancellationToken)
@@ -221,6 +229,7 @@ public class RavensightController : ControllerBase
     }
 
     [HttpGet("feed")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetFeed([FromQuery] string filter = "all", [FromQuery] int page = 1, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
     {
         var userId = GetCurrentUserId();
@@ -362,6 +371,8 @@ public sealed class RavensightVideoUploadDto
     public string Description { get; set; } = string.Empty;
     public string Tags { get; set; } = "[]";
     public string PrivacyStatus { get; set; } = "unlisted";
+    public string StorageMode { get; set; } = "temporary";
+    public bool IsPermanent { get; set; }
 }
 
 public sealed class AddVideoCommentRequest

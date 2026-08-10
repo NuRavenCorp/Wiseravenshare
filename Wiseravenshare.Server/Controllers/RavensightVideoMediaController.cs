@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -13,10 +15,14 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class RavensightVideoMediaController : ControllerBase
 {
     private readonly IRavensightVideoService _videoService;
+    private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly ILogger<RavensightVideoMediaController> _logger;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, ILogger<RavensightVideoMediaController> logger)
     {
         _videoService = videoService;
+        _videoLibraryStore = videoLibraryStore;
+        _logger = logger;
     }
 
     [HttpPost("save")]
@@ -62,19 +68,40 @@ public sealed class RavensightVideoMediaController : ControllerBase
             MediaUrl = mediaUrl
         };
 
+        VideoLibraryVideo persistedVideo;
+        try
+        {
+            persistedVideo = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+            {
+                UserId = userId.ToString(),
+                Title = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Title.Trim(),
+                Description = dto.Description ?? string.Empty,
+                Tags = [],
+                VideoUrl = mediaUrl,
+                PrivacyStatus = "unlisted",
+                Status = "published",
+                StorageMode = VideoRetentionPolicy.NormalizeStorageMode(dto.StorageMode, dto.IsPermanent),
+                IsPermanent = dto.IsPermanent
+            }, cancellationToken);
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Video library database is temporarily unavailable." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
+        }
+
         return Ok(new
         {
             file = response,
-            video = new
-            {
-                saved.Video.Id,
-                saved.Video.UserId,
-                saved.Video.Title,
-                saved.Video.Description,
-                saved.Video.Privacy,
-                saved.Video.Status,
-                saved.Video.PublishedAt
-            }
+            fileName = response.FileName,
+            filePath = mediaUrl,
+            mediaUrl,
+            video = persistedVideo
         });
     }
 

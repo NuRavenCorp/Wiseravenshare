@@ -55,13 +55,14 @@ public class PostService : IPostService
         }
 
         // Create post
+        var mediaUrls = NormalizeMediaUrls(dto);
         var post = new Post
         {
             UserId = userId,
             Content = dto.Content,
             Type = Enum.Parse<PostType>(dto.Type, true),
-            MediaUrls = dto.MediaUrls?.Split(',', StringSplitOptions.RemoveEmptyEntries),
-            MediaMetadata = BuildMediaMetadata(dto),
+            MediaUrls = mediaUrls,
+            MediaMetadata = BuildMediaMetadata(dto, mediaUrls),
             ReplyToId = dto.ReplyToId,
             RepostOfId = dto.RepostOfId,
             QuoteOfId = dto.QuoteOfId,
@@ -275,7 +276,8 @@ public class PostService : IPostService
             UserId = post.UserId,
             Content = post.Content,
             Type = post.Type.ToString(),
-            MediaUrls = post.MediaUrls,
+            MediaUrl = ResolveMediaUrl(post),
+            MediaUrls = ResolveMediaUrls(post),
             YoutubeUrl = ReadMediaMetadataValue(post.MediaMetadata, "youtubeUrl"),
             TikTokUrl = ReadMediaMetadataValue(post.MediaMetadata, "tiktokUrl"),
             FacebookUrl = ReadMediaMetadataValue(post.MediaMetadata, "facebookUrl"),
@@ -299,7 +301,7 @@ public class PostService : IPostService
         return dto;
     }
 
-    private static JsonDocument? BuildMediaMetadata(CreatePostDto dto)
+    private static JsonDocument? BuildMediaMetadata(CreatePostDto dto, string[]? mediaUrls)
     {
         var metadata = new Dictionary<string, string?>();
 
@@ -318,12 +320,65 @@ public class PostService : IPostService
             metadata["facebookUrl"] = dto.FacebookUrl.Trim();
         }
 
+        if (mediaUrls is { Length: > 0 })
+        {
+            metadata["mediaUrl"] = mediaUrls[0];
+            metadata["mediaUrls"] = string.Join(",", mediaUrls);
+        }
+
         if (metadata.Count == 0)
         {
             return null;
         }
 
         return JsonDocument.Parse(JsonSerializer.Serialize(metadata));
+    }
+
+    private static string[]? NormalizeMediaUrls(CreatePostDto dto)
+    {
+        var values = new List<string>();
+        if (!string.IsNullOrWhiteSpace(dto.MediaUrl))
+        {
+            values.Add(dto.MediaUrl.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.MediaUrls))
+        {
+            foreach (var part in dto.MediaUrls.Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!string.IsNullOrWhiteSpace(part))
+                {
+                    values.Add(part);
+                }
+            }
+        }
+
+        return values.Count > 0 ? values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray() : null;
+    }
+
+    private static string? ResolveMediaUrl(Post post)
+    {
+        var resolved = ResolveMediaUrls(post);
+        return resolved?.FirstOrDefault() ?? ReadMediaMetadataValue(post.MediaMetadata, "mediaUrl");
+    }
+
+    private static string[]? ResolveMediaUrls(Post post)
+    {
+        if (post.MediaUrls is { Length: > 0 })
+        {
+            return post.MediaUrls.Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        var metadataValue = ReadMediaMetadataValue(post.MediaMetadata, "mediaUrls");
+        if (string.IsNullOrWhiteSpace(metadataValue))
+        {
+            return null;
+        }
+
+        return metadataValue.Split([','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string? ReadMediaMetadataValue(JsonDocument? metadata, string key)
