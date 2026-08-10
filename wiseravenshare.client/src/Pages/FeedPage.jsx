@@ -10,26 +10,7 @@ import { truthEngine } from '../Services/TruthDetectionEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
 import { apiService } from '../Services/api';
-import { normalizePostsPayload, readStoredFeedPosts } from '../Services/postFeedPayload';
-
-const MAX_STORED_POSTS = 120;
-
-const normalizePost = (post) => ({
-    ...post,
-    mediaType: post?.mediaType || (String(post?.type || '').toLowerCase() === 'video' ? 'video' : null),
-    mediaUrl: post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null),
-    likes: Number(post?.likes ?? post?.likesCount ?? 0),
-    reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
-    comments: Array.isArray(post?.comments) ? post.comments : [],
-    truthScore: post?.truthScore,
-    user: {
-        ...(post?.user || {}),
-        id: post?.user?.id || post?.userId,
-        name: post?.user?.displayName || post?.user?.name || post?.user?.username || 'User',
-        handle: post?.user?.handle || (post?.user?.username ? `@${post.user.username}` : '@user'),
-        avatar: post?.user?.avatar || post?.user?.avatarUrl || 'U'
-    }
-});
+import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
 
 const FeedPage = ({ addTruthAlert, onNavigate }) => {
     const [posts, setPosts] = useState([]);
@@ -37,6 +18,8 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
     const [integrityReports, setIntegrityReports] = useState({});
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
+
+    const normalizePost = (post) => normalizeFeedPost(post, currentUser);
 
     const buildIntegrityReport = (post, mode = 'manual') => {
         const content = String(post?.content || '').trim();
@@ -92,7 +75,9 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                 const response = await apiService.getPosts({ page: 1, pageSize: 40 });
                 const normalizedPayload = normalizePostsPayload(response?.data ?? response);
                 const backendPosts = normalizedPayload.map(normalizePost);
-                setPosts(backendPosts.length > 0 ? backendPosts : readStoredFeedPosts().map(normalizePost).length > 0 ? readStoredFeedPosts().map(normalizePost) : samplePosts);
+                const storedPosts = readStoredFeedPosts().map(normalizePost);
+                const mergedPosts = mergeFeedPosts(storedPosts, backendPosts);
+                setPosts(mergedPosts.length > 0 ? mergedPosts : samplePosts);
             } catch {
                 const storedPosts = readStoredFeedPosts().map(normalizePost);
                 setPosts(storedPosts.length > 0 ? storedPosts : samplePosts);
@@ -114,12 +99,12 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
     }, [currentUser.id]);
 
     useEffect(() => {
-        localStorage.setItem('wiseRecentPosts', JSON.stringify(posts.slice(0, MAX_STORED_POSTS)));
+        writeStoredFeedPosts(posts);
         window.dispatchEvent(new Event('wiseraven:posts-updated'));
     }, [posts]);
 
     const handlePostCreate = (newPost) => {
-        setPosts(prev => [normalizePost(newPost), ...prev]);
+        setPosts(prev => mergeFeedPosts([normalizePost(newPost)], prev));
     };
 
     const handleLike = (postId) => {
@@ -270,7 +255,7 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                     <WiseRavenLogo showTagline={false} />
                 </div>
             </div>
-            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} />
+            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} />
             <OnboardingCard onNavigate={onNavigate} />
             <VideoFeedMini posts={rankedFeedPosts} />
             <SocialFeedsTimeline user={currentUser} />

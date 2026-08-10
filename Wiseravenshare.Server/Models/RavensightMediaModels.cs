@@ -13,6 +13,7 @@ public sealed class RavensightSavedMediaFile
 {
     public string FileName { get; init; } = string.Empty;
     public string RelativePath { get; init; } = string.Empty;
+    public string? PublicUrl { get; init; }
     public string AbsolutePath { get; init; } = string.Empty;
     public string DestinationFolder { get; init; } = string.Empty;
     public string ContentType { get; init; } = string.Empty;
