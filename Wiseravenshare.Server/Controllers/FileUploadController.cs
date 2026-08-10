@@ -31,9 +31,10 @@ public class MediaController : ControllerBase
             _videoStorageFolderName = "ravensight_videos";
         }
 
-        _defaultVideoDestination = NormalizeDestinationFolder(
-            configuration["Storage:Video:DefaultFolder"],
-            "wiseravenshare/ravensight/video");
+        _defaultVideoDestination = StoragePathResolver.ResolveDefaultVideoDestination(
+            configuration,
+            environment.ContentRootPath,
+            "wiseravenshare");
     }
 
     [HttpPost("upload")]

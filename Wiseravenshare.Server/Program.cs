@@ -8,6 +8,7 @@ using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Infrastructure.Data.Repositories;
 using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,7 +59,8 @@ static string NormalizeConnectionString(string connectionString)
         Password = password,
         Database = uri.AbsolutePath.Trim('/'),
         SslMode = SslMode.Require,
-        TrustServerCertificate = true
+        TrustServerCertificate = true,
+        Pooling = true
     };
 
     var query = uri.Query?.TrimStart('?') ?? string.Empty;
@@ -141,6 +143,8 @@ static async Task EnsureBucketObjectsRegistryAsync(
         return;
     }
 
+    await DatabasePrivilegeBootstrap.EnsureAppDataPrivilegesAsync(connectionString, cancellationToken);
+
     var safeBucketName = string.IsNullOrWhiteSpace(bucketName) ? "allbuckets1786108292029" : bucketName.Trim();
     var safeFolderPath = NormalizeFolderPath(folderPath);
 
@@ -222,7 +226,7 @@ var configuredClientOrigins = (clientOrigin ?? string.Empty)
 var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
 var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "allbuckets1786108292029";
-var configuredProjectFolder = builder.Configuration["Storage:Blob:ProjectFolder"] ?? "wiseravenshare/";
+var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 builder.Logging.ClearProviders();
@@ -250,6 +254,7 @@ builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
 builder.Services.AddScoped<IRavensightMediaPathService, RavensightMediaPathService>();
+builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageService>();
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
@@ -435,7 +440,33 @@ app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();
 app.UseAuthorization();
+
+var frontendDistPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+var frontendDistExists = Directory.Exists(frontendDistPath);
+
+if (frontendDistExists)
+{
+    app.UseDefaultFiles(new DefaultFilesOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath),
+        DefaultFileNames = new[] { "index.html" }
+    });
+
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath)
+    });
+}
+
 app.MapControllers();
+
+if (frontendDistExists)
+{
+    app.MapFallbackToFile("index.html", new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath)
+    });
+}
 
 // ── Health endpoints ──────────────────────────────────────────────────────────
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));

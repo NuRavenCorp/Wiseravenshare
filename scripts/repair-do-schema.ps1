@@ -146,6 +146,19 @@ $folderEscaped = $ProjectFolder.Replace("'", "''")
 $runtimeSql = @"
 CREATE SCHEMA IF NOT EXISTS app_data;
 
+DO $$
+DECLARE
+    current_role TEXT := current_user;
+BEGIN
+    EXECUTE format('GRANT USAGE, CREATE ON SCHEMA app_data TO %I', current_role);
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app_data TO %I', current_role);
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA app_data TO %I', current_role);
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA app_data TO %I', current_role);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA app_data GRANT ALL ON TABLES TO %I', current_role);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA app_data GRANT ALL ON SEQUENCES TO %I', current_role);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA app_data GRANT ALL ON FUNCTIONS TO %I', current_role);
+END $$;
+
 CREATE TABLE IF NOT EXISTS app_data.app_users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
