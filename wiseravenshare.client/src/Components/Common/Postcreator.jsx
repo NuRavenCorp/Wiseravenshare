@@ -2,6 +2,19 @@ import React, { useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 import { apiService } from '../../Services/api';
 import { appendStoredFeedPost, normalizeFeedPost } from '../../Services/postFeedPayload';
+import {
+    getRavensightLocalSaveRootPreference,
+    saveFileToRavensightFolder,
+    setRavensightLocalSaveRootPreference
+} from '../../utils/ravensightLocalSave';
+
+const RAVENSIGHT_DESTINATION_BY_MEDIA_TYPE = {
+    video: '/wiseravenshare/ravensight/video',
+    photo: '/wiseravenshare/ravensight/photo',
+    audio: '/wiseravenshare/ravensight/music'
+};
+
+const resolveRavensightDestination = (type) => RAVENSIGHT_DESTINATION_BY_MEDIA_TYPE[type] || '/wiseravenshare/ravensight/video';
 
 const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
     const [content, setContent] = useState('');
@@ -18,7 +31,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
     const [facebookPermissionGranted, setFacebookPermissionGranted] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
-    const [destinationFolder, setDestinationFolder] = useState('/wiseravenshare/ravensight/video');
+    const [destinationFolder, setDestinationFolder] = useState(resolveRavensightDestination('video'));
+    const [localSaveRoot, setLocalSaveRoot] = useState(getRavensightLocalSaveRootPreference());
     const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
     const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
@@ -54,10 +68,11 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             // Trust the browser-reported MIME first so upload toggles are accurate.
             if (selected.type?.startsWith('video/')) {
                 setMediaType('video');
+                setDestinationFolder(resolveRavensightDestination('video'));
                 try {
                     const pickedDestination = window.prompt(
                         'Choose destination folder for this video upload:',
-                        destinationFolder || '/wiseravenshare/ravensight/video'
+                        resolveRavensightDestination('video')
                     );
 
                     if (typeof pickedDestination === 'string' && pickedDestination.trim().length > 0) {
@@ -68,10 +83,13 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 }
             } else if (selected.type?.startsWith('image/')) {
                 setMediaType('photo');
+                setDestinationFolder(resolveRavensightDestination('photo'));
             } else if (selected.type?.startsWith('audio/')) {
                 setMediaType('audio');
+                setDestinationFolder(resolveRavensightDestination('audio'));
             } else {
                 setMediaType(type);
+                setDestinationFolder(resolveRavensightDestination(type));
             }
         };
         input.click();
@@ -296,7 +314,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             setYouTubePermissionGranted(false);
             setTikTokPermissionGranted(false);
             setFacebookPermissionGranted(false);
-            setDestinationFolder('/wiseravenshare/ravensight/video');
+            setDestinationFolder(resolveRavensightDestination('video'));
             setUploadProgress(0);
             setIsUploading(false);
 
@@ -306,6 +324,40 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 addTruthAlert('success', `Post published! Truth score: ${truthScore}%`, null);
             }
         }, 1000);
+    };
+
+    const handleSaveMediaToComputer = async () => {
+        if (!mediaFile) {
+            addTruthAlert('warning', 'No media selected to save.', null);
+            return;
+        }
+
+        const resolvedType = mediaType || (mediaFile.type?.startsWith('video/')
+            ? 'video'
+            : mediaFile.type?.startsWith('image/')
+                ? 'photo'
+                : mediaFile.type?.startsWith('audio/')
+                    ? 'audio'
+                    : 'photo');
+
+        const result = await saveFileToRavensightFolder(mediaFile, mediaFile.name || `ravensight_${Date.now()}`, resolvedType, localSaveRoot);
+        if (!result.ok) {
+            addTruthAlert('warning', 'Could not save this file to your computer.', null);
+            return;
+        }
+
+        if (result.mode === 'directory') {
+            const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
+            addTruthAlert('success', `Saved to ${rootLabel}/Ravensight`, null);
+            return;
+        }
+
+        addTruthAlert('success', 'Saved to computer', null);
+    };
+
+    const handleLocalSaveRootChange = (value) => {
+        setLocalSaveRoot(value);
+        setRavensightLocalSaveRootPreference(value);
     };
 
     return (
@@ -493,6 +545,28 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 </div>
             )}
 
+            <div style={{ marginTop: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                    Local Save Folder
+                </label>
+                <select
+                    value={localSaveRoot}
+                    onChange={(e) => handleLocalSaveRootChange(e.target.value)}
+                    style={{
+                        width: '100%',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-color)'
+                    }}
+                >
+                    <option value="auto">Auto (Video to Videos, Photo/Music to Pictures)</option>
+                    <option value="videos">Always Videos</option>
+                    <option value="pictures">Always Pictures</option>
+                </select>
+            </div>
+
             {mediaFile && (
                 <div style={{
                     marginTop: '15px',
@@ -504,21 +578,37 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                     alignItems: 'center'
                 }}>
                     <span>{mediaFile.name}</span>
-                    <button onClick={() => {
-                        setMediaFile(null);
-                        setMediaType(null);
-                        setPublishToYouTube(false);
-                        setPublishToTikTok(false);
-                        setPublishToFacebook(false);
-                        setYouTubePermissionGranted(false);
-                        setTikTokPermissionGranted(false);
-                        setFacebookPermissionGranted(false);
-                    }} style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--error-color)',
-                        cursor: 'pointer'
-                    }}>Remove</button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <button
+                            onClick={handleSaveMediaToComputer}
+                            type="button"
+                            style={{
+                                background: 'none',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '999px',
+                                color: 'var(--light-color)',
+                                padding: '4px 12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Save to Computer
+                        </button>
+                        <button onClick={() => {
+                            setMediaFile(null);
+                            setMediaType(null);
+                            setPublishToYouTube(false);
+                            setPublishToTikTok(false);
+                            setPublishToFacebook(false);
+                            setYouTubePermissionGranted(false);
+                            setTikTokPermissionGranted(false);
+                            setFacebookPermissionGranted(false);
+                        }} style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--error-color)',
+                            cursor: 'pointer'
+                        }}>Remove</button>
+                    </div>
                 </div>
             )}
 

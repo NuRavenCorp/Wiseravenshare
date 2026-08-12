@@ -93,6 +93,8 @@ const buildMediaUploadUrls = (type = '') => {
         ravensightRoutes.push('/ravensight/videos/upload', '/ravensight/media/videos/save');
     } else if (type === 'photo') {
         ravensightRoutes.push('/ravensight/media/photos/save');
+    } else if (type === 'audio') {
+        ravensightRoutes.push('/ravensight/media/music/save');
     }
 
     for (const base of bases) {

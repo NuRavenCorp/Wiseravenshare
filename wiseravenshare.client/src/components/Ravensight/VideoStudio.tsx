@@ -7,6 +7,15 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { videoService } from '../../services/videoService';
 import {
+    getRavensightLocalSaveRootPreference,
+    getRavensightLocalFolderPermission,
+    saveFileToRavensightFolder,
+    setRavensightLocalFolderPermission,
+    setRavensightLocalSaveRootPreference,
+    type RavensightLocalFolderPermission,
+    type RavensightSaveRoot
+} from '../../utils/ravensightLocalSave';
+import {
     FiCamera,
     FiMic,
     FiMicOff,
@@ -36,12 +45,25 @@ export const VideoStudio: React.FC = () => {
     const [privacy, setPrivacy] = useState('unlisted');
     const [isAutoSaving, setIsAutoSaving] = useState(false);
     const [hasAutoSaved, setHasAutoSaved] = useState(false);
+    const [localSaveRoot, setLocalSaveRoot] = useState<RavensightSaveRoot>(getRavensightLocalSaveRootPreference());
+    const [folderPermission, setFolderPermission] = useState<RavensightLocalFolderPermission | null>(null);
+    const [isPermissionLoading, setIsPermissionLoading] = useState(false);
+    const [isPermissionSaving, setIsPermissionSaving] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const chunksRef = useRef<Blob[]>([]);
+
+    const sanitizeFileBaseName = (rawName: string) => {
+        const normalized = String(rawName || '').trim();
+        if (!normalized) {
+            return `recording_${Date.now()}`;
+        }
+
+        return normalized.replace(/[^a-zA-Z0-9-_]/g, '_');
+    };
 
     const buildUploadFormData = (blob: Blob) => {
         const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'video/webm' });
@@ -77,6 +99,34 @@ export const VideoStudio: React.FC = () => {
             if (timerRef.current) {
                 clearInterval(timerRef.current);
             }
+        };
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPermission = async () => {
+            setIsPermissionLoading(true);
+            const permission = await getRavensightLocalFolderPermission();
+            if (!isMounted) {
+                return;
+            }
+
+            if (permission) {
+                setFolderPermission(permission);
+                if (permission.localSaveRoot !== localSaveRoot) {
+                    setLocalSaveRoot(permission.localSaveRoot);
+                    setRavensightLocalSaveRootPreference(permission.localSaveRoot);
+                }
+            }
+
+            setIsPermissionLoading(false);
+        };
+
+        void loadPermission();
+
+        return () => {
+            isMounted = false;
         };
     }, []);
 
@@ -192,20 +242,54 @@ export const VideoStudio: React.FC = () => {
         uploadMutation.mutate(formData);
     };
 
-    const handleSaveToComputer = () => {
+    const handleSaveToComputer = async () => {
         if (!videoURL) {
             toast.error('No video to save');
             return;
         }
 
-        const link = document.createElement('a');
-        const safeTitle = (title || `recording_${Date.now()}`).replace(/[^a-zA-Z0-9-_]/g, '_');
-        link.href = videoURL;
-        link.download = `${safeTitle}.webm`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const blob = await fetch(videoURL).then((response) => response.blob());
+        const safeTitle = sanitizeFileBaseName(title || `recording_${Date.now()}`);
+        const result = await saveFileToRavensightFolder(blob, `${safeTitle}.webm`, 'video', localSaveRoot);
+
+        if (result.mode === 'directory') {
+            const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
+            toast.success(`Saved to ${rootLabel}/Ravensight`);
+            return;
+        }
+
         toast.success('Saved to computer');
+    };
+
+    const handleLocalSaveRootChange = (value: RavensightSaveRoot) => {
+        setLocalSaveRoot(value);
+        setRavensightLocalSaveRootPreference(value);
+    };
+
+    const handleGrantFolderPermission = async () => {
+        try {
+            setIsPermissionSaving(true);
+            const updated = await setRavensightLocalFolderPermission(true, localSaveRoot);
+            setFolderPermission(updated);
+            toast.success('Ravensight folder permission granted.');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Unable to grant folder permission.');
+        } finally {
+            setIsPermissionSaving(false);
+        }
+    };
+
+    const handleRevokeFolderPermission = async () => {
+        try {
+            setIsPermissionSaving(true);
+            const updated = await setRavensightLocalFolderPermission(false, localSaveRoot);
+            setFolderPermission(updated);
+            toast.success('Ravensight folder permission revoked.');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Unable to revoke folder permission.');
+        } finally {
+            setIsPermissionSaving(false);
+        }
     };
 
     const resetStudio = () => {
@@ -378,6 +462,56 @@ export const VideoStudio: React.FC = () => {
 
                     {videoURL && (
                         <div className="p-3 bg-white/5 rounded-lg">
+                            <div className="mb-3 p-3 bg-black/20 rounded-lg border border-border/50">
+                                <div className="text-sm font-medium text-gray-200">Ravensight Folder Identity</div>
+                                <div className="text-xs text-gray-400 mt-1">
+                                    Server copies auto-delete in 7 days unless your local Ravensight folder permission is active.
+                                </div>
+                                <div className="mt-2 text-xs text-gray-300">
+                                    Status: {isPermissionLoading
+                                        ? 'Checking...'
+                                        : folderPermission?.localFolderPermissionGranted
+                                            ? 'Active'
+                                            : 'Not granted'}
+                                </div>
+                                {folderPermission?.folderIdentityKey && (
+                                    <div className="mt-1 text-xs text-gray-500 break-all">
+                                        Key: {folderPermission.folderIdentityKey}
+                                    </div>
+                                )}
+                                <div className="mt-3 flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={handleGrantFolderPermission}
+                                        disabled={isPermissionSaving}
+                                    >
+                                        {isPermissionSaving ? 'Saving...' : 'Grant Permission'}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={handleRevokeFolderPermission}
+                                        disabled={isPermissionSaving || !(folderPermission?.localFolderPermissionGranted)}
+                                    >
+                                        Revoke Permission
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="mb-3">
+                                <label className="block text-sm font-medium text-gray-400 mb-1">
+                                    Local Save Folder
+                                </label>
+                                <select
+                                    value={localSaveRoot}
+                                    onChange={(e) => handleLocalSaveRootChange(e.target.value as RavensightSaveRoot)}
+                                    className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary focus:ring-1 focus:ring-primary transition"
+                                >
+                                    <option value="auto">Auto (Video to Videos, Photo/Music to Pictures)</option>
+                                    <option value="videos">Always Videos</option>
+                                    <option value="pictures">Always Pictures</option>
+                                </select>
+                            </div>
                             <div className="flex items-center gap-2 text-sm text-gray-400">
                                 <FiClock />
                                 <span>Duration: {formatTime(recordingTime)}</span>

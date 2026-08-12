@@ -94,7 +94,7 @@ static string ResolvePrimaryConnectionString(IConfiguration configuration)
 static string ResolveExpectedDatabaseName(IConfiguration configuration)
 {
     var configured = configuration["Database:ExpectedName"]?.Trim();
-    return string.IsNullOrWhiteSpace(configured) ? "wiseravenshare-db" : configured;
+    return string.IsNullOrWhiteSpace(configured) ? "defaultdb" : configured;
 }
 
 static string ExtractDatabaseName(string connectionString)
@@ -263,10 +263,12 @@ builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
+builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
+builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
 
 var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
@@ -399,7 +401,7 @@ using (var scope = app.Services.CreateScope())
             DatabaseConfigured = !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")),
             DatabaseAvailable = videoDbPersistenceAvailable,
             RequiresDatabase = false,
-            ActiveTable = "app_data.ravensight_videos",
+            ActiveTable = "app_data.ravensight_videos_v2",
             LastError = string.Empty,
             TimedOut = false
         }
@@ -515,10 +517,10 @@ app.MapGet("/health/db", async () =>
         {
             "app_data.app_users",
             "public.app_users",
-            "app_data.ravensight_videos",
-            "public.ravensight_videos",
-            "app_data.ravensight_video_comments",
-            "public.ravensight_video_comments",
+            "app_data.ravensight_videos_v2",
+            "public.ravensight_videos_v2",
+            "app_data.ravensight_video_comments_v2",
+            "public.ravensight_video_comments_v2",
             "app_data.bucket_objects",
             "public.bucket_objects"
         };
@@ -583,8 +585,8 @@ ORDER BY ""MigrationId"";";
             .ToArray();
 
         var hasUserTable = actualTables.Contains("app_data.app_users") || actualTables.Contains("public.app_users");
-        var hasVideoTable = actualTables.Contains("app_data.ravensight_videos") || actualTables.Contains("public.ravensight_videos");
-        var hasVideoCommentsTable = actualTables.Contains("app_data.ravensight_video_comments") || actualTables.Contains("public.ravensight_video_comments");
+        var hasVideoTable = actualTables.Contains("app_data.ravensight_videos_v2") || actualTables.Contains("public.ravensight_videos_v2");
+        var hasVideoCommentsTable = actualTables.Contains("app_data.ravensight_video_comments_v2") || actualTables.Contains("public.ravensight_video_comments_v2");
         var hasBucketObjectsTable = actualTables.Contains("app_data.bucket_objects") || actualTables.Contains("public.bucket_objects");
 
         var missingLegacyRetentionTables = expectedLegacyRetentionTables
