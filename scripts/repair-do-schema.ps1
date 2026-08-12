@@ -2,7 +2,7 @@ param(
     [string]$TargetConnectionString = $env:DATABASE_URL,
     [string]$ExpectedDatabaseName = "wiseravenshare-db",
     [string]$Project = "Wiseravenshare.Server/Wiseravenshare.Server.csproj",
-    [string]$BucketName = "allbuckets1786108292029",
+    [string]$BucketName = "bucket-wrs-01010",
     [string]$ProjectFolder = "wiseravenshare/"
 )
 

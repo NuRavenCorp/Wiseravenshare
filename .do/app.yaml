@@ -44,7 +44,7 @@ services:
       - key: Storage__Blob__ProjectFolder
         value: wiseravenshare/
       - key: Storage__Blob__BucketName
-        value: allbuckets1786108292029
+        value: bucket-wrs-01010
       - key: Persistence__RequireDatabase
         value: "true"
       - key: STRIPE_SECRET_KEY
