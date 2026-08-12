@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,13 +21,15 @@ public sealed class RavensightVideoMediaController : ControllerBase
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightVideoMediaController> _logger;
+    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore)
     {
         _videoService = videoService;
         _videoLibraryStore = videoLibraryStore;
         _dbContext = dbContext;
         _logger = logger;
+        _mediaCatalogStore = mediaCatalogStore;
     }
 
     [HttpPost("save")]
@@ -66,6 +69,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
         var mediaUrl = !string.IsNullOrWhiteSpace(saved.File.PublicUrl)
             ? saved.File.PublicUrl
             : $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.File.FileName)}";
+        var persistenceStatus = "ready";
         var response = new RavensightSavedMediaDto
         {
             FileName = saved.File.FileName,
@@ -76,6 +80,28 @@ public sealed class RavensightVideoMediaController : ControllerBase
             SavedAtUtc = saved.File.SavedAtUtc,
             MediaUrl = mediaUrl
         };
+
+        var preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
+        var mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+        {
+            UserId = userId,
+            MediaType = RavensightMediaType.Video,
+            FileName = saved.File.FileName,
+            RelativePath = saved.File.RelativePath,
+            PublicUrl = saved.File.PublicUrl,
+            AbsolutePath = saved.File.AbsolutePath,
+            DestinationFolder = saved.File.DestinationFolder,
+            ContentType = saved.File.ContentType,
+            SizeBytes = saved.File.SizeBytes,
+            SavedAtUtc = saved.File.SavedAtUtc,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                title = dto.Title,
+                description = dto.Description,
+                privacy = dto.Privacy,
+                storageMode = resolvedStorageMode
+            })
+        }, cancellationToken);
 
         VideoLibraryVideo persistedVideo;
         try
@@ -95,12 +121,14 @@ public sealed class RavensightVideoMediaController : ControllerBase
         }
         catch (PostgresException ex)
         {
-            _logger.LogWarning(ex, "Video library save failed at DB layer for user {UserId}; serving a local fallback video object.", userId);
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}; serving a local fallback video object.", userId);
             persistedVideo = BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Video library save failed unexpectedly for user {UserId}; serving a local fallback video object.", userId);
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}; serving a local fallback video object.", userId);
             persistedVideo = BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription);
         }
 
@@ -111,7 +139,16 @@ public sealed class RavensightVideoMediaController : ControllerBase
             filePath = mediaUrl,
             mediaUrl,
             video = persistedVideo,
-            persistenceStatus = "degraded"
+            persistenceStatus,
+            mediaAssetId = mediaRecord.Id,
+            retention = new
+            {
+                days = VideoRetentionPolicy.TemporaryRetentionDays,
+                expiresAtUtc = mediaRecord.ExpiresAtUtc,
+                warning = $"This Ravensight server copy will auto-delete in {VideoRetentionPolicy.TemporaryRetentionDays} days unless you save it to your local Ravensight folder.",
+                localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
+                localFolderIdentityKey = preference?.FolderIdentityKey
+            }
         });
     }
 
