@@ -33,6 +33,17 @@ const Header = ({ onLogout, user }) => {
                         letterSpacing: '0.08em',
                         textTransform: 'uppercase'
                     }}>Ravensight Active</span>
+                    <span style={{
+                        background: 'rgba(255, 72, 72, 0.12)',
+                        border: '1px solid rgba(255, 114, 114, 0.6)',
+                        color: '#ffd1d1',
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase'
+                    }}>Liars, beware.</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <span>Welcome, {user?.name || 'Guest'}</span>
