@@ -2,23 +2,39 @@ import React, { useEffect, useRef, useState } from 'react';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import { authService } from '../Services/Auth.jsx';
 
+const AUTH_DRAFT_KEY = 'wiseAuthFormDraft';
+
+const readAuthDraft = () => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(AUTH_DRAFT_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
 const LoginPage = ({ onAuth }) => {
-    const [mode, setMode] = useState('login');
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [resetToken, setResetToken] = useState('');
-    const [bio, setBio] = useState('');
-    const [location, setLocation] = useState('');
-    const [website, setWebsite] = useState('');
-    const [referralCode, setReferralCode] = useState('');
+    const initialDraft = readAuthDraft();
+    const [mode, setMode] = useState(initialDraft?.mode || 'login');
+    const [name, setName] = useState(initialDraft?.name || '');
+    const [email, setEmail] = useState(initialDraft?.email || '');
+    const [password, setPassword] = useState(initialDraft?.password || '');
+    const [resetToken, setResetToken] = useState(initialDraft?.resetToken || '');
+    const [bio, setBio] = useState(initialDraft?.bio || '');
+    const [location, setLocation] = useState(initialDraft?.location || '');
+    const [website, setWebsite] = useState(initialDraft?.website || '');
+    const [referralCode, setReferralCode] = useState(initialDraft?.referralCode || '');
     const [avatarFile, setAvatarFile] = useState(null);
-    const [avatarPreview, setAvatarPreview] = useState('');
+    const [avatarPreview, setAvatarPreview] = useState(initialDraft?.avatarPreview || '');
     const [cameraOpen, setCameraOpen] = useState(false);
     const [cameraError, setCameraError] = useState('');
     const [cameraStream, setCameraStream] = useState(null);
     const [error, setError] = useState('');
-    const [info, setInfo] = useState('');
+    const [info, setInfo] = useState(initialDraft?.info || '');
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
 
@@ -42,6 +58,28 @@ const LoginPage = ({ onAuth }) => {
         setMode('signup');
         setInfo('Referral code detected. Complete signup to redeem it.');
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const payload = {
+            mode,
+            name,
+            email,
+            password,
+            resetToken,
+            bio,
+            location,
+            website,
+            referralCode,
+            avatarPreview,
+            info
+        };
+
+        window.localStorage.setItem(AUTH_DRAFT_KEY, JSON.stringify(payload));
+    }, [mode, name, email, password, resetToken, bio, location, website, referralCode, avatarPreview, info]);
 
     useEffect(() => {
         if (cameraOpen && videoRef.current && cameraStream) {
@@ -117,6 +155,12 @@ const LoginPage = ({ onAuth }) => {
         setAvatarPreview(dataUrl);
         setAvatarFile(null);
         stopCamera();
+    };
+
+    const clearAuthDraft = () => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(AUTH_DRAFT_KEY);
+        }
     };
 
     const submit = async () => {
@@ -197,6 +241,7 @@ const LoginPage = ({ onAuth }) => {
                 avatarFile,
                 referralCode
             });
+            clearAuthDraft();
         } catch (err) {
             setError(err?.message || 'Authentication failed.');
         }
@@ -226,18 +271,35 @@ const LoginPage = ({ onAuth }) => {
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '22px' }}>
                     <WiseRavenLogo size="hero" />
                 </div>
+                <div
+                    className="ancient-warning-banner"
+                    style={{
+                        marginBottom: '18px',
+                        padding: '12px 14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(255, 176, 77, 0.7)',
+                        background: 'linear-gradient(135deg, rgba(118, 45, 18, 0.8), rgba(255, 82, 82, 0.2), rgba(76, 35, 18, 0.75))',
+                        color: '#fff4d6',
+                        fontWeight: 800,
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase',
+                        textAlign: 'center',
+                        boxShadow: 'inset 0 0 18px rgba(255, 214, 120, 0.18), 0 0 18px rgba(255, 160, 74, 0.2)'
+                    }}
+                >
+                    Liars, beware.
+                </div>
                 <h2 style={{ marginBottom: '12px' }}>
                     {mode === 'signup' && 'Create Account'}
                     {mode === 'login' && 'Sign In'}
                     {mode === 'forgot' && 'Forgot Password'}
                     {mode === 'reset' && 'Reset Password'}
                 </h2>
-                <p style={{ marginBottom: '20px', color: 'var(--light-color)' }}>
-                    {mode === 'signup' && 'Sign up to start posting and messaging.'}
-                    {mode === 'login' && 'Sign in to your account.'}
-                    {mode === 'forgot' && 'Enter your account email to request a reset token.'}
-                    {mode === 'reset' && 'Paste your reset token and choose a new password.'}
-                </p>
+                <div style={{ marginBottom: '20px', color: 'var(--light-color)', lineHeight: 1.6 }}>
+                    <p style={{ margin: 0 }}>
+                        in ancient Egypt it was considered a terribe crime to knowingly lie. Things like the All seeing eye was mean to invoke that whether you kn ew it or not, the Gods were watching. Real men and women did not degrade themselves by lying, it was/ is and always will be a cowardly act.
+                    </p>
+                </div>
 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button
