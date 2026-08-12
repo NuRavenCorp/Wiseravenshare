@@ -55,6 +55,18 @@ export const GlobalStyles = () = > (
                 line-height: 1.6;
                 min-height: 100vh;
                 overflow-x: hidden;
+                max-width: 100%;
+            }
+
+            #root, #app, main, section, article, div, p, span, li, td, th {
+                max-width: 100%;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+
+            img, svg, video {
+                max-width: 100%;
+                display: block;
             }
 
             /* Scrollbar Styling */

@@ -1,4 +1,6 @@
 ﻿// Wiseravenshare.Server/DTOs/Auth/LoginRequestDto.cs
+using System.ComponentModel.DataAnnotations;
+
 namespace Wiseravenshare.Server.DTOs.Auth
 {
 
@@ -51,6 +53,9 @@ namespace Wiseravenshare.Server.DTOs.Auth
 
     public class RefreshTokenRequestDto
     {
+        [Required]
+        public string AccessToken { get; set; } = string.Empty;
+
         [Required]
         public string RefreshToken { get; set; } = string.Empty;
     }

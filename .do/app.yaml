@@ -35,7 +35,7 @@ services:
       - key: Authentication__Users__0__Email
         value: admin@wise-ravens.com
       - key: Authentication__Users__0__Password
-        value: 1@Chinchin234
+        value: CHANGE_ME
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
