@@ -44,6 +44,16 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+const isAuthEndpoint = (url = '') => {
+    const value = String(url || '').toLowerCase();
+    return value.includes('/auth/login')
+        || value.includes('/auth/register')
+        || value.includes('/auth/verify')
+        || value.includes('/auth/forgot-password')
+        || value.includes('/auth/reset-password')
+        || value.includes('/auth/status');
+};
+
 const handleUnauthorized = () => {
     clearAuthToken();
     try {
@@ -216,7 +226,9 @@ api.interceptors.response.use(
     (response) => response,
     async (error) => {
         const status = error?.response?.status;
-        if (status === 401 || status === 403) {
+        const requestUrl = String(error?.config?.url || '');
+        const hasToken = Boolean(getAuthToken());
+        if ((status === 401 || status === 403) && hasToken && !isAuthEndpoint(requestUrl)) {
             handleUnauthorized();
         }
         return Promise.reject(error);
