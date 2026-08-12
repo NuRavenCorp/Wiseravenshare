@@ -186,7 +186,7 @@ static async Task EnsureBucketObjectsRegistryAsync(
 
     await DatabasePrivilegeBootstrap.EnsureAppDataPrivilegesAsync(connectionString, cancellationToken);
 
-    var safeBucketName = string.IsNullOrWhiteSpace(bucketName) ? "allbuckets1786108292029" : bucketName.Trim();
+    var safeBucketName = string.IsNullOrWhiteSpace(bucketName) ? "bucket-wrs-01010" : bucketName.Trim();
     var safeFolderPath = NormalizeFolderPath(folderPath);
 
     var bucketLiteral = ToSqlLiteral(safeBucketName);
@@ -266,7 +266,7 @@ var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .ToArray();
 var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
-var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "allbuckets1786108292029";
+var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "bucket-wrs-01010";
 var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
 
 // ── Logging ──────────────────────────────────────────────────────────────────
