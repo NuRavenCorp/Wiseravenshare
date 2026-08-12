@@ -2,6 +2,7 @@
 // Planner State Management System
 import { computeTaskPriorityScore, getRecommendedPriority } from './EngagementAlgorithms';
 import { apiService } from './api';
+import { getAuthToken } from './authStorage';
 
 class PlannerState {
     constructor() {
