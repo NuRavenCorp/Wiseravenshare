@@ -584,7 +584,7 @@ CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     id TEXT PRIMARY KEY,
     owner_user_id UUID NULL,
     provider TEXT NOT NULL DEFAULT 'digitalocean_spaces',
-    bucket_name TEXT NOT NULL DEFAULT 'allbuckets1786108292029',
+    bucket_name TEXT NOT NULL DEFAULT 'bucket-wrs-01010',
     region TEXT NOT NULL,
     endpoint TEXT NOT NULL,
     folder_path TEXT NOT NULL DEFAULT 'wiseravenshare/',
