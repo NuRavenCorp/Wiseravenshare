@@ -136,7 +136,11 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         setError(null);
         try {
-            const response = await authService.register(userData);
+            let response = await authService.register(userData);
+            if (!response?.token && userData?.email && userData?.password) {
+                // Some environments complete account creation but omit token payloads.
+                response = await authService.login(userData.email, userData.password);
+            }
             const normalizedUser = normalizeUser(response.user);
             setUser(normalizedUser);
             authService.setToken(response.token);
