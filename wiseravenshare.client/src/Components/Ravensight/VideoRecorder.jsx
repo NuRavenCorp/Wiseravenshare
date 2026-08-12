@@ -4,6 +4,7 @@ import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
 const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
+    const defaultDestinationFolder = '/wiseravenshare/ravensight/video';
     const [isRecording, setIsRecording] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [recordedChunks, setRecordedChunks] = useState([]);
@@ -35,20 +36,6 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const { user } = useAuth();
-
-    const askDestinationFolder = () => {
-        if (typeof window === 'undefined') {
-            return '/wiseravenshare/ravensight/video';
-        }
-
-        const input = window.prompt(
-            'Choose a destination folder for this video (default: /wiseravenshare/ravensight/video)',
-            '/wiseravenshare/ravensight/video'
-        );
-
-        const value = String(input || '').trim();
-        return value || '/wiseravenshare/ravensight/video';
-    };
 
     const persistLocalVideo = (video) => {
         try {
@@ -125,14 +112,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                     videoRef.current.src = url;
                 }
 
-                const shouldSave = typeof window !== 'undefined'
-                    ? window.confirm('Save this recording now?')
-                    : true;
-
-                if (shouldSave) {
-                    const destinationFolder = askDestinationFolder();
-                    await uploadVideo({ libraryOnly: true, destinationFolder, chunksOverride: chunks });
-                }
+                onNotification('Recording ready. Use Save to Library when you are ready.', 'info');
             };
 
             mediaRecorder.start(1000);
@@ -236,7 +216,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
             const wantsPermanentStorage = Boolean(savePermanently);
-            formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
+            formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
             formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
             formData.append('isPermanent', String(wantsPermanentStorage));
 
@@ -252,6 +232,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                     channelAvatar: response.video.channelAvatar || user?.avatar,
                     videoUrl: response.video.videoUrl || videoURL
                 });
+                window.dispatchEvent(new CustomEvent('ravensight:video-saved', { detail: response.video }));
             }
 
             onNotification(libraryOnly ? 'Video saved to library!' : 'Video uploaded successfully!', 'success');
@@ -266,7 +247,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     };
 
     const handleUploadToSocials = () => uploadVideo({ libraryOnly: false });
-    const handleSaveToLibrary = () => uploadVideo({ libraryOnly: true });
+    const handleSaveToLibrary = () => uploadVideo({ libraryOnly: true, destinationFolder: defaultDestinationFolder });
 
     const formatTime = (seconds) => {
         const hrs = Math.floor(seconds / 3600);

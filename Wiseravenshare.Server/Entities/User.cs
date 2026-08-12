@@ -23,6 +23,10 @@ namespace Wiseravenshare.Server.Entities
         public int ReputationPoints { get; set; }
         public DateTime? LastLoginAt { get; set; }
         public DateTime? LastActiveAt { get; set; }
+        public string? RefreshToken { get; set; }
+        public DateTime? RefreshTokenExpiryTime { get; set; }
+        public string? PasswordResetToken { get; set; }
+        public DateTime? PasswordResetTokenExpiryTime { get; set; }
         public DateTime? DeletedAt { get; set; }
 
         // Navigation Properties

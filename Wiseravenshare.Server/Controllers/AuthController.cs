@@ -21,6 +21,7 @@ public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, PasswordResetRecord> PasswordResetsByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, RefreshTokenRecord> RefreshTokensByToken = new(StringComparer.Ordinal);
     private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
     private const int MaxFailedLoginAttempts = 5;
@@ -114,10 +115,11 @@ public class AuthController : ControllerBase
 
         var domainUserId = await EnsureDomainUserAsync(user);
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
-        return Ok(new { token, user = responseUser });
+        return Ok(new { token, refreshToken, user = responseUser });
     }
 
     [HttpPost("login")]
@@ -158,10 +160,41 @@ public class AuthController : ControllerBase
 
         var domainUserId = await EnsureDomainUserAsync(user);
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
-        return Ok(new { token, user = responseUser });
+        return Ok(new { token, refreshToken, user = responseUser });
+    }
+
+    [HttpPost("refresh-token")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RefreshToken))
+        {
+            return BadRequest(new { message = "Refresh token is required." });
+        }
+
+        if (!RefreshTokensByToken.TryGetValue(request.RefreshToken, out var record) || record.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            return Unauthorized(new { message = "Refresh token is invalid or expired." });
+        }
+
+        if (!_userStore.TryGetById(record.UserId, out var user) || user is null)
+        {
+            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            return Unauthorized(new { message = "User not found." });
+        }
+
+        RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+
+        var domainUserId = await EnsureDomainUserAsync(user);
+        var newToken = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var newRefreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+
+        return Ok(new { token = newToken, refreshToken = newRefreshToken });
     }
 
     [HttpPost("verify")]
@@ -218,7 +251,54 @@ public class AuthController : ControllerBase
     [Authorize]
     public IActionResult Logout()
     {
-        return Ok(new { success = true });
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            var tokensToRemove = RefreshTokensByToken.Where(pair => pair.Value.UserId == userId).ToList();
+            foreach (var pair in tokensToRemove)
+            {
+                RefreshTokensByToken.TryRemove(pair.Key, out _);
+            }
+        }
+
+        return Ok(new { success = true, message = "Logged out successfully" });
+    }
+
+    [HttpPost("change-password")]
+    [Authorize]
+    public IActionResult ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized(new { message = "User not authenticated." });
+        }
+
+        if (!_userStore.TryGetById(userId, out var user) || user is null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        if (!UserStore.VerifyPassword(request.CurrentPassword, user.PasswordHash))
+        {
+            return BadRequest(new { message = "Current password is incorrect." });
+        }
+
+        if (!MeetsPasswordPolicy(request.NewPassword))
+        {
+            return BadRequest(new { message = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character." });
+        }
+
+        try
+        {
+            _userStore.UpdatePassword(user.Email, request.NewPassword);
+            return Ok(new { success = true, message = "Password changed successfully." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to change password for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to change password." });
+        }
     }
 
     [HttpGet("status")]
@@ -370,6 +450,20 @@ public class AuthController : ControllerBase
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private string GenerateRefreshToken(string userId)
+    {
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        var expiresAtUtc = DateTime.UtcNow.AddDays(7);
+        
+        RefreshTokensByToken[token] = new RefreshTokenRecord
+        {
+            UserId = userId,
+            ExpiresAtUtc = expiresAtUtc
+        };
+
+        return token;
     }
 
     private string GetJwtKey()
@@ -626,6 +720,12 @@ public class AuthController : ControllerBase
         public int FailedCount { get; set; }
         public DateTime? LockedOutUntilUtc { get; set; }
     }
+
+    private sealed class RefreshTokenRecord
+    {
+        public string UserId { get; set; } = string.Empty;
+        public DateTime ExpiresAtUtc { get; set; }
+    }
 }
 
 public sealed class LoginRequest
@@ -659,5 +759,16 @@ public sealed class ForgotPasswordRequest
 public sealed class ResetPasswordRequest
 {
     public string Token { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+public sealed class RefreshTokenRequest
+{
+    public string RefreshToken { get; set; } = string.Empty;
+}
+
+public sealed class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = string.Empty;
     public string NewPassword { get; set; } = string.Empty;
 }
