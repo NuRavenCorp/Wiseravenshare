@@ -23,12 +23,29 @@
     box-sizing: border-box;
 }
 
+html, body, #root, #app {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: var(--bg-color);
     background-image: radial-gradient(circle at 20% 0%, rgba(79, 116, 214, 0.18), transparent 45%), radial-gradient(circle at 80% 10%, rgba(163, 58, 93, 0.16), transparent 40%);
     color: var(--text-color);
     line-height: 1.6;
+    max-width: 100%;
+}
+
+p, span, div, li, td, th, a, button, input, textarea {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+img, svg, video {
+    max-width: 100%;
+    display: block;
 }
 
 /* Scrollbar Styling */
@@ -74,6 +91,40 @@ body {
     display: grid;
     grid-template-columns: 280px 1fr 320px;
     gap: 20px;
+}
+
+@keyframes warningPulse {
+    0% {
+        box-shadow: 0 0 0 rgba(255, 176, 77, 0), 0 0 0 rgba(255, 86, 86, 0);
+        filter: brightness(1);
+    }
+    50% {
+        box-shadow: 0 0 22px rgba(255, 176, 77, 0.45), 0 0 36px rgba(255, 86, 86, 0.2);
+        filter: brightness(1.08);
+    }
+    100% {
+        box-shadow: 0 0 0 rgba(255, 176, 77, 0), 0 0 0 rgba(255, 86, 86, 0);
+        filter: brightness(1);
+    }
+}
+
+@keyframes eyeGlow {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 rgba(255, 209, 102, 0);
+    }
+    50% {
+        transform: scale(1.03);
+        box-shadow: 0 0 28px rgba(255, 209, 102, 0.5), 0 0 44px rgba(240, 155, 82, 0.28);
+    }
+}
+
+.ancient-warning-banner {
+    animation: warningPulse 3s ease-in-out infinite;
+}
+
+.ancient-raven-mark {
+    animation: eyeGlow 3.2s ease-in-out infinite;
 }
 
 @media (max-width: 1200px) {
@@ -185,6 +236,21 @@ body {
     }
     100% {
         transform: rotate(0deg) scaleY(1);
+    }
+}
+
+@keyframes heart-pop {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.5);
+    }
+    18% {
+        opacity: 1;
+        transform: translate(-50%, -60%) scale(1.15);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -120%) scale(1.45);
     }
 }
 
