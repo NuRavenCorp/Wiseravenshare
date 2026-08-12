@@ -129,7 +129,7 @@ public sealed class PersistenceController : ControllerBase
                     DatabaseConfigured = !string.IsNullOrWhiteSpace(_configuration.GetConnectionString("DefaultConnection")),
                     DatabaseAvailable = videoAvailable,
                     RequiresDatabase = false,
-                    ActiveTable = "app_data.ravensight_videos",
+                    ActiveTable = "app_data.ravensight_videos_v2",
                     LastError = videoError,
                     TimedOut = videoTimedOut
                 }

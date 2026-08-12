@@ -4,28 +4,17 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Wiseravenshare.Server.DTOs.Auth;
+using Wiseravenshare.Server.DTOs.User;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Interfaces.Repositories;
-using Wiseravenshare.Server.DTOs.User;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Services
 {
-
-    public interface IAuthService
-    {
-        Task<AuthResponseDto> LoginAsync(LoginRequestDto request);
-        Task<AuthResponseDto> RegisterAsync(RegisterRequestDto request);
-        Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenRequestDto request);
-        Task LogoutAsync(Guid userId);
-        Task<bool> ValidateTokenAsync(string token);
-        Task ChangePasswordAsync(Guid userId, ChangePasswordRequestDto request);
-        Task<UserDto> GetCurrentUserAsync(Guid userId);
-    }
-
     public class AuthService : IAuthService
     {
         private readonly IUserRepository _userRepository;
@@ -62,11 +51,16 @@ namespace Wiseravenshare.Server.Services
 
             // Update last login
             user.LastLoginAt = DateTime.UtcNow;
-            await _userRepository.UpdateAsync(user);
 
             // Generate tokens
             var accessToken = GenerateJwtToken(user);
             var refreshToken = GenerateRefreshToken();
+
+            // Store refresh token
+            user.RefreshToken = refreshToken;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+            
+            await _userRepository.UpdateAsync(user);
 
             _logger.LogInformation($"User {user.Email} logged in successfully");
 
@@ -101,14 +95,11 @@ namespace Wiseravenshare.Server.Services
                 PasswordHash = PasswordHelper.HashPassword(request.Password),
                 AvatarUrl = request.AvatarUrl,
                 IsActive = true,
-                TruthScore = 50.00m
+                TruthScore = 50.00m,
+                CreatedAt = DateTime.UtcNow
             };
 
             await _userRepository.AddAsync(user);
-
-            // Initialize user settings
-            var settings = new UserSettings { UserId = user.Id };
-            // Add settings to context
 
             _logger.LogInformation($"New user registered: {user.Email}");
 
@@ -118,6 +109,11 @@ namespace Wiseravenshare.Server.Services
             // Generate tokens
             var accessToken = GenerateJwtToken(user);
             var refreshToken = GenerateRefreshToken();
+
+            // Store refresh token
+            user.RefreshToken = refreshToken;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+            await _userRepository.UpdateAsync(user);
 
             return new AuthResponseDto
             {
@@ -130,23 +126,68 @@ namespace Wiseravenshare.Server.Services
 
         public async Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenRequestDto request)
         {
-            // Validate refresh token (simplified - store in database in production)
             if (string.IsNullOrEmpty(request.RefreshToken))
             {
                 throw new UnauthorizedException("Invalid refresh token");
             }
 
-            // Get user from token (simplified)
-            // In production, store refresh tokens in database with expiration
+            // Get principal from expired access token
+            var principal = GetPrincipalFromExpiredToken(request.AccessToken);
+            if (principal == null)
+            {
+                throw new UnauthorizedException("Invalid access token");
+            }
 
-            throw new NotImplementedException("Refresh token validation not implemented");
+            var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            {
+                throw new UnauthorizedException("Invalid token claims");
+            }
+
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null || !user.IsActive)
+            {
+                throw new UnauthorizedException("User not found");
+            }
+
+            // Validate refresh token
+            if (user.RefreshToken != request.RefreshToken || 
+                user.RefreshTokenExpiryTime == null || 
+                user.RefreshTokenExpiryTime <= DateTime.UtcNow)
+            {
+                throw new UnauthorizedException("Invalid or expired refresh token");
+            }
+
+            // Generate new tokens
+            var newAccessToken = GenerateJwtToken(user);
+            var newRefreshToken = GenerateRefreshToken();
+
+            user.RefreshToken = newRefreshToken;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+            await _userRepository.UpdateAsync(user);
+
+            _logger.LogInformation($"Token refreshed for user {user.Email}");
+
+            return new AuthResponseDto
+            {
+                AccessToken = newAccessToken,
+                RefreshToken = newRefreshToken,
+                User = MapToUserDto(user),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+            };
         }
 
         public async Task LogoutAsync(Guid userId)
         {
-            // Clear refresh token from database
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user != null)
+            {
+                user.RefreshToken = null;
+                user.RefreshTokenExpiryTime = null;
+                await _userRepository.UpdateAsync(user);
+            }
+
             _logger.LogInformation($"User {userId} logged out");
-            await Task.CompletedTask;
         }
 
         public async Task<bool> ValidateTokenAsync(string token)
@@ -206,6 +247,58 @@ namespace Wiseravenshare.Server.Services
             return MapToUserDto(user);
         }
 
+        public async Task<bool> ForgotPasswordAsync(string email)
+        {
+            var user = await _userRepository.GetByEmailAsync(email);
+            if (user == null || !user.IsActive)
+            {
+                // Return true to prevent email enumeration
+                _logger.LogWarning($"Password reset requested for non-existent email: {email}");
+                return true;
+            }
+
+            // Generate password reset token
+            var resetToken = GenerateRefreshToken();
+            user.PasswordResetToken = resetToken;
+            user.PasswordResetTokenExpiryTime = DateTime.UtcNow.AddHours(1);
+            await _userRepository.UpdateAsync(user);
+
+            // Send password reset email
+            await _emailService.SendPasswordResetEmailAsync(user.Email, user.DisplayName, resetToken);
+
+            _logger.LogInformation($"Password reset email sent to {user.Email}");
+            return true;
+        }
+
+        public async Task<bool> ResetPasswordAsync(string token, string newPassword)
+        {
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(newPassword))
+            {
+                throw new BadRequestException("Invalid reset token or password");
+            }
+
+            // Find user by reset token
+            var users = await _userRepository.GetAllAsync();
+            var user = users.FirstOrDefault(u => 
+                u.PasswordResetToken == token && 
+                u.PasswordResetTokenExpiryTime.HasValue &&
+                u.PasswordResetTokenExpiryTime > DateTime.UtcNow);
+
+            if (user == null)
+            {
+                throw new BadRequestException("Invalid or expired reset token");
+            }
+
+            // Reset password
+            user.PasswordHash = PasswordHelper.HashPassword(newPassword);
+            user.PasswordResetToken = null;
+            user.PasswordResetTokenExpiryTime = null;
+            await _userRepository.UpdateAsync(user);
+
+            _logger.LogInformation($"Password reset successful for user {user.Email}");
+            return true;
+        }
+
         private string GenerateJwtToken(User user)
         {
             var key = new SymmetricSecurityKey(
@@ -214,21 +307,21 @@ namespace Wiseravenshare.Server.Services
 
             var claims = new[]
             {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(ClaimTypes.Email, user.Email),
-            new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
-            new Claim(ClaimTypes.Name, user.Username),
-            new Claim("role", user.Role.ToString()),
-            new Claim(ClaimTypes.Role, user.Role.ToString()),
-            new Claim("truthScore", user.TruthScore.ToString()),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim(
-                JwtRegisteredClaimNames.Iat,
-                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
-                ClaimValueTypes.Integer64)
-        };
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim("role", user.Role.ToString()),
+                new Claim(ClaimTypes.Role, user.Role.ToString()),
+                new Claim("truthScore", user.TruthScore.ToString()),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(
+                    JwtRegisteredClaimNames.Iat,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                    ClaimValueTypes.Integer64)
+            };
 
             var token = new JwtSecurityToken(
                 issuer: _configuration["Jwt:Issuer"] ?? "wiseravenshare.com",
@@ -243,7 +336,43 @@ namespace Wiseravenshare.Server.Services
 
         private string GenerateRefreshToken()
         {
-            return Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+            var randomNumber = new byte[32];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
+
+        private ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
+        {
+            try
+            {
+                var tokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateAudience = true,
+                    ValidAudience = _configuration["Jwt:Audience"],
+                    ValidateIssuer = true,
+                    ValidIssuer = _configuration["Jwt:Issuer"],
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(
+                        Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "default-secret-key-32-chars-minimum")),
+                    ValidateLifetime = false // Don't validate expiration for refresh
+                };
+
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
+
+                if (securityToken is not JwtSecurityToken jwtSecurityToken ||
+                    !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return null;
+                }
+
+                return principal;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private UserDto MapToUserDto(User user)

@@ -22,6 +22,7 @@ import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
+import { apiService } from './Services/api';
 import './Styles/Global.css';
 
 const parseAdminEmails = () => {
@@ -190,6 +191,28 @@ const App = () => {
         addToast('You have been logged out.', 'info');
     };
 
+    const handleSponsor = async () => {
+        try {
+            const response = await apiService.createCheckoutSession({
+                plan: 'sponsorship',
+                billingCycle: 'monthly',
+                successUrl: `${window.location.origin}/?subscription=success`,
+                cancelUrl: `${window.location.origin}/?subscription=cancelled`
+            });
+
+            const checkoutUrl = response?.data?.url;
+            if (checkoutUrl) {
+                window.location.assign(checkoutUrl);
+                return;
+            }
+
+            throw new Error('Missing Stripe sponsorship checkout URL.');
+        } catch (error) {
+            const message = error?.response?.data?.message || error?.message || 'Sponsorship checkout is unavailable right now.';
+            addToast(message, 'error');
+        }
+    };
+
     const enterRavensightMode = () => {
         setCurrentPage('ravensight');
         setIsRavensightMode(true);
@@ -293,7 +316,7 @@ const App = () => {
     if (isRavensightMode) {
         return (
             <div>
-                <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} user={user} />
+                <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
                 <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                     <button
                         onClick={exitRavensightMode}
@@ -319,7 +342,7 @@ const App = () => {
 
     return (
         <div>
-            <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} user={user} />
+            <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
             <TruthAlert alerts={truthAlerts} onDismiss={(id) => setTruthAlerts(prev => prev.filter(a => a.id !== id))} />
             <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

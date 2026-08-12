@@ -39,6 +39,54 @@
       "EventName": "login_success",
       "CreatedAtUtc": "2026-08-06T01:21:41.1208436Z",
       "Metadata": {}
+    },
+    {
+      "Id": "3a54610d8d87488e9f360e93f3170b21",
+      "UserId": "b7ff968ced02406d8ceec4a6fb397b5a",
+      "Email": "arnold_spence308@outlook.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-10T04:01:58.8680043Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "9cac4079da164995ad88816854c3c517",
+      "UserId": "b7ff968ced02406d8ceec4a6fb397b5a",
+      "Email": "arnold_spence308@outlook.com",
+      "EventName": "paywall_variant_assigned",
+      "CreatedAtUtc": "2026-08-10T04:02:12.7455513Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro",
+        "variant": "control"
+      }
+    },
+    {
+      "Id": "b16906b2aa3743b08398e517e23c8798",
+      "UserId": "b7ff968ced02406d8ceec4a6fb397b5a",
+      "Email": "arnold_spence308@outlook.com",
+      "EventName": "paywall_variant_assigned",
+      "CreatedAtUtc": "2026-08-10T04:04:03.9942798Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro",
+        "variant": "control"
+      }
+    },
+    {
+      "Id": "629fa3c903d545659a95ec8f06b910ef",
+      "UserId": "3501285becec424bb74bce74bd86ab2c",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-10T15:27:18.4312313Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "6950a227c0584632b606711ab9caa9b3",
+      "UserId": "3501285becec424bb74bce74bd86ab2c",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-10T15:36:05.3325682Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],

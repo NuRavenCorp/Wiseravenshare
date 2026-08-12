@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: wiseravenshare_db
       POSTGRES_USER: wiseravenshare_user
-      POSTGRES_PASSWORD: 1@Chinchin234
+      POSTGRES_PASSWORD: CHANGE_ME
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -39,7 +39,7 @@ services:
     container_name: wiseravenshare_api
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=wiseravenshare_db;Username=wiseravenshare_user;Password=1@Chinchin234
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=wiseravenshare_db;Username=wiseravenshare_user;Password=CHANGE_ME
       - Redis__ConnectionString=redis:6379,password=${REDIS_PASSWORD:-redis123}
       - Jwt__Key=${JWT_SECRET_KEY}
       - Jwt__Issuer=wiseravenshare.com

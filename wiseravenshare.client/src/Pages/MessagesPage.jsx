@@ -317,15 +317,6 @@ const MessagesPage = () => {
                         </button>
                     </div>
 
-                    {isRavenDelivering && (
-                        <div className="raven-flight-overlay" key={flightToken}>
-                            <div className="raven-flight-trail"></div>
-                            <div className="raven-flight-icon" aria-hidden="true">
-                                <i className="fas fa-crow"></i>
-                            </div>
-                            <div className="raven-flight-label">Delivering message...</div>
-                        </div>
-                    )}
                 </div>
             ) : (
                 <div style={{

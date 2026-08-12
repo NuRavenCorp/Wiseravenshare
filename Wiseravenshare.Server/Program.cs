@@ -132,6 +132,47 @@ static string ToSqlLiteral(string value)
     return "'" + value.Replace("'", "''") + "'";
 }
 
+static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    try
+    {
+        var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        if (pendingMigrations.Count > 0)
+        {
+            await dbContext.Database.MigrateAsync(cancellationToken);
+            return;
+        }
+
+        var databaseExists = await dbContext.Database.CanConnectAsync(cancellationToken);
+        if (!databaseExists)
+        {
+            logger.LogInformation("Database is not reachable; creating schema from the current EF model.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+            return;
+        }
+
+        var hasAnyTables = await dbContext.Database.SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'app_data' LIMIT 1").AnyAsync(cancellationToken);
+        if (!hasAnyTables)
+        {
+            logger.LogInformation("No app_data tables were found; creating schema from the current EF model.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Schema migration failed; falling back to EnsureCreated so the application can self-upgrade its DB schema on startup.");
+        try
+        {
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+        catch (Exception ensureEx)
+        {
+            logger.LogError(ensureEx, "Schema bootstrap failed during EnsureCreated fallback.");
+            throw;
+        }
+    }
+}
+
 static async Task EnsureBucketObjectsRegistryAsync(
     string connectionString,
     string bucketName,
@@ -249,6 +290,8 @@ builder.Services.AddScoped<ITruthRepository, TruthRepository>();
 builder.Services.AddScoped<IAgentRepository, AgentRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IEmailService, NoopEmailService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
@@ -360,11 +403,11 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     try
     {
-        await dbContext.Database.MigrateAsync();
+        await EnsureDatabaseSchemaAsync(dbContext, app.Logger);
     }
     catch (Exception ex)
     {
-        app.Logger.LogCritical(ex, "Automatic EF migration failed during startup. Service will continue with existing schema.");
+        app.Logger.LogCritical(ex, "Automatic EF schema upgrade failed during startup. The app will continue with the existing schema if available.");
     }
 
     try

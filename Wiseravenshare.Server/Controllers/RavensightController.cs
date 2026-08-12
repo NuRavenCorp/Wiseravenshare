@@ -144,6 +144,7 @@ public class RavensightController : ControllerBase
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
         var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(upload.StorageMode, upload.IsPermanent, hasActiveSubscription);
 
+        var persistenceStatus = "ready";
         VideoLibraryVideo saved;
         try
         {
@@ -165,12 +166,14 @@ public class RavensightController : ControllerBase
         }
         catch (PostgresException ex)
         {
-            _logger.LogWarning(ex, "Video library save failed at DB layer for user {UserId}; serving a local fallback video object.", userId);
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}; serving a local fallback video object.", userId);
             saved = BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Video library save failed unexpectedly for user {UserId}; serving a local fallback video object.", userId);
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}; serving a local fallback video object.", userId);
             saved = BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription);
         }
 
@@ -180,7 +183,7 @@ public class RavensightController : ControllerBase
             fileName = uniqueFileName,
             filePath = absoluteVideoUrl,
             mediaUrl = absoluteVideoUrl,
-            persistenceStatus = "degraded"
+            persistenceStatus
         });
     }
 

@@ -4,6 +4,7 @@ import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
 const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
+    const defaultDestinationFolder = '/wiseravenshare/ravensight/video';
     const [selectedFile, setSelectedFile] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
@@ -29,20 +30,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     const [uploadedVideos, setUploadedVideos] = useState([]);
     const fileInputRef = useRef(null);
     const { user } = useAuth();
-
-    const askDestinationFolder = () => {
-        if (typeof window === 'undefined') {
-            return '/wiseravenshare/ravensight/video';
-        }
-
-        const input = window.prompt(
-            'Choose a destination folder for this video (default: /wiseravenshare/ravensight/video)',
-            '/wiseravenshare/ravensight/video'
-        );
-
-        const value = String(input || '').trim();
-        return value || '/wiseravenshare/ravensight/video';
-    };
 
     const persistLocalVideo = (video) => {
         try {
@@ -117,7 +104,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
         const wantsPermanentStorage = Boolean(savePermanently);
-        formData.append('destinationFolder', String(destinationFolder || '/wiseravenshare/ravensight/video'));
+        formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
         formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
         formData.append('isPermanent', String(wantsPermanentStorage));
         if (videoDetails.scheduledPublish) {
@@ -137,6 +124,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                     channelName: response.video.channelName || user?.name || 'WiseRaven Creator',
                     channelAvatar: response.video.channelAvatar || user?.avatar
                 });
+                window.dispatchEvent(new CustomEvent('ravensight:video-saved', { detail: response.video }));
             }
             onNotification(libraryOnly ? 'Video saved to library!' : 'Video uploaded successfully!', 'success');
             resetForm();
@@ -174,8 +162,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
     const handleUpload = () => uploadVideo({ libraryOnly: false });
     const handleSaveToLibrary = () => {
-        const destinationFolder = askDestinationFolder();
-        uploadVideo({ libraryOnly: true, destinationFolder });
+        uploadVideo({ libraryOnly: true, destinationFolder: defaultDestinationFolder });
     };
 
     const resetForm = () => {

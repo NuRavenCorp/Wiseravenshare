@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<AgentEvolution> AgentEvolutions => Set<AgentEvolution>();
     public DbSet<AgentInteraction> AgentInteractions => Set<AgentInteraction>();
     public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
 
@@ -28,6 +29,29 @@ public class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.HasDefaultSchema("app_data");
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.ToTable("Users");
+            entity.HasIndex(u => u.Email).IsUnique();
+            entity.HasIndex(u => u.Username).IsUnique();
+            entity.Property(u => u.Email).HasMaxLength(255);
+            entity.Property(u => u.Username).HasMaxLength(100);
+            entity.Property(u => u.DisplayName).HasMaxLength(200);
+            entity.Property(u => u.Bio).HasColumnType("text");
+            entity.Property(u => u.AvatarUrl).HasMaxLength(2048);
+            entity.Property(u => u.CoverPhotoUrl).HasMaxLength(2048);
+            entity.Property(u => u.Location).HasMaxLength(200);
+            entity.Property(u => u.Website).HasMaxLength(2048);
+            entity.Property(u => u.RefreshToken).HasMaxLength(512);
+            entity.Property(u => u.PasswordResetToken).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<UserSettings>(entity =>
+        {
+            entity.ToTable("UserSettings");
+            entity.Property(s => s.Theme).HasMaxLength(50);
+        });
 
         modelBuilder.Entity<Follow>(entity =>
         {
