@@ -116,7 +116,7 @@ static_sites:
       branch: main
       deploy_on_push: true
     source_dir: wiseravenshare.client
-    build_command: npm ci && npm run build
+    build_command: npm ci && npx -y node@20 node_modules/vite/bin/vite.js build
     output_dir: dist
     index_document: index.html
     error_document: index.html
