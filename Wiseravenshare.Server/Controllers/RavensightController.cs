@@ -16,7 +16,7 @@ public class RavensightController : ControllerBase
 {
     private static readonly HashSet<string> AllowedVideoTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp4", ".mov", ".webm"
+        ".mp4", ".mov", ".webm", ".avi"
     };
 
     private readonly IWebHostEnvironment _environment;

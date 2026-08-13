@@ -45,6 +45,7 @@ const App = () => {
         window.location.pathname === '/privacy' ? 'privacy' : 'feed'
     );
     const [isRavensightMode, setIsRavensightMode] = useState(false);
+    const [profileEditRequested, setProfileEditRequested] = useState(false);
     const [truthAlerts, setTruthAlerts] = useState([]);
     const [selectedArticle, setSelectedArticle] = useState(() => {
         try {
@@ -177,6 +178,21 @@ const App = () => {
         }, 8000);
     };
 
+    const navigateToPage = (target) => {
+        if (typeof target === 'string') {
+            setCurrentPage(target);
+            return;
+        }
+
+        if (target?.page) {
+            setCurrentPage(target.page);
+        }
+
+        if (target?.editProfile) {
+            setProfileEditRequested(true);
+        }
+    };
+
     const handleLogin = async ({ mode, name, email, password, bio, location, website, avatar, referralCode }) => {
         if (mode === 'signup') {
             await register({ name, email, password, bio, location, website, avatar, referralCode });
@@ -282,7 +298,12 @@ const App = () => {
             case 'article':
                 return <ArticlePage article={selectedArticle} onBack={() => setCurrentPage(articleBackPage)} />;
             case 'profile':
-                return <ProfilePage />;
+                return (
+                    <ProfilePage
+                        openEditMode={profileEditRequested}
+                        onEditModeHandled={() => setProfileEditRequested(false)}
+                    />
+                );
             case 'growth':
                 return isAdminUser
                     ? <GrowthPage />
@@ -327,7 +348,7 @@ const App = () => {
     if (isRavensightMode) {
         return (
             <div>
-                <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
+                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
                 <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                     <button
                         onClick={exitRavensightMode}
@@ -353,7 +374,7 @@ const App = () => {
 
     return (
         <div>
-            <Header onNavigate={setCurrentPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
+                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
             <TruthAlert alerts={truthAlerts} onDismiss={(id) => setTruthAlerts(prev => prev.filter(a => a.id !== id))} />
             <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -393,7 +414,7 @@ const App = () => {
             </div>
             <div className="container">
                 <div className="grid-3">
-                    <Sidebar onNavigate={setCurrentPage} currentPage={currentPage} user={user} />
+                    <Sidebar onNavigate={navigateToPage} currentPage={currentPage} user={user} />
                     <main className="middle-column">
                         {renderPage()}
                     </main>

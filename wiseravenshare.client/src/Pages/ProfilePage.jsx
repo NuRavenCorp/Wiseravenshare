@@ -45,7 +45,7 @@ const parseAdminEmails = () => {
     return new Set([...defaults, ...fromEnv]);
 };
 
-const ProfilePage = () => {
+const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     const { user, updateProfile } = useAuth();
     const { addToast } = useNotification();
     const emptySocialFeeds = {
@@ -113,6 +113,17 @@ const ProfilePage = () => {
             });
         }
     }, [user]);
+
+    useEffect(() => {
+        if (!openEditMode || !user?.id) {
+            return;
+        }
+
+        setEditing(true);
+        if (typeof onEditModeHandled === 'function') {
+            onEditModeHandled();
+        }
+    }, [openEditMode, onEditModeHandled, user?.id]);
 
     useEffect(() => {
         if (!user?.id) {

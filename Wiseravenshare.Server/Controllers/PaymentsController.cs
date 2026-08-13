@@ -50,10 +50,11 @@ public class PaymentsController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Stripe secret key is not configured." });
         }
 
-        var priceId = ResolvePriceId(request.BillingCycle);
+        var plan = string.IsNullOrWhiteSpace(request.Plan) ? "creator_pro" : request.Plan.Trim();
+        var priceId = ResolvePriceId(plan, request.BillingCycle);
         if (string.IsNullOrWhiteSpace(priceId))
         {
-            return BadRequest(new { message = $"Stripe price id is not configured for {request.BillingCycle} billing." });
+            return BadRequest(new { message = $"Stripe price id is not configured for the {plan} {request.BillingCycle} plan." });
         }
 
         var successUrl = string.IsNullOrWhiteSpace(request.SuccessUrl)
@@ -140,15 +141,44 @@ public class PaymentsController : ControllerBase
         });
     }
 
-    private string ResolvePriceId(string billingCycle)
+    private string ResolvePriceId(string plan, string billingCycle)
     {
-        var normalized = string.Equals(billingCycle, "annual", StringComparison.OrdinalIgnoreCase)
+        var normalizedPlan = string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim();
+        var normalizedCycle = string.Equals(billingCycle, "annual", StringComparison.OrdinalIgnoreCase)
             ? "annual"
             : "monthly";
 
-        return normalized == "annual"
-            ? ResolveConfig("Stripe:PriceAnnualId", "STRIPE_PRICE_ANNUAL_ID")
-            : ResolveConfig("Stripe:PriceMonthlyId", "STRIPE_PRICE_MONTHLY_ID");
+        var planKey = normalizedPlan.ToLowerInvariant() switch
+        {
+            "creator_pro" => "CreatorPro",
+            "growth_suite" => "GrowthSuite",
+            "studio_plus" => "StudioPlus",
+            _ => "CreatorPro"
+        };
+
+        var sectionKey = normalizedCycle == "annual"
+            ? $"Stripe:Price{planKey}AnnualId"
+            : $"Stripe:Price{planKey}MonthlyId";
+
+        var envKey = normalizedCycle == "annual"
+            ? $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_ANNUAL_ID"
+            : $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_MONTHLY_ID";
+
+        var resolved = ResolveConfig(sectionKey, envKey);
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+
+        var legacySectionKey = normalizedCycle == "annual"
+            ? "Stripe:PriceAnnualId"
+            : "Stripe:PriceMonthlyId";
+
+        var legacyEnvKey = normalizedCycle == "annual"
+            ? "STRIPE_PRICE_ANNUAL_ID"
+            : "STRIPE_PRICE_MONTHLY_ID";
+
+        return ResolveConfig(legacySectionKey, legacyEnvKey);
     }
 
     private string ResolveConfig(string sectionKey, string envKey)

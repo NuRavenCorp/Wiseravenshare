@@ -46,7 +46,7 @@ public class MediaController : ControllerBase
             return BadRequest("No file uploaded.");
         }
 
-        var allowedTypes = new[] { ".mp4", ".mov", ".webm", ".jpg", ".png", ".mp3" };
+            var allowedTypes = new[] { ".mp4", ".mov", ".webm", ".avi", ".jpg", ".png", ".mp3" };
         var extension = Path.GetExtension(upload.File.FileName).ToLowerInvariant();
 
         if (!allowedTypes.Contains(extension))

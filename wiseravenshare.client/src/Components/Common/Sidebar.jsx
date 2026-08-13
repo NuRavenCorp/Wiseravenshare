@@ -296,7 +296,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                     ) : (
                                         <button
                                             type="button"
-                                            onClick={() => onNavigate('profile')}
+                                            onClick={() => onNavigate({ page: 'profile', editProfile: true })}
                                             style={{
                                                 fontSize: '0.75rem',
                                                 color: 'var(--highlight-color)',
