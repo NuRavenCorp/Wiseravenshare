@@ -39,8 +39,8 @@ body {
 
 p, span, div, li, td, th, a, button, input, textarea {
     max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: normal;
 }
 
 img, svg, video {

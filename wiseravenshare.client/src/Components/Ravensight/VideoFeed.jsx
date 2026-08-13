@@ -181,82 +181,169 @@ const VideoFeed = ({ onNotification }) => {
     const VideoCard = ({ video }) => {
         const [isPlaying, setIsPlaying] = useState(false);
         const [isMuted, setIsMuted] = useState(true);
+        const [isBanging, setIsBanging] = useState(false);
         const videoRef = useRef(null);
 
-        const handlePlayPause = () => {
+        const triggerPlayback = async () => {
+            if (!videoRef.current) return;
+
+            setIsBanging(true);
+            window.setTimeout(() => {
+                if (videoRef.current) {
+                    videoRef.current.play().catch(() => null);
+                }
+            }, 180);
+
+            window.setTimeout(() => {
+                setIsBanging(false);
+            }, 700);
+        };
+
+        const handlePlayPause = async () => {
             if (videoRef.current) {
                 if (isPlaying) {
                     videoRef.current.pause();
-                } else {
-                    videoRef.current.play();
+                    setIsPlaying(false);
+                    return;
                 }
-                setIsPlaying(!isPlaying);
+
+                await triggerPlayback();
+                setIsPlaying(true);
             }
         };
 
         return (
-            <div style={{
-                background: 'var(--card-bg)',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                transition: 'transform 0.3s',
-                cursor: 'pointer'
-            }}
-                onMouseEnter={() => setIsPlaying(true)}
-                onMouseLeave={() => {
-                    if (videoRef.current) {
-                        videoRef.current.pause();
-                        setIsPlaying(false);
+            <>
+                <style>{`
+                    @keyframes retroTvBang {
+                        0% { transform: translateX(0) rotate(0deg) scale(1); opacity: 0; }
+                        20% { opacity: 1; }
+                        30% { transform: translateX(-9px) rotate(-6deg) scale(1.02); }
+                        45% { transform: translateX(9px) rotate(7deg) scale(1.03); }
+                        60% { transform: translateX(-6px) rotate(-5deg) scale(1); }
+                        100% { transform: translateX(0) rotate(0deg) scale(1); opacity: 0; }
                     }
-                }}>
-                <div style={{ position: 'relative' }}>
-                    <video
-                        ref={videoRef}
-                        src={video.videoUrl}
-                        poster={video.thumbnailUrl}
-                        muted={isMuted}
-                        loop
-                        style={{
-                            width: '100%',
-                            height: 'auto',
-                            background: '#000'
-                        }}
-                    />
-
-                    {/* Duration Badge */}
+                    @keyframes retroGlow {
+                        0% { box-shadow: 0 0 0 rgba(255, 213, 94, 0); }
+                        30% { box-shadow: 0 0 18px rgba(255, 213, 94, 0.9); }
+                        100% { box-shadow: 0 0 0 rgba(255, 213, 94, 0); }
+                    }
+                `}</style>
+                <div style={{
+                    background: 'linear-gradient(145deg, rgba(18,18,18,0.96), rgba(35,35,35,0.88))',
+                    border: '4px solid #7e6f4d',
+                    borderRadius: '18px',
+                    boxShadow: 'inset 0 0 0 4px rgba(0,0,0,0.5), 0 14px 30px rgba(0,0,0,0.2)',
+                    overflow: 'hidden',
+                    transition: 'transform 0.3s',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    padding: '12px 12px 0'
+                }}
+                    onMouseEnter={() => setIsPlaying(true)}
+                    onMouseLeave={() => {
+                        if (videoRef.current) {
+                            videoRef.current.pause();
+                            setIsPlaying(false);
+                        }
+                    }}>
                     <div style={{
                         position: 'absolute',
-                        bottom: '10px',
-                        right: '10px',
-                        background: 'rgba(0,0,0,0.8)',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        fontSize: '12px'
+                        left: '10px',
+                        top: '14px',
+                        width: '22px',
+                        height: '22px',
+                        borderRadius: '50%',
+                        background: 'radial-gradient(circle, #f0d977, #c38a14)',
+                        boxShadow: '0 0 12px rgba(255, 205, 86, 0.9)',
+                        zIndex: 2,
+                        opacity: isBanging ? 1 : 0.45,
+                        animation: isBanging ? 'retroGlow 0.7s ease-in-out' : 'none'
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        left: '8px',
+                        top: '34px',
+                        width: '3px',
+                        height: '62px',
+                        borderRadius: '999px',
+                        background: '#c2a773',
+                        opacity: 0.8,
+                        zIndex: 2
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        left: '0px',
+                        top: '34px',
+                        width: '38px',
+                        height: '38px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '24px',
+                        transform: isBanging ? 'translateX(-8px) rotate(-12deg)' : 'translateX(0) rotate(0deg)',
+                        transition: 'transform 0.13s ease-in-out',
+                        animation: isBanging ? 'retroTvBang 0.7s ease-in-out' : 'none',
+                        zIndex: 3,
+                        textShadow: '0 0 12px rgba(255,255,255,0.5)'
                     }}>
-                        {video.duration}
+                        ✋
                     </div>
+                    <div style={{ position: 'relative' }} onClick={handlePlayPause}>
+                        <video
+                            ref={videoRef}
+                            src={video.videoUrl}
+                            poster={video.thumbnailUrl}
+                            muted={isMuted}
+                            loop
+                            style={{
+                                width: '100%',
+                                height: 'auto',
+                                background: '#000',
+                                borderRadius: '8px',
+                                border: '3px solid rgba(0,0,0,0.8)',
+                                boxShadow: 'inset 0 0 18px rgba(255,255,255,0.08)'
+                            }}
+                        />
 
-                    {/* Play Button Overlay */}
-                    {!isPlaying && (
+                        {/* Duration Badge */}
                         <div style={{
                             position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            background: 'rgba(0,0,0,0.7)',
-                            borderRadius: '50%',
-                            width: '50px',
-                            height: '50px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
+                            bottom: '10px',
+                            right: '10px',
+                            background: 'rgba(0,0,0,0.8)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontSize: '12px'
                         }}>
-                            <FaPlay style={{ color: 'white', marginLeft: '4px' }} />
+                            {video.duration}
                         </div>
-                    )}
-                </div>
 
-                <div style={{ padding: '15px' }}>
+                        {/* Play Button Overlay */}
+                        {!isPlaying && (
+                            <div
+                                onClick={handlePlayPause}
+                                style={{
+                                    position: 'absolute',
+                                    top: '50%',
+                                    left: '50%',
+                                    transform: 'translate(-50%, -50%)',
+                                    background: 'rgba(0,0,0,0.7)',
+                                    borderRadius: '50%',
+                                    width: '50px',
+                                    height: '50px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    zIndex: 4,
+                                    cursor: 'pointer'
+                                }}>
+                                <FaPlay style={{ color: 'white', marginLeft: '4px' }} />
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{ padding: '15px' }}>
                     <div style={{ display: 'flex', gap: '12px' }}>
                         <img
                             src={video.channelAvatar}
@@ -332,8 +419,9 @@ const VideoFeed = ({ onNotification }) => {
                             <FaShare /> Share
                         </button>
                     </div>
+                    </div>
                 </div>
-            </div>
+            </>
         );
     };
 

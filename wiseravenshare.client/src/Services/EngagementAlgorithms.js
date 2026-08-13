@@ -7,10 +7,13 @@ const PRIORITY_BASE = {
 
 const FALLBACK_TRENDS = [
     { topic: '#WiseRaven', posts: '12.4K', score: 12400 },
+    { topic: '%human', posts: '9.6K', score: 9600 },
     { topic: '#TruthDetection', posts: '8.2K', score: 8200 },
     { topic: '#AIRevolution', posts: '6.9K', score: 6900 },
     { topic: '#SocialMedia', posts: '5.1K', score: 5100 }
 ];
+
+const TREND_TOKEN_REGEX = /[#%][a-z0-9_]+/gi;
 
 const safeDate = (value) => {
     const parsed = new Date(value);
@@ -33,9 +36,13 @@ const formatPostCount = (value) => {
     return `${Math.round(value)}`;
 };
 
+export const extractTrendTokens = (text = '') => {
+    const matches = String(text || '').match(TREND_TOKEN_REGEX) || [];
+    return matches.map((token) => token.toLowerCase());
+};
+
 export const extractHashtags = (text = '') => {
-    const matches = text.match(/#[\w]+/g) || [];
-    return matches.map((tag) => tag.toLowerCase());
+    return extractTrendTokens(text).filter((token) => token.startsWith('#'));
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -99,11 +106,11 @@ export const predictPostEngagement = (post, options = {}) => {
     const truthScore = clamp(Number(post?.truthScore) || 65, 20, 100);
     const freshness = recencyFactor(post?.createdAt);
     const contentFit = normalizeTextLength(post);
-    const hashtagCount = extractHashtags(post?.content || '').length;
-    const hashtagBoost = clamp(1 + (hashtagCount * 0.05), 1, 1.2);
+    const trendTokenCount = extractTrendTokens(post?.content || '').length;
+    const trendBoost = clamp(1 + (trendTokenCount * 0.05), 1, 1.2);
 
     const engagementRate = clamp((baseScore / impressions) * 0.14, 0.01, 0.28);
-    const qualityMultiplier = (truthScore / 100) * freshness * contentFit * hashtagBoost;
+    const qualityMultiplier = (truthScore / 100) * freshness * contentFit * trendBoost;
     const predictionCore = impressions * engagementRate * qualityMultiplier;
     const horizonScale = Math.sqrt(horizonHours / 24);
     const predictedTotalScore = Math.round((baseScore + (predictionCore * 12)) * horizonScale);
@@ -151,7 +158,7 @@ export const computeTrendingTopics = (posts = [], limit = 6) => {
     const buckets = new Map();
 
     posts.forEach((post) => {
-        const tags = extractHashtags(post.content || '');
+        const tags = extractTrendTokens(post.content || '');
         if (tags.length === 0) {
             return;
         }
@@ -167,7 +174,7 @@ export const computeTrendingTopics = (posts = [], limit = 6) => {
 
     const ranked = [...buckets.entries()]
         .map(([tag, value]) => ({
-            topic: tag.startsWith('#') ? tag : `#${tag}`,
+            topic: (tag.startsWith('#') || tag.startsWith('%')) ? tag : `#${tag}`,
             score: value.score,
             mentions: value.mentions,
             posts: formatPostCount(value.score + (value.mentions * 12))

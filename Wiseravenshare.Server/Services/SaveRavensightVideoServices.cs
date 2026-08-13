@@ -45,7 +45,7 @@ public sealed class RavensightVideoService : IRavensightVideoService
             UserId = userId,
             Title = string.IsNullOrWhiteSpace(title) ? Path.GetFileNameWithoutExtension(file.FileName) : title.Trim(),
             Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
-            VideoUrl = savedFile.RelativePath,
+            VideoUrl = savedFile.PublicUrl ?? savedFile.RelativePath,
             Privacy = privacy,
             Status = VideoStatus.Ready,
             PublishedAt = DateTime.UtcNow,

@@ -115,7 +115,18 @@ const normalizeTopicValue = (value) => String(value || '')
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase()
-    .replace(/^#+/, '');
+    .replace(/^[#%]+/, '');
+
+const toTrendTopicLabel = (topic) => {
+    const raw = String(topic?.topic || topic?.name || '').trim();
+    const normalized = normalizeTopicValue(raw);
+    if (!normalized) {
+        return '#topic';
+    }
+
+    const symbol = raw.startsWith('%') ? '%' : '#';
+    return `${symbol}${normalized}`;
+};
 
 const inferNewsCategory = (item) => {
     const normalized = `${item?.title || ''} ${item?.summary || ''} ${item?.content || ''} ${item?.source || ''}`.toLowerCase();
@@ -256,11 +267,12 @@ const DiscoverPage = ({ onNavigate }) => {
             .slice(0, 12)
             .map((topic, index) => ({
                 id: topic.id || `topic-${index}`,
-                name: topic.name || topic.topic || `Topic ${index + 1}`,
+                name: normalizeTopicValue(topic.name || topic.topic || `topic${index + 1}`),
+                label: toTrendTopicLabel(topic),
                 count: Number(topic.count) || Number(topic.posts) || 0,
-                description: `Explore the latest activity around ${topic.name || topic.topic || 'this topic'}.`,
+                description: `Explore the latest activity around ${toTrendTopicLabel(topic)}.`,
                 externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
-                    || buildSearchUrl(topic.name || topic.topic)
+                    || buildSearchUrl(toTrendTopicLabel(topic))
             }));
 
         let storedNews = [];
@@ -285,11 +297,11 @@ const DiscoverPage = ({ onNavigate }) => {
 
         const dynamicGroups = topicBuckets.slice(0, 6).map((topic, index) => ({
             id: `topic-group-${index}`,
-            name: `${topic.name} Circle`,
-            description: `A community focused on ${topic.name.toLowerCase()}.`,
+            name: `${topic.label} Circle`,
+            description: `A community focused on ${topic.label.toLowerCase()}.`,
             members: Math.max(50, topic.count || 0),
-            focus: topic.name,
-            externalUrl: buildSearchUrl(topic.name, 'community')
+            focus: topic.label,
+            externalUrl: buildSearchUrl(topic.label, 'community')
         }));
 
         const groups = [...fallbackGroups, ...dynamicGroups]
@@ -454,7 +466,7 @@ const DiscoverPage = ({ onNavigate }) => {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                         {discoverBuckets.topics.map((topic) => (
                             (() => {
-                                const isFocusedTopic = normalizeTopicValue(topic.name) === focusedTopic;
+                                const isFocusedTopic = normalizeTopicValue(topic.label || topic.name) === focusedTopic;
 
                                 return (
                             <div
@@ -469,7 +481,7 @@ const DiscoverPage = ({ onNavigate }) => {
                                 }}
                             >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
-                                    <div style={{ fontWeight: 700 }}>#{topic.name}</div>
+                                    <div style={{ fontWeight: 700 }}>{topic.label || `#${topic.name}`}</div>
                                     {isFocusedTopic && (
                                         <span style={{ fontSize: '11px', color: 'var(--highlight-color)', border: '1px solid var(--highlight-color)', borderRadius: '999px', padding: '3px 8px', whiteSpace: 'nowrap' }}>
                                             Selected
@@ -718,14 +730,14 @@ const DiscoverPage = ({ onNavigate }) => {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                         {topics.map((topic) => (
                             <span
-                                key={topic.name}
+                                key={topic.id || topic.name || topic.topic}
                                 style={{
                                     padding: '6px 14px',
                                     background: 'rgba(255,255,255,0.05)',
                                     borderRadius: '20px'
                                 }}
                             >
-                                #{topic.name} <span style={{ color: 'var(--highlight-color)' }}>{topic.count}</span>
+                                {toTrendTopicLabel(topic)} <span style={{ color: 'var(--highlight-color)' }}>{Number(topic.count) || Number(topic.posts) || 0}</span>
                             </span>
                         ))}
                     </div>

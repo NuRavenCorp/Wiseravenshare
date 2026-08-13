@@ -280,10 +280,6 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                 </div>
             </div>
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} />
-            <OnboardingCard onNavigate={onNavigate} />
-            <ShortFormFeed posts={rankedFeedPosts} />
-            <VideoFeedMini posts={rankedFeedPosts} />
-            <SocialFeedsTimeline user={currentUser} />
             <div style={{ marginTop: '20px' }}>
                 {rankedFeedPosts.map(post => (
                     <PostCard
@@ -300,6 +296,21 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                         onBookmark={handleBookmark}
                     />
                 ))}
+            </div>
+            <div
+                style={{
+                    marginTop: '24px',
+                    paddingTop: '18px',
+                    borderTop: '1px solid var(--border-color)'
+                }}
+            >
+                <div style={{ marginBottom: '12px', fontSize: '12px', fontWeight: 700, color: 'var(--highlight-color)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    Explore More
+                </div>
+                <OnboardingCard onNavigate={onNavigate} />
+                <ShortFormFeed posts={rankedFeedPosts} />
+                <VideoFeedMini posts={rankedFeedPosts} />
+                <SocialFeedsTimeline user={currentUser} />
             </div>
         </div>
     );
