@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { truthEngine } from '../../Services/TruthDetectionEngine';
+import { truthEngine } from '../../Services/truthEngine';
 import { apiService } from '../../Services/api';
 import { appendStoredFeedPost, normalizeFeedPost } from '../../Services/postFeedPayload';
 import {
@@ -15,6 +15,28 @@ const RAVENSIGHT_DESTINATION_BY_MEDIA_TYPE = {
 };
 
 const resolveRavensightDestination = (type) => RAVENSIGHT_DESTINATION_BY_MEDIA_TYPE[type] || '/wiseravenshare/ravensight/video';
+
+const looksLikeCorruptBlob = (value) => {
+    const text = String(value || '').replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text || text.length < 24) {
+        return false;
+    }
+
+    const hasLongEncodedRun = /(?:[A-Za-z0-9+/=]{24,})/.test(text);
+    const hasFewWords = text.split(/\s+/).filter(Boolean).length <= 2 && text.length > 60;
+    const hasTooManySymbols = (text.match(/[^A-Za-z0-9\s.,!?@#%\-'\/]/g) || []).length > text.length * 0.22;
+
+    return hasLongEncodedRun || hasFewWords || hasTooManySymbols;
+};
+
+const sanitizeServerMessage = (value, fallback) => {
+    const text = String(value || '').replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text || looksLikeCorruptBlob(text)) {
+        return fallback;
+    }
+
+    return text;
+};
 
 const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
     const [content, setContent] = useState('');
@@ -217,7 +239,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             } catch (error) {
                 const status = error?.response?.status;
                 const serverMessage = error?.response?.data?.message || error?.response?.data;
-                const normalizedServerMessage = typeof serverMessage === 'string' ? serverMessage.trim() : '';
+                const normalizedServerMessage = sanitizeServerMessage(serverMessage, '');
 
                 let uploadMessage = 'Media upload endpoint unreachable, using local preview instead.';
 
@@ -265,14 +287,28 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             } catch (error) {
                 const status = error?.response?.status;
                 const serverMessage = error?.response?.data?.message || error?.message;
+                const normalizedServerMessage = sanitizeServerMessage(serverMessage, '');
                 let saveMessage = 'Failed to save post to server. Please try again.';
 
                 if (status === 401 || status === 403) {
                     saveMessage = 'Your session expired. Please sign in again and retry posting.';
                 } else if (status === 400 && serverMessage) {
-                    saveMessage = `Unable to publish post: ${serverMessage}`;
-                } else if (typeof serverMessage === 'string' && serverMessage.trim().length > 0) {
-                    saveMessage = serverMessage.trim();
+                    saveMessage = 'Unable to publish post. Please review the content and try again.';
+                } else if (normalizedServerMessage) {
+                    saveMessage = 'Unable to publish post. Please try again.';
+                }
+
+                const isServiceUnavailable =
+                    !status
+                    || status === 408
+                    || status === 429
+                    || status >= 500;
+
+                // Only create a local fallback post when the backend is transiently unavailable.
+                if (!isServiceUnavailable) {
+                    addTruthAlert('warning', saveMessage, null);
+                    setIsUploading(false);
+                    return;
                 }
 
                 const fallbackPost = normalizeFeedPost({
@@ -297,7 +333,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
 
                 appendStoredFeedPost(fallbackPost, currentUser);
                 onPostCreate(fallbackPost);
-                addTruthAlert('warning', 'Your post is still visible in the feed while the service is temporarily unavailable.', null);
+                addTruthAlert('warning', 'The posting service is temporarily unavailable. Your post is saved locally and remains visible in your feed on this device.', null);
                 setIsUploading(false);
                 return;
             }

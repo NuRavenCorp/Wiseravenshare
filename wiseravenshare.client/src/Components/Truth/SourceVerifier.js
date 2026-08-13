@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FaLink, FaSearch, FaShieldAlt, FaStar, FaMedal, FaCheckCircle, FaTimesCircle, FaGlobe, FaNewspaper, FaTwitter, FaYoutube } from 'react-icons/fa';
-import { truthEngine } from '../../services/truthEngine';
+import { truthEngine } from '../../Services/truthEngine';
 
 const SourceVerifier = () => {
     const [url, setUrl] = useState('');

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { truthEngine } from '../../Services/TruthDetectionEngine';
+import { truthEngine } from '../../Services/truthEngine';
 
 const PostCard = ({
     post,
