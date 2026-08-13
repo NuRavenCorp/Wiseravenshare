@@ -80,7 +80,7 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
 
         var normalizedLocation = location.Trim();
         if (!Uri.TryCreate(normalizedLocation, UriKind.Absolute, out var uri)
-            && normalizedLocation.StartsWith('/', StringComparison.Ordinal))
+            && normalizedLocation.StartsWith("/", StringComparison.Ordinal))
         {
             Uri.TryCreate("http://localhost" + normalizedLocation, UriKind.Absolute, out uri);
         }
@@ -230,7 +230,7 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         var trimmedQuery = query.TrimStart('?');
         foreach (var pair in trimmedQuery.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
-            var parts = pair.Split('=', 2);
+            var parts = pair.Split('=', 2, StringSplitOptions.None);
             var currentKey = Uri.UnescapeDataString(parts[0]);
             if (!string.Equals(currentKey, key, StringComparison.OrdinalIgnoreCase))
             {
