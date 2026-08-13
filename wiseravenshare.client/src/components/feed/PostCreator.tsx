@@ -8,7 +8,7 @@ import { Button } from '../ui/Button';
 import { MediaUploader } from '../ui/MediaUploader';
 import { useAuth } from '../../hooks/useAuth';
 import { postService } from '../../services/postService';
-import { truthService } from '../../services/truthService';
+import { truthService } from '../../Services/truthService';
 import {
     FiImage,
     FiVideo,

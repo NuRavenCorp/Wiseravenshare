@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { truthEngine } from '../../Services/TruthDetectionEngine';
+import { truthEngine } from '../../Services/truthEngine';
 
 const PostCard = ({ post, onLike, onRepost, onDispute, currentUser, isFollowing, onFollow }) => {
     const [showCorrection, setShowCorrection] = useState(false);
