@@ -25,6 +25,12 @@ import { useNotification } from './Contexts/NotificationContext';
 import { apiService } from './Services/api';
 import './Styles/Global.css';
 
+const SPONSOR_PAYMENT_LINK = String(
+    import.meta.env.VITE_STRIPE_SPONSOR_PAYMENT_LINK
+    || import.meta.env.VITE_STRIPE_PAYMENT_LINK
+    || 'https://buy.stripe.com/9B67sL9h13oZ4vTe8Tf7i00'
+).trim();
+
 const parseAdminEmails = () => {
     const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
         .split(',')
@@ -192,6 +198,11 @@ const App = () => {
     };
 
     const handleSponsor = async () => {
+        if (SPONSOR_PAYMENT_LINK) {
+            window.location.assign(SPONSOR_PAYMENT_LINK);
+            return;
+        }
+
         try {
             const response = await apiService.createCheckoutSession({
                 plan: 'sponsorship',

@@ -11,9 +11,13 @@ public interface IBlobStorageService
 
     string? ResolvePublicUrl(string objectKey);
 
+    string? ResolveObjectKey(string location);
+
     Task<StoredBlobResult> UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken = default);
 
     Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default);
 }
 
 public sealed record StoredBlobResult(string ObjectKey, string PublicUrl);
@@ -65,6 +69,54 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
 
         var normalizedEndpoint = _endpoint.Trim().Trim('/');
         return CombineUrl(normalizedEndpoint, $"{_bucketName}/{objectKey.Trim('/')}");
+    }
+
+    public string? ResolveObjectKey(string location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+        {
+            return null;
+        }
+
+        var normalizedLocation = location.Trim();
+        if (!Uri.TryCreate(normalizedLocation, UriKind.Absolute, out var uri)
+            && normalizedLocation.StartsWith('/', StringComparison.Ordinal))
+        {
+            Uri.TryCreate("http://localhost" + normalizedLocation, UriKind.Absolute, out uri);
+        }
+
+        if (uri is not null)
+        {
+            var fileName = TryReadQueryParameter(uri.Query, "fileName");
+            if (!string.IsNullOrWhiteSpace(fileName) && uri.AbsolutePath.Contains("videostreaming/stream", StringComparison.OrdinalIgnoreCase))
+            {
+                return fileName.Trim('/');
+            }
+
+            var path = uri.AbsolutePath.Trim('/');
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_bucketName))
+            {
+                var bucketPrefix = _bucketName.Trim().Trim('/');
+                if (path.StartsWith(bucketPrefix + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return path[(bucketPrefix.Length + 1)..].Trim('/');
+                }
+            }
+
+            return path;
+        }
+
+        if (normalizedLocation.StartsWith("/", StringComparison.Ordinal))
+        {
+            return normalizedLocation.Trim('/');
+        }
+
+        return normalizedLocation;
     }
 
     public async Task<StoredBlobResult> UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken = default)
@@ -121,6 +173,30 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         }
     }
 
+    public async Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        try
+        {
+            var client = CreateClient();
+            await client.DeleteObjectAsync(new DeleteObjectRequest
+            {
+                BucketName = _bucketName,
+                Key = NormalizeObjectKey(objectKey)
+            }, cancellationToken);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to delete object {ObjectKey} from DigitalOcean Spaces bucket {BucketName}", objectKey, _bucketName);
+            return false;
+        }
+    }
+
     private AmazonS3Client CreateClient()
     {
         var config = new AmazonS3Config
@@ -142,6 +218,29 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
 
         var normalized = objectKey.Replace('\\', '/').Trim('/');
         return normalized;
+    }
+
+    private static string? TryReadQueryParameter(string query, string key)
+    {
+        if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        var trimmedQuery = query.TrimStart('?');
+        foreach (var pair in trimmedQuery.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var currentKey = Uri.UnescapeDataString(parts[0]);
+            if (!string.Equals(currentKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : string.Empty;
+        }
+
+        return null;
     }
 
     private string BuildFallbackPublicUrl(string objectKey)

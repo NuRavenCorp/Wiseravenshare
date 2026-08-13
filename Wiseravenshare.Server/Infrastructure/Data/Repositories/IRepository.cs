@@ -1,6 +1,7 @@
 ﻿// Wiseravenshare.Server/Infrastructure/Data/Repositories/IRepository.cs
 using System.Linq.Expressions;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Services.Truth;
 
 namespace Wiseravenshare.Server.Interfaces.Repositories;
 
@@ -58,11 +59,23 @@ public interface ITruthRepository : IRepository<TruthClaim>
     Task<IEnumerable<TruthClaim>> GetClaimsByCategoryAsync(string category);
     Task<IEnumerable<TruthClaim.TruthDispute>> GetDisputesByPostAsync(Guid postId);
     Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetVotesForClaimAsync(Guid claimId);
+    Task<TruthClaim.TruthVerificationVote?> GetUserVoteAsync(Guid claimId, Guid userId);
+    Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetVotesByUsersAsync(string normalizedClaim, IEnumerable<Guid> userIds);
+    Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetStakedVotesAsync(string normalizedClaim);
+    Task AddVoteAsync(TruthClaim.TruthVerificationVote vote);
     Task<decimal> GetAverageTruthScoreAsync(Guid userId);
     Task<IEnumerable<TruthClaim>> GetUnverifiedClaimsAsync(int count);
     Task AddDisputeAsync(TruthClaim.TruthDispute dispute);
     Task<TruthClaim.TruthDispute?> GetDisputeAsync(Guid disputeId);
     Task UpdateDisputeAsync(TruthClaim.TruthDispute dispute);
+    Task<TruthFact?> FindFactAsync(string normalizedClaim);
+    Task<IEnumerable<TruthFact>> FindSimilarFactsAsync(string normalizedClaim);
+    Task AddFactAsync(TruthFact fact);
+    Task UpdateFactAsync(TruthFact fact);
+    Task<IEnumerable<TruthFact>> GetRecentFactsAsync(int count);
+    Task<IDictionary<string, decimal>> GetCategoryStatsAsync();
+    Task<IEnumerable<TruthFact>> GetUnverifiedFactsAsync(int count);
+    Task<List<TruthFact>> GetHistoricalClaimsAsync(string normalizedClaim);
 }
 
 // Wiseravenshare.Core/Interfaces/Repositories/IAgentRepository.cs

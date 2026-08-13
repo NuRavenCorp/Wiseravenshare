@@ -60,8 +60,8 @@ export const GlobalStyles = () = > (
 
             #root, #app, main, section, article, div, p, span, li, td, th {
                 max-width: 100%;
-                overflow-wrap: anywhere;
-                word-break: break-word;
+                overflow-wrap: break-word;
+                word-break: normal;
             }
 
             img, svg, video {

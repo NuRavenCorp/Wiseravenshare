@@ -1,4 +1,5 @@
-import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useContext, useCallback, useEffect, useRef } from 'react';
+import { createHubConnection } from '../Services/realtimeHub.js';
 
 const NotificationContext = createContext();
 
@@ -13,6 +14,7 @@ export const useNotification = () => {
 export const NotificationProvider = ({ children }) => {
     const [notifications, setNotifications] = useState([]);
     const [toasts, setToasts] = useState([]);
+    const notificationConnectionRef = useRef(null);
 
     const addNotification = useCallback((notification) => {
         const newNotification = {
@@ -73,6 +75,89 @@ export const NotificationProvider = ({ children }) => {
 
         window.addEventListener('wise-planner-notification', handlePlannerNotification);
         return () => window.removeEventListener('wise-planner-notification', handlePlannerNotification);
+    }, [addNotification, addToast]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const getCurrentUserId = () => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem('user_data') || 'null');
+                const id = String(parsed?.id || '').trim().toLowerCase();
+                return id || '';
+            } catch {
+                return '';
+            }
+        };
+
+        const bindUserChannel = async () => {
+            const userId = getCurrentUserId();
+            const connection = notificationConnectionRef.current;
+
+            if (!connection || !userId || connection.state !== 'Connected') {
+                return;
+            }
+
+            try {
+                await connection.invoke('JoinUserChannel', userId);
+            } catch {
+                // Ignore channel join errors; reconnect flow will retry.
+            }
+        };
+
+        const connectNotificationsHub = async () => {
+            const connection = createHubConnection('/hubs/notifications');
+
+            connection.on('PersonnelNotification', (payload) => {
+                const sender = String(payload?.sender || 'Wiseravenshare Personnel').trim();
+                const title = String(payload?.title || 'Announcement').trim();
+                const messageBody = String(payload?.message || '').trim();
+
+                addNotification({
+                    title: sender,
+                    message: messageBody ? `${title}: ${messageBody}` : title,
+                    type: String(payload?.type || 'alert').trim() || 'alert',
+                    source: 'personnel',
+                    fromPersonnel: true
+                });
+                addToast(`${title}${messageBody ? ` - ${messageBody}` : ''}`, 'info');
+            });
+
+            connection.onreconnected(async () => {
+                await bindUserChannel();
+            });
+
+            try {
+                await connection.start();
+                if (!isMounted) {
+                    await connection.stop();
+                    return;
+                }
+
+                notificationConnectionRef.current = connection;
+                await bindUserChannel();
+            } catch {
+                // Keep notifications functional via local context even if hub connection fails.
+            }
+        };
+
+        const handleSocialUpdate = () => {
+            bindUserChannel().catch(() => null);
+        };
+
+        connectNotificationsHub();
+        window.addEventListener('wiseraven:social-updated', handleSocialUpdate);
+
+        return () => {
+            isMounted = false;
+            window.removeEventListener('wiseraven:social-updated', handleSocialUpdate);
+
+            const connection = notificationConnectionRef.current;
+            notificationConnectionRef.current = null;
+            if (connection) {
+                connection.stop().catch(() => null);
+            }
+        };
     }, [addNotification, addToast]);
 
     const clearAll = useCallback(() => {

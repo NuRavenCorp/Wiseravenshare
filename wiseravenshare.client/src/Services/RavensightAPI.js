@@ -166,8 +166,14 @@ class RavensightAPI {
     }
 
     // Get User Videos
-    async getUserVideos() {
-        const response = await this.api.get('/videos/user');
+    async getUserVideos(userId = null) {
+        const targetUrl = userId ? `/videos/user/${encodeURIComponent(userId)}` : '/videos/user';
+        const response = await this.api.get(targetUrl).catch((error) => {
+            if (error?.response?.status === 404 && userId === null) {
+                return this.api.get('/videos/user');
+            }
+            throw error;
+        });
         return response.data;
     }
 

@@ -6,6 +6,13 @@ import { socialGraphService } from '../../Services/SocialGraph';
 
 const MAX_POSTS_FOR_SIDEBAR = 200;
 const MARKET_SYMBOLS = ['MSFT', 'IBM'];
+const FALLBACK_QUOTES = {
+    MSFT: { name: 'Microsoft', price: 487.65, changePercent: 4.93, volume: 66663409, currency: 'USD', marketState: 'Fallback Snapshot' },
+    IBM: { name: 'IBM', price: 226.13, changePercent: 0.65, volume: 4288300, currency: 'USD', marketState: 'Fallback Snapshot' },
+    AAPL: { name: 'Apple', price: 219.44, changePercent: -0.33, volume: 51200438, currency: 'USD', marketState: 'Fallback Snapshot' },
+    NVDA: { name: 'NVIDIA', price: 126.19, changePercent: 1.63, volume: 453991124, currency: 'USD', marketState: 'Fallback Snapshot' },
+    TSLA: { name: 'Tesla', price: 251.8, changePercent: -1.23, volume: 97212581, currency: 'USD', marketState: 'Fallback Snapshot' }
+};
 
 const seedUsers = [
     { id: 'seed-wiseravenshare', name: 'WiseravenShare Community', handle: '@wiseravenshare', avatar: 'WS' },
@@ -22,6 +29,32 @@ const readPosts = () => {
     return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
 };
 
+const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
+    if (!Array.isArray(posts) || posts.length === 0) {
+        return [];
+    }
+
+    return posts
+        .filter((post) => post && typeof post === 'object')
+        .map((post) => {
+            const likes = Number(post.likes) || 0;
+            const reposts = Number(post.reposts) || 0;
+            const comments = Array.isArray(post.comments) ? post.comments.length : (Number(post.comments) || 0);
+            const momentum = (likes * 1.6) + (reposts * 2.4) + (comments * 1.2);
+            const content = String(post.content || '').trim();
+            const preview = content.length > 92 ? `${content.slice(0, 89).trim()}...` : content;
+
+            return {
+                id: String(post.id || `${post.userId || 'post'}-${Math.random().toString(36).slice(2)}`),
+                userName: String(post?.user?.name || 'Community voice').trim(),
+                preview: preview || 'Trending post update',
+                momentum
+            };
+        })
+        .sort((left, right) => right.momentum - left.momentum)
+        .slice(0, limit);
+};
+
 const formatFollowers = (count) => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
@@ -35,7 +68,7 @@ const normalizeSearchValue = (value) => String(value || '')
     .toLowerCase()
     .replace(/^@+/, '');
 
-const normalizeTopicValue = (value) => normalizeSearchValue(value).replace(/^#+/, '');
+const normalizeTopicValue = (value) => normalizeSearchValue(value).replace(/^[#%]+/, '');
 
 const collapseForNameMatch = (value) => normalizeSearchValue(value).replace(/[^a-z0-9]/g, '');
 
@@ -132,6 +165,44 @@ const normalizeMarketQuote = (quote = {}) => ({
     asOf: quote.asOf || null
 });
 
+const extractMarketQuotes = (response) => {
+    const body = response?.data;
+    if (Array.isArray(body?.quotes)) {
+        return body.quotes;
+    }
+
+    // Backward compatibility with older market endpoint payload shape.
+    if (Array.isArray(body?.data)) {
+        return body.data;
+    }
+
+    return [];
+};
+
+const buildFallbackQuotes = (symbols = MARKET_SYMBOLS) => symbols
+    .map((symbol) => {
+        const key = String(symbol || '').toUpperCase().trim();
+        const sample = FALLBACK_QUOTES[key] || {
+            name: key || 'Market quote',
+            price: 100,
+            changePercent: 0,
+            volume: 0,
+            currency: 'USD',
+            marketState: 'Fallback Snapshot'
+        };
+
+        return normalizeMarketQuote({
+            symbol: key,
+            name: sample.name,
+            price: sample.price,
+            changePercent: sample.changePercent,
+            volume: sample.volume,
+            currency: sample.currency,
+            marketState: sample.marketState
+        });
+    })
+    .filter((quote) => quote.symbol && Number.isFinite(quote.price));
+
 const isImageAvatar = (value) => {
     if (typeof value !== 'string') return false;
     const normalized = value.trim();
@@ -187,6 +258,7 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
 
 const RightSidebar = ({ onNavigate }) => {
     const [trendingTopics, setTrendingTopics] = useState([]);
+    const [trendingPostAnnouncements, setTrendingPostAnnouncements] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
     const [followingIds, setFollowingIds] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -281,8 +353,10 @@ const RightSidebar = ({ onNavigate }) => {
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
                 const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
                 setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
+                setTrendingPostAnnouncements(buildTrendingPostAnnouncements(mergedPosts, 4));
             } catch (error) {
                 setTrendingTopics(computeTrendingTopics([], 6));
+                setTrendingPostAnnouncements([]);
             }
         };
 
@@ -320,7 +394,7 @@ const RightSidebar = ({ onNavigate }) => {
 
             try {
                 const response = await apiService.getMarketQuotes(MARKET_SYMBOLS);
-                const quotes = Array.isArray(response?.data?.quotes) ? response.data.quotes : [];
+                const quotes = extractMarketQuotes(response);
                 const normalizedQuotes = quotes
                     .map(normalizeMarketQuote)
                     .filter((quote) => quote.symbol && Number.isFinite(quote.price));
@@ -329,15 +403,16 @@ const RightSidebar = ({ onNavigate }) => {
                     return;
                 }
 
-                setStockData(normalizedQuotes);
-                setMarketError(normalizedQuotes.length === 0 ? 'Live market data is temporarily unavailable.' : '');
+                const safeQuotes = normalizedQuotes.length > 0 ? normalizedQuotes : buildFallbackQuotes(MARKET_SYMBOLS);
+                setStockData(safeQuotes);
+                setMarketError(normalizedQuotes.length === 0 ? 'Showing snapshot quotes while live market data reconnects.' : '');
             } catch (error) {
                 if (!isMounted) {
                     return;
                 }
 
-                setStockData([]);
-                setMarketError('Live market data is temporarily unavailable.');
+                setStockData(buildFallbackQuotes(MARKET_SYMBOLS));
+                setMarketError('Showing snapshot quotes while live market data reconnects.');
             } finally {
                 if (isMounted) {
                     setMarketLoading(false);
@@ -551,15 +626,41 @@ const RightSidebar = ({ onNavigate }) => {
                 marginBottom: '20px',
                 border: '1px solid var(--border-color)'
             }}>
-                <h3 style={{ marginBottom: '15px', color: 'var(--light-color)' }}>
-                    <i className="fas fa-chart-line"></i> Trending Now
+                <h3 style={{ marginBottom: '12px', color: 'var(--light-color)' }}>
+                    <i className="fas fa-bullhorn"></i> Trending Announcements
                 </h3>
+                <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '12px' }}>
+                    Live callouts for trending posts and topics.
+                </div>
+
+                {trendingPostAnnouncements.length > 0 && (
+                    <div style={{ marginBottom: '12px' }}>
+                        {trendingPostAnnouncements.map((item) => (
+                            <div
+                                key={item.id}
+                                style={{
+                                    padding: '10px 0',
+                                    borderBottom: '1px solid var(--border-color)'
+                                }}
+                            >
+                                <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '4px' }}>
+                                    Post surge • {item.userName}
+                                </div>
+                                <div style={{ fontSize: '12px', lineHeight: 1.45 }}>{item.preview}</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Topic Signals
+                </div>
                 {trendingTopics.map(topic => (
                     <div
                         key={topic.topic}
                         onClick={() => handleTrendingClick(topic.topic)}
                         style={{
-                            padding: '12px 0',
+                            padding: '10px 0',
                             borderBottom: '1px solid var(--border-color)',
                             cursor: 'pointer',
                             transition: 'all 0.3s'

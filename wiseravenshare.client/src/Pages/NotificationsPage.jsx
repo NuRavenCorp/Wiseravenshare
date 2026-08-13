@@ -9,46 +9,8 @@ const NotificationsPage = () => {
         markAllAsRead: markAllAppNotificationsAsRead,
         deleteNotification: deleteAppNotification
     } = useNotification();
-    const [fallbackNotifications, setFallbackNotifications] = useState([
-        {
-            id: 1,
-            type: 'like',
-            user: { name: 'Sarah Johnson', avatar: 'SJ' },
-            content: 'liked your post: "The future of social media is decentralized..."',
-            time: '2 hours ago',
-            unread: true
-        },
-        {
-            id: 2,
-            type: 'follow',
-            user: { name: 'Michael Chen', avatar: 'MC' },
-            content: 'started following you',
-            time: '5 hours ago',
-            unread: true
-        },
-        {
-            id: 3,
-            type: 'mention',
-            user: { name: 'Emma Wilson', avatar: 'EW' },
-            content: 'mentioned you in a comment: "Great point @RavenBlackbeak!"',
-            time: '1 day ago',
-            unread: false
-        },
-        {
-            id: 4,
-            type: 'comment',
-            user: { name: 'David Kim', avatar: 'DK' },
-            content: 'commented on your photo: "Amazing shot! The lighting is perfect."',
-            time: '2 days ago',
-            unread: false
-        }
-    ]);
 
     const notifications = useMemo(() => {
-        if (appNotifications.length === 0) {
-            return fallbackNotifications;
-        }
-
         return appNotifications.map((notification) => ({
             id: notification.id,
             type: notification.type || 'alert',
@@ -60,7 +22,7 @@ const NotificationsPage = () => {
             time: new Date(notification.timestamp).toLocaleString(),
             unread: !notification.read
         }));
-    }, [appNotifications, fallbackNotifications]);
+    }, [appNotifications]);
 
     const getTypeIcon = (type) => {
         switch (type) {
@@ -77,26 +39,18 @@ const NotificationsPage = () => {
         if (appNotifications.length > 0) {
             return markAppNotificationAsRead(id);
         }
-
-        setFallbackNotifications(prev => prev.map(notif =>
-            notif.id === id ? { ...notif, unread: false } : notif
-        ));
     };
 
     const handleMarkAllAsRead = () => {
         if (appNotifications.length > 0) {
             return markAllAppNotificationsAsRead();
         }
-
-        setFallbackNotifications(prev => prev.map(notif => ({ ...notif, unread: false })));
     };
 
     const handleRemoveNotification = (id) => {
         if (appNotifications.length > 0) {
             return deleteAppNotification(id);
         }
-
-        setFallbackNotifications(prev => prev.filter(notif => notif.id !== id));
     };
 
     const filteredNotifications = notifications.filter(notif => {

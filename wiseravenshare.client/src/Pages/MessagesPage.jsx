@@ -1,40 +1,96 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createHubConnection } from '../Services/realtimeHub.js';
+import { useAuth } from '../Contexts/AuthContext';
+import { useNotification } from '../Contexts/NotificationContext';
+
+const STORAGE_KEY = 'wiseMessagesConversations';
+
+const formatClock = (value) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+const relativeTime = (value) => {
+    const then = new Date(value).getTime();
+    if (!Number.isFinite(then)) return 'now';
+
+    const deltaMinutes = Math.max(0, Math.round((Date.now() - then) / 60000));
+    if (deltaMinutes < 1) return 'now';
+    if (deltaMinutes < 60) return `${deltaMinutes}m`;
+
+    const deltaHours = Math.round(deltaMinutes / 60);
+    if (deltaHours < 24) return `${deltaHours}h`;
+    return `${Math.round(deltaHours / 24)}d`;
+};
+
+const normalizeIncomingMessage = (payload = {}) => ({
+    id: String(payload.id || Date.now()),
+    senderUserId: String(payload.senderUserId || '').trim().toLowerCase(),
+    recipientUserId: String(payload.recipientUserId || '').trim().toLowerCase(),
+    text: String(payload.text || '').trim(),
+    sentAtUtc: payload.sentAtUtc || new Date().toISOString(),
+    fromPersonnel: Boolean(payload.fromPersonnel)
+});
+
+const seedConversations = [
+    {
+        id: 'user2',
+        participantUserId: 'user2',
+        name: 'Sarah Johnson',
+        avatar: 'SJ',
+        lastMessage: 'Hey, how are you doing?',
+        time: '2h',
+        unread: 1,
+        online: true,
+        messages: [
+            { id: 'seed-1', text: "Hey there! How's it going?", incoming: true, time: '10:30 AM', sentAtUtc: new Date().toISOString() }
+        ]
+    },
+    {
+        id: 'user3',
+        participantUserId: 'user3',
+        name: 'Michael Chen',
+        avatar: 'MC',
+        lastMessage: 'The project is due next week',
+        time: '1d',
+        unread: 0,
+        online: false,
+        messages: [
+            { id: 'seed-2', text: 'The project is due next week', incoming: true, time: 'Yesterday', sentAtUtc: new Date().toISOString() }
+        ]
+    }
+];
 
 const MessagesPage = () => {
-    const [selectedConversation, setSelectedConversation] = useState(null);
+    const { user } = useAuth();
+    const { addToast, addNotification } = useNotification();
+    const [selectedConversationId, setSelectedConversationId] = useState(null);
     const [messageInput, setMessageInput] = useState('');
     const [isRavenDelivering, setIsRavenDelivering] = useState(false);
-    const [flightToken, setFlightToken] = useState(0);
+    const [isConnected, setIsConnected] = useState(false);
     const ravenTimerRef = useRef(null);
-    const [conversations, setConversations] = useState([
-        {
-            id: 1,
-            name: 'Sarah Johnson',
-            avatar: 'SJ',
-            lastMessage: 'Hey, how are you doing?',
-            time: '2h',
-            unread: 3,
-            online: true,
-            messages: [
-                { id: 1, text: 'Hey there! How\'s it going?', incoming: true, time: '10:30 AM' },
-                { id: 2, text: 'I\'m doing great! Just working on some new features for Wiseraven.', incoming: false, time: '10:32 AM' },
-                { id: 3, text: 'That sounds interesting! What kind of features?', incoming: true, time: '10:33 AM' }
-            ]
-        },
-        {
-            id: 2,
-            name: 'Michael Chen',
-            avatar: 'MC',
-            lastMessage: 'The project is due next week',
-            time: '1d',
-            unread: 0,
-            online: false,
-            messages: [
-                { id: 1, text: 'Hey Michael, how\'s the project going?', incoming: false, time: 'Yesterday' },
-                { id: 2, text: 'The project is due next week', incoming: true, time: 'Yesterday' }
-            ]
+    const connectionRef = useRef(null);
+    const [conversations, setConversations] = useState(() => {
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            return Array.isArray(stored) && stored.length > 0 ? stored : seedConversations;
+        } catch {
+            return seedConversations;
         }
-    ]);
+    });
+
+    const selectedConversation = useMemo(() => {
+        if (!selectedConversationId) {
+            return null;
+        }
+
+        return conversations.find((conversation) => conversation.id === selectedConversationId) || null;
+    }, [conversations, selectedConversationId]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+        } catch {
+            // Ignore storage write failures.
+        }
+    }, [conversations]);
 
     useEffect(() => () => {
         if (ravenTimerRef.current) {
@@ -42,23 +98,141 @@ const MessagesPage = () => {
         }
     }, []);
 
-    const sendMessage = () => {
-        if (!messageInput.trim() || !selectedConversation) return;
+    useEffect(() => {
+        const activeUserId = String(user?.id || '').trim().toLowerCase();
+        if (!activeUserId) {
+            return undefined;
+        }
 
-        const newMessage = {
-            id: Date.now(),
-            text: messageInput,
-            incoming: false,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        let isMounted = true;
+        const connection = createHubConnection('/hubs/messages');
+        connectionRef.current = connection;
+
+        const onIncomingMessage = (rawPayload) => {
+            const payload = normalizeIncomingMessage(rawPayload);
+            if (!payload.text || !payload.senderUserId || !payload.recipientUserId) {
+                return;
+            }
+
+            if (payload.senderUserId !== activeUserId && payload.recipientUserId !== activeUserId) {
+                return;
+            }
+
+            const otherPartyId = payload.senderUserId === activeUserId
+                ? payload.recipientUserId
+                : payload.senderUserId;
+            const incoming = payload.senderUserId !== activeUserId;
+
+            setConversations((prev) => {
+                const existing = prev.find((conversation) => conversation.participantUserId === otherPartyId || conversation.id === otherPartyId);
+                const messageEntry = {
+                    id: payload.id,
+                    text: payload.text,
+                    incoming,
+                    time: formatClock(payload.sentAtUtc),
+                    sentAtUtc: payload.sentAtUtc
+                };
+
+                if (existing) {
+                    return prev.map((conversation) => {
+                        if (conversation.id !== existing.id) {
+                            return conversation;
+                        }
+
+                        const alreadyExists = Array.isArray(conversation.messages)
+                            && conversation.messages.some((message) => String(message.id) === payload.id);
+                        if (alreadyExists) {
+                            return conversation;
+                        }
+
+                        const isSelected = selectedConversationId === conversation.id;
+                        return {
+                            ...conversation,
+                            messages: [...(conversation.messages || []), messageEntry],
+                            lastMessage: payload.text,
+                            time: relativeTime(payload.sentAtUtc),
+                            unread: incoming && !isSelected ? (Number(conversation.unread) || 0) + 1 : (Number(conversation.unread) || 0)
+                        };
+                    });
+                }
+
+                const fallbackAvatar = (otherPartyId[0] || 'U').toUpperCase();
+                const createdConversation = {
+                    id: otherPartyId,
+                    participantUserId: otherPartyId,
+                    name: payload.fromPersonnel ? 'Wiseravenshare Personnel' : `User ${otherPartyId.slice(0, 6)}`,
+                    avatar: payload.fromPersonnel ? 'WS' : fallbackAvatar,
+                    lastMessage: payload.text,
+                    time: relativeTime(payload.sentAtUtc),
+                    unread: incoming ? 1 : 0,
+                    online: false,
+                    messages: [messageEntry]
+                };
+
+                return [createdConversation, ...prev];
+            });
+
+            if (incoming) {
+                addNotification({
+                    title: payload.fromPersonnel ? 'Wiseravenshare Personnel' : 'New message',
+                    message: payload.text,
+                    type: 'message'
+                });
+            }
         };
 
-        setConversations(prev => prev.map(conv =>
-            conv.id === selectedConversation.id
-                ? { ...conv, messages: [...conv.messages, newMessage], lastMessage: messageInput }
-                : conv
-        ));
+        connection.on('DirectMessageReceived', onIncomingMessage);
 
-        setFlightToken(Date.now());
+        const connect = async () => {
+            try {
+                await connection.start();
+                if (!isMounted) {
+                    await connection.stop();
+                    return;
+                }
+
+                setIsConnected(true);
+                await connection.invoke('JoinDirectChannel', activeUserId);
+            } catch {
+                setIsConnected(false);
+                addToast('Real-time messaging is temporarily unavailable.', 'warning');
+            }
+        };
+
+        connect();
+
+        connection.onclose(() => {
+            setIsConnected(false);
+        });
+
+        connection.onreconnected(async () => {
+            setIsConnected(true);
+            try {
+                await connection.invoke('JoinDirectChannel', activeUserId);
+            } catch {
+                // Ignore reconnect join failures.
+            }
+        });
+
+        return () => {
+            isMounted = false;
+            connection.off('DirectMessageReceived', onIncomingMessage);
+            connectionRef.current = null;
+            connection.stop().catch(() => null);
+        };
+    }, [addNotification, addToast, selectedConversationId, user?.id]);
+
+    const sendMessage = () => {
+        const text = messageInput.trim();
+        if (!text || !selectedConversation) return;
+
+        const activeUserId = String(user?.id || '').trim().toLowerCase();
+        const recipientUserId = String(selectedConversation.participantUserId || selectedConversation.id || '').trim().toLowerCase();
+        if (!activeUserId || !recipientUserId) {
+            addToast('Please select a valid conversation before sending.', 'warning');
+            return;
+        }
+
         setIsRavenDelivering(true);
         if (ravenTimerRef.current) {
             clearTimeout(ravenTimerRef.current);
@@ -69,25 +243,23 @@ const MessagesPage = () => {
 
         setMessageInput('');
 
-        // Simulate reply
-        setTimeout(() => {
-            const replies = ['Interesting!', 'Tell me more.', 'I see.', 'Thanks for sharing!'];
-            const replyMessage = {
-                id: Date.now() + 1,
-                text: replies[Math.floor(Math.random() * replies.length)],
-                incoming: true,
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            };
-            setConversations(prev => prev.map(conv =>
-                conv.id === selectedConversation.id
-                    ? { ...conv, messages: [...conv.messages, replyMessage] }
-                    : conv
-            ));
-        }, 1000);
+        const connection = connectionRef.current;
+        if (!connection || connection.state !== 'Connected') {
+            addToast('Message queue is offline. Reconnecting to real-time service.', 'warning');
+            return;
+        }
+
+        connection.invoke('SendDirectMessage', {
+            senderUserId: activeUserId,
+            recipientUserId,
+            text
+        }).catch(() => {
+            addToast('Failed to send message in real-time.', 'error');
+        });
     };
 
     const selectConversation = (conversation) => {
-        setSelectedConversation(conversation);
+        setSelectedConversationId(conversation.id);
         // Mark as read
         setConversations(prev => prev.map(conv =>
             conv.id === conversation.id ? { ...conv, unread: 0 } : conv
@@ -217,7 +389,7 @@ const MessagesPage = () => {
                             <div>
                                 <div style={{ fontWeight: 'bold' }}>{selectedConversation.name}</div>
                                 <div style={{ fontSize: '12px', color: selectedConversation.online ? '#4caf50' : 'var(--highlight-color)' }}>
-                                    {selectedConversation.online ? 'Online' : 'Offline'}
+                                    {isConnected ? (selectedConversation.online ? 'Online' : 'Connected') : 'Offline'}
                                 </div>
                             </div>
                         </div>

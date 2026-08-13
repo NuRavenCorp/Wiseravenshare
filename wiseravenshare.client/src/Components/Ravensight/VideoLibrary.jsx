@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FaTrash, FaEdit, FaYoutube, FaEye, FaThumbsUp, FaComment, FaCalendar, FaSearch, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
@@ -10,6 +10,29 @@ const safeReadJson = (key, fallback) => {
     } catch {
         return fallback;
     }
+};
+
+const STORAGE_KEY = 'wiseRavensightLibrary';
+
+const readLibraryEntries = () => {
+    const saved = safeReadJson(STORAGE_KEY, []);
+    return Array.isArray(saved) ? saved : [];
+};
+
+const writeLibraryEntries = (entries) => {
+    try {
+        const sanitized = Array.isArray(entries) ? entries : [];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized.slice(0, 200)));
+    } catch {
+        // Ignore storage write failures; UI should still work in-memory.
+    }
+};
+
+const getVideoIdentity = (video) => String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
+
+const isLocalManagedVideo = (video) => {
+    const identity = getVideoIdentity(video);
+    return identity.startsWith('local-video-') || identity.startsWith('post-video-');
 };
 
 const normalizeVideo = (video, index = 0) => ({
@@ -38,7 +61,10 @@ const normalizeVideo = (video, index = 0) => ({
 });
 
 const getLocalFallbackVideos = (currentUserId) => {
-    const cachedVideos = safeReadJson('wiseRavensightVideos', [])
+    const cachedVideos = readLibraryEntries()
+        .map((video, index) => normalizeVideo(video, index));
+
+    const legacyVideos = safeReadJson('wiseRavensightVideos', [])
         .map((video, index) => normalizeVideo(video, index));
 
     const recentPosts = safeReadJson('wiseRecentPosts', [])
@@ -55,9 +81,9 @@ const getLocalFallbackVideos = (currentUserId) => {
             channelAvatar: post.user?.avatar || ''
         }, index));
 
-    const combined = [...cachedVideos, ...recentPosts]
+    const combined = [...cachedVideos, ...legacyVideos, ...recentPosts]
         .filter((video) => !!video.videoUrl)
-        .filter((video, idx, all) => all.findIndex((item) => item.videoUrl === video.videoUrl) === idx);
+        .filter((video, idx, all) => all.findIndex((item) => (item.videoUrl || item.mediaUrl) === (video.videoUrl || video.mediaUrl)) === idx);
 
     return currentUserId
         ? combined.filter((video) => !video.userId || video.userId === currentUserId)
@@ -71,6 +97,9 @@ const VideoLibrary = ({ onNotification }) => {
     const [filter, setFilter] = useState('all');
     const [selectedVideo, setSelectedVideo] = useState(null);
     const [editingVideo, setEditingVideo] = useState(null);
+    const [selectedVideoIds, setSelectedVideoIds] = useState([]);
+    const [deletingVideoIds, setDeletingVideoIds] = useState([]);
+    const [isBulkDeleting, setIsBulkDeleting] = useState(false);
     const { user } = useAuth();
 
     useEffect(() => {
@@ -85,16 +114,16 @@ const VideoLibrary = ({ onNotification }) => {
                 ? response.videos.map((video, index) => normalizeVideo(video, index))
                 : [];
 
-            if (responseVideos.length === 0) {
-                const fallbackVideos = getLocalFallbackVideos(user?.id);
-                setVideos(fallbackVideos);
-                if (fallbackVideos.length > 0) {
-                    onNotification('Showing locally saved videos from your library.', 'info');
-                }
-                return;
-            }
+            const fallbackVideos = getLocalFallbackVideos(user?.id);
+            const mergedVideos = [...responseVideos, ...fallbackVideos]
+                .filter((video) => !!video.videoUrl)
+                .filter((video, idx, all) => all.findIndex((item) => (item.id || item.videoUrl) === (video.id || video.videoUrl)) === idx);
 
-            setVideos(responseVideos);
+            setVideos(mergedVideos);
+            setSelectedVideoIds([]);
+            if (responseVideos.length === 0 && fallbackVideos.length > 0) {
+                onNotification('Showing locally saved videos from your library.', 'info');
+            }
         } catch (error) {
             console.error('Error loading videos:', error);
             const fallbackVideos = getLocalFallbackVideos(user?.id);
@@ -109,16 +138,101 @@ const VideoLibrary = ({ onNotification }) => {
         }
     };
 
-    const handleDeleteVideo = async (videoId) => {
-        if (window.confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
-            try {
-                await ravensightAPI.deleteVideo(videoId);
-                setVideos(prev => prev.filter(v => v.id !== videoId));
-                onNotification('Video deleted successfully', 'success');
-            } catch (error) {
-                console.error('Error deleting video:', error);
-                onNotification('Failed to delete video', 'error');
+    const removeVideoFromLocalCaches = (videoId) => {
+        const normalizedId = String(videoId);
+
+        const nextLibraryEntries = readLibraryEntries().filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId);
+        writeLibraryEntries(nextLibraryEntries);
+
+        const legacyVideos = safeReadJson('wiseRavensightVideos', []).filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId);
+        try {
+            localStorage.setItem('wiseRavensightVideos', JSON.stringify(legacyVideos));
+        } catch {
+            // Ignore local cache failures.
+        }
+
+        setVideos((prev) => prev.filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId));
+        setSelectedVideoIds((prev) => prev.filter((id) => id !== normalizedId));
+    };
+
+    const deleteVideoOnce = async (video, { skipConfirm = false, notify = true } = {}) => {
+        const videoId = getVideoIdentity(video);
+        if (!videoId) {
+            return false;
+        }
+
+        if (!skipConfirm) {
+            const confirmed = window.confirm('Delete this video and remove it from Ravensight storage? This cannot be undone.');
+            if (!confirmed) {
+                return false;
             }
+        }
+
+        setDeletingVideoIds((prev) => [...new Set([...prev, videoId])]);
+        try {
+            if (!isLocalManagedVideo(video)) {
+                const response = await ravensightAPI.deleteVideo(videoId);
+                removeVideoFromLocalCaches(videoId);
+                const blobDeleted = Boolean(response?.blobDeleted);
+                if (notify) {
+                    onNotification(
+                        blobDeleted ? 'Video and blob storage object deleted.' : 'Video deleted. Storage cleanup may still be in progress.',
+                        blobDeleted ? 'success' : 'warning'
+                    );
+                }
+                return true;
+            }
+
+            removeVideoFromLocalCaches(videoId);
+            if (notify) {
+                onNotification('Local video removed from your library.', 'success');
+            }
+            return true;
+        } catch (error) {
+            console.error('Error deleting video:', error);
+            if (notify) {
+                onNotification('Delete failed. The video was kept in the library.', 'error');
+            }
+            return false;
+        } finally {
+            setDeletingVideoIds((prev) => prev.filter((id) => id !== videoId));
+        }
+    };
+
+    const handleDeleteVideo = async (video) => {
+        await deleteVideoOnce(video);
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedVideoIds.length === 0) {
+            return;
+        }
+
+        const confirmed = window.confirm(`Delete ${selectedVideoIds.length} selected video${selectedVideoIds.length === 1 ? '' : 's'}?`);
+        if (!confirmed) {
+            return;
+        }
+
+        setIsBulkDeleting(true);
+        let deletedCount = 0;
+        try {
+            for (const id of selectedVideoIds) {
+                const video = videos.find((item) => getVideoIdentity(item) === id);
+                if (!video) {
+                    continue;
+                }
+
+                // eslint-disable-next-line no-await-in-loop
+                const deleted = await deleteVideoOnce(video, { skipConfirm: true, notify: false });
+                if (deleted) {
+                    deletedCount += 1;
+                }
+            }
+
+            onNotification(`${deletedCount} selected video${deletedCount === 1 ? '' : 's'} deleted.`, deletedCount > 0 ? 'success' : 'warning');
+        } finally {
+            setIsBulkDeleting(false);
+            setSelectedVideoIds([]);
         }
     };
 
@@ -134,7 +248,7 @@ const VideoLibrary = ({ onNotification }) => {
         }
     };
 
-    const filteredVideos = videos.filter(video => {
+    const filteredVideos = useMemo(() => videos.filter(video => {
         const title = String(video?.title || '').toLowerCase();
         const description = String(video?.description || '').toLowerCase();
         const search = String(searchTerm || '').toLowerCase();
@@ -144,7 +258,34 @@ const VideoLibrary = ({ onNotification }) => {
             (filter === 'processing' && video.status === 'processing') ||
             (filter === 'failed' && video.status === 'failed');
         return matchesSearch && matchesFilter;
-    });
+    }), [filter, searchTerm, videos]);
+
+    const selectedCount = selectedVideoIds.length;
+    const selectedVisibleCount = filteredVideos.filter((video) => selectedVideoIds.includes(getVideoIdentity(video))).length;
+    const allVisibleSelected = filteredVideos.length > 0 && selectedVisibleCount === filteredVideos.length;
+
+    const toggleVideoSelected = (videoId) => {
+        const normalizedId = String(videoId);
+        setSelectedVideoIds((prev) => (
+            prev.includes(normalizedId)
+                ? prev.filter((id) => id !== normalizedId)
+                : [...prev, normalizedId]
+        ));
+    };
+
+    const toggleSelectVisible = () => {
+        if (allVisibleSelected) {
+            setSelectedVideoIds((prev) => prev.filter((id) => !filteredVideos.some((video) => getVideoIdentity(video) === id)));
+            return;
+        }
+
+        setSelectedVideoIds((prev) => [
+            ...new Set([
+                ...prev,
+                ...filteredVideos.map((video) => getVideoIdentity(video)).filter(Boolean)
+            ])
+        ]);
+    };
 
     const getStatusBadge = (status) => {
         switch (status) {
@@ -167,15 +308,29 @@ const VideoLibrary = ({ onNotification }) => {
             tags: video.tags || []
         });
         const status = getStatusBadge(video.status);
+        const videoId = getVideoIdentity(video);
+        const isSelected = selectedVideoIds.includes(videoId);
+        const isDeleting = deletingVideoIds.includes(videoId);
 
         return (
             <div style={{
                 background: 'var(--card-bg)',
                 borderRadius: '12px',
                 overflow: 'hidden',
-                marginBottom: '20px'
+                marginBottom: '20px',
+                border: isSelected ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                boxShadow: isSelected ? '0 0 0 1px rgba(79,116,214,0.25), 0 14px 28px rgba(0,0,0,0.18)' : 'none'
             }}>
-                <div style={{ display: 'flex', gap: '15px' }}>
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'stretch' }}>
+                    <div style={{ padding: '14px 0 0 14px' }}>
+                        <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleVideoSelected(videoId)}
+                            aria-label={`Select ${video.title}`}
+                            style={{ width: '16px', height: '16px', accentColor: 'var(--highlight-color)' }}
+                        />
+                    </div>
                     <img
                         src={video.thumbnailUrl || 'https://via.placeholder.com/160x90?text=Video'}
                         alt={video.title}
@@ -299,7 +454,7 @@ const VideoLibrary = ({ onNotification }) => {
                             </>
                         )}
                     </div>
-                    <div style={{ padding: '10px', display: 'flex', gap: '8px' }}>
+                    <div style={{ padding: '10px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                         {!isEditing && (
                             <button
                                 onClick={() => setIsEditing(true)}
@@ -315,14 +470,16 @@ const VideoLibrary = ({ onNotification }) => {
                             </button>
                         )}
                         <button
-                            onClick={() => handleDeleteVideo(video.id)}
+                            onClick={() => handleDeleteVideo(video)}
+                            disabled={isDeleting || isBulkDeleting}
                             style={{
                                 background: 'none',
                                 border: 'none',
-                                color: '#f44336',
-                                cursor: 'pointer',
+                                color: isDeleting ? 'var(--highlight-color)' : '#f44336',
+                                cursor: isDeleting || isBulkDeleting ? 'wait' : 'pointer',
                                 fontSize: '16px'
                             }}
+                            title={isDeleting ? 'Deleting...' : 'Delete video'}
                         >
                             <FaTrash />
                         </button>
@@ -334,17 +491,78 @@ const VideoLibrary = ({ onNotification }) => {
 
     const stats = [
         { label: 'Total Videos', value: videos.length, icon: '🎥' },
+        { label: 'Selected', value: selectedCount, icon: '✅' },
         { label: 'Total Views', value: videos.reduce((sum, v) => sum + (v.views || 0), 0).toLocaleString(), icon: '👁️' },
-        { label: 'Total Likes', value: videos.reduce((sum, v) => sum + (v.likes || 0), 0).toLocaleString(), icon: '❤️' },
-        { label: 'YouTube Published', value: videos.filter(v => v.youtubeUrl).length, icon: '📺' }
+        { label: 'Permanent', value: videos.filter(v => v.storageMode === 'permanent').length, icon: '🗂️' }
     ];
 
     return (
         <div>
+            <div style={{
+                background: 'linear-gradient(135deg, rgba(79, 116, 214, 0.16), rgba(163, 58, 93, 0.18))',
+                border: '1px solid var(--border-color)',
+                borderRadius: '16px',
+                padding: '18px 20px',
+                marginBottom: '18px'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div>
+                        <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>Ravensight Library</div>
+                        <h2 style={{ margin: '4px 0 0', fontSize: '26px' }}>Manage saved objects</h2>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                            type="button"
+                            onClick={loadUserVideos}
+                            style={{
+                                padding: '9px 14px',
+                                borderRadius: '999px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Refresh
+                        </button>
+                        <button
+                            type="button"
+                            onClick={toggleSelectVisible}
+                            disabled={filteredVideos.length === 0}
+                            style={{
+                                padding: '9px 14px',
+                                borderRadius: '999px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)',
+                                cursor: filteredVideos.length === 0 ? 'not-allowed' : 'pointer'
+                            }}
+                        >
+                            {allVisibleSelected ? 'Clear visible selection' : 'Select visible'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleBulkDelete}
+                            disabled={selectedCount === 0 || isBulkDeleting}
+                            style={{
+                                padding: '9px 14px',
+                                borderRadius: '999px',
+                                border: 'none',
+                                background: selectedCount === 0 ? 'rgba(244,67,54,0.35)' : 'linear-gradient(135deg, #ef4444, #c2410c)',
+                                color: '#fff',
+                                cursor: selectedCount === 0 || isBulkDeleting ? 'not-allowed' : 'pointer'
+                            }}
+                        >
+                            {isBulkDeleting ? 'Deleting...' : `Delete selected (${selectedCount})`}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             {/* Stats */}
             <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
                 gap: '15px',
                 marginBottom: '20px'
             }}>
@@ -362,12 +580,45 @@ const VideoLibrary = ({ onNotification }) => {
                 ))}
             </div>
 
+            {selectedCount > 0 && (
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    marginBottom: '14px',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(79,116,214,0.35)',
+                    background: 'rgba(79,116,214,0.12)'
+                }}>
+                    <div style={{ fontSize: '13px' }}>
+                        {selectedCount} item{selectedCount === 1 ? '' : 's'} selected
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setSelectedVideoIds([])}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '999px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Clear selection
+                    </button>
+                </div>
+            )}
+
             {/* Search and Filter */}
             <div style={{
-                display: 'flex',
+                display: 'grid',
+                gridTemplateColumns: 'minmax(280px, 1fr) 180px',
                 gap: '15px',
-                marginBottom: '20px',
-                flexWrap: 'wrap'
+                marginBottom: '20px'
             }}>
                 <div style={{ flex: 1, position: 'relative' }}>
                     <FaSearch style={{
@@ -410,15 +661,41 @@ const VideoLibrary = ({ onNotification }) => {
                 </select>
             </div>
 
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {['all', 'published', 'processing', 'failed'].map((option) => (
+                    <button
+                        key={option}
+                        type="button"
+                        onClick={() => setFilter(option)}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '999px',
+                            border: '1px solid var(--border-color)',
+                            background: filter === option ? 'var(--highlight-color)' : 'rgba(255,255,255,0.03)',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer',
+                            textTransform: 'capitalize'
+                        }}
+                    >
+                        {option}
+                    </button>
+                ))}
+            </div>
+
             {/* Video List */}
             {loading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>
                     <div className="loading-spinner" style={{ margin: '0 auto' }}></div>
                 </div>
             ) : filteredVideos.length > 0 ? (
-                filteredVideos.map(video => (
-                    <VideoCard key={video.id} video={video} />
-                ))
+                <div style={{ display: 'grid', gap: '14px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '2px' }}>
+                        Showing {filteredVideos.length} of {videos.length} saved object{videos.length === 1 ? '' : 's'}
+                    </div>
+                    {filteredVideos.map(video => (
+                        <VideoCard key={video.id} video={video} />
+                    ))}
+                </div>
             ) : (
                 <div style={{
                     textAlign: 'center',

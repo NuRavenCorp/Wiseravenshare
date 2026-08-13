@@ -1234,7 +1234,7 @@ const ProfilePage = () => {
                             </div>
                             <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
                                 <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>Active User Table</div>
-                                <div style={{ fontWeight: 'bold', wordBreak: 'break-all' }}>{persistenceStatus?.users?.activeTable || 'n/a'}</div>
+                                <div style={{ fontWeight: 'bold', wordBreak: 'normal', overflowWrap: 'anywhere' }}>{persistenceStatus?.users?.activeTable || 'n/a'}</div>
                             </div>
                             <div style={{ padding: '10px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
                                 <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>Video DB Available</div>

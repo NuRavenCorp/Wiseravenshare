@@ -307,6 +307,7 @@ export const apiService = {
     getNotifications: (params) => api.get('/notifications', { params }),
     markNotificationRead: (notificationId) => api.put(`/notifications/${notificationId}/read`),
     markAllNotificationsRead: () => api.put('/notifications/read-all'),
+    broadcastPersonnelNotification: (payload) => api.post('/notifications/personnel/broadcast', payload),
 
     // Messages endpoints
     getConversations: () => api.get('/messages/conversations'),
@@ -387,7 +388,29 @@ export const apiService = {
     }),
 
     // Payments endpoints
-    createCheckoutSession: (payload) => api.post('/payments/checkout-session', payload),
+    createCheckoutSession: async (payload) => {
+        const candidates = [
+            '/payments/checkout-session',
+            '/api/payments/checkout-session',
+            `${window.location.origin}/api/payments/checkout-session`,
+            'https://wise-ravens.com/api/payments/checkout-session'
+        ];
+
+        let lastError = null;
+        for (const url of [...new Set(candidates.filter(Boolean))]) {
+            try {
+                return await api.post(url, payload);
+            } catch (error) {
+                lastError = error;
+                const status = Number(error?.response?.status || 0);
+                if (status !== 404 && status !== 405) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Sponsorship checkout is unavailable right now.');
+    },
     getPaymentsConfig: () => api.get('/payments/config'),
 
     // Planner reminder endpoints

@@ -1,5 +1,37 @@
 const STORAGE_KEY = 'wiseRecentPosts';
 const MAX_STORED_POSTS = 120;
+const MAX_TEXT_LENGTH = 220;
+
+const cleanWhitespaceText = (value) => String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const looksLikeCorruptBlob = (value) => {
+    const text = cleanWhitespaceText(value);
+    if (!text || text.length < 24) {
+        return false;
+    }
+
+    const hasLongEncodedRun = /(?:[A-Za-z0-9+/=]{24,})/.test(text);
+    const hasFewWords = text.split(/\s+/).filter(Boolean).length <= 2 && text.length > 60;
+    const hasTooManySymbols = (text.match(/[^A-Za-z0-9\s.,!?@#%'\-/]/g) || []).length > text.length * 0.22;
+
+    return hasLongEncodedRun || hasFewWords || hasTooManySymbols;
+};
+
+const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) => {
+    const text = cleanWhitespaceText(value);
+    if (!text) {
+        return fallback;
+    }
+
+    if (looksLikeCorruptBlob(text)) {
+        return fallback;
+    }
+
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
+};
 
 export const normalizePostsPayload = (payload) => {
     if (Array.isArray(payload)) {
@@ -52,6 +84,11 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const resolvedUser = normalizeUser(post, fallbackUser);
     const resolvedUserId = post?.userId || resolvedUser?.id || fallbackUser?.id || null;
 
+    const content = sanitizeTextValue(post?.content, 'Fresh clip from the feed', 180);
+    const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
+    const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
+    const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
+
     return {
         ...post,
         id: post?.id || `local-post-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -61,8 +98,15 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
         likes: Number(post?.likes ?? post?.likesCount ?? 0),
         reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
         comments: Array.isArray(post?.comments) ? post.comments : [],
+        content,
+        caption,
         truthScore: post?.truthScore ?? null,
-        user: resolvedUser
+        user: {
+            ...resolvedUser,
+            name,
+            handle,
+            avatar: sanitizeTextValue(resolvedUser?.avatar, 'U', 24) || 'U'
+        }
     };
 };
 
