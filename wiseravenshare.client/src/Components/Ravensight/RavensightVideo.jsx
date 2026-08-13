@@ -8,32 +8,98 @@ import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
 import { subscriptionService } from '../../services/subscriptionService';
 
-const CREATOR_PRO = {
-    tier: 'Creator Pro',
-    monthlyPrice: 9.99,
-    annualPrice: 109.00,
-    monthlyCycleDays: 30,
-    annualCycleDays: 365
-};
-
-const PAYWALL_VARIANTS = {
-    control: {
-        id: 'control',
-        heading: 'Creator Pro',
-        subheading: 'Unlock direct video uploads to YouTube and TikTok with scheduling and creator controls.',
-        monthlyCta: 'Subscribe Monthly',
-        annualCta: 'Subscribe Annual (Save 9%)',
-        annualNote: 'Annual plan saves about 9% compared with monthly billing.'
+const PRICING_PLANS = [
+    {
+        id: 'creator_pro',
+        name: 'Creator Pro',
+        tagline: 'For solo creators shipping consistently',
+        monthlyPrice: 19,
+        annualPrice: 190,
+        monthlyCycleDays: 30,
+        annualCycleDays: 365,
+        badge: 'Most popular',
+        features: [
+            'Direct publishing to YouTube and TikTok',
+            'Scheduled uploads and publishing workflow',
+            'Creator controls for privacy and approvals'
+        ]
     },
-    value: {
-        id: 'value',
-        heading: 'Creator Pro Revenue Mode',
-        subheading: 'Publish faster, keep audience momentum, and turn each post into measurable growth.',
-        monthlyCta: 'Start Monthly Creator Revenue',
-        annualCta: 'Lock Annual And Save 9%',
-        annualNote: 'Annual billing lowers effective monthly cost and protects your publishing cadence.'
+    {
+        id: 'growth_suite',
+        name: 'Growth Suite',
+        tagline: 'For creators scaling their audience',
+        monthlyPrice: 39,
+        annualPrice: 390,
+        monthlyCycleDays: 30,
+        annualCycleDays: 365,
+        badge: 'Best for growth',
+        features: [
+            'Everything in Creator Pro',
+            'Advanced audience growth analytics',
+            'Trend and publishing optimization tools'
+        ]
+    },
+    {
+        id: 'studio_plus',
+        name: 'Studio Plus',
+        tagline: 'For teams and agencies',
+        monthlyPrice: 79,
+        annualPrice: 790,
+        monthlyCycleDays: 30,
+        annualCycleDays: 365,
+        badge: 'For teams',
+        features: [
+            'Everything in Growth Suite',
+            'Multi-user access and team workflows',
+            'Expanded publishing and delivery controls'
+        ]
     }
-};
+];
+
+const DEFAULT_PLAN_ID = 'creator_pro';
+const DEFAULT_BILLING_CYCLE = 'monthly';
+
+const PRODUCT_ROADMAP = [
+    {
+        phase: 'Launch',
+        title: 'Creator publishing core',
+        description: 'Direct publishing, scheduling, video upload flows, and clean creator controls for the essentials.'
+    },
+    {
+        phase: 'Next',
+        title: 'Growth intelligence',
+        description: 'Trend-aware planning, content ideas, and audience optimization tools for faster reach.'
+    },
+    {
+        phase: 'Scale',
+        title: 'Team and agency workflows',
+        description: 'Collaborations, approvals, shared libraries, and multi-brand publishing capabilities.'
+    }
+];
+
+const CAPABILITY_STACK = [
+    {
+        title: 'Creator publishing core',
+        subitems: ['Direct video upload flows', 'Publishing queue and scheduling', 'Creator privacy and approval controls']
+    },
+    {
+        title: 'Growth intelligence',
+        subitems: ['AI-assisted ideation', 'Trend-aware content planning', 'Performance-based publishing recommendations']
+    },
+    {
+        title: 'Team / agency mode',
+        subitems: ['Shared workspace', 'Approvals and comments', 'Client-ready workflows and multi-brand publishing']
+    }
+];
+
+const CHANNEL_ROLLOUT = [
+    { name: 'YouTube', status: 'Ready' },
+    { name: 'TikTok', status: 'Ready' },
+    { name: 'Instagram', status: 'Phase 2' },
+    { name: 'LinkedIn', status: 'Phase 2' },
+    { name: 'X', status: 'Phase 3' },
+    { name: 'Facebook', status: 'Phase 3' }
+];
 
 const allowLocalCheckoutFallback =
     import.meta.env.DEV || String(import.meta.env.VITE_STRIPE_CHECKOUT_LOCAL_FALLBACK || '').toLowerCase() === 'true';
@@ -50,9 +116,16 @@ const buildRenewDate = (days) => {
     return date.toISOString();
 };
 
+const formatMoney = (value) => `$${Number(value).toFixed(2)}`;
+
+const getPlanById = (planId = DEFAULT_PLAN_ID) => {
+    return PRICING_PLANS.find((plan) => plan.id === planId) || PRICING_PLANS[0];
+};
+
 const RavensightVideo = () => {
     const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library
     const [notifications, setNotifications] = useState([]);
+    const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
     const { user } = useAuth();
     const subscriptionStorageKey = buildSubscriptionStorageKey(user?.id);
     const paywallVariantStorageKey = buildPaywallVariantStorageKey(user?.id);
@@ -62,36 +135,25 @@ const RavensightVideo = () => {
             return raw
                 ? JSON.parse(raw)
                 : {
-                    tier: CREATOR_PRO.tier,
+                    tier: getPlanById().name,
                     isActive: false,
-                    billingCycle: 'monthly',
-                    price: CREATOR_PRO.monthlyPrice,
-                    renewsAt: null
+                    billingCycle: DEFAULT_BILLING_CYCLE,
+                    price: getPlanById().monthlyPrice,
+                    renewsAt: null,
+                    planId: DEFAULT_PLAN_ID
                 };
         } catch {
             return {
-                tier: CREATOR_PRO.tier,
+                tier: getPlanById().name,
                 isActive: false,
-                billingCycle: 'monthly',
-                price: CREATOR_PRO.monthlyPrice,
-                renewsAt: null
+                billingCycle: DEFAULT_BILLING_CYCLE,
+                price: getPlanById().monthlyPrice,
+                renewsAt: null,
+                planId: DEFAULT_PLAN_ID
             };
         }
     });
-    const [paywallVariant, setPaywallVariant] = useState(() => {
-        try {
-            const savedVariant = localStorage.getItem(paywallVariantStorageKey);
-            if (savedVariant && PAYWALL_VARIANTS[savedVariant]) {
-                return savedVariant;
-            }
-
-            const assigned = Math.random() < 0.5 ? 'control' : 'value';
-            localStorage.setItem(paywallVariantStorageKey, assigned);
-            return assigned;
-        } catch {
-            return 'control';
-        }
-    });
+    const selectedPlan = getPlanById(selectedPlanId);
 
     const addNotification = (message, type = 'info') => {
         const id = Date.now();
@@ -112,27 +174,25 @@ const RavensightVideo = () => {
 
     useEffect(() => {
         try {
-            const savedVariant = localStorage.getItem(paywallVariantStorageKey);
-            if (savedVariant && PAYWALL_VARIANTS[savedVariant]) {
-                setPaywallVariant(savedVariant);
+            const savedPlanId = localStorage.getItem(paywallVariantStorageKey);
+            if (savedPlanId && PRICING_PLANS.some((plan) => plan.id === savedPlanId)) {
+                setSelectedPlanId(savedPlanId);
                 return;
             }
 
-            const assigned = Math.random() < 0.5 ? 'control' : 'value';
-            localStorage.setItem(paywallVariantStorageKey, assigned);
-            setPaywallVariant(assigned);
+            localStorage.setItem(paywallVariantStorageKey, DEFAULT_PLAN_ID);
+            setSelectedPlanId(DEFAULT_PLAN_ID);
         } catch {
-            setPaywallVariant('control');
+            setSelectedPlanId(DEFAULT_PLAN_ID);
         }
     }, [paywallVariantStorageKey]);
 
     useEffect(() => {
-        safeTrackGrowthEvent('paywall_variant_assigned', {
+        safeTrackGrowthEvent('paywall_plan_selected', {
             source: 'ravensight_video',
-            plan: 'creator_pro',
-            variant: paywallVariant
+            plan: selectedPlanId
         });
-    }, [paywallVariant]);
+    }, [selectedPlanId]);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search || '');
@@ -169,18 +229,19 @@ const RavensightVideo = () => {
 
         safeTrackGrowthEvent('paywall_viewed', {
             source: 'ravensight_video',
-            plan: 'creator_pro',
-            variant: paywallVariant
+            plan: selectedPlanId
         });
-    }, [activeTab, paywallVariant]);
+    }, [activeTab, selectedPlanId]);
 
-    const subscribeNow = async (billingCycle = 'monthly') => {
+    const subscribeNow = async (planId = selectedPlanId, billingCycle = DEFAULT_BILLING_CYCLE) => {
+        const plan = getPlanById(planId);
+        const actualPlanId = plan.id;
+
         if (hostedStripePaymentLink) {
             safeTrackGrowthEvent('checkout_redirected_payment_link', {
                 source: 'ravensight_video',
-                plan: 'creator_pro',
+                plan: actualPlanId,
                 billingCycle,
-                variant: paywallVariant,
                 checkoutUrl: hostedStripePaymentLink
             });
             window.location.assign(hostedStripePaymentLink);
@@ -192,14 +253,13 @@ const RavensightVideo = () => {
 
         safeTrackGrowthEvent('checkout_started', {
             source: 'ravensight_video',
-            plan: 'creator_pro',
-            billingCycle,
-            variant: paywallVariant
+            plan: actualPlanId,
+            billingCycle
         });
 
         try {
             const response = await apiService.createCheckoutSession({
-                plan: 'creator_pro',
+                plan: actualPlanId,
                 billingCycle,
                 successUrl,
                 cancelUrl
@@ -209,9 +269,8 @@ const RavensightVideo = () => {
             if (checkoutUrl) {
                 safeTrackGrowthEvent('checkout_redirected', {
                     source: 'ravensight_video',
-                    plan: 'creator_pro',
+                    plan: actualPlanId,
                     billingCycle,
-                    variant: paywallVariant,
                     checkoutSessionId: response?.data?.id || ''
                 });
                 window.location.assign(checkoutUrl);
@@ -228,37 +287,35 @@ const RavensightVideo = () => {
             if (!allowLocalCheckoutFallback) {
                 safeTrackGrowthEvent('checkout_failed', {
                     source: 'ravensight_video',
-                    plan: 'creator_pro',
+                    plan: actualPlanId,
                     billingCycle,
-                    variant: paywallVariant,
                     reason: resolvedMessage
                 });
-                addNotification(`Stripe checkout unavailable: ${resolvedMessage}`, 'error');
+                addNotification(`Billing is temporarily unavailable. Please try again in a few minutes.`, 'error');
                 return;
             }
 
-            // Local fallback keeps development/testing workflow functional.
             const isAnnual = billingCycle === 'annual';
             const next = {
-                tier: CREATOR_PRO.tier,
+                tier: plan.name,
                 isActive: true,
                 billingCycle,
-                price: isAnnual ? CREATOR_PRO.annualPrice : CREATOR_PRO.monthlyPrice,
-                renewsAt: buildRenewDate(isAnnual ? CREATOR_PRO.annualCycleDays : CREATOR_PRO.monthlyCycleDays)
+                planId: actualPlanId,
+                price: isAnnual ? plan.annualPrice : plan.monthlyPrice,
+                renewsAt: buildRenewDate(isAnnual ? plan.annualCycleDays : plan.monthlyCycleDays)
             };
 
             persistSubscription(next);
             safeTrackGrowthEvent('checkout_fallback_enabled', {
                 source: 'ravensight_video',
-                plan: 'creator_pro',
+                plan: actualPlanId,
                 billingCycle,
-                variant: paywallVariant,
                 reason: resolvedMessage
             });
             addNotification(
                 isAnnual
-                    ? `Stripe checkout unavailable (${resolvedMessage}). Local ${CREATOR_PRO.tier} annual test mode enabled.`
-                    : `Stripe checkout unavailable (${resolvedMessage}). Local ${CREATOR_PRO.tier} monthly test mode enabled.`,
+                    ? `${plan.name} annual checkout is unavailable right now. A local billing test has been enabled for preview purposes.`
+                    : `${plan.name} monthly checkout is unavailable right now. A local billing test has been enabled for preview purposes.`,
                 'warning'
             );
         }
@@ -324,11 +381,11 @@ const RavensightVideo = () => {
                     <i className="fas fa-crow"></i>
                     Ravensight Video Studio
                 </h2>
-                <p style={{ opacity: 0.9 }}>Record, upload, and share videos directly to YouTube and TikTok</p>
+                <p style={{ opacity: 0.9 }}>Secure publishing for creators, teams, and growth-focused brands.</p>
                 <div style={{ marginTop: '10px', fontSize: '13px', opacity: 0.95 }}>
-                    Direct Upload:
+                    Publishing access:
                     <strong style={{ marginLeft: '6px' }}>
-                        {subscription?.isActive ? `${subscription.tier} Active` : `Locked - ${CREATOR_PRO.tier} $${CREATOR_PRO.monthlyPrice.toFixed(2)}/month`}
+                        {subscription?.isActive ? `${subscription.tier} active` : `Choose a plan below`}
                     </strong>
                 </div>
             </div>
@@ -371,7 +428,7 @@ const RavensightVideo = () => {
                     <VideoRecorder
                         onNotification={addNotification}
                         canDirectUpload={Boolean(subscription?.isActive)}
-                        subscriptionPriceMonthly={CREATOR_PRO.monthlyPrice}
+                        subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
                 {activeTab === 'feed' && (
@@ -381,83 +438,129 @@ const RavensightVideo = () => {
                     <VideoUploader
                         onNotification={addNotification}
                         canDirectUpload={Boolean(subscription?.isActive)}
-                        subscriptionPriceMonthly={CREATOR_PRO.monthlyPrice}
+                        subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
                 {activeTab === 'library' && (
                     <VideoLibrary onNotification={addNotification} />
                 )}
                 {activeTab === 'subscribe' && (
-                    <div style={{ maxWidth: '760px', margin: '0 auto' }}>
+                    <div style={{ maxWidth: '980px', margin: '0 auto' }}>
                         <div style={{
                             border: '1px solid var(--border-color)',
-                            borderRadius: '14px',
+                            borderRadius: '18px',
                             background: 'linear-gradient(145deg, rgba(79,116,214,0.18), rgba(163,58,93,0.14))',
                             padding: '24px'
                         }}>
-                            <h3 style={{ marginTop: 0, marginBottom: '8px' }}>Creator Pro</h3>
-                            <p style={{ margin: 0, color: 'var(--light-color)' }}>
-                                Unlock direct video uploads to YouTube and TikTok with scheduling and creator controls.
-                            </p>
-
-                            <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginTop: '16px', marginBottom: '18px' }}>
-                                <span style={{
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '999px',
-                                    padding: '6px 12px',
-                                    fontWeight: 700
-                                }}>
-                                    ${CREATOR_PRO.monthlyPrice.toFixed(2)}/month
-                                </span>
-                                <span style={{ fontWeight: 700, alignSelf: 'center' }}>
-                                    ${CREATOR_PRO.annualPrice.toFixed(2)}/year
-                                </span>
-                                <span style={{
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '999px',
-                                    padding: '6px 12px',
-                                    fontWeight: 700
-                                }}>
-                                    Annual plan saves about 9% compared with monthly billing.
-                                </span>
+                            <div style={{ marginBottom: '20px' }}>
+                                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8 }}>
+                                    Pricing
+                                </div>
+                                <h3 style={{ margin: '8px 0 6px', fontSize: '32px' }}>Choose the plan that fits your publishing pace.</h3>
+                                <p style={{ margin: 0, color: 'var(--light-color)' }}>
+                                    A creator-first suite designed to help you publish faster, grow smarter, and scale with more structure.
+                                </p>
                             </div>
 
-                            <ul style={{ margin: 0, paddingLeft: '20px', color: 'var(--light-color)', lineHeight: 1.6 }}>
-                                <li>Direct upload pipeline for YouTube and TikTok</li>
-                                <li>Upload scheduling and privacy controls</li>
-                                <li>Priority upload reliability profile</li>
-                            </ul>
+                            <div style={{
+                                marginBottom: '22px',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '14px',
+                                background: 'rgba(10,10,18,0.18)',
+                                padding: '16px 18px',
+                                color: 'var(--light-color)'
+                            }}>
+                                <strong style={{ color: 'var(--text-color)' }}>Early access rollout:</strong> We are launching with the creator publishing core first, then expanding into growth intelligence and team workflows to power the broader social ecosystem.
+                            </div>
 
-                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '22px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                                {PRICING_PLANS.map((plan) => {
+                                    const isSelected = selectedPlanId === plan.id;
+                                    const isCurrent = subscription?.planId === plan.id && subscription?.isActive;
+
+                                    return (
+                                        <div
+                                            key={plan.id}
+                                            onClick={() => setSelectedPlanId(plan.id)}
+                                            style={{
+                                                border: isSelected ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                                                borderRadius: '16px',
+                                                background: isSelected ? 'rgba(255,255,255,0.03)' : 'rgba(10,10,18,0.2)',
+                                                padding: '18px',
+                                                cursor: 'pointer',
+                                                position: 'relative',
+                                                boxShadow: isSelected ? '0 8px 28px rgba(79,116,214,0.18)' : 'none'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                <h4 style={{ margin: 0, fontSize: '20px' }}>{plan.name}</h4>
+                                                <span style={{
+                                                    fontSize: '11px',
+                                                    fontWeight: 700,
+                                                    borderRadius: '999px',
+                                                    padding: '4px 8px',
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid var(--border-color)'
+                                                }}>
+                                                    {plan.badge}
+                                                </span>
+                                            </div>
+
+                                            <div style={{ marginBottom: '8px', color: 'var(--light-color)', fontSize: '14px' }}>{plan.tagline}</div>
+                                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '12px' }}>
+                                                <span style={{ fontSize: '32px', fontWeight: 800 }}>{formatMoney(plan.monthlyPrice)}</span>
+                                                <span style={{ color: 'var(--light-color)' }}>/ month</span>
+                                            </div>
+                                            <div style={{ marginBottom: '14px', color: 'var(--light-color)', fontSize: '13px' }}>
+                                                or {formatMoney(plan.annualPrice)}/year • save with annual billing
+                                            </div>
+
+                                            <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--light-color)', lineHeight: 1.65, fontSize: '14px' }}>
+                                                {plan.features.map((feature) => (
+                                                    <li key={feature}>{feature}</li>
+                                                ))}
+                                            </ul>
+
+                                            {isCurrent && (
+                                                <div style={{ marginTop: '14px', fontWeight: 700, color: 'var(--highlight-color)' }}>
+                                                    Active plan
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '24px', alignItems: 'center' }}>
                                 {!subscription?.isActive ? (
                                     <>
                                         <button
-                                            onClick={() => subscribeNow('monthly')}
+                                            onClick={() => subscribeNow(selectedPlanId, 'monthly')}
                                             style={{
                                                 border: 'none',
                                                 background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                                                 color: 'white',
                                                 borderRadius: '999px',
-                                                padding: '10px 16px',
+                                                padding: '12px 18px',
                                                 fontWeight: 700,
                                                 cursor: 'pointer'
                                             }}
                                         >
-                                            Subscribe Monthly
+                                            Start {selectedPlan.name} • {formatMoney(selectedPlan.monthlyPrice)}/mo
                                         </button>
                                         <button
-                                            onClick={() => subscribeNow('annual')}
+                                            onClick={() => subscribeNow(selectedPlanId, 'annual')}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 background: 'var(--card-bg)',
                                                 color: 'var(--text-color)',
                                                 borderRadius: '999px',
-                                                padding: '10px 16px',
+                                                padding: '12px 18px',
                                                 fontWeight: 700,
                                                 cursor: 'pointer'
                                             }}
                                         >
-                                            Subscribe Annual (Save 9%)
+                                            Annual {formatMoney(selectedPlan.annualPrice)} • Save more
                                         </button>
                                     </>
                                 ) : (
@@ -473,15 +576,83 @@ const RavensightVideo = () => {
                                                 background: 'transparent',
                                                 color: 'var(--text-color)',
                                                 borderRadius: '999px',
-                                                padding: '10px 16px',
+                                                padding: '12px 18px',
                                                 fontWeight: 700,
                                                 cursor: 'pointer'
                                             }}
                                         >
-                                            Cancel Subscription
+                                            Manage billing
                                         </button>
                                     </>
                                 )}
+                            </div>
+
+                            <div style={{ marginTop: '28px' }}>
+                                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8, marginBottom: '14px' }}>
+                                    Product roadmap
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+                                    {PRODUCT_ROADMAP.map((item) => (
+                                        <div key={item.phase} style={{
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '12px',
+                                            padding: '14px',
+                                            background: 'rgba(255,255,255,0.02)'
+                                        }}>
+                                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.8, marginBottom: '8px' }}>{item.phase}</div>
+                                            <div style={{ fontWeight: 700, marginBottom: '6px' }}>{item.title}</div>
+                                            <div style={{ color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px' }}>{item.description}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginTop: '28px' }}>
+                                {CAPABILITY_STACK.map((stack) => (
+                                    <div key={stack.title} style={{
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '12px',
+                                        padding: '16px',
+                                        background: 'rgba(10,10,18,0.18)'
+                                    }}>
+                                        <div style={{ fontWeight: 800, marginBottom: '10px' }}>{stack.title}</div>
+                                        <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--light-color)', lineHeight: 1.6, fontSize: '14px' }}>
+                                            {stack.subitems.map((item) => <li key={item}>{item}</li>)}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div style={{ marginTop: '30px' }}>
+                                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8, marginBottom: '12px' }}>
+                                    Channel rollout
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    {CHANNEL_ROLLOUT.map((channel) => (
+                                        <div key={channel.name} style={{
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '999px',
+                                            padding: '8px 12px',
+                                            background: 'rgba(255,255,255,0.02)',
+                                            fontSize: '13px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <span>{channel.name}</span>
+                                            <span style={{
+                                                borderRadius: '999px',
+                                                padding: '2px 7px',
+                                                background: channel.status === 'Ready' ? 'rgba(76,175,80,0.18)' : 'rgba(255,152,0,0.15)',
+                                                color: channel.status === 'Ready' ? '#8fe28a' : '#ffcf70',
+                                                fontSize: '11px',
+                                                fontWeight: 700
+                                            }}>
+                                                {channel.status}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>

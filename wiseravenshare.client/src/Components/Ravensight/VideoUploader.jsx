@@ -3,11 +3,35 @@ import { FaUpload, FaYoutube, FaFileVideo, FaTrash, FaCheck, FaSpinner } from 'r
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 
+const CHANNEL_CHOICES = [
+    { id: 'youtube', label: 'YouTube' },
+    { id: 'tiktok', label: 'TikTok' },
+    { id: 'facebook', label: 'Facebook' }
+];
+
+const QUEUE_STATUS_LABELS = {
+    scheduled: 'Scheduled',
+    ready: 'Ready to publish',
+    publishing: 'Publishing',
+    published: 'Published',
+    failed: 'Failed'
+};
+
+const QUEUE_STATUS_STYLES = {
+    scheduled: { background: 'rgba(79, 116, 214, 0.18)', color: '#c5d7ff' },
+    ready: { background: 'rgba(255, 193, 7, 0.16)', color: '#ffe38d' },
+    publishing: { background: 'rgba(33, 150, 243, 0.16)', color: '#9dd0ff' },
+    published: { background: 'rgba(76, 175, 80, 0.16)', color: '#a9e7a6' },
+    failed: { background: 'rgba(244, 67, 54, 0.16)', color: '#ffb0aa' }
+};
+
 const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
     const defaultDestinationFolder = '/wiseravenshare/ravensight/video';
+    const queueStorageKey = 'wiseRavensightPublishingQueue';
     const [selectedFile, setSelectedFile] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
+    const [publishingQueue, setPublishingQueue] = useState([]);
     const [videoDetails, setVideoDetails] = useState({
         title: '',
         description: '',
@@ -31,6 +55,59 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     const fileInputRef = useRef(null);
     const { user } = useAuth();
 
+    const getSelectedChannels = () => {
+        const channels = [];
+
+        if (videoDetails.publishToYouTube) channels.push('youtube');
+        if (videoDetails.publishToTikTok) channels.push('tiktok');
+        if (videoDetails.publishToFacebook) channels.push('facebook');
+
+        return channels.length > 0 ? channels : ['youtube'];
+    };
+
+    const deriveQueueStatus = (item) => {
+        if (item.status && item.status !== 'scheduled') {
+            return item.status;
+        }
+
+        const scheduledTime = item.scheduledFor ? new Date(item.scheduledFor).getTime() : 0;
+        if (!scheduledTime || Number.isNaN(scheduledTime)) {
+            return 'scheduled';
+        }
+
+        const minutesUntilPublish = Math.round((scheduledTime - Date.now()) / 60000);
+        if (minutesUntilPublish <= 0) {
+            return 'ready';
+        }
+
+        if (minutesUntilPublish <= 10) {
+            return 'publishing';
+        }
+
+        return 'scheduled';
+    };
+
+    const enrichQueueItems = (items) => items.map((item) => ({
+        ...item,
+        channels: Array.isArray(item.channels) && item.channels.length > 0 ? item.channels : ['youtube'],
+        status: deriveQueueStatus(item)
+    }));
+
+    const readPublishingQueue = () => {
+        try {
+            const raw = localStorage.getItem(queueStorageKey);
+            return enrichQueueItems(raw ? JSON.parse(raw) : []);
+        } catch {
+            return [];
+        }
+    };
+
+    const persistPublishingQueue = (nextQueue) => {
+        const enrichedQueue = enrichQueueItems(nextQueue);
+        setPublishingQueue(enrichedQueue);
+        localStorage.setItem(queueStorageKey, JSON.stringify(enrichedQueue));
+    };
+
     const persistLocalVideo = (video) => {
         try {
             const current = JSON.parse(localStorage.getItem('wiseRavensightVideos') || '[]');
@@ -41,6 +118,10 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
             // No-op: local fallback storage should never block upload UX.
         }
     };
+
+    React.useEffect(() => {
+        setPublishingQueue(readPublishingQueue());
+    }, []);
 
     const handleFileSelect = (event) => {
         const file = event.target.files[0];
@@ -163,6 +244,55 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     const handleUpload = () => uploadVideo({ libraryOnly: false });
     const handleSaveToLibrary = () => {
         uploadVideo({ libraryOnly: true, destinationFolder: defaultDestinationFolder });
+    };
+
+    const handleQueueForPublishing = () => {
+        if (!selectedFile || !videoDetails.title.trim()) {
+            onNotification('Please select a video and add a title first.', 'error');
+            return;
+        }
+
+        if (!videoDetails.scheduledPublish) {
+            onNotification('Choose a scheduled time for this publishing queue item.', 'error');
+            return;
+        }
+
+        const scheduledItem = {
+            id: `scheduled-${Date.now()}`,
+            title: videoDetails.title.trim(),
+            description: videoDetails.description.trim(),
+            channel: videoDetails.publishToYouTube ? 'YouTube' : (videoDetails.publishToTikTok ? 'TikTok' : 'Ravensight'),
+            channels: getSelectedChannels(),
+            scheduledFor: videoDetails.scheduledPublish,
+            createdAt: new Date().toISOString(),
+            status: 'scheduled'
+        };
+
+        const nextQueue = [scheduledItem, ...readPublishingQueue()].slice(0, 12);
+        persistPublishingQueue(nextQueue);
+        resetForm();
+        onNotification('Video queued for scheduled publishing.', 'success');
+    };
+
+    const removeQueueItem = (queueId) => {
+        const nextQueue = readPublishingQueue().filter(item => item.id !== queueId);
+        persistPublishingQueue(nextQueue);
+    };
+
+    const updateQueueItemStatus = (queueId, status) => {
+        const nextQueue = readPublishingQueue().map((item) => (
+            item.id === queueId ? { ...item, status, updatedAt: new Date().toISOString() } : item
+        ));
+
+        persistPublishingQueue(nextQueue);
+    };
+
+    const summarizeQueue = () => {
+        const queue = readPublishingQueue();
+        return queue.reduce((summary, item) => {
+            summary[item.status] = (summary[item.status] || 0) + 1;
+            return summary;
+        }, { scheduled: 0, ready: 0, publishing: 0, published: 0, failed: 0 });
     };
 
     const resetForm = () => {
@@ -672,8 +802,178 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                 {isUploading ? 'Uploading...' : 'Upload to Socials'}
                             </button>
                         </div>
+
+                        <div style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={handleQueueForPublishing}
+                                disabled={!selectedFile || !videoDetails.scheduledPublish || isUploading}
+                                style={{
+                                    flex: 1,
+                                    padding: '12px',
+                                    borderRadius: '30px',
+                                    border: '1px solid var(--border-color)',
+                                    background: !selectedFile || !videoDetails.scheduledPublish || isUploading ? 'rgba(255,255,255,0.04)' : 'rgba(79, 116, 214, 0.18)',
+                                    color: 'var(--text-color)',
+                                    fontWeight: 'bold',
+                                    cursor: !selectedFile || !videoDetails.scheduledPublish || isUploading ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                Queue for Publishing
+                            </button>
+                        </div>
+
+                        <div style={{ marginTop: '16px', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)' }}>
+                            <div style={{ fontWeight: 700, marginBottom: '10px' }}>Publishing targets</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                {CHANNEL_CHOICES.map((channel) => {
+                                    const selected = getSelectedChannels().includes(channel.id);
+                                    return (
+                                        <span
+                                            key={channel.id}
+                                            style={{
+                                                padding: '6px 10px',
+                                                borderRadius: '999px',
+                                                border: '1px solid var(--border-color)',
+                                                background: selected ? 'rgba(79, 116, 214, 0.18)' : 'rgba(255,255,255,0.03)',
+                                                color: selected ? '#dfe9ff' : 'var(--light-color)',
+                                                fontSize: '12px'
+                                            }}
+                                        >
+                                            {channel.label}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </div>
+
+            <div style={{ marginTop: '26px', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '18px', background: 'var(--secondary-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h3 style={{ margin: 0 }}>Publishing Queue</h3>
+                    {publishingQueue.length > 0 && (
+                        <button
+                            onClick={() => persistPublishingQueue([])}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                background: 'transparent',
+                                color: 'var(--text-color)',
+                                borderRadius: '999px',
+                                padding: '6px 10px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Clear queue
+                        </button>
+                    )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                    {Object.entries(summarizeQueue()).map(([status, count]) => (
+                        <div key={status} style={{ padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'var(--card-bg)' }}>
+                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '6px' }}>{QUEUE_STATUS_LABELS[status]}</div>
+                            <div style={{ fontSize: '24px', fontWeight: 800 }}>{count}</div>
+                        </div>
+                    ))}
+                </div>
+
+                {publishingQueue.length === 0 ? (
+                    <div style={{ color: 'var(--light-color)' }}>
+                        No scheduled posts yet. Add a planned publish time to queue a video for later delivery.
+                    </div>
+                ) : (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                        {publishingQueue.map((item) => (
+                            <div key={item.id} style={{
+                                background: 'var(--card-bg)',
+                                borderRadius: '10px',
+                                padding: '12px 14px',
+                                border: '1px solid var(--border-color)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '12px'
+                            }}>
+                                <div>
+                                    <div style={{ fontWeight: 700, marginBottom: '4px' }}>{item.title}</div>
+                                    <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
+                                        {item.channels.join(', ')} • {new Date(item.scheduledFor).toLocaleString()}
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{
+                                        borderRadius: '999px',
+                                        padding: '5px 9px',
+                                        ...QUEUE_STATUS_STYLES[item.status],
+                                        fontSize: '11px',
+                                        fontWeight: 700
+                                    }}>
+                                        {QUEUE_STATUS_LABELS[item.status] || item.status}
+                                    </span>
+                                    {item.status === 'scheduled' && (
+                                        <button
+                                            onClick={() => updateQueueItemStatus(item.id, 'ready')}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                background: 'transparent',
+                                                color: 'var(--text-color)',
+                                                borderRadius: '999px',
+                                                padding: '5px 8px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Mark ready
+                                        </button>
+                                    )}
+                                    {item.status === 'ready' && (
+                                        <button
+                                            onClick={() => updateQueueItemStatus(item.id, 'published')}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                background: 'transparent',
+                                                color: 'var(--text-color)',
+                                                borderRadius: '999px',
+                                                padding: '5px 8px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Complete
+                                        </button>
+                                    )}
+                                    {item.status === 'failed' && (
+                                        <button
+                                            onClick={() => updateQueueItemStatus(item.id, 'scheduled')}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                background: 'transparent',
+                                                color: 'var(--text-color)',
+                                                borderRadius: '999px',
+                                                padding: '5px 8px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Retry
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => removeQueueItem(item.id)}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            background: 'transparent',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '999px',
+                                            padding: '5px 8px',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Recently Uploaded */}
