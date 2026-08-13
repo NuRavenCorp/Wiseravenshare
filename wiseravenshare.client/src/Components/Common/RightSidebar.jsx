@@ -29,6 +29,28 @@ const readPosts = () => {
     return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
 };
 
+const looksLikeCorruptBlob = (value) => {
+    const text = String(value || '').replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text || text.length < 24) {
+        return false;
+    }
+
+    const hasLongEncodedRun = /(?:[A-Za-z0-9+/=]{24,})/.test(text);
+    const hasFewWords = text.split(/\s+/).filter(Boolean).length <= 2 && text.length > 60;
+    const hasTooManySymbols = (text.match(/[^A-Za-z0-9\s.,!?@#%\-'\/]/g) || []).length > text.length * 0.22;
+
+    return hasLongEncodedRun || hasFewWords || hasTooManySymbols;
+};
+
+const sanitizeSidebarPreview = (value, fallback = 'Trending post update', maxLength = 92) => {
+    const text = String(value || '').replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text || looksLikeCorruptBlob(text)) {
+        return fallback;
+    }
+
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
+};
+
 const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
     if (!Array.isArray(posts) || posts.length === 0) {
         return [];
@@ -41,13 +63,13 @@ const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
             const reposts = Number(post.reposts) || 0;
             const comments = Array.isArray(post.comments) ? post.comments.length : (Number(post.comments) || 0);
             const momentum = (likes * 1.6) + (reposts * 2.4) + (comments * 1.2);
-            const content = String(post.content || '').trim();
-            const preview = content.length > 92 ? `${content.slice(0, 89).trim()}...` : content;
+            const userName = String(post?.user?.name || 'Community voice').trim();
+            const preview = sanitizeSidebarPreview(post.content, 'Trending post update', 92);
 
             return {
                 id: String(post.id || `${post.userId || 'post'}-${Math.random().toString(36).slice(2)}`),
-                userName: String(post?.user?.name || 'Community voice').trim(),
-                preview: preview || 'Trending post update',
+                userName: userName || 'Community voice',
+                preview,
                 momentum
             };
         })
@@ -646,7 +668,17 @@ const RightSidebar = ({ onNavigate }) => {
                                 <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '4px' }}>
                                     Post surge • {item.userName}
                                 </div>
-                                <div style={{ fontSize: '12px', lineHeight: 1.45 }}>{item.preview}</div>
+                                <div
+                                    style={{
+                                        fontSize: '12px',
+                                        lineHeight: 1.45,
+                                        overflowWrap: 'anywhere',
+                                        wordBreak: 'break-word',
+                                        whiteSpace: 'normal'
+                                    }}
+                                >
+                                    {item.preview}
+                                </div>
                             </div>
                         ))}
                     </div>
