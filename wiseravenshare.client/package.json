@@ -18,6 +18,7 @@
     "android:release:win": "powershell -ExecutionPolicy Bypass -File ./scripts/build-android-release.ps1"
   },
   "dependencies": {
+    "@microsoft/signalr": "^9.0.8",
     "axios": "^1.18.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

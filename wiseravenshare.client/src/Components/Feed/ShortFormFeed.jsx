@@ -2,6 +2,23 @@ import React, { useMemo, useRef, useState } from 'react';
 
 const sampleVideo = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 
+const sanitizeFeedText = (value, fallback = '') => {
+    const text = String(value ?? '')
+        .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!text) {
+        return fallback;
+    }
+
+    if (text.length > 220 || /(?:[A-Za-z0-9+/=]{24,})/.test(text)) {
+        return fallback;
+    }
+
+    return text;
+};
+
 const friends = ['AL', 'MJ', 'SK', 'NT', 'RV'];
 
 const ShortFormFeed = ({ posts = [] }) => {
@@ -27,12 +44,16 @@ const ShortFormFeed = ({ posts = [] }) => {
 
         return posts.slice(0, 5).map((post, index) => ({
             id: post.id || `${post.userId || 'clip'}-${index}`,
-            user: post.user || { name: 'Raven User', handle: '@ravenuser' },
-            content: String(post.content || 'Fresh clip from the feed').slice(0, 150),
+            user: {
+                ...(post.user || { name: 'Raven User', handle: '@ravenuser' }),
+                name: sanitizeFeedText(post.user?.name || 'Raven User', 'Raven User'),
+                handle: sanitizeFeedText(post.user?.handle || '@ravenuser', '@ravenuser')
+            },
+            content: sanitizeFeedText(post.content || 'Fresh clip from the feed', 'Fresh clip from the feed').slice(0, 150),
             likes: Number(post.likes || 0) + 180 + index * 32,
             mediaUrl: post.mediaUrl || sampleVideo,
             mediaType: post.mediaType || 'video',
-            caption: post.caption || 'Original audio • viral loop',
+            caption: sanitizeFeedText(post.caption || 'Original audio • viral loop', 'Original audio • viral loop'),
             accent: ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ec4899'][index % 5]
         }));
     }, [posts]);

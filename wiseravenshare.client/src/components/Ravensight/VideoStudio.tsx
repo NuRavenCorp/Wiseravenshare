@@ -475,7 +475,7 @@ export const VideoStudio: React.FC = () => {
                                             : 'Not granted'}
                                 </div>
                                 {folderPermission?.folderIdentityKey && (
-                                    <div className="mt-1 text-xs text-gray-500 break-all">
+                                    <div className="mt-1 text-xs text-gray-500 break-words">
                                         Key: {folderPermission.folderIdentityKey}
                                     </div>
                                 )}

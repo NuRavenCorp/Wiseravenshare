@@ -377,8 +377,31 @@ public class RavensightController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
+        var video = await _videoStore.GetByIdAsync(videoId, cancellationToken);
+        if (video is null)
+        {
+            return NotFound(new { message = "Video not found." });
+        }
+
+        var blobDeleted = false;
+        var blobObjectKey = _blobStorageService.ResolveObjectKey(video.VideoUrl);
+        if (!string.IsNullOrWhiteSpace(blobObjectKey))
+        {
+            blobDeleted = await _blobStorageService.DeleteAsync(blobObjectKey, cancellationToken);
+        }
+
         var deleted = await _videoStore.DeleteVideoAsync(videoId, userId, cancellationToken);
-        return deleted ? Ok(new { success = true }) : NotFound(new { message = "Video not found." });
+        if (!deleted)
+        {
+            return NotFound(new { message = "Video not found." });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            blobDeleted,
+            objectKey = blobDeleted ? blobObjectKey : null
+        });
     }
 
     [HttpPost("{videoId}/like")]

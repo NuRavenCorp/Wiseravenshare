@@ -9,6 +9,7 @@ using Wiseravenshare.Server.Infrastructure.Data.Repositories;
 using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Microsoft.Extensions.FileProviders;
+using Wiseravenshare.Server.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -265,9 +266,15 @@ var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
 var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
+var requireDatabase = builder.Configuration.GetValue("Persistence:RequireDatabase", true);
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
 var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "bucket-wrs-01010";
 var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
+
+if (requireDatabase && string.IsNullOrWhiteSpace(defaultConnectionString))
+{
+    throw new InvalidOperationException("Persistence:RequireDatabase is true but no database connection string was configured. Set DATABASE_URL or ConnectionStrings:DefaultConnection.");
+}
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 builder.Logging.ClearProviders();
@@ -281,6 +288,7 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
+builder.Services.AddSignalR();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
         npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
@@ -328,6 +336,23 @@ var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrWhiteSpace(accessToken)
+                    && (path.StartsWithSegments("/hubs/messages") || path.StartsWithSegments("/hubs/notifications") || path.StartsWithSegments("/hubs/evolution")))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -441,9 +466,9 @@ using (var scope = app.Services.CreateScope())
         },
         Videos = new PersistenceDiagnosticsEntry
         {
-            DatabaseConfigured = !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")),
+            DatabaseConfigured = !string.IsNullOrWhiteSpace(defaultConnectionString),
             DatabaseAvailable = videoDbPersistenceAvailable,
-            RequiresDatabase = false,
+            RequiresDatabase = requireDatabase,
             ActiveTable = "app_data.ravensight_videos_v2",
             LastError = string.Empty,
             TimedOut = false
@@ -504,6 +529,9 @@ if (frontendDistExists)
 }
 
 app.MapControllers();
+app.MapHub<EvolutionHub>("/hubs/evolution");
+app.MapHub<NotificationHub>("/hubs/notifications");
+app.MapHub<MessageHub>("/hubs/messages");
 
 if (frontendDistExists)
 {

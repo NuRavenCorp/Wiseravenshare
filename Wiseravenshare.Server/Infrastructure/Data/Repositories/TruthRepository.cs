@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.Services.Truth;
 
 namespace Wiseravenshare.Server.Infrastructure.Data.Repositories;
 
@@ -20,6 +21,28 @@ public class TruthRepository : Repository<TruthClaim>, ITruthRepository
 
     public Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetVotesForClaimAsync(Guid claimId)
         => Task.FromResult<IEnumerable<TruthClaim.TruthVerificationVote>>(_context.TruthVerificationVotes.Where(v => v.ClaimId == claimId && !v.IsDeleted).ToList());
+
+    public Task<TruthClaim.TruthVerificationVote?> GetUserVoteAsync(Guid claimId, Guid userId)
+        => _context.TruthVerificationVotes.FirstOrDefaultAsync(v => v.ClaimId == claimId && v.UserId == userId && !v.IsDeleted);
+
+    public Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetVotesByUsersAsync(string normalizedClaim, IEnumerable<Guid> userIds)
+        => Task.FromResult<IEnumerable<TruthClaim.TruthVerificationVote>>(
+            _context.TruthVerificationVotes
+                .Where(v => userIds.Contains(v.UserId) && !v.IsDeleted)
+                .Where(v => v.Claim != null && v.Claim.NormalizedClaim == normalizedClaim)
+                .ToList());
+
+    public Task<IEnumerable<TruthClaim.TruthVerificationVote>> GetStakedVotesAsync(string normalizedClaim)
+        => Task.FromResult<IEnumerable<TruthClaim.TruthVerificationVote>>(
+            _context.TruthVerificationVotes
+                .Where(v => v.Claim != null && v.Claim.NormalizedClaim == normalizedClaim && !v.IsDeleted)
+                .ToList());
+
+    public async Task AddVoteAsync(TruthClaim.TruthVerificationVote vote)
+    {
+        await _context.TruthVerificationVotes.AddAsync(vote);
+        await _context.SaveChangesAsync();
+    }
 
     public async Task<decimal> GetAverageTruthScoreAsync(Guid userId)
     {
@@ -44,4 +67,28 @@ public class TruthRepository : Repository<TruthClaim>, ITruthRepository
         _context.TruthDisputes.Update(dispute);
         await _context.SaveChangesAsync();
     }
+
+    public Task<TruthFact?> FindFactAsync(string normalizedClaim)
+        => Task.FromResult<TruthFact?>(null);
+
+    public Task<IEnumerable<TruthFact>> FindSimilarFactsAsync(string normalizedClaim)
+        => Task.FromResult<IEnumerable<TruthFact>>(Enumerable.Empty<TruthFact>());
+
+    public Task AddFactAsync(TruthFact fact)
+        => Task.CompletedTask;
+
+    public Task UpdateFactAsync(TruthFact fact)
+        => Task.CompletedTask;
+
+    public Task<IEnumerable<TruthFact>> GetRecentFactsAsync(int count)
+        => Task.FromResult<IEnumerable<TruthFact>>(Enumerable.Empty<TruthFact>());
+
+    public Task<IDictionary<string, decimal>> GetCategoryStatsAsync()
+        => Task.FromResult<IDictionary<string, decimal>>(new Dictionary<string, decimal>());
+
+    public Task<IEnumerable<TruthFact>> GetUnverifiedFactsAsync(int count)
+        => Task.FromResult<IEnumerable<TruthFact>>(Enumerable.Empty<TruthFact>());
+
+    public Task<List<TruthFact>> GetHistoricalClaimsAsync(string normalizedClaim)
+        => Task.FromResult(new List<TruthFact>());
 }

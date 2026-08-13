@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { apiService } from '../../Services/api';
 
 const MARKET_SYMBOLS = ['MSFT', 'IBM'];
+const FALLBACK_QUOTES = {
+    MSFT: { name: 'Microsoft', price: 487.65, changePercent: 4.93, volume: 66663409, currency: 'USD', marketState: 'Fallback Snapshot' },
+    IBM: { name: 'IBM', price: 226.13, changePercent: 0.65, volume: 4288300, currency: 'USD', marketState: 'Fallback Snapshot' },
+    AAPL: { name: 'Apple', price: 219.44, changePercent: -0.33, volume: 51200438, currency: 'USD', marketState: 'Fallback Snapshot' },
+    NVDA: { name: 'NVIDIA', price: 126.19, changePercent: 1.63, volume: 453991124, currency: 'USD', marketState: 'Fallback Snapshot' },
+    TSLA: { name: 'Tesla', price: 251.8, changePercent: -1.23, volume: 97212581, currency: 'USD', marketState: 'Fallback Snapshot' }
+};
 
 const formatCurrency = (value, currency = 'USD') => {
     const amount = Number(value);
@@ -47,6 +54,44 @@ const normalizeQuote = (quote = {}) => ({
     marketState: normalizeMarketState(quote.marketState)
 });
 
+const extractQuotes = (response) => {
+    const body = response?.data;
+    if (Array.isArray(body?.quotes)) {
+        return body.quotes;
+    }
+
+    // Backward compatibility with older market endpoint payload shape.
+    if (Array.isArray(body?.data)) {
+        return body.data;
+    }
+
+    return [];
+};
+
+const buildFallbackQuotes = (symbols = MARKET_SYMBOLS) => symbols
+    .map((symbol) => {
+        const key = String(symbol || '').toUpperCase().trim();
+        const sample = FALLBACK_QUOTES[key] || {
+            name: key || 'Market quote',
+            price: 100,
+            changePercent: 0,
+            volume: 0,
+            currency: 'USD',
+            marketState: 'Fallback Snapshot'
+        };
+
+        return normalizeQuote({
+            symbol: key,
+            name: sample.name,
+            price: sample.price,
+            changePercent: sample.changePercent,
+            volume: sample.volume,
+            currency: sample.currency,
+            marketState: sample.marketState
+        });
+    })
+    .filter((quote) => quote.symbol && Number.isFinite(quote.price));
+
 const StockWidget = () => {
     const [stocks, setStocks] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -62,7 +107,7 @@ const StockWidget = () => {
 
             try {
                 const response = await apiService.getMarketQuotes(MARKET_SYMBOLS);
-                const quotes = Array.isArray(response?.data?.quotes) ? response.data.quotes : [];
+                const quotes = extractQuotes(response);
                 const normalized = quotes
                     .map(normalizeQuote)
                     .filter((quote) => quote.symbol && Number.isFinite(quote.price));
@@ -71,15 +116,16 @@ const StockWidget = () => {
                     return;
                 }
 
-                setStocks(normalized);
-                setError(normalized.length === 0 ? 'Live market data is temporarily unavailable.' : '');
+                const safeQuotes = normalized.length > 0 ? normalized : buildFallbackQuotes(MARKET_SYMBOLS);
+                setStocks(safeQuotes);
+                setError(normalized.length === 0 ? 'Showing snapshot quotes while live market data reconnects.' : '');
             } catch {
                 if (!isMounted) {
                     return;
                 }
 
-                setStocks([]);
-                setError('Live market data is temporarily unavailable.');
+                setStocks(buildFallbackQuotes(MARKET_SYMBOLS));
+                setError('Showing snapshot quotes while live market data reconnects.');
             } finally {
                 if (isMounted) {
                     setLoading(false);
@@ -102,15 +148,17 @@ const StockWidget = () => {
         setLoading(true);
         try {
             const response = await apiService.getMarketQuotes(MARKET_SYMBOLS);
-            const quotes = Array.isArray(response?.data?.quotes) ? response.data.quotes : [];
+            const quotes = extractQuotes(response);
             const normalized = quotes
                 .map(normalizeQuote)
                 .filter((quote) => quote.symbol && Number.isFinite(quote.price));
-            setStocks(normalized);
-            setError(normalized.length === 0 ? 'Live market data is temporarily unavailable.' : '');
+
+            const safeQuotes = normalized.length > 0 ? normalized : buildFallbackQuotes(MARKET_SYMBOLS);
+            setStocks(safeQuotes);
+            setError(normalized.length === 0 ? 'Showing snapshot quotes while live market data reconnects.' : '');
         } catch {
-            setStocks([]);
-            setError('Live market data is temporarily unavailable.');
+            setStocks(buildFallbackQuotes(MARKET_SYMBOLS));
+            setError('Showing snapshot quotes while live market data reconnects.');
         } finally {
             setLoading(false);
         }
