@@ -6,7 +6,7 @@ import VideoLibrary from './VideoLibrary';
 import WiseRavenLogo from '../Common/WiseRavenLogo';
 import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
-import { subscriptionService } from '../../Services/subscriptionService';
+import { subscriptionService } from '../../services/subscriptionService';
 
 const PRICING_PLANS = [
     {
