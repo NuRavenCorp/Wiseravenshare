@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { truthService } from '../../services/truthService';
+import { truthService } from '../../Services/truthService';
 import {
     FiSearch,
     FiCheckCircle,

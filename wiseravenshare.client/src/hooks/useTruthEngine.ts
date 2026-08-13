@@ -1,7 +1,7 @@
 ﻿// src/hooks/useTruthEngine.ts
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { truthService } from '../services/truthService';
+import { truthService } from '../Services/truthService';
 
 interface TruthVerificationResult {
     id?: string;

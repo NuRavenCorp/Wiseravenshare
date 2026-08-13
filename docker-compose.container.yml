@@ -1,0 +1,141 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./Wiseravenshare.Server/Dockerfile
+    container_name: wiseravenshare-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_started
+        required: false
+      minio:
+        condition: service_started
+        required: false
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:8088}
+      # Use EXTERNAL_POSTGRES_CONNECTION for DigitalOcean Managed PostgreSQL.
+      ConnectionStrings__DefaultConnection: ${EXTERNAL_POSTGRES_CONNECTION:-Host=postgres;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=CHANGE_ME;SSL Mode=Disable;Trust Server Certificate=true}
+      # Stripe can point to real keys, while stripe-cli forwards webhooks in local testing.
+      Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      # Optional Redis cache URL for app features that can use cache.
+      Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
+      # Blob settings (use DO Spaces values in production; local MinIO for dev).
+      Storage__Blob__BucketName: ${BLOB_BUCKET_NAME:-wiseravenshare-dev}
+      Storage__Blob__ProjectFolder: ${BLOB_PROJECT_FOLDER:-wiseravenshare}
+      Storage__Blob__SiteName: ${BLOB_SITE_NAME:-wiseravenshare}
+      S3__Endpoint: ${S3_ENDPOINT:-http://minio:9000}
+      S3__AccessKey: ${S3_ACCESS_KEY:-minioadmin}
+      S3__SecretKey: ${S3_SECRET_KEY:-minioadmin123}
+      S3__ForcePathStyle: ${S3_FORCE_PATH_STYLE:-true}
+      S3__Region: ${S3_REGION:-us-east-1}
+    ports:
+      - "10000:10000"
+    networks:
+      - app-net
+
+  web:
+    build:
+      context: .
+      dockerfile: ./wiseravenshare.client/Dockerfile
+    container_name: wiseravenshare-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8088:8080"
+    networks:
+      - app-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: wiseravenshare-postgres
+    restart: unless-stopped
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wiseravenshare-db}
+      POSTGRES_USER: ${POSTGRES_USER:-wiseravenshare_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+    volumes:
+      - wiseravenshare-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wiseravenshare_user} -d ${POSTGRES_DB:-wiseravenshare-db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    ports:
+      - "5432:5432"
+    networks:
+      - app-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: wiseravenshare-redis
+    restart: unless-stopped
+    profiles: ["local-cache"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    networks:
+      - app-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: wiseravenshare-minio
+    restart: unless-stopped
+    profiles: ["local-blob"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - wiseravenshare-minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - app-net
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: wiseravenshare-minio-init
+    profiles: ["local-blob"]
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin123} &&
+      mc mb -p local/${BLOB_BUCKET_NAME:-wiseravenshare-dev} || true &&
+      mc anonymous set download local/${BLOB_BUCKET_NAME:-wiseravenshare-dev} || true
+      "
+    networks:
+      - app-net
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: wiseravenshare-stripe-cli
+    restart: unless-stopped
+    profiles: ["stripe"]
+    depends_on:
+      - api
+    command: >
+      listen
+      --api-key ${STRIPE_SECRET_KEY}
+      --forward-to http://api:10000/api/payments/webhook
+    networks:
+      - app-net
+
+volumes:
+  wiseravenshare-postgres-data:
+  wiseravenshare-minio-data:
+
+networks:
+  app-net:
+    driver: bridge

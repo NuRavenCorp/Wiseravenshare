@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FaChartLine, FaChartBar, FaChartPie, FaCalendar, FaDownload, FaGlobe, FaHashtag } from 'react-icons/fa';
-import { truthEngine } from '../../services/truthEngine';
+import { truthEngine } from '../../Services/truthEngine';
 
 const TruthAnalytics = () => {
     const [analytics, setAnalytics] = useState(null);

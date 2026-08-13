@@ -6,7 +6,7 @@ import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
-import { truthEngine } from '../Services/TruthDetectionEngine';
+import { truthEngine } from '../Services/truthEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
 import ShortFormFeed from '../Components/Feed/ShortFormFeed';

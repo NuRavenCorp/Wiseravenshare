@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { FaShieldAlt, FaSearch, FaCheckCircle, FaExclamationTriangle, FaTimesCircle } from 'react-icons/fa';
-import { truthEngine } from '../../Services/TruthDetectionEngine';
+import { truthEngine } from '../../Services/truthEngine';
 
 const TruthSeeker = () => {
     const [claim, setClaim] = useState('');
@@ -185,6 +185,13 @@ const TruthSeeker = () => {
                                 <div style={{ fontSize: '13px', color: 'var(--highlight-color)' }}>
                                     Source: {finding.source || 'Truth Engine'} • Confidence: {Math.round((finding.confidence || 0) * 100)}%
                                 </div>
+                                {finding.corroboration && (
+                                    <div style={{ fontSize: '12px', color: finding.corroboration.corroborated ? '#86efac' : '#fcd34d', marginTop: '4px' }}>
+                                        {finding.corroboration.corroborated
+                                            ? `Corroborated by ${finding.corroboration.sourceCount} authorities: ${finding.corroboration.sources.join(', ')}`
+                                            : (finding.corroboration.note || 'Corroboration pending')}
+                                    </div>
+                                )}
                                 {finding.correction && (
                                     <div style={{ marginTop: '6px', fontSize: '13px' }}>
                                         Correction: {finding.correction}

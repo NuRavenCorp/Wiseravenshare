@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
-import { truthService } from '../../services/truthService';
+import { truthService } from '../../Services/truthService';
 import {
     FiShield,
     FiCheckCircle,

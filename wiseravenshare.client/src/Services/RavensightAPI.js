@@ -99,7 +99,7 @@ class RavensightAPI {
         this.api.interceptors.request.use(
             (config) => {
                 const token = getAuthToken();
-                if (token) {
+                if (!config.skipAuth && token) {
                     config.headers.Authorization = `Bearer ${token}`;
                 }
                 return config;
@@ -161,8 +161,65 @@ class RavensightAPI {
 
     // Get Video Feed
     async getVideoFeed(params = {}) {
-        const response = await this.api.get('/videos/feed', { params });
-        return response.data;
+        const candidateUrls = [
+            '/videos/feed',
+            '/feed',
+            `${this.generalApiBaseUrl}/ravensight/videos/feed`
+        ];
+
+        const normalizeFeedPayload = (payload, requestedLimit = 10) => {
+            if (Array.isArray(payload)) {
+                return {
+                    videos: payload,
+                    hasMore: payload.length >= Math.max(1, Number(requestedLimit) || 10)
+                };
+            }
+
+            if (payload && Array.isArray(payload.videos)) {
+                return {
+                    videos: payload.videos,
+                    hasMore: Boolean(payload.hasMore)
+                };
+            }
+
+            return { videos: [], hasMore: false };
+        };
+
+        const requestedFilter = String(params?.filter || 'all').toLowerCase();
+        const shouldUseAnonymousFirst = requestedFilter !== 'my_videos';
+
+        const requestModes = shouldUseAnonymousFirst
+            ? [{ skipAuth: true }, { skipAuth: false }]
+            : [{ skipAuth: false }, { skipAuth: true }];
+
+        let lastError = null;
+        for (const mode of requestModes) {
+            for (const url of candidateUrls) {
+                try {
+                    const response = await this.api.get(url, {
+                        params,
+                        skipAuth: mode.skipAuth
+                    });
+                    return normalizeFeedPayload(response.data, params?.limit);
+                } catch (error) {
+                    lastError = error;
+                    const status = error?.status ?? error?.response?.status ?? 0;
+
+                    // Retry only for missing route or auth mode mismatch.
+                    if (status === 404 || status === 405) {
+                        continue;
+                    }
+
+                    if ((status === 401 || status === 403) && mode.skipAuth) {
+                        continue;
+                    }
+
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Failed to load Ravensight video feed.');
     }
 
     // Get User Videos
