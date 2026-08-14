@@ -2,15 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
-
-const safeReadJson = (key, fallback) => {
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : fallback;
-    } catch {
-        return fallback;
-    }
-};
+import { normalizeVideoRecord, getMergedLocalVideos } from '../../Services/ravensightVideoStore';
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -33,44 +25,18 @@ const normalizeMediaSource = (value, fallback = '') => {
     return fallback;
 };
 
-const normalizeVideo = (video, index = 0) => ({
-    id: video.id || `local-video-${Date.now()}-${index}`,
-    videoUrl: normalizeMediaSource(video.videoUrl || video.mediaUrl || '', ''),
-    thumbnailUrl: normalizeMediaSource(video.thumbnailUrl || '', ''),
-    duration: video.duration || '00:30',
-    channelAvatar: normalizeMediaSource(video.channelAvatar || video.avatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR'),
-    channelName: video.channelName || video.user?.name || 'WiseRaven',
-    title: video.title || 'Uploaded Video',
-    views: Number(video.views) || 0,
-    createdAt: video.createdAt || new Date().toISOString(),
-    likes: Number(video.likes) || 0,
-    comments: Number(video.comments) || 0,
-    isLiked: Boolean(video.isLiked),
-    userId: video.userId || video.user?.id || null
-});
+const normalizeVideo = (video, index = 0) => {
+    const normalized = normalizeVideoRecord(video, index);
+    return {
+        ...normalized,
+        videoUrl: normalizeMediaSource(normalized.videoUrl || normalized.mediaUrl || '', ''),
+        thumbnailUrl: normalizeMediaSource(normalized.thumbnailUrl || '', ''),
+        channelAvatar: normalizeMediaSource(normalized.channelAvatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR')
+    };
+};
 
 const getLocalFallbackVideos = (currentUserId, filterMode = 'all') => {
-    const ravensightVideos = safeReadJson('wiseRavensightVideos', []).map((video, index) => normalizeVideo(video, index));
-    const recentPosts = safeReadJson('wiseRecentPosts', [])
-        .filter((post) => post.mediaType === 'video' && post.mediaUrl)
-        .map((post, index) => normalizeVideo({
-            id: `post-video-${post.id || index}`,
-            videoUrl: post.mediaUrl,
-            thumbnailUrl: post.thumbnailUrl,
-            duration: '00:45',
-            channelAvatar: post.user?.avatar,
-            channelName: post.user?.name,
-            title: post.content?.slice(0, 70) || 'Feed Video',
-            views: post.views || 0,
-            createdAt: post.createdAt,
-            likes: post.likes || 0,
-            comments: Array.isArray(post.comments) ? post.comments.length : Number(post.comments) || 0,
-            userId: post.userId || post.user?.id
-        }, index));
-
-    const combined = [...ravensightVideos, ...recentPosts]
-        .filter((video) => !!video.videoUrl)
-        .filter((video, idx, all) => all.findIndex((v) => v.videoUrl === video.videoUrl) === idx);
+    const combined = getMergedLocalVideos(currentUserId).map((video, index) => normalizeVideo(video, index));
 
     return combined.filter((video) => {
         if (filterMode === 'my_videos') {
@@ -93,6 +59,17 @@ const VideoFeed = ({ onNotification }) => {
     useEffect(() => {
         loadVideos();
     }, [filter, page]);
+
+    useEffect(() => {
+        const handleVideoSaved = () => {
+            if (page === 1) {
+                loadVideos();
+            }
+        };
+
+        window.addEventListener('ravensight:video-saved', handleVideoSaved);
+        return () => window.removeEventListener('ravensight:video-saved', handleVideoSaved);
+    }, [page, filter]);
 
     useEffect(() => {
         const options = {
@@ -122,11 +99,26 @@ const VideoFeed = ({ onNotification }) => {
     const loadVideos = async () => {
         setLoading(true);
         try {
-            const response = await ravensightAPI.getVideoFeed({
-                filter,
-                page,
-                limit: 10
-            });
+            let response = null;
+            let attempts = 0;
+            const maxAttempts = 2;
+            while (attempts < maxAttempts) {
+                attempts += 1;
+                try {
+                    response = await ravensightAPI.getVideoFeed({
+                        filter,
+                        page,
+                        limit: 10
+                    });
+                    break;
+                } catch (error) {
+                    const status = Number(error?.status ?? error?.response?.status ?? 0);
+                    const shouldRetry = attempts < maxAttempts && (status === 0 || status >= 500);
+                    if (!shouldRetry) {
+                        throw error;
+                    }
+                }
+            }
 
             const responseVideos = Array.isArray(response?.videos)
                 ? response.videos.map((video, index) => normalizeVideo(video, index))

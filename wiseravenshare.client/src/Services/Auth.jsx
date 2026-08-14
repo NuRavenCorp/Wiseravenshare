@@ -2,131 +2,81 @@ import api from './api';
 import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
 const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 12000;
+const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 
 class AuthService {
-    buildAuthFallbackBases() {
-        const bases = [];
-        const primaryBase = (api?.defaults?.baseURL || '').replace(/\/+$/, '');
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        const host = typeof window !== 'undefined' ? (window.location.hostname || '').toLowerCase() : '';
-        const isLocalHost = /localhost|127\.0\.0\.1/i.test(host);
-        const ravensightUrl = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
-
-        if (primaryBase) {
-            bases.push(primaryBase);
+    constructor() {
+        const token = this.getToken();
+        if (token) {
+            api.defaults.headers.common.Authorization = `Bearer ${token}`;
         }
-
-        if (origin) {
-            bases.push(origin);
-        }
-
-        if (ravensightUrl) {
-            const trimmed = ravensightUrl.replace(/\/+$/, '');
-            const withoutRavensight = trimmed.replace(/\/api\/ravensight$/i, '');
-            if (withoutRavensight) {
-                bases.push(withoutRavensight);
-            }
-        }
-
-        // Local development fallbacks for common ASP.NET launch profiles.
-        if (typeof window !== 'undefined' && /localhost|127\.0\.0\.1/i.test(window.location.hostname)) {
-            bases.push('http://localhost:5242');
-            bases.push('https://localhost:7146');
-        }
-
-        const filtered = bases.filter((base) => {
-            if (!base) {
-                return false;
-            }
-
-            if (isLocalHost) {
-                return true;
-            }
-
-            return !/\/\/localhost(?::\d+)?$|\/\/127\.0\.0\.1(?::\d+)?$/i.test(base.replace(/\/+$/, ''));
-        });
-
-        return [...new Set(filtered)];
     }
 
-    async postAuthWithFallback(path, payload = {}, options = {}) {
-        const bases = this.buildAuthFallbackBases();
-        const attempts = [];
+    getRefreshToken() {
+        try {
+            return localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+        } catch {
+            return '';
+        }
+    }
+
+    setRefreshToken(token) {
+        try {
+            if (token) {
+                localStorage.setItem(REFRESH_TOKEN_KEY, token);
+            } else {
+                localStorage.removeItem(REFRESH_TOKEN_KEY);
+            }
+        } catch {
+            // Ignore storage failures for refresh token.
+        }
+    }
+
+    clearRefreshToken() {
+        this.setRefreshToken('');
+    }
+
+    normalizeAuthResponse(payload) {
+        const source = payload && typeof payload === 'object' ? payload : {};
+        const token = source.token || source.accessToken || source.AccessToken || source.jwt || '';
+        const refreshToken = source.refreshToken || source.RefreshToken || '';
+        const user = source.user || source.User || null;
+
+        return {
+            ...source,
+            token,
+            refreshToken,
+            user
+        };
+    }
+
+    async postAuth(path, payload = {}, options = {}) {
         const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_AUTH_REQUEST_TIMEOUT_MS;
-
-        const requestOnce = async (url, headers = {}) => {
-            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-            const timeoutId = controller
-                ? window.setTimeout(() => controller.abort(), timeoutMs)
-                : null;
-
-            return fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...headers
-                },
-                signal: controller?.signal,
-                body: JSON.stringify(payload)
-            }).finally(() => {
-                if (timeoutId !== null) {
-                    window.clearTimeout(timeoutId);
-                }
-            });
+        const token = this.getToken();
+        const headers = {
+            ...(options.withAuth && token ? { Authorization: `Bearer ${token}` } : {})
         };
 
-        // Try conventional /api/auth path first, then /auth path as compatibility fallback.
-        for (const base of bases) {
-            const normalizedBase = base.replace(/\/+$/, '');
-            if (!/\/api$/i.test(normalizedBase)) {
-                attempts.push(`${normalizedBase}/api/auth${path}`);
-            }
-            attempts.push(`${normalizedBase}/auth${path}`);
-        }
+        const response = await api.post(`/auth${path}`, payload, {
+            timeout: timeoutMs,
+            headers
+        });
 
-        const token = this.getToken();
-        let lastError = null;
-
-        for (const url of attempts) {
-            try {
-                const response = await requestOnce(url, token ? { Authorization: `Bearer ${token}` } : {});
-                if (response.ok) {
-                    return await response.json();
-                }
-
-                if (response.status !== 404 && response.status !== 405) {
-                    const body = await response.json().catch(() => ({}));
-                    const error = new Error(body?.message || 'Server error');
-                    error.status = response.status;
-                    throw error;
-                }
-
-                lastError = { status: response.status };
-            } catch (error) {
-                if (error?.name === 'AbortError') {
-                    lastError = { status: 0, message: 'Request timed out' };
-                    continue;
-                }
-
-                if (error?.status && error.status !== 404 && error.status !== 405) {
-                    throw error;
-                }
-                lastError = error;
-            }
-        }
-
-        const err = new Error('Authentication service is currently unavailable. Please try again.');
-        err.status = lastError?.status || 0;
-        throw err;
+        return response?.data ?? {};
     }
 
     async login(email, password) {
         try {
-            const response = await this.postAuthWithFallback('/login', { email, password });
-            if (response.token) {
-                this.setToken(response.token);
-                this.setUser(response.user);
+            const response = this.normalizeAuthResponse(await this.postAuth('/login', { email, password }));
+            if (!response.token) {
+                const err = new Error('Authentication token was not returned by the server.');
+                err.status = 500;
+                throw err;
             }
+
+            this.setToken(response.token);
+            this.setRefreshToken(response.refreshToken);
+            this.setUser(response.user);
             return response;
         } catch (error) {
             throw this.handleError(error);
@@ -135,11 +85,13 @@ class AuthService {
 
     async register(userData) {
         try {
-            const response = await this.postAuthWithFallback('/register', userData);
+            const response = this.normalizeAuthResponse(await this.postAuth('/register', userData));
             if (response.token) {
                 this.setToken(response.token);
+                this.setRefreshToken(response.refreshToken);
                 this.setUser(response.user);
             }
+
             return response;
         } catch (error) {
             throw this.handleError(error);
@@ -148,24 +100,29 @@ class AuthService {
 
     async logout() {
         try {
-            await this.postAuthWithFallback('/logout', {});
+            await this.postAuth('/logout', {}, { withAuth: true });
         } finally {
             this.clearToken();
+            this.clearRefreshToken();
             this.clearUser();
         }
     }
 
     async verifyToken(token) {
         try {
-            const response = await this.postAuthWithFallback('/verify', { token });
-            if (response.valid) {
+            const response = this.normalizeAuthResponse(await this.postAuth('/verify', { token }, { withAuth: true }));
+            if (response.valid && response.user) {
                 this.setUser(response.user);
                 return response.user;
             }
-            throw new Error('Invalid token');
+
+            const err = new Error(response.message || 'Invalid token');
+            err.status = 401;
+            throw err;
         } catch (error) {
             if (error?.response?.status === 401 || error?.response?.status === 403 || error?.status === 401 || error?.status === 403) {
                 this.clearToken();
+                this.clearRefreshToken();
                 this.clearUser();
             }
             throw this.handleError(error);
@@ -184,7 +141,7 @@ class AuthService {
 
     async changePassword(currentPassword, newPassword) {
         try {
-            await api.post('/auth/change-password', { currentPassword, newPassword });
+            await this.postAuth('/change-password', { currentPassword, newPassword }, { withAuth: true });
             return true;
         } catch (error) {
             throw this.handleError(error);
@@ -193,7 +150,7 @@ class AuthService {
 
     async requestPasswordReset(email) {
         try {
-            return await this.postAuthWithFallback('/forgot-password', { email });
+            return await this.postAuth('/forgot-password', { email });
         } catch (error) {
             throw this.handleError(error);
         }
@@ -201,7 +158,7 @@ class AuthService {
 
     async resetPassword(token, newPassword) {
         try {
-            return await this.postAuthWithFallback('/reset-password', { token, newPassword });
+            return await this.postAuth('/reset-password', { token, newPassword });
         } catch (error) {
             throw this.handleError(error);
         }
@@ -218,16 +175,26 @@ class AuthService {
 
     clearToken() {
         clearAuthToken();
+        this.clearRefreshToken();
         delete api.defaults.headers.common['Authorization'];
     }
 
     setUser(user) {
+        if (!user) {
+            this.clearUser();
+            return;
+        }
+
         localStorage.setItem('user_data', JSON.stringify(user));
     }
 
     getUser() {
-        const userData = localStorage.getItem('user_data');
-        return userData ? JSON.parse(userData) : null;
+        try {
+            const userData = localStorage.getItem('user_data');
+            return userData ? JSON.parse(userData) : null;
+        } catch {
+            return null;
+        }
     }
 
     clearUser() {
@@ -242,6 +209,10 @@ class AuthService {
         } else if (error?.status) {
             const err = new Error(error.message || 'Server error');
             err.status = error.status;
+            return err;
+        } else if (error?.code === 'ECONNABORTED') {
+            const err = new Error('Authentication request timed out. Please retry.');
+            err.status = 0;
             return err;
         } else if (error.request) {
             const err = new Error('Network error - please check your connection');
