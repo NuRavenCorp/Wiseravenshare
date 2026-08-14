@@ -229,6 +229,67 @@ const toTrendingTopics = (payload) => {
         .filter((item) => item.name.length > 0);
 };
 
+const safeReadJson = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const safeWriteJson = (key, value) => {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Ignore storage write failures.
+    }
+};
+
+const getStoredComments = () => {
+    const data = safeReadJson('wisePostComments', {});
+    return data && typeof data === 'object' ? data : {};
+};
+
+const setStoredComments = (commentsByPost) => {
+    safeWriteJson('wisePostComments', commentsByPost);
+};
+
+const getStoredMessages = () => {
+    const data = safeReadJson('wiseMessages', {});
+    return data && typeof data === 'object' ? data : {};
+};
+
+const setStoredMessages = (messagesByConversation) => {
+    safeWriteJson('wiseMessages', messagesByConversation);
+};
+
+const getStoredNotifications = () => {
+    const data = safeReadJson('wiseNotifications', []);
+    return Array.isArray(data) ? data : [];
+};
+
+const setStoredNotifications = (items) => {
+    safeWriteJson('wiseNotifications', Array.isArray(items) ? items : []);
+};
+
+const buildLocalComment = (postId, content) => {
+    const user = safeReadJson('user_data', null);
+    return {
+        id: `local-comment-${Date.now()}`,
+        postId,
+        content: String(content || '').trim(),
+        createdAt: new Date().toISOString(),
+        user: {
+            id: user?.id || 'local-user',
+            name: user?.name || user?.username || 'You',
+            avatar: user?.avatar || null
+        }
+    };
+};
+
+const isMissingEndpointStatus = (status) => status === 404 || status === 405 || status === 501;
+
 // Request interceptor
 api.interceptors.request.use(
     (config) => {
@@ -360,34 +421,275 @@ export const apiService = {
     },
 
     // Comments endpoints
-    getComments: (postId) => api.get(`/posts/${postId}/comments`),
-    addComment: (postId, content) => api.post(`/posts/${postId}/comments`, { content }),
-    deleteComment: (commentId) => api.delete(`/comments/${commentId}`),
+    getComments: async (postId) => {
+        try {
+            const response = await api.get(`/posts/${postId}/comments`);
+            const payload = response?.data;
+            if (Array.isArray(payload)) {
+                return { ...response, data: payload };
+            }
+
+            if (payload && Array.isArray(payload.comments)) {
+                return { ...response, data: payload.comments };
+            }
+
+            return { ...response, data: [] };
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load comments. Please try again.');
+            }
+
+            const commentsByPost = getStoredComments();
+            return { data: Array.isArray(commentsByPost[postId]) ? commentsByPost[postId] : [] };
+        }
+    },
+    addComment: async (postId, content) => {
+        try {
+            return await api.post(`/posts/${postId}/comments`, { content });
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to add comment. Please try again.');
+            }
+
+            const commentsByPost = getStoredComments();
+            const comment = buildLocalComment(postId, content);
+            const existing = Array.isArray(commentsByPost[postId]) ? commentsByPost[postId] : [];
+            commentsByPost[postId] = [comment, ...existing];
+            setStoredComments(commentsByPost);
+            return { data: comment };
+        }
+    },
+    deleteComment: async (commentId) => {
+        try {
+            return await api.delete(`/comments/${commentId}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to delete comment. Please try again.');
+            }
+
+            const commentsByPost = getStoredComments();
+            Object.keys(commentsByPost).forEach((postId) => {
+                commentsByPost[postId] = (commentsByPost[postId] || []).filter((item) => item?.id !== commentId);
+            });
+            setStoredComments(commentsByPost);
+            return { data: { success: true } };
+        }
+    },
 
     // User endpoints
     getUser: (userId) => api.get(`/users/${userId}`),
     getUsers: (params) => api.get('/users', { params }),
-    followUser: (userId) => api.post(`/users/${userId}/follow`),
-    unfollowUser: (userId) => api.delete(`/users/${userId}/follow`),
-    getFollowers: (userId) => api.get(`/users/${userId}/followers`),
-    getFollowing: (userId) => api.get(`/users/${userId}/following`),
+    followUser: async (userId) => {
+        try {
+            return await api.post(`/users/${userId}/follow`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to follow user. Please try again.');
+            }
+
+            return { data: { success: true, fallback: true, userId } };
+        }
+    },
+    unfollowUser: async (userId) => {
+        try {
+            return await api.delete(`/users/${userId}/follow`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to unfollow user. Please try again.');
+            }
+
+            return { data: { success: true, fallback: true, userId } };
+        }
+    },
+    getFollowers: async (userId) => {
+        try {
+            return await api.get(`/users/${userId}/followers`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load followers. Please try again.');
+            }
+
+            return { data: [] };
+        }
+    },
+    getFollowing: async (userId) => {
+        try {
+            return await api.get(`/users/${userId}/following`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load following users. Please try again.');
+            }
+
+            return { data: [] };
+        }
+    },
 
     // Notifications endpoints
-    getNotifications: (params) => api.get('/notifications', { params }),
-    markNotificationRead: (notificationId) => api.put(`/notifications/${notificationId}/read`),
-    markAllNotificationsRead: () => api.put('/notifications/read-all'),
+    getNotifications: async (params) => {
+        try {
+            return await api.get('/notifications', { params });
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load notifications. Please try again.');
+            }
+
+            return { data: getStoredNotifications() };
+        }
+    },
+    markNotificationRead: async (notificationId) => {
+        try {
+            return await api.put(`/notifications/${notificationId}/read`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to update notification. Please try again.');
+            }
+
+            const items = getStoredNotifications().map((item) => (
+                item?.id === notificationId ? { ...item, read: true } : item
+            ));
+            setStoredNotifications(items);
+            return { data: { success: true } };
+        }
+    },
+    markAllNotificationsRead: async () => {
+        try {
+            return await api.put('/notifications/read-all');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to update notifications. Please try again.');
+            }
+
+            const items = getStoredNotifications().map((item) => ({ ...item, read: true }));
+            setStoredNotifications(items);
+            return { data: { success: true } };
+        }
+    },
     broadcastPersonnelNotification: (payload) => api.post('/notifications/personnel/broadcast', payload),
 
     // Messages endpoints
-    getConversations: () => api.get('/messages/conversations'),
-    getMessages: (conversationId) => api.get(`/messages/${conversationId}`),
-    sendMessage: (conversationId, content) => api.post(`/messages/${conversationId}`, { content }),
-    createConversation: (userId) => api.post('/messages/conversations', { userId }),
+    getConversations: async () => {
+        try {
+            return await api.get('/messages/conversations');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load conversations. Please try again.');
+            }
+
+            const all = getStoredMessages();
+            const conversations = Object.keys(all).map((id) => ({ id, messageCount: (all[id] || []).length }));
+            return { data: conversations };
+        }
+    },
+    getMessages: async (conversationId) => {
+        try {
+            return await api.get(`/messages/${conversationId}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load messages. Please try again.');
+            }
+
+            const all = getStoredMessages();
+            return { data: Array.isArray(all[conversationId]) ? all[conversationId] : [] };
+        }
+    },
+    sendMessage: async (conversationId, content) => {
+        try {
+            return await api.post(`/messages/${conversationId}`, { content });
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to send message. Please try again.');
+            }
+
+            const all = getStoredMessages();
+            const message = {
+                id: `local-message-${Date.now()}`,
+                conversationId,
+                content: String(content || '').trim(),
+                createdAt: new Date().toISOString()
+            };
+            const existing = Array.isArray(all[conversationId]) ? all[conversationId] : [];
+            all[conversationId] = [...existing, message];
+            setStoredMessages(all);
+            return { data: message };
+        }
+    },
+    createConversation: async (userId) => {
+        try {
+            return await api.post('/messages/conversations', { userId });
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to create conversation. Please try again.');
+            }
+
+            const conversation = {
+                id: `local-conversation-${userId}-${Date.now()}`,
+                userId,
+                createdAt: new Date().toISOString()
+            };
+            return { data: conversation };
+        }
+    },
 
     // Bookmark endpoints
-    getBookmarks: () => api.get('/bookmarks'),
-    addBookmark: (postId) => api.post(`/bookmarks/${postId}`),
-    removeBookmark: (postId) => api.delete(`/bookmarks/${postId}`),
+    getBookmarks: async () => {
+        try {
+            return await api.get('/bookmarks');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load bookmarks. Please try again.');
+            }
+
+            return { data: safeReadJson('wiseBookmarks', []) };
+        }
+    },
+    addBookmark: async (postId) => {
+        try {
+            return await api.post(`/bookmarks/${postId}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to save bookmark. Please try again.');
+            }
+
+            const bookmarks = safeReadJson('wiseBookmarks', []);
+            const normalized = Array.isArray(bookmarks) ? bookmarks : [];
+            if (!normalized.some((item) => item?.id === postId)) {
+                normalized.unshift({ id: postId, createdAt: new Date().toISOString() });
+            }
+            safeWriteJson('wiseBookmarks', normalized);
+            return { data: { success: true, fallback: true } };
+        }
+    },
+    removeBookmark: async (postId) => {
+        try {
+            return await api.delete(`/bookmarks/${postId}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to remove bookmark. Please try again.');
+            }
+
+            const bookmarks = safeReadJson('wiseBookmarks', []);
+            const normalized = (Array.isArray(bookmarks) ? bookmarks : []).filter((item) => item?.id !== postId);
+            safeWriteJson('wiseBookmarks', normalized);
+            return { data: { success: true, fallback: true } };
+        }
+    },
 
     // Media endpoints
     uploadMedia: async (file, type, options = {}) => {
@@ -442,7 +744,27 @@ export const apiService = {
     },
 
     // Search endpoints
-    search: (query, type) => api.get('/search', { params: { q: query, type } }),
+    search: async (query, type) => {
+        const candidates = [
+            { endpoint: '/search', params: { q: query, type } },
+            { endpoint: '/news/search', params: { q: query, limit: 20 } }
+        ];
+
+        let lastError = null;
+        for (const candidate of candidates) {
+            try {
+                return await api.get(candidate.endpoint, { params: candidate.params });
+            } catch (error) {
+                lastError = error;
+                const status = Number(error?.response?.status || 0);
+                if (!isMissingEndpointStatus(status)) {
+                    throw normalizeApiError(error, 'Search is unavailable right now.');
+                }
+            }
+        }
+
+        throw normalizeApiError(lastError || new Error('Search is unavailable right now.'), 'Search is unavailable right now.');
+    },
 
     // Trends endpoints
     getTrending: async () => {

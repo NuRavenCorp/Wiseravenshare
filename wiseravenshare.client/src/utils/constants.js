@@ -25,8 +25,8 @@ export const API_ENDPOINTS = {
         MESSAGES: '/messages/:conversationId'
     },
     NOTIFICATIONS: '/notifications',
-    SEARCH: '/search',
-    TRENDING: '/trending',
+    SEARCH: '/news/search',
+    TRENDING: '/news/trending',
     MEDIA: '/media'
 };
 
