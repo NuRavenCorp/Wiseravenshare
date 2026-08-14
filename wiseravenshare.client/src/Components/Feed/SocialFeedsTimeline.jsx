@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { socialService } from '../../services/socialService';
+import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 

@@ -25,11 +25,12 @@ public class RavensightController : ControllerBase
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightController> _logger;
     private readonly IBlobStorageService _blobStorageService;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService)
+    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService, IHttpClientFactory httpClientFactory)
     {
         _environment = environment;
         _youTubeService = youTubeService;
@@ -37,6 +38,7 @@ public class RavensightController : ControllerBase
         _dbContext = dbContext;
         _logger = logger;
         _blobStorageService = blobStorageService;
+        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
@@ -52,6 +54,7 @@ public class RavensightController : ControllerBase
 
     [HttpPost("upload")]
     [RequestSizeLimit(500_000_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
     public async Task<IActionResult> UploadVideo([FromForm] RavensightVideoUploadDto upload, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
@@ -191,6 +194,103 @@ public class RavensightController : ControllerBase
         });
     }
 
+    [HttpPost("save-reference")]
+    public async Task<IActionResult> SaveVideoReference([FromBody] SaveVideoReferenceRequest request, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null)
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.VideoUrl))
+        {
+            return BadRequest(new { message = "videoUrl is required." });
+        }
+
+        if (!_blobStorageService.IsConfigured)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Blob storage is not configured. Cannot persist this video to library storage." });
+        }
+
+        var destinationFolder = NormalizeDestinationFolder(request.DestinationFolder, _defaultVideoDestination);
+        var persistedUrl = await PersistExternalVideoToBlobAsync(request.VideoUrl, destinationFolder, cancellationToken);
+        if (string.IsNullOrWhiteSpace(persistedUrl))
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "Unable to copy source video into blob storage." });
+        }
+
+        var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
+        var now = DateTime.UtcNow;
+        var title = string.IsNullOrWhiteSpace(request.Title) ? "Saved Feed Video" : request.Title.Trim();
+
+        var persistenceStatus = "ready";
+        VideoLibraryVideo saved;
+        try
+        {
+            saved = await RavensightPersistenceGuard.RunWithTimeoutAsync(
+                async ct => await _videoStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId,
+                    Title = title,
+                    Description = request.Description?.Trim() ?? string.Empty,
+                    Tags = request.Tags ?? [],
+                    VideoUrl = persistedUrl,
+                    ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
+                    PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
+                    Status = "published",
+                    StorageMode = "permanent",
+                    IsPermanent = true
+                }, ct),
+                new VideoLibraryVideo
+                {
+                    Id = $"local-{Guid.NewGuid():N}",
+                    UserId = userId,
+                    Title = title,
+                    Description = request.Description?.Trim() ?? string.Empty,
+                    Tags = request.Tags?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
+                    VideoUrl = persistedUrl,
+                    ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
+                    Status = "published",
+                    PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
+                    StorageMode = "permanent",
+                    RetentionStatus = VideoRetentionPolicy.GetStorageStatus(now, true, nowUtc: now, hasActiveSubscription: hasActiveSubscription),
+                    CreatedAt = now,
+                    UpdatedAt = now
+                },
+                TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Save reference failed for user {UserId}; returning blob URL fallback object.", userId);
+            saved = new VideoLibraryVideo
+            {
+                Id = $"local-{Guid.NewGuid():N}",
+                UserId = userId,
+                Title = title,
+                Description = request.Description?.Trim() ?? string.Empty,
+                Tags = request.Tags?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
+                VideoUrl = persistedUrl,
+                ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
+                Status = "published",
+                PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
+                StorageMode = "permanent",
+                RetentionStatus = VideoRetentionPolicy.GetStorageStatus(now, true, nowUtc: now, hasActiveSubscription: hasActiveSubscription),
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+        }
+
+        return Ok(new
+        {
+            video = saved,
+            mediaUrl = persistedUrl,
+            blobStored = true,
+            persistenceStatus
+        });
+    }
+
     private async Task<string> SaveVideoFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, CancellationToken cancellationToken)
     {
         var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
@@ -261,6 +361,70 @@ public class RavensightController : ControllerBase
             _logger.LogWarning(ex, "Failed to upload video {FileName} to blob storage", uniqueFileName);
             return null;
         }
+    }
+
+    private async Task<string?> PersistExternalVideoToBlobAsync(string sourceVideoUrl, string destinationFolder, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sourceUri = BuildSourceUri(sourceVideoUrl);
+            if (sourceUri is null)
+            {
+                return null;
+            }
+
+            var client = _httpClientFactory.CreateClient();
+            using var response = await client.GetAsync(sourceUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch source video {SourceVideoUrl}. Status {StatusCode}", sourceVideoUrl, (int)response.StatusCode);
+                return null;
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "video/mp4";
+            var extension = ResolveVideoExtension(sourceUri, contentType);
+            var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
+            var objectKey = BuildBlobObjectKey(destinationFolder, uniqueFileName);
+
+            await using var sourceStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var uploadResult = await _blobStorageService.UploadAsync(objectKey, sourceStream, contentType, cancellationToken);
+            return uploadResult.PublicUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to persist external video source {SourceVideoUrl} to blob storage", sourceVideoUrl);
+            return null;
+        }
+    }
+
+    private Uri? BuildSourceUri(string sourceVideoUrl)
+    {
+        if (Uri.TryCreate(sourceVideoUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri;
+        }
+
+        if (!sourceVideoUrl.StartsWith('/'))
+        {
+            return null;
+        }
+
+        var host = $"{Request.Scheme}://{Request.Host}";
+        return Uri.TryCreate(host + sourceVideoUrl, UriKind.Absolute, out var relativeUri) ? relativeUri : null;
+    }
+
+    private static string ResolveVideoExtension(Uri sourceUri, string contentType)
+    {
+        var existingExtension = Path.GetExtension(sourceUri.AbsolutePath);
+        if (!string.IsNullOrWhiteSpace(existingExtension) && AllowedVideoTypes.Contains(existingExtension))
+        {
+            return existingExtension;
+        }
+
+        if (contentType.Contains("webm", StringComparison.OrdinalIgnoreCase)) return ".webm";
+        if (contentType.Contains("quicktime", StringComparison.OrdinalIgnoreCase)) return ".mov";
+        if (contentType.Contains("x-msvideo", StringComparison.OrdinalIgnoreCase)) return ".avi";
+        return ".mp4";
     }
 
     private string BuildBlobObjectKey(string destinationFolder, string fileName)
@@ -544,4 +708,15 @@ public sealed class RavensightVideoUploadDto
 public sealed class AddVideoCommentRequest
 {
     public string Comment { get; set; } = string.Empty;
+}
+
+public sealed class SaveVideoReferenceRequest
+{
+    public string VideoUrl { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string ThumbnailUrl { get; set; } = string.Empty;
+    public string DestinationFolder { get; set; } = string.Empty;
+    public string PrivacyStatus { get; set; } = "unlisted";
+    public List<string>? Tags { get; set; }
 }

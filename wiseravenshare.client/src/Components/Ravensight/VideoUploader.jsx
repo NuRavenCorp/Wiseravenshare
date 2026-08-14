@@ -174,7 +174,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('youTubePermissionGranted', String(!libraryOnly && videoDetails.youTubePermissionGranted));
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
-        const wantsPermanentStorage = Boolean(savePermanently);
+        const wantsPermanentStorage = libraryOnly || Boolean(savePermanently);
         formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
         formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
         formData.append('isPermanent', String(wantsPermanentStorage));
@@ -206,7 +206,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                 title: videoDetails.title,
                 description: videoDetails.description,
                 privacyStatus: videoDetails.privacyStatus,
-                storageMode: savePermanently ? 'permanent' : 'temporary'
+                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary'
             });
 
             upsertLocalVideo(fallbackVideo);

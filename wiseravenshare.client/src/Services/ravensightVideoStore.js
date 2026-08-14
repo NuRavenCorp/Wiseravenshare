@@ -2,6 +2,24 @@ const VIDEO_CACHE_KEY = 'wiseRavensightVideos';
 const VIDEO_LIBRARY_KEY = 'wiseRavensightLibrary';
 const VIDEO_RECENT_POSTS_KEY = 'wiseRecentPosts';
 
+export const RAVENSIGHT_LIBRARY_PROTOCOL = {
+    events: {
+        videoSaved: 'ravensight:video-saved',
+        postsUpdated: 'wiseraven:posts-updated'
+    },
+    source: {
+        localFallback: 'local-fallback',
+        feedCache: 'feed-cache',
+        libraryStore: 'library-store'
+    },
+    access: {
+        blobSession: 'blob-session-url',
+        remoteUrl: 'remote-url',
+        streamUrl: 'stream-url',
+        unavailable: 'unavailable'
+    }
+};
+
 const safeReadJson = (key, fallback) => {
     try {
         const raw = localStorage.getItem(key);
@@ -40,32 +58,56 @@ const normalizeMediaSource = (value, fallback = '') => {
     return fallback;
 };
 
-export const normalizeVideoRecord = (video, index = 0) => ({
-    id: String(video?.id || video?.videoId || `local-video-${Date.now()}-${index}`),
-    videoUrl: normalizeMediaSource(video?.videoUrl || video?.mediaUrl || video?.filePath || '', ''),
-    mediaUrl: normalizeMediaSource(video?.mediaUrl || video?.videoUrl || video?.filePath || '', ''),
-    thumbnailUrl: normalizeMediaSource(video?.thumbnailUrl || '', ''),
-    duration: video?.duration || '00:30',
-    channelAvatar: normalizeMediaSource(video?.channelAvatar || video?.avatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR'),
-    channelName: video?.channelName || video?.user?.name || 'WiseRaven Creator',
-    title: video?.title || 'Uploaded Video',
-    description: video?.description || '',
-    tags: Array.isArray(video?.tags) ? video.tags : [],
-    views: Number(video?.views ?? video?.viewsCount ?? 0),
-    likes: Number(video?.likes ?? video?.likesCount ?? 0),
-    comments: Number(video?.comments ?? video?.commentsCount ?? 0),
-    createdAt: video?.createdAt || new Date().toISOString(),
-    updatedAt: video?.updatedAt || video?.createdAt || new Date().toISOString(),
-    isLiked: Boolean(video?.isLiked),
-    userId: video?.userId || video?.user?.id || null,
-    status: video?.status || 'published',
-    privacyStatus: video?.privacyStatus || 'unlisted',
-    storageMode: video?.storageMode || 'temporary',
-    retentionStatus: video?.retentionStatus || 'active',
-    youtubeUrl: video?.youtubeUrl || null,
-    tiktokUrl: video?.tiktokUrl || null,
-    facebookUrl: video?.facebookUrl || null
-});
+export const normalizeVideoRecord = (video, index = 0) => {
+    const id = String(video?.id || video?.videoId || `local-video-${Date.now()}-${index}`);
+    const videoUrl = normalizeMediaSource(video?.videoUrl || video?.mediaUrl || video?.filePath || '', '');
+    const mediaUrl = normalizeMediaSource(video?.mediaUrl || video?.videoUrl || video?.filePath || '', '');
+    const resolvedVideoUrl = videoUrl || mediaUrl;
+    const sourceType = Object.values(RAVENSIGHT_LIBRARY_PROTOCOL.source).includes(video?.sourceType)
+        ? video.sourceType
+        : id.startsWith('local-video-')
+            ? RAVENSIGHT_LIBRARY_PROTOCOL.source.localFallback
+            : id.startsWith('post-video-')
+                ? RAVENSIGHT_LIBRARY_PROTOCOL.source.feedCache
+                : RAVENSIGHT_LIBRARY_PROTOCOL.source.libraryStore;
+
+    const accessProtocol = resolvedVideoUrl.startsWith('blob:')
+        ? RAVENSIGHT_LIBRARY_PROTOCOL.access.blobSession
+        : resolvedVideoUrl.includes('/api/videostreaming/')
+            ? RAVENSIGHT_LIBRARY_PROTOCOL.access.streamUrl
+            : /^https?:\/\//i.test(resolvedVideoUrl)
+                ? RAVENSIGHT_LIBRARY_PROTOCOL.access.remoteUrl
+                : RAVENSIGHT_LIBRARY_PROTOCOL.access.unavailable;
+
+    return {
+        id,
+        videoUrl,
+        mediaUrl,
+        thumbnailUrl: normalizeMediaSource(video?.thumbnailUrl || '', ''),
+        duration: video?.duration || '00:30',
+        channelAvatar: normalizeMediaSource(video?.channelAvatar || video?.avatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR'),
+        channelName: video?.channelName || video?.user?.name || 'WiseRaven Creator',
+        title: video?.title || 'Uploaded Video',
+        description: video?.description || '',
+        tags: Array.isArray(video?.tags) ? video.tags : [],
+        views: Number(video?.views ?? video?.viewsCount ?? 0),
+        likes: Number(video?.likes ?? video?.likesCount ?? 0),
+        comments: Number(video?.comments ?? video?.commentsCount ?? 0),
+        createdAt: video?.createdAt || new Date().toISOString(),
+        updatedAt: video?.updatedAt || video?.createdAt || new Date().toISOString(),
+        isLiked: Boolean(video?.isLiked),
+        userId: video?.userId || video?.user?.id || null,
+        status: video?.status || 'published',
+        privacyStatus: video?.privacyStatus || 'unlisted',
+        storageMode: video?.storageMode || 'temporary',
+        retentionStatus: video?.retentionStatus || 'active',
+        youtubeUrl: video?.youtubeUrl || null,
+        tiktokUrl: video?.tiktokUrl || null,
+        facebookUrl: video?.facebookUrl || null,
+        sourceType,
+        accessProtocol
+    };
+};
 
 const dedupeByIdentity = (videos) => {
     const seen = new Set();
@@ -130,8 +172,13 @@ export const getMergedLocalVideos = (currentUserId = null) => {
     return merged.filter((video) => !video.userId || video.userId === currentUserId);
 };
 
-export const upsertLocalVideo = (videoInput) => {
+export const mergeVideoRecords = (serverVideos = [], localVideos = []) => {
+    return dedupeByIdentity([...(serverVideos || []), ...(localVideos || [])]);
+};
+
+export const upsertLocalVideo = (videoInput, options = {}) => {
     const video = normalizeVideoRecord(videoInput);
+    const shouldEmitEvent = options.emitEvent !== false;
     const currentPrimary = readPrimaryVideos();
     const currentLibrary = readLibraryVideos();
 
@@ -144,10 +191,33 @@ export const upsertLocalVideo = (videoInput) => {
     safeWriteJson(VIDEO_CACHE_KEY, mergeOne(currentPrimary));
     safeWriteJson(VIDEO_LIBRARY_KEY, mergeOne(currentLibrary));
 
-    window.dispatchEvent(new CustomEvent('ravensight:video-saved', { detail: video }));
-    window.dispatchEvent(new Event('wiseraven:posts-updated'));
+    if (shouldEmitEvent) {
+        window.dispatchEvent(new CustomEvent(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, { detail: video }));
+        window.dispatchEvent(new Event(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated));
+    }
 
     return video;
+};
+
+export const upsertLocalVideos = (videos = [], options = {}) => {
+    const normalized = Array.isArray(videos)
+        ? videos.map((video, index) => normalizeVideoRecord(video, index)).filter((video) => video.videoUrl || video.mediaUrl)
+        : [];
+
+    if (normalized.length === 0) {
+        return [];
+    }
+
+    normalized.forEach((video) => {
+        upsertLocalVideo(video, { emitEvent: false });
+    });
+
+    if (options.emitEvent !== false) {
+        window.dispatchEvent(new CustomEvent(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, { detail: normalized[0] }));
+        window.dispatchEvent(new Event(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated));
+    }
+
+    return normalized;
 };
 
 export const removeLocalVideo = (videoIdentity) => {
@@ -167,7 +237,7 @@ export const removeLocalVideo = (videoIdentity) => {
 
     safeWriteJson(VIDEO_CACHE_KEY, removeFrom(readPrimaryVideos()));
     safeWriteJson(VIDEO_LIBRARY_KEY, removeFrom(readLibraryVideos()));
-    window.dispatchEvent(new Event('wiseraven:posts-updated'));
+    window.dispatchEvent(new Event(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated));
 };
 
 export const buildLocalFallbackVideo = ({ file, user, title = '', description = '', privacyStatus = 'unlisted', storageMode = 'temporary' }) => {

@@ -205,7 +205,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('youTubePermissionGranted', String(!libraryOnly && youTubePermissionGranted));
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
-            const wantsPermanentStorage = Boolean(savePermanently);
+            const wantsPermanentStorage = libraryOnly || Boolean(savePermanently);
             formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
             formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
             formData.append('isPermanent', String(wantsPermanentStorage));
@@ -234,7 +234,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                 title: videoTitle || `Recording ${new Date().toLocaleString()}`,
                 description: videoDescription,
                 privacyStatus,
-                storageMode: savePermanently ? 'permanent' : 'temporary'
+                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary'
             });
 
             upsertLocalVideo(fallbackVideo);

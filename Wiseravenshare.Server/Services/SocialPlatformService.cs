@@ -21,12 +21,14 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SocialPlatformService> _logger;
+    private readonly IYouTubeService _youTubeService;
 
-    public SocialPlatformService(HttpClient httpClient, IConfiguration configuration, ILogger<SocialPlatformService> logger)
+    public SocialPlatformService(HttpClient httpClient, IConfiguration configuration, ILogger<SocialPlatformService> logger, IYouTubeService youTubeService)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _youTubeService = youTubeService;
     }
 
     public async Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit)
@@ -152,11 +154,17 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToTikTokAsync(message, request.VideoUrl));
         }
 
+        if (request.PublishToYouTube)
+        {
+            response.Results.Add(await PublishToYouTubeAsync(message, request.VideoUrl));
+        }
+
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}",
             userId,
             request.PublishToFacebook,
-            request.PublishToTikTok);
+            request.PublishToTikTok,
+            request.PublishToYouTube);
 
         return response;
     }
@@ -284,6 +292,43 @@ public class SocialPlatformService : ISocialPlatformService
             ExternalPostId = publishId,
             ExternalPostUrl = string.IsNullOrWhiteSpace(publishId) ? null : $"https://www.tiktok.com/upload?publish_id={publishId}"
         };
+    }
+
+    private async Task<SocialPublishResultDto> PublishToYouTubeAsync(string message, string? videoUrl)
+    {
+        if (string.IsNullOrWhiteSpace(videoUrl))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = false,
+                Error = "YouTube publish requires a public videoUrl."
+            };
+        }
+
+        try
+        {
+            var title = message.Length > 100 ? message[..100] : message;
+            var description = $"Shared from Ravensight feed. Source: {videoUrl}";
+            var publishedUrl = await _youTubeService.PublishVideoFromUrlAsync(videoUrl, title, description);
+
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = true,
+                ExternalPostUrl = publishedUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "YouTube publish failed for shared video URL.");
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = false,
+                Error = ex.Message
+            };
+        }
     }
 
     private static DateTimeOffset? ParseDate(JsonElement element, string propertyName)

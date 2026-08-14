@@ -6,7 +6,7 @@ import VideoLibrary from './VideoLibrary';
 import WiseRavenLogo from '../Common/WiseRavenLogo';
 import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
-import { subscriptionService } from '../../services/subscriptionService';
+import { subscriptionService } from '../../Services/subscriptionService';
 
 const PRICING_PLANS = [
     {
@@ -149,7 +149,7 @@ const allowLocalCheckoutFallback =
     import.meta.env.DEV || String(import.meta.env.VITE_STRIPE_CHECKOUT_LOCAL_FALLBACK || '').toLowerCase() === 'true';
 
 const hostedStripePaymentLink =
-    String(import.meta.env.VITE_STRIPE_PAYMENT_LINK || 'https://buy.stripe.com/9B67sL9h13oZ4vTe8Tf7i00').trim();
+    String(import.meta.env.VITE_STRIPE_PAYMENT_LINK || '').trim();
 
 const buildSubscriptionStorageKey = (userId) => `wiseRavensightSubscription_${userId || 'guest'}`;
 const buildPaywallVariantStorageKey = (userId) => `wiseRavensightPaywallVariant_${userId || 'guest'}`;
@@ -166,6 +166,26 @@ const getPlanById = (planId = DEFAULT_PLAN_ID) => {
     return PRICING_PLANS.find((plan) => plan.id === planId) || PRICING_PLANS[0];
 };
 
+const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
+    const plan = getPlanById(planId);
+    return {
+        planId: plan.id,
+        name: plan.name,
+        tagline: plan.tagline,
+        badge: plan.badge,
+        monthly: {
+            priceId: '',
+            configured: false,
+            amountUsd: plan.monthlyPrice
+        },
+        annual: {
+            priceId: '',
+            configured: false,
+            amountUsd: plan.annualPrice
+        }
+    };
+};
+
 const RavensightVideo = () => {
     const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library
     const [notifications, setNotifications] = useState([]);
@@ -178,6 +198,8 @@ const RavensightVideo = () => {
         priceId: null,
         error: ''
     });
+    const [stripeCatalog, setStripeCatalog] = useState([]);
+    const [catalogError, setCatalogError] = useState('');
     const { user } = useAuth();
     const subscriptionStorageKey = buildSubscriptionStorageKey(user?.id);
     const paywallVariantStorageKey = buildPaywallVariantStorageKey(user?.id);
@@ -206,10 +228,32 @@ const RavensightVideo = () => {
         }
     });
     const selectedPlan = getPlanById(selectedPlanId);
+
+    const getCatalogPlanById = (planId = DEFAULT_PLAN_ID) => {
+        const matched = stripeCatalog.find((plan) => plan.planId === planId);
+        return matched || getFallbackCatalogPlan(planId);
+    };
+
+    const resolvePlanIdFromPriceId = (priceId) => {
+        if (!priceId) {
+            return null;
+        }
+
+        const match = stripeCatalog.find((plan) => {
+            return plan?.monthly?.priceId === priceId || plan?.annual?.priceId === priceId;
+        });
+
+        return match?.planId || null;
+    };
+
+    const activePlanId = billingSync.hasActiveSubscription
+        ? (resolvePlanIdFromPriceId(billingSync.priceId) || subscription?.planId || DEFAULT_PLAN_ID)
+        : selectedPlanId;
+
     const unlockedFeatureCount = PAID_FEATURES.filter((feature) => {
         if (feature.access === 'creator_pro') return true;
-        if (feature.access === 'growth_suite') return selectedPlanId === 'growth_suite' || selectedPlanId === 'studio_plus';
-        if (feature.access === 'studio_plus') return selectedPlanId === 'studio_plus';
+        if (feature.access === 'growth_suite') return activePlanId === 'growth_suite' || activePlanId === 'studio_plus';
+        if (feature.access === 'studio_plus') return activePlanId === 'studio_plus';
         return false;
     }).length;
 
@@ -244,6 +288,38 @@ const RavensightVideo = () => {
             setSelectedPlanId(DEFAULT_PLAN_ID);
         }
     }, [paywallVariantStorageKey]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCatalog = async () => {
+            try {
+                const response = await subscriptionService.getProductCatalog();
+                if (cancelled) {
+                    return;
+                }
+
+                const plans = Array.isArray(response?.plans) ? response.plans : [];
+                if (plans.length > 0) {
+                    setStripeCatalog(plans);
+                }
+                setCatalogError('');
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+
+                setStripeCatalog([]);
+                setCatalogError(error?.message || 'Unable to load Stripe product catalog.');
+            }
+        };
+
+        loadCatalog();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -354,6 +430,8 @@ const RavensightVideo = () => {
     const subscribeNow = async (planId = selectedPlanId, billingCycle = DEFAULT_BILLING_CYCLE) => {
         const plan = getPlanById(planId);
         const actualPlanId = plan.id;
+        const catalogPlan = getCatalogPlanById(actualPlanId);
+        const catalogPrice = billingCycle === 'annual' ? catalogPlan.annual : catalogPlan.monthly;
 
         if (hostedStripePaymentLink) {
             safeTrackGrowthEvent('checkout_redirected_payment_link', {
@@ -376,20 +454,38 @@ const RavensightVideo = () => {
         });
 
         try {
-            const response = await apiService.createCheckoutSession({
-                plan: actualPlanId,
-                billingCycle,
-                successUrl,
-                cancelUrl
-            });
+            let checkoutUrl = '';
+            let checkoutSessionId = '';
 
-            const checkoutUrl = response?.data?.url;
+            if (catalogPrice?.configured && catalogPrice?.priceId) {
+                const response = await subscriptionService.createCheckoutSession({
+                    priceId: catalogPrice.priceId,
+                    successUrl,
+                    cancelUrl,
+                    plan: actualPlanId,
+                    billingCycle
+                });
+
+                checkoutUrl = response?.url || '';
+                checkoutSessionId = response?.sessionId || '';
+            } else {
+                const response = await apiService.createCheckoutSession({
+                    plan: actualPlanId,
+                    billingCycle,
+                    successUrl,
+                    cancelUrl
+                });
+
+                checkoutUrl = response?.data?.url || '';
+                checkoutSessionId = response?.data?.id || '';
+            }
+
             if (checkoutUrl) {
                 safeTrackGrowthEvent('checkout_redirected', {
                     source: 'ravensight_video',
                     plan: actualPlanId,
                     billingCycle,
-                    checkoutSessionId: response?.data?.id || ''
+                    checkoutSessionId
                 });
                 window.location.assign(checkoutUrl);
                 return;
@@ -565,8 +661,8 @@ const RavensightVideo = () => {
                 }}>
                     {PAID_FEATURES.map((feature) => {
                         const isUnlocked = feature.access === 'creator_pro'
-                            || (feature.access === 'growth_suite' && (selectedPlanId === 'growth_suite' || selectedPlanId === 'studio_plus'))
-                            || (feature.access === 'studio_plus' && selectedPlanId === 'studio_plus');
+                            || (feature.access === 'growth_suite' && (activePlanId === 'growth_suite' || activePlanId === 'studio_plus'))
+                            || (feature.access === 'studio_plus' && activePlanId === 'studio_plus');
 
                         return (
                             <div key={feature.title} style={{
@@ -611,6 +707,9 @@ const RavensightVideo = () => {
                                     ? `Synced from Stripe with status ${billingSync.status}.`
                                     : 'Showing local preview until Stripe status is available.'}
                             </div>
+                            {catalogError && (
+                                <div style={{ color: '#ffd7d7', marginTop: '4px' }}>{catalogError}</div>
+                            )}
                         </div>
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8 }}>Unlocked feature groups</div>
@@ -707,6 +806,7 @@ const RavensightVideo = () => {
 
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                                 {PRICING_PLANS.map((plan) => {
+                                    const catalogPlan = getCatalogPlanById(plan.id);
                                     const isSelected = selectedPlanId === plan.id;
                                     const isCurrent = subscription?.planId === plan.id && subscription?.isActive;
 
@@ -740,11 +840,14 @@ const RavensightVideo = () => {
 
                                             <div style={{ marginBottom: '8px', color: 'var(--light-color)', fontSize: '14px' }}>{plan.tagline}</div>
                                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '12px' }}>
-                                                <span style={{ fontSize: '32px', fontWeight: 800 }}>{formatMoney(plan.monthlyPrice)}</span>
+                                                <span style={{ fontSize: '32px', fontWeight: 800 }}>{formatMoney(catalogPlan.monthly.amountUsd)}</span>
                                                 <span style={{ color: 'var(--light-color)' }}>/ month</span>
                                             </div>
                                             <div style={{ marginBottom: '14px', color: 'var(--light-color)', fontSize: '13px' }}>
-                                                or {formatMoney(plan.annualPrice)}/year • save with annual billing
+                                                or {formatMoney(catalogPlan.annual.amountUsd)}/year • save with annual billing
+                                            </div>
+                                            <div style={{ marginBottom: '10px', fontSize: '11px', color: 'var(--light-color)' }}>
+                                                Stripe catalog: {catalogPlan.monthly.configured && catalogPlan.annual.configured ? 'Connected' : 'Needs price mapping'}
                                             </div>
 
                                             <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--light-color)', lineHeight: 1.65, fontSize: '14px' }}>
@@ -768,6 +871,7 @@ const RavensightVideo = () => {
                                     <>
                                         <button
                                             onClick={() => subscribeNow(selectedPlanId, 'monthly')}
+                                            disabled={!getCatalogPlanById(selectedPlanId).monthly.configured && !allowLocalCheckoutFallback}
                                             style={{
                                                 border: 'none',
                                                 background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
@@ -775,13 +879,15 @@ const RavensightVideo = () => {
                                                 borderRadius: '999px',
                                                 padding: '12px 18px',
                                                 fontWeight: 700,
-                                                cursor: 'pointer'
+                                                cursor: 'pointer',
+                                                opacity: !getCatalogPlanById(selectedPlanId).monthly.configured && !allowLocalCheckoutFallback ? 0.6 : 1
                                             }}
                                         >
-                                            Start {selectedPlan.name} • {formatMoney(selectedPlan.monthlyPrice)}/mo
+                                            Start {selectedPlan.name} • {formatMoney(getCatalogPlanById(selectedPlanId).monthly.amountUsd)}/mo
                                         </button>
                                         <button
                                             onClick={() => subscribeNow(selectedPlanId, 'annual')}
+                                            disabled={!getCatalogPlanById(selectedPlanId).annual.configured && !allowLocalCheckoutFallback}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 background: 'var(--card-bg)',
@@ -789,10 +895,11 @@ const RavensightVideo = () => {
                                                 borderRadius: '999px',
                                                 padding: '12px 18px',
                                                 fontWeight: 700,
-                                                cursor: 'pointer'
+                                                cursor: 'pointer',
+                                                opacity: !getCatalogPlanById(selectedPlanId).annual.configured && !allowLocalCheckoutFallback ? 0.6 : 1
                                             }}
                                         >
-                                            Annual {formatMoney(selectedPlan.annualPrice)} • Save more
+                                            Annual {formatMoney(getCatalogPlanById(selectedPlanId).annual.amountUsd)} • Save more
                                         </button>
                                     </>
                                 ) : (

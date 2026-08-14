@@ -34,6 +34,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
     [HttpPost("save")]
     [RequestSizeLimit(500_000_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SaveVideo([FromForm] SaveRavensightVideoDto dto, CancellationToken cancellationToken)
     {

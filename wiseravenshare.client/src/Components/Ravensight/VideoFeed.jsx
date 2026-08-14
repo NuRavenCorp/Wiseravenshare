@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
+import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
-import { normalizeVideoRecord, getMergedLocalVideos } from '../../Services/ravensightVideoStore';
+import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -53,6 +54,8 @@ const VideoFeed = ({ onNotification }) => {
     const [filter, setFilter] = useState('all'); // all, trending, subscribed, my_videos
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+    const [sharingVideoIds, setSharingVideoIds] = useState([]);
+    const [savingVideoIds, setSavingVideoIds] = useState([]);
     const observerRef = useRef();
     const { user } = useAuth();
 
@@ -67,8 +70,8 @@ const VideoFeed = ({ onNotification }) => {
             }
         };
 
-        window.addEventListener('ravensight:video-saved', handleVideoSaved);
-        return () => window.removeEventListener('ravensight:video-saved', handleVideoSaved);
+        window.addEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, handleVideoSaved);
+        return () => window.removeEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, handleVideoSaved);
     }, [page, filter]);
 
     useEffect(() => {
@@ -123,6 +126,10 @@ const VideoFeed = ({ onNotification }) => {
             const responseVideos = Array.isArray(response?.videos)
                 ? response.videos.map((video, index) => normalizeVideo(video, index))
                 : [];
+
+            if (responseVideos.length > 0 && page === 1) {
+                upsertLocalVideos(responseVideos, { emitEvent: false });
+            }
 
             if (responseVideos.length === 0 && page === 1) {
                 const fallback = getLocalFallbackVideos(user?.id, filter);
@@ -183,6 +190,92 @@ const VideoFeed = ({ onNotification }) => {
         }
     };
 
+    const handleSaveToLibrary = async (video) => {
+        const videoId = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
+        const mediaUrl = String(video?.videoUrl || video?.mediaUrl || '').trim();
+        if (!mediaUrl) {
+            onNotification('This feed item has no accessible media URL to save.', 'warning');
+            return;
+        }
+
+        setSavingVideoIds((prev) => [...new Set([...prev, videoId])]);
+        try {
+            const response = await ravensightAPI.saveVideoReference({
+                videoUrl: mediaUrl,
+                title: video?.title || 'Saved Feed Video',
+                description: video?.description || '',
+                thumbnailUrl: video?.thumbnailUrl || '',
+                privacyStatus: video?.privacyStatus || 'unlisted',
+                destinationFolder: '/wiseravenshare/ravensight/video',
+                tags: Array.isArray(video?.tags) ? video.tags : []
+            });
+
+            if (response?.video) {
+                upsertLocalVideo({
+                    ...response.video,
+                    sourceType: RAVENSIGHT_LIBRARY_PROTOCOL.source.libraryStore,
+                    storageMode: 'permanent'
+                });
+            }
+
+            onNotification('Saved to My Library with blob-backed storage.', 'success');
+        } catch (error) {
+            onNotification(error?.message || 'Unable to save this item to blob library storage.', 'error');
+        } finally {
+            setSavingVideoIds((prev) => prev.filter((id) => id !== videoId));
+        }
+    };
+
+    const handleShareVideo = async (video) => {
+        const videoId = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
+        if (!videoId) {
+            onNotification('Cannot share this item yet. Missing video identity.', 'warning');
+            return;
+        }
+
+        const message = `Watch: ${String(video?.title || 'Ravensight video').trim()}`;
+        const videoUrl = String(video?.videoUrl || video?.mediaUrl || '').trim();
+
+        setSharingVideoIds((prev) => [...new Set([...prev, videoId])]);
+        try {
+            const result = await socialService.publishContent({
+                message,
+                linkUrl: videoUrl || undefined,
+                videoUrl: videoUrl || undefined,
+                publishToFacebook: true,
+                publishToTikTok: true,
+                publishToYouTube: true
+            });
+
+            const successfulPlatforms = Array.isArray(result?.results)
+                ? result.results.filter((entry) => entry?.success).map((entry) => entry.platform)
+                : [];
+            const failedResults = Array.isArray(result?.results)
+                ? result.results.filter((entry) => !entry?.success)
+                : [];
+
+            if (successfulPlatforms.length > 0) {
+                onNotification(`Shared to ${successfulPlatforms.join(', ')}.`, 'success');
+            }
+
+            if (failedResults.length > 0) {
+                const firstFailure = failedResults[0];
+                onNotification(
+                    `${firstFailure?.platform || 'Social publish'} failed: ${firstFailure?.error || 'Unknown error'}`,
+                    'warning'
+                );
+            }
+
+            if (successfulPlatforms.length === 0 && failedResults.length === 0) {
+                onNotification('Share request sent, but no platform response was returned.', 'warning');
+            }
+        } catch (error) {
+            onNotification(error?.message || 'Unable to share this video right now.', 'error');
+        } finally {
+            setSharingVideoIds((prev) => prev.filter((id) => id !== videoId));
+        }
+    };
+
     const formatViews = (views) => {
         if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
         if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
@@ -207,20 +300,31 @@ const VideoFeed = ({ onNotification }) => {
         const [isMuted, setIsMuted] = useState(true);
         const [isBanging, setIsBanging] = useState(false);
         const videoRef = useRef(null);
+        const videoIdentity = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
+        const isSharing = sharingVideoIds.includes(videoIdentity);
+        const isSaving = savingVideoIds.includes(videoIdentity);
 
         const triggerPlayback = async () => {
-            if (!videoRef.current) return;
+            if (!videoRef.current) return false;
 
             setIsBanging(true);
-            window.setTimeout(() => {
-                if (videoRef.current) {
-                    videoRef.current.play().catch(() => null);
+            try {
+                await videoRef.current.play();
+                return true;
+            } catch {
+                try {
+                    videoRef.current.muted = true;
+                    setIsMuted(true);
+                    await videoRef.current.play();
+                    return true;
+                } catch {
+                    return false;
                 }
-            }, 180);
-
-            window.setTimeout(() => {
-                setIsBanging(false);
-            }, 700);
+            } finally {
+                window.setTimeout(() => {
+                    setIsBanging(false);
+                }, 700);
+            }
         };
 
         const handlePlayPause = async () => {
@@ -231,8 +335,11 @@ const VideoFeed = ({ onNotification }) => {
                     return;
                 }
 
-                await triggerPlayback();
-                setIsPlaying(true);
+                const started = await triggerPlayback();
+                setIsPlaying(started);
+                if (!started) {
+                    onNotification('Playback could not start for this video.', 'warning');
+                }
             }
         };
 
@@ -264,7 +371,6 @@ const VideoFeed = ({ onNotification }) => {
                     position: 'relative',
                     padding: '12px 12px 0'
                 }}
-                    onMouseEnter={() => setIsPlaying(true)}
                     onMouseLeave={() => {
                         if (videoRef.current) {
                             videoRef.current.pause();
@@ -309,8 +415,12 @@ const VideoFeed = ({ onNotification }) => {
                         transition: 'transform 0.13s ease-in-out',
                         animation: isBanging ? 'retroTvBang 0.7s ease-in-out' : 'none',
                         zIndex: 3,
-                        textShadow: '0 0 12px rgba(255,255,255,0.5)'
-                    }}>
+                        textShadow: '0 0 12px rgba(255,255,255,0.5)',
+                        cursor: 'pointer'
+                    }}
+                        onClick={handlePlayPause}
+                        title="Play or pause video"
+                    >
                         ✋
                     </div>
                     <div style={{ position: 'relative' }} onClick={handlePlayPause}>
@@ -438,9 +548,31 @@ const VideoFeed = ({ onNotification }) => {
                             background: 'none',
                             border: 'none',
                             color: 'var(--text-color)',
-                            cursor: 'pointer'
-                        }}>
-                            <FaShare /> Share
+                            cursor: isSharing ? 'wait' : 'pointer',
+                            opacity: isSharing ? 0.6 : 1
+                        }}
+                            onClick={() => handleShareVideo(video)}
+                            disabled={isSharing}
+                            title="Share this video to connected social channels"
+                        >
+                            <FaShare /> {isSharing ? 'Sharing...' : 'Share'}
+                        </button>
+                        <button
+                            onClick={() => handleSaveToLibrary(video)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-color)',
+                                cursor: isSaving ? 'wait' : 'pointer',
+                                opacity: isSaving ? 0.6 : 1
+                            }}
+                            disabled={isSaving}
+                            title="Save this feed item to My Library"
+                        >
+                            <FaDownload /> {isSaving ? 'Saving...' : 'Save'}
                         </button>
                     </div>
                     </div>
