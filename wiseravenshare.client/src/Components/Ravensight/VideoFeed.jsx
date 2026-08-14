@@ -220,7 +220,10 @@ const VideoFeed = ({ onNotification }) => {
 
             onNotification('Saved to My Library with blob-backed storage.', 'success');
         } catch (error) {
-            onNotification(error?.message || 'Unable to save this item to blob library storage.', 'error');
+            onNotification(
+                error?.message || 'Blob persistence unavailable. Save to Library requires blob storage and did not complete.',
+                'error'
+            );
         } finally {
             setSavingVideoIds((prev) => prev.filter((id) => id !== videoId));
         }
