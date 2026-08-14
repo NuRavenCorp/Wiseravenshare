@@ -106,18 +106,22 @@ public sealed class RavensightVideoMediaController : ControllerBase
         VideoLibraryVideo persistedVideo;
         try
         {
-            persistedVideo = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
-            {
-                UserId = userId.ToString(),
-                Title = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Title.Trim(),
-                Description = dto.Description ?? string.Empty,
-                Tags = [],
-                VideoUrl = mediaUrl,
-                PrivacyStatus = "unlisted",
-                Status = "published",
-                StorageMode = resolvedStorageMode,
-                IsPermanent = resolvedStorageMode == "permanent"
-            }, cancellationToken);
+            persistedVideo = await RavensightPersistenceGuard.RunWithTimeoutAsync(
+                async ct => await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId.ToString(),
+                    Title = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Title.Trim(),
+                    Description = dto.Description ?? string.Empty,
+                    Tags = [],
+                    VideoUrl = mediaUrl,
+                    PrivacyStatus = "unlisted",
+                    Status = "published",
+                    StorageMode = resolvedStorageMode,
+                    IsPermanent = resolvedStorageMode == "permanent"
+                }, ct),
+                BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription),
+                TimeSpan.FromSeconds(5));
+            persistenceStatus = "ready";
         }
         catch (PostgresException ex)
         {

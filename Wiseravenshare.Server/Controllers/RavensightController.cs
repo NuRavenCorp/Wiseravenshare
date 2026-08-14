@@ -148,21 +148,25 @@ public class RavensightController : ControllerBase
         VideoLibraryVideo saved;
         try
         {
-            saved = await _videoStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
-            {
-                UserId = userId,
-                Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(file.FileName) : upload.Title,
-                Description = upload.Description ?? string.Empty,
-                Tags = ParseTags(upload.Tags),
-                VideoUrl = absoluteVideoUrl,
-                PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
-                Status = "published",
-                StorageMode = resolvedStorageMode,
-                IsPermanent = resolvedStorageMode == "permanent",
-                YouTubeUrl = youtubeUrl,
-                TikTokUrl = tiktokUrl,
-                FacebookUrl = facebookUrl
-            }, cancellationToken);
+            saved = await RavensightPersistenceGuard.RunWithTimeoutAsync(
+                async ct => await _videoStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId,
+                    Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(file.FileName) : upload.Title,
+                    Description = upload.Description ?? string.Empty,
+                    Tags = ParseTags(upload.Tags),
+                    VideoUrl = absoluteVideoUrl,
+                    PrivacyStatus = string.IsNullOrWhiteSpace(upload.PrivacyStatus) ? "unlisted" : upload.PrivacyStatus,
+                    Status = "published",
+                    StorageMode = resolvedStorageMode,
+                    IsPermanent = resolvedStorageMode == "permanent",
+                    YouTubeUrl = youtubeUrl,
+                    TikTokUrl = tiktokUrl,
+                    FacebookUrl = facebookUrl
+                }, ct),
+                BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription),
+                TimeSpan.FromSeconds(5));
+            persistenceStatus = "ready";
         }
         catch (PostgresException ex)
         {
