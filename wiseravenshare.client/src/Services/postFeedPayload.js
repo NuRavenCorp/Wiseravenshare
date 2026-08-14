@@ -20,6 +20,45 @@ const looksLikeCorruptBlob = (value) => {
     return hasLongEncodedRun || hasFewWords || hasTooManySymbols;
 };
 
+const isSafeImageSource = (value) => {
+    const text = cleanWhitespaceText(value);
+    if (!text) {
+        return false;
+    }
+
+    if (text.startsWith('data:image/')) {
+        return text.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(text);
+    }
+
+    if (text.startsWith('/')) {
+        return true;
+    }
+
+    return /^https?:\/\//i.test(text) || /^blob:/i.test(text);
+};
+
+const sanitizeImageValue = (value, fallback = 'U') => {
+    const text = cleanWhitespaceText(value);
+    if (!text || looksLikeCorruptBlob(text) || !isSafeImageSource(text)) {
+        return fallback;
+    }
+
+    return text;
+};
+
+const sanitizeMediaUrl = (value) => {
+    const text = cleanWhitespaceText(value);
+    if (!text) {
+        return null;
+    }
+
+    if (text.startsWith('data:video/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
+        return text;
+    }
+
+    return null;
+};
+
 const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) => {
     const text = cleanWhitespaceText(value);
     if (!text) {
@@ -72,7 +111,7 @@ const normalizeUser = (post, fallbackUser = null) => {
         id: resolvedUserId,
         name: rawUser?.displayName || rawUser?.name || rawUser?.username || fallbackUser?.name || 'User',
         handle: rawUser?.handle || (rawUser?.username ? `@${rawUser.username}` : fallbackUser?.handle || '@user'),
-        avatar: rawUser?.avatar || rawUser?.avatarUrl || fallbackUser?.avatar || 'U'
+        avatar: sanitizeImageValue(rawUser?.avatar || rawUser?.avatarUrl || fallbackUser?.avatar, 'U')
     };
 };
 
@@ -94,7 +133,7 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
         id: post?.id || `local-post-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         userId: resolvedUserId,
         mediaType: post?.mediaType || (String(post?.type || '').toLowerCase() === 'video' ? 'video' : null),
-        mediaUrl: post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null),
+        mediaUrl: sanitizeMediaUrl(post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null)),
         likes: Number(post?.likes ?? post?.likesCount ?? 0),
         reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
         comments: Array.isArray(post?.comments) ? post.comments : [],
@@ -105,7 +144,7 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
             ...resolvedUser,
             name,
             handle,
-            avatar: sanitizeTextValue(resolvedUser?.avatar, 'U', 24) || 'U'
+            avatar: sanitizeImageValue(resolvedUser?.avatar, 'U')
         }
     };
 };

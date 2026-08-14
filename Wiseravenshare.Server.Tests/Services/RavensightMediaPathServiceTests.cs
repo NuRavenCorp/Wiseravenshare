@@ -49,11 +49,16 @@ public sealed class RavensightMediaPathServiceTests
 
         public string? ResolvePublicUrl(string objectKey) => null;
 
+        public string? ResolveObjectKey(string location) => location;
+
         public Task<StoredBlobResult> UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken = default)
             => Task.FromResult(new StoredBlobResult(objectKey, string.Empty));
 
         public Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken = default)
             => Task.FromResult<Stream?>(null);
+
+        public Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
     }
 
     private sealed class FakeWebHostEnvironment(string contentRootPath) : IWebHostEnvironment

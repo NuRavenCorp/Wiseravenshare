@@ -87,6 +87,76 @@ const resolveGeneralApiBaseUrl = () => {
     return 'http://localhost:5242/api';
 };
 
+const normalizeVideoRecord = (video) => {
+    if (!video || typeof video !== 'object') {
+        return null;
+    }
+
+    return {
+        ...video,
+        id: video.id || video.videoId || '',
+        videoUrl: video.videoUrl || video.mediaUrl || video.filePath || '',
+        mediaUrl: video.mediaUrl || video.videoUrl || video.filePath || '',
+        likes: Number(video.likes ?? video.likesCount ?? 0),
+        likesCount: Number(video.likesCount ?? video.likes ?? 0),
+        comments: Number(video.comments ?? video.commentsCount ?? 0),
+        commentsCount: Number(video.commentsCount ?? video.comments ?? 0),
+        views: Number(video.views ?? video.viewsCount ?? 0),
+        viewsCount: Number(video.viewsCount ?? video.views ?? 0)
+    };
+};
+
+const normalizeVideoCollectionPayload = (payload, requestedLimit = 10) => {
+    if (Array.isArray(payload)) {
+        return {
+            videos: payload.map(normalizeVideoRecord).filter(Boolean),
+            hasMore: payload.length >= Math.max(1, Number(requestedLimit) || 10),
+            persistenceStatus: 'ready'
+        };
+    }
+
+    if (payload && typeof payload === 'object') {
+        const source = Array.isArray(payload.videos)
+            ? payload.videos
+            : Array.isArray(payload.items)
+                ? payload.items
+                : [];
+
+        return {
+            videos: source.map(normalizeVideoRecord).filter(Boolean),
+            hasMore: Boolean(payload.hasMore),
+            persistenceStatus: payload.persistenceStatus || 'ready'
+        };
+    }
+
+    return { videos: [], hasMore: false, persistenceStatus: 'degraded' };
+};
+
+const normalizeVideoEntityPayload = (payload) => {
+    if (!payload) {
+        return null;
+    }
+
+    if (payload.video && typeof payload.video === 'object') {
+        return normalizeVideoRecord(payload.video);
+    }
+
+    if (payload.file && typeof payload.file === 'object') {
+        return normalizeVideoRecord({
+            ...payload.file,
+            id: payload.file.id || payload.mediaAssetId || payload.fileName,
+            videoUrl: payload.mediaUrl || payload.file.mediaUrl || payload.file.publicUrl || payload.file.filePath,
+            mediaUrl: payload.mediaUrl || payload.file.mediaUrl || payload.file.publicUrl || payload.file.filePath,
+            title: payload.file.title || payload.title || payload.fileName || 'Uploaded Video',
+            description: payload.file.description || payload.description || '',
+            status: payload.persistenceStatus === 'degraded' ? 'degraded' : 'published',
+            privacyStatus: payload.privacyStatus || 'unlisted'
+        });
+    }
+
+    return normalizeVideoRecord(payload);
+};
+
 class RavensightAPI {
     constructor() {
         this.generalApiBaseUrl = resolveGeneralApiBaseUrl();
@@ -123,6 +193,24 @@ class RavensightAPI {
         );
     }
 
+    async requestWithFallback(method, urls, config = {}) {
+        let lastError = null;
+
+        for (const url of urls) {
+            try {
+                return await this.api.request({ method, url, ...config });
+            } catch (error) {
+                lastError = error;
+                const status = Number(error?.response?.status || 0);
+                if (status !== 404 && status !== 405) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Ravensight API route is unavailable.');
+    }
+
     // Video Upload
     async uploadVideo(formData, onProgress) {
         const requestConfig = {
@@ -135,28 +223,26 @@ class RavensightAPI {
             }
         };
 
-        const candidateUrls = [
+        const response = await this.requestWithFallback('post', [
             '/videos/upload',
             '/media/videos/save',
             `${this.generalApiBaseUrl}/media/upload`
-        ];
+        ], {
+            data: formData,
+            ...requestConfig
+        }).catch((error) => {
+            throw new Error(extractErrorMessage(error, 'Video upload failed.'));
+        });
 
-        let lastError = null;
+        const payload = response?.data || {};
+        const normalizedVideo = normalizeVideoEntityPayload(payload);
 
-        for (const url of candidateUrls) {
-            try {
-                const response = await (url.startsWith('http') ? this.api.post(url, formData, requestConfig) : this.api.post(url, formData, requestConfig));
-                return response.data;
-            } catch (error) {
-                lastError = error;
-                const status = error?.response?.status;
-                if (status !== 404 && status !== 405) {
-                    throw new Error(extractErrorMessage(error, 'Video upload failed.'));
-                }
-            }
-        }
-
-        throw new Error(extractErrorMessage(lastError, 'Video upload failed.'));
+        return {
+            ...payload,
+            video: normalizedVideo,
+            mediaUrl: payload.mediaUrl || normalizedVideo?.mediaUrl || normalizedVideo?.videoUrl || '',
+            filePath: payload.filePath || normalizedVideo?.videoUrl || normalizedVideo?.mediaUrl || ''
+        };
     }
 
     // Get Video Feed
@@ -166,24 +252,6 @@ class RavensightAPI {
             '/feed',
             `${this.generalApiBaseUrl}/ravensight/videos/feed`
         ];
-
-        const normalizeFeedPayload = (payload, requestedLimit = 10) => {
-            if (Array.isArray(payload)) {
-                return {
-                    videos: payload,
-                    hasMore: payload.length >= Math.max(1, Number(requestedLimit) || 10)
-                };
-            }
-
-            if (payload && Array.isArray(payload.videos)) {
-                return {
-                    videos: payload.videos,
-                    hasMore: Boolean(payload.hasMore)
-                };
-            }
-
-            return { videos: [], hasMore: false };
-        };
 
         const requestedFilter = String(params?.filter || 'all').toLowerCase();
         const shouldUseAnonymousFirst = requestedFilter !== 'my_videos';
@@ -200,7 +268,7 @@ class RavensightAPI {
                         params,
                         skipAuth: mode.skipAuth
                     });
-                    return normalizeFeedPayload(response.data, params?.limit);
+                    return normalizeVideoCollectionPayload(response.data, params?.limit);
                 } catch (error) {
                     lastError = error;
                     const status = error?.status ?? error?.response?.status ?? 0;
@@ -224,56 +292,94 @@ class RavensightAPI {
 
     // Get User Videos
     async getUserVideos(userId = null) {
-        const targetUrl = userId ? `/videos/user/${encodeURIComponent(userId)}` : '/videos/user';
-        const response = await this.api.get(targetUrl).catch((error) => {
-            if (error?.response?.status === 404 && userId === null) {
-                return this.api.get('/videos/user');
-            }
-            throw error;
+        const targetUrls = userId
+            ? [`/videos/user/${encodeURIComponent(userId)}`, `${this.generalApiBaseUrl}/video/user/${encodeURIComponent(userId)}`, '/videos/user']
+            : ['/videos/user'];
+
+        const response = await this.requestWithFallback('get', targetUrls, {
+            params: { page: 1, limit: 50, pageSize: 50 }
         });
-        return response.data;
+
+        const normalized = normalizeVideoCollectionPayload(response?.data, 50);
+        return {
+            ...response?.data,
+            videos: normalized.videos,
+            persistenceStatus: normalized.persistenceStatus
+        };
     }
 
     // Get Single Video
     async getVideo(videoId) {
-        const response = await this.api.get(`/videos/${videoId}`);
-        return response.data;
+        const response = await this.requestWithFallback('get', [
+            `/videos/${videoId}`,
+            `${this.generalApiBaseUrl}/video/${videoId}`
+        ]);
+        return normalizeVideoEntityPayload(response?.data);
     }
 
     // Update Video
     async updateVideo(videoId, updates) {
-        const response = await this.api.put(`/videos/${videoId}`, updates);
-        return response.data;
+        const response = await this.requestWithFallback('put', [
+            `/videos/${videoId}`,
+            `${this.generalApiBaseUrl}/video/${videoId}`
+        ], {
+            data: updates
+        });
+        return normalizeVideoEntityPayload(response?.data);
     }
 
     // Delete Video
     async deleteVideo(videoId) {
-        const response = await this.api.delete(`/videos/${videoId}`);
-        return response.data;
+        const response = await this.requestWithFallback('delete', [
+            `/videos/${videoId}`,
+            `${this.generalApiBaseUrl}/video/${videoId}`
+        ]);
+        return response?.data || { success: true };
     }
 
     // Like Video
     async likeVideo(videoId) {
-        const response = await this.api.post(`/videos/${videoId}/like`);
-        return response.data;
+        const response = await this.requestWithFallback('post', [
+            `/videos/${videoId}/like`,
+            `${this.generalApiBaseUrl}/video/${videoId}/like`
+        ]);
+        return response?.data || { success: true };
     }
 
     // Unlike Video
     async unlikeVideo(videoId) {
-        const response = await this.api.delete(`/videos/${videoId}/like`);
-        return response.data;
+        const response = await this.requestWithFallback('delete', [
+            `/videos/${videoId}/like`,
+            `${this.generalApiBaseUrl}/video/${videoId}/like`
+        ]);
+        return response?.data || { success: true };
     }
 
     // Add Comment
     async addComment(videoId, comment) {
-        const response = await this.api.post(`/videos/${videoId}/comments`, { comment });
-        return response.data;
+        const response = await this.requestWithFallback('post', [
+            `/videos/${videoId}/comments`
+        ], {
+            data: { comment }
+        });
+        return response?.data;
     }
 
     // Get Comments
     async getComments(videoId, page = 1) {
-        const response = await this.api.get(`/videos/${videoId}/comments`, { params: { page } });
-        return response.data;
+        const response = await this.requestWithFallback('get', [
+            `/videos/${videoId}/comments`
+        ], {
+            params: { page }
+        });
+        const payload = response?.data;
+        if (Array.isArray(payload)) {
+            return { comments: payload, page };
+        }
+        if (payload && Array.isArray(payload.comments)) {
+            return payload;
+        }
+        return { comments: [], page };
     }
 
     // YouTube Integration

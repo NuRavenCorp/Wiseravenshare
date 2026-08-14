@@ -124,78 +124,78 @@ namespace Wiseravenshare.Server.Controllers
         /// Like a post
         /// </summary>
         [HttpPost("{id}/like")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> LikePost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.LikePostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.LikePostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>
         /// Unlike a post
         /// </summary>
         [HttpDelete("{id}/like")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnlikePost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.UnlikePostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.UnlikePostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>
         /// Repost a post
         /// </summary>
         [HttpPost("{id}/repost")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> RepostPost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.RepostPostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.RepostPostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>
         /// Unrepost a post
         /// </summary>
         [HttpDelete("{id}/repost")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnrepostPost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.UnrepostPostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.UnrepostPostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>
         /// Bookmark a post
         /// </summary>
         [HttpPost("{id}/bookmark")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> BookmarkPost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.BookmarkPostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.BookmarkPostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>
         /// Unbookmark a post
         /// </summary>
         [HttpDelete("{id}/bookmark")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnbookmarkPost(Guid id)
         {
             var userId = await ResolveEffectiveUserIdAsync();
-            await _postService.UnbookmarkPostAsync(userId, id);
-            return NoContent();
+            var state = await _postService.UnbookmarkPostAsync(userId, id);
+            return Ok(state);
         }
 
         /// <summary>

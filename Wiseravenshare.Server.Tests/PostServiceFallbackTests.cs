@@ -85,6 +85,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task UnrepostPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
+        public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
     }
 
     private sealed class StubPostRepository : IPostRepository
@@ -111,6 +113,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task UnrepostPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
+        public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
     }
 
     private sealed class StubUserRepository : IUserRepository

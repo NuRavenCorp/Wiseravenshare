@@ -202,6 +202,33 @@ const normalizeApiError = (error, fallbackMessage) => {
     return normalized;
 };
 
+const toArrayPayload = (payload) => {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+
+    if (payload && typeof payload === 'object') {
+        if (Array.isArray(payload.items)) return payload.items;
+        if (Array.isArray(payload.posts)) return payload.posts;
+        if (Array.isArray(payload.videos)) return payload.videos;
+        if (Array.isArray(payload.data)) return payload.data;
+    }
+
+    return [];
+};
+
+const toTrendingTopics = (payload) => {
+    const source = toArrayPayload(payload?.articles ? payload.articles : payload);
+
+    return source
+        .map((item, index) => ({
+            id: item?.id || `topic-${index}`,
+            name: String(item?.name || item?.topic || item?.label || item?.title || '').trim(),
+            count: Number(item?.count ?? item?.posts ?? item?.mentions ?? 0)
+        }))
+        .filter((item) => item.name.length > 0);
+};
+
 // Request interceptor
 api.interceptors.request.use(
     (config) => {
@@ -246,23 +273,35 @@ export const apiService = {
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),
 
     // Posts endpoints
-    getPosts: (params = {}) => {
+    getPosts: async (params = {}) => {
         const page = Number(params.page) > 0 ? Number(params.page) : 1;
         const pageSize = Number(params.pageSize || params.limit) > 0 ? Number(params.pageSize || params.limit) : 20;
 
         if (params.userId) {
-            return api.get(`/posts/user/${encodeURIComponent(params.userId)}`, {
+            const response = await api.get(`/posts/user/${encodeURIComponent(params.userId)}`, {
                 params: { page, pageSize }
             });
+            return {
+                ...response,
+                data: toArrayPayload(response?.data)
+            };
         }
 
         if (String(params.sort || '').toLowerCase() === 'trending') {
-            return api.get('/posts/trending', { params: { count: pageSize } });
+            const response = await api.get('/posts/trending', { params: { count: pageSize } });
+            return {
+                ...response,
+                data: toArrayPayload(response?.data)
+            };
         }
 
-        return api.get('/posts/feed', {
+        const response = await api.get('/posts/feed', {
             params: { page, pageSize }
         });
+        return {
+            ...response,
+            data: toArrayPayload(response?.data)
+        };
     },
     getPost: (postId) => api.get(`/posts/${postId}`),
     createPost: async (postData) => {
@@ -287,8 +326,22 @@ export const apiService = {
     },
     updatePost: (postId, updates) => api.put(`/posts/${postId}`, updates),
     deletePost: (postId) => api.delete(`/posts/${postId}`),
-    likePost: (postId) => api.post(`/posts/${postId}/like`),
-    repostPost: (postId) => api.post(`/posts/${postId}/repost`),
+    likePost: async (postId) => {
+        const response = await api.post(`/posts/${postId}/like`);
+        return response.data;
+    },
+    unlikePost: async (postId) => {
+        const response = await api.delete(`/posts/${postId}/like`);
+        return response.data;
+    },
+    repostPost: async (postId) => {
+        const response = await api.post(`/posts/${postId}/repost`);
+        return response.data;
+    },
+    unrepostPost: async (postId) => {
+        const response = await api.delete(`/posts/${postId}/repost`);
+        return response.data;
+    },
 
     // Comments endpoints
     getComments: (postId) => api.get(`/posts/${postId}/comments`),
@@ -376,7 +429,28 @@ export const apiService = {
     search: (query, type) => api.get('/search', { params: { q: query, type } }),
 
     // Trends endpoints
-    getTrending: () => api.get('/trending'),
+    getTrending: async () => {
+        const candidates = ['/news/trending', '/posts/trending', '/trending'];
+        let lastError = null;
+
+        for (const endpoint of candidates) {
+            try {
+                const response = await api.get(endpoint);
+                return {
+                    ...response,
+                    data: toTrendingTopics(response?.data)
+                };
+            } catch (error) {
+                lastError = error;
+                const status = Number(error?.response?.status || 0);
+                if (status !== 404 && status !== 405) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Trending endpoint is unavailable.');
+    },
 
     // Market data endpoints
     getMarketQuotes: (symbols = []) => api.get('/market/quotes', {

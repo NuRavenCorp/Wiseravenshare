@@ -44,6 +44,17 @@ namespace Wiseravenshare.Server.DTOs.Post
         public bool IsBookmarked { get; set; }
     }
 
+    public class PostInteractionDto
+    {
+        public Guid PostId { get; set; }
+        public int LikesCount { get; set; }
+        public int RepostsCount { get; set; }
+        public int BookmarksCount { get; set; }
+        public bool IsLiked { get; set; }
+        public bool IsReposted { get; set; }
+        public bool IsBookmarked { get; set; }
+    }
+
     public class CreatePostDto
     {
         [Required]

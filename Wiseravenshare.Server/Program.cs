@@ -133,6 +133,232 @@ static string ToSqlLiteral(string value)
     return "'" + value.Replace("'", "''") + "'";
 }
 
+static IEnumerable<string> SplitSqlStatements(string script)
+{
+    if (string.IsNullOrWhiteSpace(script))
+    {
+        yield break;
+    }
+
+    var builder = new StringBuilder();
+    var inString = false;
+    string? dollarTag = null;
+    var inLineComment = false;
+    var inBlockComment = false;
+
+    for (var index = 0; index < script.Length; index++)
+    {
+        var current = script[index];
+        var next = index + 1 < script.Length ? script[index + 1] : '\0';
+
+        if (inLineComment)
+        {
+            builder.Append(current);
+            if (current == '\n')
+            {
+                inLineComment = false;
+            }
+
+            continue;
+        }
+
+        if (inBlockComment)
+        {
+            builder.Append(current);
+            if (current == '*' && next == '/')
+            {
+                builder.Append(next);
+                index++;
+                inBlockComment = false;
+            }
+
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '-' && next == '-')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            inLineComment = true;
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '/' && next == '*')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            inBlockComment = true;
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '$')
+        {
+            var tagEnd = script.IndexOf('$', index + 1);
+            if (tagEnd > index)
+            {
+                var possibleTag = script.Substring(index, tagEnd - index + 1);
+                if (possibleTag.Length >= 2 && possibleTag.All(ch => ch == '$' || ch == '_' || char.IsLetterOrDigit(ch)))
+                {
+                    dollarTag = possibleTag;
+                    builder.Append(possibleTag);
+                    index = tagEnd;
+                    continue;
+                }
+            }
+        }
+
+        if (dollarTag is not null)
+        {
+            if (current == '$')
+            {
+                if (index + dollarTag.Length - 1 < script.Length
+                    && string.Compare(script, index, dollarTag, 0, dollarTag.Length, StringComparison.Ordinal) == 0)
+                {
+                    builder.Append(dollarTag);
+                    index += dollarTag.Length - 1;
+                    dollarTag = null;
+                    continue;
+                }
+            }
+
+            builder.Append(current);
+            continue;
+        }
+
+        if (current == '\'' && next == '\'')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            continue;
+        }
+
+        if (current == '\'')
+        {
+            inString = !inString;
+            builder.Append(current);
+            continue;
+        }
+
+        if (current == ';' && !inString)
+        {
+            var statement = builder.ToString().Trim();
+            if (!string.IsNullOrWhiteSpace(statement))
+            {
+                yield return statement;
+            }
+
+            builder.Clear();
+            continue;
+        }
+
+        builder.Append(current);
+    }
+
+    var trailing = builder.ToString().Trim();
+    if (!string.IsNullOrWhiteSpace(trailing))
+    {
+        yield return trailing;
+    }
+}
+
+static async Task EnsureMigrationsHistoryTableAsync(AppDbContext dbContext, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    const string historySql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+CREATE TABLE IF NOT EXISTS app_data.""__EFMigrationsHistory"" (
+    ""MigrationId"" character varying(150) NOT NULL,
+    ""ProductVersion"" character varying(32) NOT NULL,
+    CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
+);";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(historySql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task ApplyModelCreateScriptIdempotentlyAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var script = dbContext.Database.GenerateCreateScript();
+    if (string.IsNullOrWhiteSpace(script))
+    {
+        return;
+    }
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var statement in SplitSqlStatements(script))
+    {
+        await using var command = new NpgsqlCommand(statement, connection);
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException ex) when (
+            ex.SqlState == PostgresErrorCodes.DuplicateTable
+            || ex.SqlState == PostgresErrorCodes.DuplicateObject
+            || ex.SqlState == PostgresErrorCodes.DuplicateColumn)
+        {
+            // Existing objects are expected when bootstrapping over a partially provisioned database.
+            logger.LogDebug("Skipped duplicate schema statement during bootstrap: {SqlState}", ex.SqlState);
+        }
+    }
+}
+
+static async Task MarkInitialMigrationAppliedAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var migrations = dbContext.Database.GetMigrations().ToList();
+    if (migrations.Count == 0)
+    {
+        return;
+    }
+
+    var initialMigration = migrations[0];
+
+    var productVersion = typeof(DbContext).Assembly.GetName().Version is { } version
+        ? $"{version.Major}.{version.Minor}.{version.Build}"
+        : "10.0.10";
+
+    await EnsureMigrationsHistoryTableAsync(dbContext, cancellationToken);
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string insertSql = @"
+INSERT INTO app_data.""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+VALUES (@migrationId, @productVersion)
+ON CONFLICT (""MigrationId"") DO NOTHING;";
+
+    await using var command = new NpgsqlCommand(insertSql, connection);
+    command.Parameters.AddWithValue("migrationId", initialMigration);
+    command.Parameters.AddWithValue("productVersion", productVersion);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+
+    logger.LogInformation("EF migration history baseline was reconciled with initial migration {MigrationId}.", initialMigration);
+}
+
 static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
 {
     try
@@ -153,23 +379,35 @@ static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logg
         }
 
         var hasAnyTables = await dbContext.Database.SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'app_data' LIMIT 1").AnyAsync(cancellationToken);
-        if (!hasAnyTables)
+        var hasUsersTable = await dbContext.Database.SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'app_data' AND table_name = 'Users' LIMIT 1").AnyAsync(cancellationToken);
+
+        if (!hasAnyTables || !hasUsersTable)
         {
-            logger.LogInformation("No app_data tables were found; creating schema from the current EF model.");
+            logger.LogInformation("app_data is missing required EF tables; creating schema from the current EF model.");
             await dbContext.Database.EnsureCreatedAsync(cancellationToken);
         }
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "Schema migration failed; falling back to EnsureCreated so the application can self-upgrade its DB schema on startup.");
+        logger.LogWarning(ex, "Schema migration failed; applying model bootstrap script and reconciling migration history.");
         try
         {
-            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+            await ApplyModelCreateScriptIdempotentlyAsync(dbContext, logger, cancellationToken);
+            await MarkInitialMigrationAppliedAsync(dbContext, logger, cancellationToken);
         }
         catch (Exception ensureEx)
         {
-            logger.LogError(ensureEx, "Schema bootstrap failed during EnsureCreated fallback.");
-            throw;
+            logger.LogError(ensureEx, "Schema bootstrap failed during model-based fallback. Attempting EnsureCreated as a final fallback.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+
+        try
+        {
+            await dbContext.Database.MigrateAsync(cancellationToken);
+        }
+        catch (Exception migrateRetryEx)
+        {
+            logger.LogWarning(migrateRetryEx, "Final migration pass after schema bootstrap was skipped because schema is already operational.");
         }
     }
 }
@@ -195,6 +433,35 @@ static async Task EnsureBucketObjectsRegistryAsync(
 
     var sql = $@"
 CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.""Users"" (
+    ""Id"" UUID PRIMARY KEY,
+    ""Email"" TEXT NOT NULL UNIQUE,
+    ""Username"" TEXT NOT NULL,
+    ""DisplayName"" TEXT NOT NULL,
+    ""PasswordHash"" TEXT NOT NULL,
+    ""Bio"" TEXT NULL,
+    ""AvatarUrl"" TEXT NULL,
+    ""CoverPhotoUrl"" TEXT NULL,
+    ""Location"" TEXT NULL,
+    ""Website"" TEXT NULL,
+    ""IsVerified"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsPrivate"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Role"" INTEGER NOT NULL DEFAULT 0,
+    ""TruthScore"" NUMERIC NOT NULL DEFAULT 50.00,
+    ""ReputationPoints"" INTEGER NOT NULL DEFAULT 0,
+    ""LastLoginAt"" TIMESTAMPTZ NULL,
+    ""LastActiveAt"" TIMESTAMPTZ NULL,
+    ""RefreshToken"" TEXT NULL,
+    ""RefreshTokenExpiryTime"" TIMESTAMPTZ NULL,
+    ""PasswordResetToken"" TEXT NULL,
+    ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE
+);
 
 CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     id TEXT PRIMARY KEY,
@@ -237,6 +504,25 @@ CREATE INDEX IF NOT EXISTS idx_bucket_objects_status_created
 
 CREATE INDEX IF NOT EXISTS idx_bucket_objects_metadata_gin
     ON app_data.bucket_objects USING GIN (metadata);
+
+DO $$
+BEGIN
+    IF to_regclass('app_data.""PostLikes""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_likes_post_user_unique
+            ON app_data.""PostLikes"" (""PostId"", ""UserId"");
+    END IF;
+
+    IF to_regclass('app_data.""PostReposts""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_reposts_post_user_unique
+            ON app_data.""PostReposts"" (""PostId"", ""UserId"");
+    END IF;
+
+    IF to_regclass('app_data.""PostBookmarks""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_bookmarks_post_user_unique
+            ON app_data.""PostBookmarks"" (""PostId"", ""UserId"");
+    END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION app_data.set_updated_at_timestamp()
 RETURNS trigger
@@ -304,6 +590,7 @@ builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+builder.Services.AddScoped<IVideoService, VideoService>();
 builder.Services.AddScoped<IRavensightMediaPathService, RavensightMediaPathService>();
 builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageService>();
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();

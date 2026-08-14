@@ -92,6 +92,24 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<PostLike>(entity =>
+        {
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<PostRepost>(entity =>
+        {
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<PostBookmark>(entity =>
+        {
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
         modelBuilder.Entity<Comment>(entity =>
         {
             entity.HasOne(c => c.Post)

@@ -17,12 +17,12 @@ public interface IPostService
     Task<PostDto> GetPostAsync(Guid postId);
     Task<IEnumerable<PostDto>> GetFeedAsync(Guid userId, int page, int pageSize);
     Task<IEnumerable<PostDto>> GetUserPostsAsync(Guid userId, int page, int pageSize);
-    Task LikePostAsync(Guid userId, Guid postId);
-    Task UnlikePostAsync(Guid userId, Guid postId);
-    Task RepostPostAsync(Guid userId, Guid postId);
-    Task UnrepostPostAsync(Guid userId, Guid postId);
-    Task BookmarkPostAsync(Guid userId, Guid postId);
-    Task UnbookmarkPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> LikePostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnlikePostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> RepostPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId);
     Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count);
     Task<int> GetPostCountAsync(Guid userId);
 }
@@ -225,7 +225,7 @@ public class PostService : IPostService
         try
         {
             var posts = await _postRepository.GetFeedAsync(userId, page, pageSize);
-            return await MapToPostDtosAsync(posts);
+            return await MapToPostDtosAsync(posts, userId);
         }
         catch (Exception ex)
         {
@@ -237,10 +237,10 @@ public class PostService : IPostService
     public async Task<IEnumerable<PostDto>> GetUserPostsAsync(Guid userId, int page, int pageSize)
     {
         var posts = await _postRepository.GetUserPostsAsync(userId, page, pageSize);
-        return await MapToPostDtosAsync(posts);
+        return await MapToPostDtosAsync(posts, userId);
     }
 
-    public async Task LikePostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> LikePostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -249,10 +249,11 @@ public class PostService : IPostService
         }
 
         await _postRepository.LikePostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} liked post {postId}");
+        _logger.LogInformation("User {UserId} liked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
-    public async Task UnlikePostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> UnlikePostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -261,10 +262,11 @@ public class PostService : IPostService
         }
 
         await _postRepository.UnlikePostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} unliked post {postId}");
+        _logger.LogInformation("User {UserId} unliked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
-    public async Task RepostPostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> RepostPostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -273,10 +275,11 @@ public class PostService : IPostService
         }
 
         await _postRepository.RepostPostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} reposted post {postId}");
+        _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
-    public async Task UnrepostPostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -285,10 +288,11 @@ public class PostService : IPostService
         }
 
         await _postRepository.UnrepostPostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} unreposted post {postId}");
+        _logger.LogInformation("User {UserId} unreposted post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
-    public async Task BookmarkPostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -297,10 +301,11 @@ public class PostService : IPostService
         }
 
         await _postRepository.BookmarkPostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} bookmarked post {postId}");
+        _logger.LogInformation("User {UserId} bookmarked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
-    public async Task UnbookmarkPostAsync(Guid userId, Guid postId)
+    public async Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null || post.IsDeleted)
@@ -309,7 +314,8 @@ public class PostService : IPostService
         }
 
         await _postRepository.UnbookmarkPostAsync(postId, userId);
-        _logger.LogInformation($"User {userId} unbookmarked post {postId}");
+        _logger.LogInformation("User {UserId} unbookmarked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
     public async Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count)
@@ -317,7 +323,7 @@ public class PostService : IPostService
         try
         {
             var posts = await _postRepository.GetTrendingPostsAsync(count);
-            return await MapToPostDtosAsync(posts);
+            return await MapToPostDtosAsync(posts, null);
         }
         catch (Exception ex)
         {
@@ -331,7 +337,7 @@ public class PostService : IPostService
         return await _postRepository.GetPostCountAsync(userId);
     }
 
-    private async Task<PostDto> GetPostDtoAsync(Guid postId)
+    private async Task<PostDto> GetPostDtoAsync(Guid postId, Guid? viewerUserId = null)
     {
         var post = await _postRepository.GetByIdAsync(postId);
         if (post == null)
@@ -339,10 +345,11 @@ public class PostService : IPostService
             throw new NotFoundException("Post not found");
         }
 
-        return BuildPostDto(post, post.User);
+        var interaction = await _postRepository.GetInteractionStateAsync(post.Id, viewerUserId);
+        return BuildPostDto(post, post.User, interaction);
     }
 
-    private PostDto BuildPostDto(Post post, User? user)
+    private PostDto BuildPostDto(Post post, User? user, PostInteractionState? interaction = null)
     {
         return new PostDto
         {
@@ -362,13 +369,16 @@ public class PostService : IPostService
             Longitude = post.Longitude.HasValue ? (double?)post.Longitude.Value : null,
             IsSensitive = post.IsSensitive,
             IsPinned = post.IsPinned,
-            LikesCount = post.LikesCount,
-            RepostsCount = post.RepostsCount,
+            LikesCount = interaction?.LikesCount ?? post.LikesCount,
+            RepostsCount = interaction?.RepostsCount ?? post.RepostsCount,
             CommentsCount = post.CommentsCount,
             SharesCount = post.SharesCount,
-            BookmarksCount = post.BookmarksCount,
+            BookmarksCount = interaction?.BookmarksCount ?? post.BookmarksCount,
             ViewsCount = post.ViewsCount,
             CreatedAt = post.CreatedAt,
+            IsLiked = interaction?.IsLiked ?? false,
+            IsReposted = interaction?.IsReposted ?? false,
+            IsBookmarked = interaction?.IsBookmarked ?? false,
             User = user is null ? new UserDto() : MapToUserDto(user)
         };
     }
@@ -475,14 +485,29 @@ public class PostService : IPostService
             : null;
     }
 
-    private async Task<IEnumerable<PostDto>> MapToPostDtosAsync(IEnumerable<Post> posts)
+    private async Task<IEnumerable<PostDto>> MapToPostDtosAsync(IEnumerable<Post> posts, Guid? viewerUserId)
     {
         var dtos = new List<PostDto>();
         foreach (var post in posts)
         {
-            dtos.Add(await GetPostDtoAsync(post.Id));
+            dtos.Add(await GetPostDtoAsync(post.Id, viewerUserId));
         }
         return dtos;
+    }
+
+    private async Task<PostInteractionDto> BuildPostInteractionDtoAsync(Guid postId, Guid userId)
+    {
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
     }
 
     private UserDto MapToUserDto(User user)

@@ -12,12 +12,33 @@ const safeReadJson = (key, fallback) => {
     }
 };
 
+const normalizeMediaSource = (value, fallback = '') => {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return fallback;
+    }
+
+    if (trimmed.startsWith('data:image/') || trimmed.startsWith('data:video/')) {
+        return trimmed.length <= 2_000_000 ? trimmed : fallback;
+    }
+
+    if (/^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed) || trimmed.startsWith('/')) {
+        return trimmed;
+    }
+
+    return fallback;
+};
+
 const normalizeVideo = (video, index = 0) => ({
     id: video.id || `local-video-${Date.now()}-${index}`,
-    videoUrl: video.videoUrl || video.mediaUrl || '',
-    thumbnailUrl: video.thumbnailUrl || '',
+    videoUrl: normalizeMediaSource(video.videoUrl || video.mediaUrl || '', ''),
+    thumbnailUrl: normalizeMediaSource(video.thumbnailUrl || '', ''),
     duration: video.duration || '00:30',
-    channelAvatar: video.channelAvatar || video.avatar || 'https://via.placeholder.com/40?text=WR',
+    channelAvatar: normalizeMediaSource(video.channelAvatar || video.avatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR'),
     channelName: video.channelName || video.user?.name || 'WiseRaven',
     title: video.title || 'Uploaded Video',
     views: Number(video.views) || 0,

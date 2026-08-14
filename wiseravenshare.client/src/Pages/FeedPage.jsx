@@ -108,33 +108,53 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
         setPosts(prev => mergeFeedPosts([normalizePost(newPost)], prev));
     };
 
-    const handleLike = (postId) => {
-        apiService.likePost(postId).catch(() => null);
-        setPosts((prev) => {
-            const next = prev.map((post) =>
-                post.id === postId
-                    ? { ...post, likes: post.isLiked ? post.likes - 1 : post.likes + 1, isLiked: !post.isLiked }
-                    : post
-            );
+    const handleLike = async (postId) => {
+        try {
+            const updated = await apiService.likePost(postId);
+            setPosts((prev) => {
+                const next = prev.map((post) =>
+                    post.id === postId
+                        ? {
+                            ...post,
+                            likes: Number(updated?.likesCount ?? post.likes ?? 0),
+                            likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
+                            isLiked: Boolean(updated?.isLiked)
+                        }
+                        : post
+                );
 
-            try {
-                const liked = next.filter((p) => p.isLiked);
-                localStorage.setItem('wiseLikedPosts', JSON.stringify(liked));
-                window.dispatchEvent(new Event('wiseraven:likes-updated'));
-            } catch { /* ignore */ }
+                try {
+                    const liked = next.filter((p) => p.isLiked);
+                    localStorage.setItem('wiseLikedPosts', JSON.stringify(liked));
+                    window.dispatchEvent(new Event('wiseraven:likes-updated'));
+                } catch {
+                    // Ignore local cache sync failures.
+                }
 
-            return next;
-        });
+                return next;
+            });
+        } catch {
+            addTruthAlert('error', 'Failed to update like.', null);
+        }
     };
 
-    const handleRepost = (postId) => {
-        apiService.repostPost(postId).catch(() => null);
-        setPosts(prev => prev.map(post =>
-            post.id === postId
-                ? { ...post, reposts: post.reposts + 1 }
-                : post
-        ));
-        addTruthAlert('success', 'Repost added to your feed!', null);
+    const handleRepost = async (postId) => {
+        try {
+            const updated = await apiService.repostPost(postId);
+            setPosts((prev) => prev.map((post) =>
+                post.id === postId
+                    ? {
+                        ...post,
+                        reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
+                        repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
+                        isReposted: Boolean(updated?.isReposted)
+                    }
+                    : post
+            ));
+            addTruthAlert('success', 'Repost saved.', null);
+        } catch {
+            addTruthAlert('error', 'Failed to update repost.', null);
+        }
     };
 
     const handleFollow = (userId) => {

@@ -87,6 +87,14 @@
       "EventName": "login_success",
       "CreatedAtUtc": "2026-08-10T15:36:05.3325682Z",
       "Metadata": {}
+    },
+    {
+      "Id": "f621878c506b4975b37d96da00ee1208",
+      "UserId": "87c6d80851d84116aa63bea854505d7e",
+      "Email": "arnold3_spence08@outlook.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-14T09:39:19.4158832Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],
