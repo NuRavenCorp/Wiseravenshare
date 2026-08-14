@@ -327,20 +327,36 @@ export const apiService = {
     updatePost: (postId, updates) => api.put(`/posts/${postId}`, updates),
     deletePost: (postId) => api.delete(`/posts/${postId}`),
     likePost: async (postId) => {
-        const response = await api.post(`/posts/${postId}/like`);
-        return response.data;
+        try {
+            const response = await api.post(`/posts/${postId}/like`);
+            return response.data;
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update like. Please try again.');
+        }
     },
     unlikePost: async (postId) => {
-        const response = await api.delete(`/posts/${postId}/like`);
-        return response.data;
+        try {
+            const response = await api.delete(`/posts/${postId}/like`);
+            return response.data;
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update like. Please try again.');
+        }
     },
     repostPost: async (postId) => {
-        const response = await api.post(`/posts/${postId}/repost`);
-        return response.data;
+        try {
+            const response = await api.post(`/posts/${postId}/repost`);
+            return response.data;
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update repost. Please try again.');
+        }
     },
     unrepostPost: async (postId) => {
-        const response = await api.delete(`/posts/${postId}/repost`);
-        return response.data;
+        try {
+            const response = await api.delete(`/posts/${postId}/repost`);
+            return response.data;
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update repost. Please try again.');
+        }
     },
 
     // Comments endpoints

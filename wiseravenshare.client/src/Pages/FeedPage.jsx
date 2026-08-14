@@ -133,8 +133,11 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
 
                 return next;
             });
-        } catch {
-            addTruthAlert('error', 'Failed to update like.', null);
+        } catch (error) {
+            const message = typeof error?.message === 'string' && error.message.trim().length > 0
+                ? error.message.trim()
+                : 'Failed to update like.';
+            addTruthAlert('error', message, null);
         }
     };
 
@@ -152,8 +155,11 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                     : post
             ));
             addTruthAlert('success', 'Repost saved.', null);
-        } catch {
-            addTruthAlert('error', 'Failed to update repost.', null);
+        } catch (error) {
+            const message = typeof error?.message === 'string' && error.message.trim().length > 0
+                ? error.message.trim()
+                : 'Failed to update repost.';
+            addTruthAlert('error', message, null);
         }
     };
 
