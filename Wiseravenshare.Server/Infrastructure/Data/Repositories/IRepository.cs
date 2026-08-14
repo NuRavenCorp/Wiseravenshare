@@ -50,7 +50,16 @@ public interface IPostRepository : IRepository<Post>
     Task UnrepostPostAsync(Guid postId, Guid userId);
     Task BookmarkPostAsync(Guid postId, Guid userId);
     Task UnbookmarkPostAsync(Guid postId, Guid userId);
+    Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null);
 }
+
+public sealed record PostInteractionState(
+    int LikesCount,
+    int RepostsCount,
+    int BookmarksCount,
+    bool IsLiked,
+    bool IsReposted,
+    bool IsBookmarked);
 
 // Wiseravenshare.Core/Interfaces/Repositories/ITruthRepository.cs
 public interface ITruthRepository : IRepository<TruthClaim>

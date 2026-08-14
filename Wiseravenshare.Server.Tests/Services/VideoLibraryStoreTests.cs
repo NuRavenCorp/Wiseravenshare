@@ -16,4 +16,19 @@ public sealed class VideoLibraryStoreTests
         Assert.Contains("retention_status", sql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("expires_at", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task RunWithTimeoutAsync_ReturnsFallback_WhenOperationTimesOut()
+    {
+        var result = await RavensightPersistenceGuard.RunWithTimeoutAsync(
+            async cancellationToken =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                return "unexpected";
+            },
+            "fallback",
+            TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal("fallback", result);
+    }
 }

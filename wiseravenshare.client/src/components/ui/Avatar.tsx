@@ -9,6 +9,27 @@ interface AvatarProps {
     onClick?: () => void;
 }
 
+const isSafeAvatarSource = (value?: string | null): value is string => {
+    if (!value || typeof value !== 'string') {
+        return false;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return false;
+    }
+
+    if (trimmed.startsWith('data:image/')) {
+        return trimmed.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed);
+    }
+
+    if (trimmed.startsWith('/')) {
+        return true;
+    }
+
+    return /^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed);
+};
+
 export const Avatar: React.FC<AvatarProps> = ({
     src,
     alt = 'User',
@@ -33,20 +54,26 @@ export const Avatar: React.FC<AvatarProps> = ({
             .slice(0, 2);
     };
 
+    const safeSrc = isSafeAvatarSource(src) ? src : null;
+
     return (
         <div
             onClick={onClick}
             className={`rounded-full overflow-hidden flex-shrink-0 ${sizes[size]} ${className} ${onClick ? 'cursor-pointer hover:opacity-80 transition' : ''
                 }`}
         >
-            {src ? (
+            {safeSrc ? (
                 <img
-                    src={src}
+                    src={safeSrc}
                     alt={alt}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                        (e.target as HTMLImageElement).parentElement!.textContent = getInitials();
+                        const element = e.target as HTMLImageElement;
+                        element.style.display = 'none';
+                        const parent = element.parentElement;
+                        if (parent) {
+                            parent.textContent = getInitials();
+                        }
                     }}
                 />
             ) : (

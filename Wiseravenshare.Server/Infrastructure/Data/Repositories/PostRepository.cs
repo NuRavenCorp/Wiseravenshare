@@ -80,6 +80,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var like = new PostLike { PostId = postId, UserId = userId };
             await _context.PostLikes.AddAsync(like);
+            await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
 
@@ -91,6 +92,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (like != null)
             {
                 _context.PostLikes.Remove(like);
+                await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
         }
@@ -102,6 +104,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var repost = new PostRepost { PostId = postId, UserId = userId };
             await _context.PostReposts.AddAsync(repost);
+            await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
 
@@ -113,6 +116,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (repost != null)
             {
                 _context.PostReposts.Remove(repost);
+                await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
         }
@@ -124,6 +128,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var bookmark = new PostBookmark { PostId = postId, UserId = userId };
             await _context.PostBookmarks.AddAsync(bookmark);
+            await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
 
@@ -135,8 +140,52 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (bookmark != null)
             {
                 _context.PostBookmarks.Remove(bookmark);
+                await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
+        }
+
+        public async Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
+        {
+            var likesCount = await _context.PostLikes.CountAsync(l => l.PostId == postId);
+            var repostsCount = await _context.PostReposts.CountAsync(r => r.PostId == postId);
+            var bookmarksCount = await _context.PostBookmarks.CountAsync(b => b.PostId == postId);
+
+            var isLiked = userId.HasValue && await _context.PostLikes.AnyAsync(l => l.PostId == postId && l.UserId == userId.Value);
+            var isReposted = userId.HasValue && await _context.PostReposts.AnyAsync(r => r.PostId == postId && r.UserId == userId.Value);
+            var isBookmarked = userId.HasValue && await _context.PostBookmarks.AnyAsync(b => b.PostId == postId && b.UserId == userId.Value);
+
+            await RefreshPostCountersAsync(postId, likesCount, repostsCount, bookmarksCount);
+            await _context.SaveChangesAsync();
+
+            return new PostInteractionState(
+                likesCount,
+                repostsCount,
+                bookmarksCount,
+                isLiked,
+                isReposted,
+                isBookmarked);
+        }
+
+        private async Task RefreshPostCountersAsync(
+            Guid postId,
+            int? likesCount = null,
+            int? repostsCount = null,
+            int? bookmarksCount = null)
+        {
+            var post = await _dbSet.FirstOrDefaultAsync(p => p.Id == postId);
+            if (post == null)
+            {
+                return;
+            }
+
+            var resolvedLikesCount = likesCount ?? await _context.PostLikes.CountAsync(l => l.PostId == postId);
+            var resolvedRepostsCount = repostsCount ?? await _context.PostReposts.CountAsync(r => r.PostId == postId);
+            var resolvedBookmarksCount = bookmarksCount ?? await _context.PostBookmarks.CountAsync(b => b.PostId == postId);
+
+            post.LikesCount = resolvedLikesCount;
+            post.RepostsCount = resolvedRepostsCount;
+            post.BookmarksCount = resolvedBookmarksCount;
         }
     }
 }

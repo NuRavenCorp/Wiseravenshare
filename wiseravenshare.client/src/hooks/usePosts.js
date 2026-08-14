@@ -70,7 +70,12 @@ export const usePosts = (initialFilters = {}) => {
             const updated = await apiService.likePost(postId);
             setPosts(prev => prev.map(post =>
                 post.id === postId
-                    ? { ...post, likes: updated.likes, isLiked: updated.isLiked }
+                    ? {
+                        ...post,
+                        likes: Number(updated?.likesCount ?? post.likes ?? 0),
+                        likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
+                        isLiked: Boolean(updated?.isLiked)
+                    }
                     : post
             ));
         } catch (err) {
@@ -83,7 +88,12 @@ export const usePosts = (initialFilters = {}) => {
             const updated = await apiService.repostPost(postId);
             setPosts(prev => prev.map(post =>
                 post.id === postId
-                    ? { ...post, reposts: updated.reposts }
+                    ? {
+                        ...post,
+                        reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
+                        repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
+                        isReposted: Boolean(updated?.isReposted)
+                    }
                     : post
             ));
             addToast('Reposted successfully!', 'success');

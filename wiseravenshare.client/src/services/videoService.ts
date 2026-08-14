@@ -48,7 +48,27 @@ function resolveRavensightBaseUrl(): string {
   return 'http://localhost:5242/api/ravensight/videos';
 }
 
+function resolveGeneralApiBaseUrl(): string {
+  const normalized = ensureApiSuffix(apiBase);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api`;
+  }
+
+  return 'http://localhost:5242/api';
+}
+
 const ravensightBase = resolveRavensightBaseUrl();
+
+function ensureVideoRouteBase(path: string): string {
+  const normalized = String(path || '').replace(/\/+$/, '');
+  return normalized.endsWith('/videos') ? normalized : `${normalized}/videos`;
+}
+
+const ravensightVideoBase = ensureVideoRouteBase(ravensightBase);
 
 function normalizeAssetUrl(url?: string): string {
   if (!url) {
@@ -76,6 +96,62 @@ function mapVideoItem(video: VideoItem): VideoItem {
   };
 }
 
+function normalizeVideoCollection(payload: any): VideoItem[] {
+  if (Array.isArray(payload)) {
+    return payload.map(mapVideoItem);
+  }
+
+  if (payload && Array.isArray(payload.videos)) {
+    return payload.videos.map(mapVideoItem);
+  }
+
+  if (payload && Array.isArray(payload.items)) {
+    return payload.items.map(mapVideoItem);
+  }
+
+  return [];
+}
+
+function normalizeUploadPayload(payload: any): UploadVideoResponse {
+  const video = payload?.video || payload?.file || payload;
+  const mapped = mapVideoItem({
+    ...(video || {}),
+    id: video?.id || payload?.mediaAssetId || payload?.fileName || '',
+    videoUrl: video?.videoUrl || payload?.mediaUrl || payload?.filePath || video?.mediaUrl || '',
+  } as VideoItem);
+
+  return {
+    ...(payload || {}),
+    video: mapped,
+    mediaUrl: payload?.mediaUrl || mapped.videoUrl,
+    filePath: payload?.filePath || mapped.videoUrl,
+  };
+}
+
+async function fetchWithFallback(urls: string[], init: RequestInit, fallback: string): Promise<Response> {
+  let lastResponse: Response | null = null;
+
+  for (const url of urls) {
+    const response = await fetch(url, init);
+    if (response.ok) {
+      return response;
+    }
+
+    lastResponse = response;
+    if (response.status !== 404 && response.status !== 405) {
+      const message = await parseError(response, fallback);
+      throw new Error(message);
+    }
+  }
+
+  if (lastResponse) {
+    const message = await parseError(lastResponse, fallback);
+    throw new Error(message);
+  }
+
+  throw new Error(fallback);
+}
+
 function getAuthToken(): string | null {
   return getSharedAuthToken();
 }
@@ -95,18 +171,22 @@ async function parseError(response: Response, fallback: string): Promise<string>
 async function uploadVideo(formData: FormData): Promise<UploadVideoResponse> {
   const token = getAuthToken();
 
-  const response = await fetch(`${ravensightBase}/upload`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: formData,
-  });
+  const response = await fetchWithFallback(
+    [
+      `${ravensightVideoBase}/upload`,
+      `${normalizeBaseUrl(resolveGeneralApiBaseUrl())}/ravensight/media/videos/save`,
+      `${normalizeBaseUrl(resolveGeneralApiBaseUrl())}/video/upload`,
+    ],
+    {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    },
+    'Video upload failed.'
+  );
 
-  if (!response.ok) {
-    const message = await parseError(response, `Video upload failed (${response.status})`);
-    throw new Error(message);
-  }
-
-  return response.json();
+  const payload = await response.json();
+  return normalizeUploadPayload(payload);
 }
 
 async function getMyLibraryVideos(page = 1, pageSize = 24): Promise<VideoItem[]> {
@@ -126,8 +206,7 @@ async function getMyLibraryVideos(page = 1, pageSize = 24): Promise<VideoItem[]>
   }
 
   const payload = await response.json();
-  const videos: VideoItem[] = Array.isArray(payload?.videos) ? payload.videos : [];
-  return videos.map(mapVideoItem);
+  return normalizeVideoCollection(payload);
 }
 
 async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<VideoItem[]> {
@@ -141,7 +220,7 @@ async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<V
   }
 
   const token = getAuthToken();
-  const response = await fetch(`${ravensightBase}/feed?${query.toString()}`, {
+  const response = await fetch(`${ravensightVideoBase}/feed?${query.toString()}`, {
     method: 'GET',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
@@ -152,8 +231,7 @@ async function getVideoFeed(page = 1, pageSize = 24, filter?: string): Promise<V
   }
 
   const payload = await response.json();
-  const videos: VideoItem[] = Array.isArray(payload?.videos) ? payload.videos : [];
-  return videos.map(mapVideoItem);
+  return normalizeVideoCollection(payload);
 }
 
 export const videoService = {
