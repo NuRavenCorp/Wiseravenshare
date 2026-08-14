@@ -1,5 +1,5 @@
 ﻿// src/services/evolution.ts
-import { api } from './api';
+import api from './api';
 import { SignalRService } from './signalR';
 
 class EvolutionService {
@@ -17,16 +17,38 @@ class EvolutionService {
         this.signalR.on('EvolutionSuggestion', this.handleEvolutionSuggestion);
     }
 
-    // Get all agents
+    // Discover module updates
     async getAgents(): Promise<Agent[]> {
-        const response = await api.get('/evolution/agents');
-        return response.data;
+        const response = await api.get('/evolution/updates');
+        const updates = Array.isArray(response?.data) ? response.data : [];
+        return updates.map((item: any) => ({
+            id: String(item?.id || ''),
+            name: String(item?.id || 'module'),
+            type: 'module',
+            description: `Update available: ${item?.currentVersion || 'unknown'} -> ${item?.version || 'unknown'}`,
+            performanceScore: 0,
+            status: 'active',
+            posts: 0,
+            interactions: 0,
+            lastActive: new Date().toISOString(),
+        }));
     }
 
     // Get agent by ID
     async getAgent(id: string): Promise<Agent> {
-        const response = await api.get(`/evolution/agents/${id}`);
-        return response.data;
+        const response = await api.get(`/evolution/modules/${id}`);
+        const module = response?.data || {};
+        return {
+            id: String(module?.id || id),
+            name: String(module?.name || module?.id || id),
+            type: 'module',
+            description: String(module?.description || ''),
+            performanceScore: 0,
+            status: 'active',
+            posts: 0,
+            interactions: 0,
+            lastActive: new Date().toISOString(),
+        };
     }
 
     // Get evolution history
@@ -45,25 +67,53 @@ class EvolutionService {
 
     // Trigger evolution for an agent
     async triggerEvolution(agentId: string): Promise<Evolution> {
-        const response = await api.post(`/evolution/agents/${agentId}/evolve`);
-        return response.data;
+        const response = await api.get(`/evolution/modules/${agentId}/latest`);
+        const latest = response?.data || {};
+        return {
+            id: `evolution-${Date.now()}`,
+            agentId,
+            agentName: String(latest?.id || agentId),
+            type: 'module-update',
+            description: `Latest module version: ${latest?.version || 'unknown'}`,
+            fitnessBefore: 0,
+            fitnessAfter: 0,
+            timestamp: new Date().toISOString(),
+        };
     }
 
     // Get evolution suggestions
     async getEvolutionSuggestions(): Promise<EvolutionSuggestion[]> {
-        const response = await api.get('/evolution/suggestions');
-        return response.data;
+        const response = await api.get('/evolution/plugins/discover');
+        const plugins = Array.isArray(response?.data?.plugins) ? response.data.plugins : [];
+        return plugins.map((plugin: any) => ({
+            id: String(plugin?.id || `plugin-${Date.now()}`),
+            agentId: String(plugin?.id || 'plugin'),
+            type: 'plugin',
+            description: `Plugin ${plugin?.id || 'unknown'} is available`,
+            expectedGain: 0,
+            confidence: 0,
+        }));
     }
 
     // Apply evolution suggestion
-    async applySuggestion(suggestionId: string): Promise<void> {
-        await api.post(`/evolution/suggestions/${suggestionId}/apply`);
+    async applySuggestion(_suggestionId: string): Promise<void> {
+        // No apply endpoint exists yet; keep method for compatibility.
+        return;
     }
 
     // Get self-representation
     async getSelfRepresentation(): Promise<SelfRepresentation> {
-        const response = await api.get('/evolution/self-representation');
-        return response.data;
+        const response = await api.get('/evolution/metrics');
+        const metrics = response?.data || {};
+        return {
+            systemId: 'wiseravenshare-evolution',
+            identity: 'module-evolution-service',
+            currentState: `agents:${metrics?.activeAgents ?? 0}`,
+            capabilities: ['updates', 'metrics', 'history', 'plugins'],
+            goals: ['reliability', 'compatibility'],
+            constraints: ['no-apply-endpoint'],
+            introspection: metrics,
+        };
     }
 
     // Event handlers
@@ -138,6 +188,12 @@ export interface EvolutionSuggestion {
 
 export interface SelfRepresentation {
     systemId: string;
+    identity: string;
+    currentState: string;
+    capabilities: string[];
+    goals: string[];
+    constraints: string[];
+    introspection: any;
     timestamp: string;
     agentCount: number;
     totalEvolutions: number;
