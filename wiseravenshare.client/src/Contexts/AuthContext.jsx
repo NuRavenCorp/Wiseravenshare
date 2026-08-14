@@ -95,6 +95,13 @@ export const AuthProvider = ({ children }) => {
             }
         } catch (err) {
             console.error('Auth check failed:', err);
+            const status = err?.status || err?.response?.status || 0;
+            if (status === 401 || status === 403) {
+                clearAuthState();
+                setError('Your session is no longer valid. Please sign in again.');
+                return;
+            }
+
             const cachedUser = authService.getUser();
             const hasToken = Boolean(authService.getToken());
             if (cachedUser && hasToken) {
@@ -103,6 +110,7 @@ export const AuthProvider = ({ children }) => {
                 localStorage.setItem('user_data', JSON.stringify(normalizedCachedUser));
                 localStorage.setItem('wiseSocialFeeds', JSON.stringify(normalizedCachedUser?.socialFeeds || {}));
                 window.dispatchEvent(new Event('wiseraven:social-updated'));
+                setError('Unable to validate your session right now. Some actions may be unavailable until connectivity recovers.');
             } else {
                 clearAuthState();
             }

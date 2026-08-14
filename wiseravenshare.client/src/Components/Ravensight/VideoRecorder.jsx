@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FaVideo, FaStop, FaRedo, FaUpload, FaCamera, FaMicrophone, FaMicrophoneSlash, FaVideoSlash } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
+import { upsertLocalVideo, buildLocalFallbackVideo } from '../../Services/ravensightVideoStore';
 
 const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
     const defaultDestinationFolder = '/wiseravenshare/ravensight/video';
@@ -36,17 +37,6 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const { user } = useAuth();
-
-    const persistLocalVideo = (video) => {
-        try {
-            const current = JSON.parse(localStorage.getItem('wiseRavensightVideos') || '[]');
-            const next = [video, ...current].slice(0, 50);
-            localStorage.setItem('wiseRavensightVideos', JSON.stringify(next));
-            window.dispatchEvent(new Event('wiseraven:posts-updated'));
-        } catch {
-            // No-op fallback storage.
-        }
-    };
 
     useEffect(() => {
         loadDevices();
@@ -225,21 +215,30 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             });
 
             if (response?.video) {
-                persistLocalVideo({
+                upsertLocalVideo({
                     ...response.video,
                     userId: user?.id,
                     channelName: response.video.channelName || user?.name || 'WiseRaven Creator',
                     channelAvatar: response.video.channelAvatar || user?.avatar,
                     videoUrl: response.video.videoUrl || videoURL
                 });
-                window.dispatchEvent(new CustomEvent('ravensight:video-saved', { detail: response.video }));
             }
 
             onNotification(libraryOnly ? 'Video saved to library!' : 'Video uploaded successfully!', 'success');
             resetRecording();
         } catch (error) {
             console.error('Upload error:', error);
-            onNotification(error?.message || (libraryOnly ? 'Failed to save to library' : 'Failed to upload video'), 'error');
+            const fallbackVideo = buildLocalFallbackVideo({
+                file,
+                user,
+                title: videoTitle || `Recording ${new Date().toLocaleString()}`,
+                description: videoDescription,
+                privacyStatus,
+                storageMode: savePermanently ? 'permanent' : 'temporary'
+            });
+
+            upsertLocalVideo(fallbackVideo);
+            onNotification(error?.message || 'Service unavailable: video saved locally and will remain visible in your feed/library.', 'warning');
         } finally {
             setIsUploading(false);
             setUploadProgress(0);

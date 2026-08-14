@@ -195,15 +195,15 @@ namespace Wiseravenshare.Server.Services
             try
             {
                 var tokenHandler = new JwtSecurityTokenHandler();
-                var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "default-secret-key-32-chars-minimum");
+                var key = Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum");
                 var validationParameters = new TokenValidationParameters
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(key),
                     ValidateIssuer = true,
-                    ValidIssuer = _configuration["Jwt:Issuer"],
+                    ValidIssuer = _configuration["Authentication:Jwt:Issuer"],
                     ValidateAudience = true,
-                    ValidAudience = _configuration["Jwt:Audience"],
+                    ValidAudience = _configuration["Authentication:Jwt:Audience"],
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
                 };
@@ -302,7 +302,7 @@ namespace Wiseravenshare.Server.Services
         private string GenerateJwtToken(User user)
         {
             var key = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "default-secret-key-32-chars-minimum"));
+                Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum"));
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
@@ -324,8 +324,8 @@ namespace Wiseravenshare.Server.Services
             };
 
             var token = new JwtSecurityToken(
-                issuer: _configuration["Jwt:Issuer"] ?? "wiseravenshare.com",
-                audience: _configuration["Jwt:Audience"] ?? "wiseravenshare.com",
+                issuer: _configuration["Authentication:Jwt:Issuer"] ?? "wiseravenshare.com",
+                audience: _configuration["Authentication:Jwt:Audience"] ?? "wiseravenshare.com",
                 claims: claims,
                 expires: DateTime.UtcNow.AddMinutes(15),
                 signingCredentials: credentials
@@ -349,12 +349,12 @@ namespace Wiseravenshare.Server.Services
                 var tokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateAudience = true,
-                    ValidAudience = _configuration["Jwt:Audience"],
+                    ValidAudience = _configuration["Authentication:Jwt:Audience"],
                     ValidateIssuer = true,
-                    ValidIssuer = _configuration["Jwt:Issuer"],
+                    ValidIssuer = _configuration["Authentication:Jwt:Issuer"],
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(
-                        Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "default-secret-key-32-chars-minimum")),
+                        Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum")),
                     ValidateLifetime = false // Don't validate expiration for refresh
                 };
 
