@@ -292,10 +292,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
 
                 if (status === 401 || status === 403) {
                     saveMessage = 'Your session expired. Please sign in again and retry posting.';
+                } else if (status === 404 || status === 405) {
+                    saveMessage = 'Posting endpoint is unavailable right now. Refresh and try again.';
                 } else if (status === 400 && serverMessage) {
                     saveMessage = 'Unable to publish post. Please review the content and try again.';
                 } else if (normalizedServerMessage) {
-                    saveMessage = 'Unable to publish post. Please try again.';
+                    saveMessage = normalizedServerMessage;
                 }
 
                 const isServiceUnavailable =
