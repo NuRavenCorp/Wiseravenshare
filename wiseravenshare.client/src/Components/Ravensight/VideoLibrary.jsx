@@ -2,31 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { FaTrash, FaEdit, FaYoutube, FaEye, FaThumbsUp, FaComment, FaCalendar, FaSearch, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
-
-const safeReadJson = (key, fallback) => {
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : fallback;
-    } catch {
-        return fallback;
-    }
-};
-
-const STORAGE_KEY = 'wiseRavensightLibrary';
-
-const readLibraryEntries = () => {
-    const saved = safeReadJson(STORAGE_KEY, []);
-    return Array.isArray(saved) ? saved : [];
-};
-
-const writeLibraryEntries = (entries) => {
-    try {
-        const sanitized = Array.isArray(entries) ? entries : [];
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized.slice(0, 200)));
-    } catch {
-        // Ignore storage write failures; UI should still work in-memory.
-    }
-};
+import { normalizeVideoRecord, getMergedLocalVideos, removeLocalVideo, upsertLocalVideo } from '../../Services/ravensightVideoStore';
 
 const getVideoIdentity = (video) => String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
 
@@ -35,59 +11,10 @@ const isLocalManagedVideo = (video) => {
     return identity.startsWith('local-video-') || identity.startsWith('post-video-');
 };
 
-const normalizeVideo = (video, index = 0) => ({
-    id: video.id || `local-video-${Date.now()}-${index}`,
-    title: video.title || 'Saved Video',
-    description: video.description || '',
-    tags: Array.isArray(video.tags) ? video.tags : [],
-    videoUrl: video.videoUrl || video.mediaUrl || '',
-    thumbnailUrl: video.thumbnailUrl || '',
-    status: video.status || 'published',
-    privacyStatus: video.privacyStatus || 'unlisted',
-    storageMode: video.storageMode || 'temporary',
-    retentionStatus: video.retentionStatus || 'active',
-    expiresAt: video.expiresAt || null,
-    youtubeUrl: video.youtubeUrl || null,
-    tiktokUrl: video.tiktokUrl || null,
-    facebookUrl: video.facebookUrl || null,
-    views: Number(video.views) || 0,
-    likes: Number(video.likes) || 0,
-    comments: Number(video.comments) || 0,
-    createdAt: video.createdAt || new Date().toISOString(),
-    updatedAt: video.updatedAt || video.createdAt || new Date().toISOString(),
-    userId: video.userId || video.user?.id || null,
-    channelName: video.channelName || video.user?.name || 'WiseRaven Creator',
-    channelAvatar: video.channelAvatar || video.user?.avatar || ''
-});
+const normalizeVideo = (video, index = 0) => normalizeVideoRecord(video, index);
 
 const getLocalFallbackVideos = (currentUserId) => {
-    const cachedVideos = readLibraryEntries()
-        .map((video, index) => normalizeVideo(video, index));
-
-    const legacyVideos = safeReadJson('wiseRavensightVideos', [])
-        .map((video, index) => normalizeVideo(video, index));
-
-    const recentPosts = safeReadJson('wiseRecentPosts', [])
-        .filter((post) => post?.mediaType === 'video' && (post?.mediaUrl || post?.videoUrl))
-        .map((post, index) => normalizeVideo({
-            id: `post-video-${post.id || index}`,
-            title: post.content?.slice(0, 70) || 'Saved Video',
-            description: post.content || '',
-            videoUrl: post.mediaUrl || post.videoUrl,
-            thumbnailUrl: post.thumbnailUrl || '',
-            createdAt: post.createdAt,
-            userId: post.userId || post.user?.id,
-            channelName: post.user?.name || 'WiseRaven Creator',
-            channelAvatar: post.user?.avatar || ''
-        }, index));
-
-    const combined = [...cachedVideos, ...legacyVideos, ...recentPosts]
-        .filter((video) => !!video.videoUrl)
-        .filter((video, idx, all) => all.findIndex((item) => (item.videoUrl || item.mediaUrl) === (video.videoUrl || video.mediaUrl)) === idx);
-
-    return currentUserId
-        ? combined.filter((video) => !video.userId || video.userId === currentUserId)
-        : combined;
+    return getMergedLocalVideos(currentUserId).map((video, index) => normalizeVideo(video, index));
 };
 
 const VideoLibrary = ({ onNotification }) => {
@@ -140,17 +67,7 @@ const VideoLibrary = ({ onNotification }) => {
 
     const removeVideoFromLocalCaches = (videoId) => {
         const normalizedId = String(videoId);
-
-        const nextLibraryEntries = readLibraryEntries().filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId);
-        writeLibraryEntries(nextLibraryEntries);
-
-        const legacyVideos = safeReadJson('wiseRavensightVideos', []).filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId);
-        try {
-            localStorage.setItem('wiseRavensightVideos', JSON.stringify(legacyVideos));
-        } catch {
-            // Ignore local cache failures.
-        }
-
+        removeLocalVideo(normalizedId);
         setVideos((prev) => prev.filter((video) => getVideoIdentity(video) !== normalizedId && String(video?.videoUrl || video?.mediaUrl || '') !== normalizedId));
         setSelectedVideoIds((prev) => prev.filter((id) => id !== normalizedId));
     };
@@ -239,7 +156,9 @@ const VideoLibrary = ({ onNotification }) => {
     const handleUpdateVideo = async (videoId, updates) => {
         try {
             const updatedVideo = await ravensightAPI.updateVideo(videoId, updates);
-            setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
+            const normalized = normalizeVideo(updatedVideo);
+            upsertLocalVideo(normalized);
+            setVideos(prev => prev.map(v => v.id === videoId ? normalized : v));
             setEditingVideo(null);
             onNotification('Video updated successfully', 'success');
         } catch (error) {

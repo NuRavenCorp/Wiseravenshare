@@ -195,15 +195,39 @@ class RavensightAPI {
 
     async requestWithFallback(method, urls, config = {}) {
         let lastError = null;
+        const maxRetries = Number(config?.maxRetries) > 0 ? Number(config.maxRetries) : 1;
+
+        const shouldRetryTransient = (error) => {
+            const status = Number(error?.status ?? error?.response?.status ?? 0);
+            if (status === 0) {
+                return true;
+            }
+
+            return status >= 500 && status < 600;
+        };
 
         for (const url of urls) {
-            try {
-                return await this.api.request({ method, url, ...config });
-            } catch (error) {
-                lastError = error;
-                const status = Number(error?.response?.status || 0);
-                if (status !== 404 && status !== 405) {
-                    throw error;
+            let attempt = 0;
+            while (attempt <= maxRetries) {
+                attempt += 1;
+                try {
+                    const requestConfig = { ...config };
+                    delete requestConfig.maxRetries;
+                    return await this.api.request({ method, url, ...requestConfig });
+                } catch (error) {
+                    lastError = error;
+                    const status = Number(error?.response?.status || 0);
+                    const retryAllowed = attempt <= maxRetries && shouldRetryTransient(error);
+
+                    if (retryAllowed) {
+                        continue;
+                    }
+
+                    if (status !== 404 && status !== 405) {
+                        throw error;
+                    }
+
+                    break;
                 }
             }
         }

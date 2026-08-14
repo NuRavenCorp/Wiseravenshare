@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { FaUpload, FaYoutube, FaFileVideo, FaTrash, FaCheck, FaSpinner } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
+import { upsertLocalVideo, buildLocalFallbackVideo } from '../../Services/ravensightVideoStore';
 
 const CHANNEL_CHOICES = [
     { id: 'youtube', label: 'YouTube' },
@@ -108,17 +109,6 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         localStorage.setItem(queueStorageKey, JSON.stringify(enrichedQueue));
     };
 
-    const persistLocalVideo = (video) => {
-        try {
-            const current = JSON.parse(localStorage.getItem('wiseRavensightVideos') || '[]');
-            const next = [video, ...current].slice(0, 50);
-            localStorage.setItem('wiseRavensightVideos', JSON.stringify(next));
-            window.dispatchEvent(new Event('wiseraven:posts-updated'));
-        } catch {
-            // No-op: local fallback storage should never block upload UX.
-        }
-    };
-
     React.useEffect(() => {
         setPublishingQueue(readPublishingQueue());
     }, []);
@@ -199,40 +189,27 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
             setUploadedVideos(prev => [response.video, ...prev]);
             if (response?.video) {
-                persistLocalVideo({
+                upsertLocalVideo({
                     ...response.video,
                     userId: user?.id,
                     channelName: response.video.channelName || user?.name || 'WiseRaven Creator',
                     channelAvatar: response.video.channelAvatar || user?.avatar
                 });
-                window.dispatchEvent(new CustomEvent('ravensight:video-saved', { detail: response.video }));
             }
             onNotification(libraryOnly ? 'Video saved to library!' : 'Video uploaded successfully!', 'success');
             resetForm();
         } catch (error) {
             console.error('Upload error:', error);
-            const fallbackVideo = {
-                id: `local-video-${Date.now()}`,
-                userId: user?.id || 'local-user',
+            const fallbackVideo = buildLocalFallbackVideo({
+                file: selectedFile,
+                user,
                 title: videoDetails.title,
                 description: videoDetails.description,
-                tags: videoDetails.tags,
-                videoUrl: selectedFile ? URL.createObjectURL(selectedFile) : '',
-                thumbnailUrl: '',
-                status: 'published',
                 privacyStatus: videoDetails.privacyStatus,
-                storageMode: savePermanently ? 'permanent' : 'temporary',
-                retentionStatus: 'active',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                likes: 0,
-                comments: 0,
-                views: 0,
-                channelName: user?.name || 'WiseRaven Creator',
-                channelAvatar: user?.avatar
-            };
+                storageMode: savePermanently ? 'permanent' : 'temporary'
+            });
 
-            persistLocalVideo(fallbackVideo);
+            upsertLocalVideo(fallbackVideo);
             setUploadedVideos(prev => [fallbackVideo, ...prev]);
             onNotification(libraryOnly ? 'Your video is still visible in your current session while the service is temporarily unavailable.' : 'Your video is still visible in your current session while the service is temporarily unavailable.', 'warning');
             resetForm();

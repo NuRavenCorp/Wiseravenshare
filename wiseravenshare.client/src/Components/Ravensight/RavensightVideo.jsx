@@ -101,6 +101,50 @@ const CHANNEL_ROLLOUT = [
     { name: 'Facebook', status: 'Phase 3' }
 ];
 
+const VALUE_PROFILES = [
+    {
+        planId: 'creator_pro',
+        headline: 'Publish faster without admin drag.',
+        outcome: 'Direct upload and creator controls remove repetitive steps from the publishing loop.',
+        unlocks: ['Direct publishing', 'Scheduled uploads', 'Creator approvals']
+    },
+    {
+        planId: 'growth_suite',
+        headline: 'Grow with clearer signals.',
+        outcome: 'Trend-aware planning and audience insights turn the video workflow into a growth system.',
+        unlocks: ['Growth analytics', 'Trend recommendations', 'Publishing optimization']
+    },
+    {
+        planId: 'studio_plus',
+        headline: 'Run teams, not just accounts.',
+        outcome: 'Shared workflows and multi-user controls support agencies and internal content teams.',
+        unlocks: ['Shared workspaces', 'Approvals', 'Multi-brand publishing']
+    }
+];
+
+const PAID_FEATURES = [
+    {
+        title: 'Direct publishing',
+        detail: 'Send content to connected channels without manual copy-paste steps.',
+        access: 'creator_pro'
+    },
+    {
+        title: 'Scheduling and queueing',
+        detail: 'Plan a content run in advance so publishing keeps moving when the team is offline.',
+        access: 'creator_pro'
+    },
+    {
+        title: 'Growth analytics',
+        detail: 'Use trend and audience signals to prioritize what gets posted next.',
+        access: 'growth_suite'
+    },
+    {
+        title: 'Team workflows',
+        detail: 'Bring reviewers, editors, and operators into the same publishing lane.',
+        access: 'studio_plus'
+    }
+];
+
 const allowLocalCheckoutFallback =
     import.meta.env.DEV || String(import.meta.env.VITE_STRIPE_CHECKOUT_LOCAL_FALLBACK || '').toLowerCase() === 'true';
 
@@ -126,6 +170,14 @@ const RavensightVideo = () => {
     const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
+    const [billingSync, setBillingSync] = useState({
+        source: 'local',
+        status: 'inactive',
+        hasActiveSubscription: false,
+        currentPeriodEnd: null,
+        priceId: null,
+        error: ''
+    });
     const { user } = useAuth();
     const subscriptionStorageKey = buildSubscriptionStorageKey(user?.id);
     const paywallVariantStorageKey = buildPaywallVariantStorageKey(user?.id);
@@ -154,6 +206,12 @@ const RavensightVideo = () => {
         }
     });
     const selectedPlan = getPlanById(selectedPlanId);
+    const unlockedFeatureCount = PAID_FEATURES.filter((feature) => {
+        if (feature.access === 'creator_pro') return true;
+        if (feature.access === 'growth_suite') return selectedPlanId === 'growth_suite' || selectedPlanId === 'studio_plus';
+        if (feature.access === 'studio_plus') return selectedPlanId === 'studio_plus';
+        return false;
+    }).length;
 
     const addNotification = (message, type = 'info') => {
         const id = Date.now();
@@ -186,6 +244,66 @@ const RavensightVideo = () => {
             setSelectedPlanId(DEFAULT_PLAN_ID);
         }
     }, [paywallVariantStorageKey]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const syncBillingStatus = async () => {
+            try {
+                const response = await subscriptionService.getSubscriptionStatus();
+                if (cancelled) {
+                    return;
+                }
+
+                setBillingSync({
+                    source: 'server',
+                    status: response?.status || 'inactive',
+                    hasActiveSubscription: Boolean(response?.hasActiveSubscription),
+                    currentPeriodEnd: response?.currentPeriodEnd || null,
+                    priceId: response?.priceId || null,
+                    error: ''
+                });
+
+                if (response?.hasActiveSubscription) {
+                    setSubscription((current) => ({
+                        ...current,
+                        isActive: true,
+                        renewsAt: response.currentPeriodEnd || current.renewsAt,
+                        planId: current.planId || DEFAULT_PLAN_ID,
+                        tier: current.tier || getPlanById(current.planId || DEFAULT_PLAN_ID).name
+                    }));
+                    return;
+                }
+
+                if (!allowLocalCheckoutFallback) {
+                    setSubscription((current) => ({
+                        ...current,
+                        isActive: false,
+                        renewsAt: null
+                    }));
+                }
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+
+                setBillingSync({
+                    source: 'local',
+                    status: 'unverified',
+                    hasActiveSubscription: Boolean(subscription?.isActive),
+                    currentPeriodEnd: subscription?.renewsAt || null,
+                    priceId: null,
+                    error: error?.message || 'Unable to verify subscription status right now.'
+                });
+            }
+        };
+
+        syncBillingStatus();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [subscriptionStorageKey, user?.id]);
 
     useEffect(() => {
         safeTrackGrowthEvent('paywall_plan_selected', {
@@ -382,11 +500,26 @@ const RavensightVideo = () => {
                     Ravensight Video Studio
                 </h2>
                 <p style={{ opacity: 0.9 }}>Secure publishing for creators, teams, and growth-focused brands.</p>
-                <div style={{ marginTop: '10px', fontSize: '13px', opacity: 0.95 }}>
-                    Publishing access:
-                    <strong style={{ marginLeft: '6px' }}>
-                        {subscription?.isActive ? `${subscription.tier} active` : `Choose a plan below`}
-                    </strong>
+                <div style={{ marginTop: '10px', fontSize: '13px', opacity: 0.95, display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                    <span>
+                        Publishing access:
+                        <strong style={{ marginLeft: '6px' }}>
+                            {subscription?.isActive ? `${subscription.tier} active` : `Choose a plan below`}
+                        </strong>
+                    </span>
+                    <span style={{
+                        borderRadius: '999px',
+                        padding: '4px 10px',
+                        background: billingSync.hasActiveSubscription ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.12)',
+                        border: '1px solid rgba(255,255,255,0.18)'
+                    }}>
+                        {billingSync.source === 'server' ? 'Billing synced' : 'Billing preview mode'}
+                    </span>
+                    {billingSync.error && (
+                        <span style={{ color: '#ffd7d7' }}>
+                            {billingSync.error}
+                        </span>
+                    )}
                 </div>
             </div>
 
@@ -424,6 +557,68 @@ const RavensightVideo = () => {
 
             {/* Content Area */}
             <div style={{ padding: '20px', minHeight: '600px' }}>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '14px',
+                    marginBottom: '18px'
+                }}>
+                    {PAID_FEATURES.map((feature) => {
+                        const isUnlocked = feature.access === 'creator_pro'
+                            || (feature.access === 'growth_suite' && (selectedPlanId === 'growth_suite' || selectedPlanId === 'studio_plus'))
+                            || (feature.access === 'studio_plus' && selectedPlanId === 'studio_plus');
+
+                        return (
+                            <div key={feature.title} style={{
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '14px',
+                                padding: '14px',
+                                background: isUnlocked ? 'rgba(76,175,80,0.08)' : 'rgba(255,255,255,0.02)'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
+                                    <div style={{ fontWeight: 800 }}>{feature.title}</div>
+                                    <span style={{
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        borderRadius: '999px',
+                                        padding: '4px 8px',
+                                        background: isUnlocked ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.08)'
+                                    }}>
+                                        {isUnlocked ? 'Unlocked' : `Needs ${feature.access.replace('_', ' ')}`}
+                                    </span>
+                                </div>
+                                <div style={{ color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px' }}>{feature.detail}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(135deg, rgba(79,116,214,0.18), rgba(163,58,93,0.14))',
+                    padding: '16px',
+                    marginBottom: '18px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                        <div>
+                            <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8 }}>Billing status</div>
+                            <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>
+                                {billingSync.hasActiveSubscription ? 'Active subscription verified' : 'Subscription not active'}
+                            </div>
+                            <div style={{ color: 'var(--light-color)', marginTop: '4px' }}>
+                                {billingSync.source === 'server'
+                                    ? `Synced from Stripe with status ${billingSync.status}.`
+                                    : 'Showing local preview until Stripe status is available.'}
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8 }}>Unlocked feature groups</div>
+                            <div style={{ fontSize: '28px', fontWeight: 900 }}>{unlockedFeatureCount}</div>
+                        </div>
+                    </div>
+                </div>
+
                 {activeTab === 'record' && (
                     <VideoRecorder
                         onNotification={addNotification}
@@ -470,8 +665,45 @@ const RavensightVideo = () => {
                                 padding: '16px 18px',
                                 color: 'var(--light-color)'
                             }}>
-                                <strong style={{ color: 'var(--text-color)' }}>Early access rollout:</strong> We are launching with the creator publishing core first, then expanding into growth intelligence and team workflows to power the broader social ecosystem.
+                                    <strong style={{ color: 'var(--text-color)' }}>Early access rollout:</strong> We are launching with the creator publishing core first, then expanding into growth intelligence and team workflows to power the broader social ecosystem.
+                                    <div style={{ marginTop: '10px' }}>
+                                        Current selected plan unlocks <strong style={{ color: 'var(--text-color)' }}>{unlockedFeatureCount} premium feature groups</strong> in the publishing studio.
+                                    </div>
                             </div>
+
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                                    gap: '14px',
+                                    marginBottom: '22px'
+                                }}>
+                                    {VALUE_PROFILES.map((profile) => (
+                                        <div
+                                            key={profile.planId}
+                                            style={{
+                                                border: selectedPlanId === profile.planId ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                                                borderRadius: '14px',
+                                                padding: '16px',
+                                                background: selectedPlanId === profile.planId ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)'
+                                            }}
+                                        >
+                                            <div style={{ fontWeight: 800, marginBottom: '8px' }}>{profile.headline}</div>
+                                            <div style={{ color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px', marginBottom: '12px' }}>{profile.outcome}</div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                {profile.unlocks.map((item) => (
+                                                    <span key={item} style={{
+                                                        fontSize: '11px',
+                                                        borderRadius: '999px',
+                                                        padding: '4px 8px',
+                                                        background: 'rgba(255,255,255,0.08)'
+                                                    }}>
+                                                        {item}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
 
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                                 {PRICING_PLANS.map((plan) => {
