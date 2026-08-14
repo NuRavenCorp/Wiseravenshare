@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { FaTrash, FaEdit, FaYoutube, FaEye, FaThumbsUp, FaComment, FaCalendar, FaSearch, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
-import { normalizeVideoRecord, getMergedLocalVideos, removeLocalVideo, upsertLocalVideo } from '../../Services/ravensightVideoStore';
+import { normalizeVideoRecord, getMergedLocalVideos, mergeVideoRecords, removeLocalVideo, upsertLocalVideo, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 
 const getVideoIdentity = (video) => String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
 
@@ -12,6 +12,34 @@ const isLocalManagedVideo = (video) => {
 };
 
 const normalizeVideo = (video, index = 0) => normalizeVideoRecord(video, index);
+
+const getAccessLabel = (accessProtocol) => {
+    if (accessProtocol === RAVENSIGHT_LIBRARY_PROTOCOL.access.remoteUrl) {
+        return 'Remote URL';
+    }
+
+    if (accessProtocol === RAVENSIGHT_LIBRARY_PROTOCOL.access.streamUrl) {
+        return 'API Stream';
+    }
+
+    if (accessProtocol === RAVENSIGHT_LIBRARY_PROTOCOL.access.blobSession) {
+        return 'Session Blob';
+    }
+
+    return 'Unavailable';
+};
+
+const getSourceLabel = (sourceType) => {
+    if (sourceType === RAVENSIGHT_LIBRARY_PROTOCOL.source.libraryStore) {
+        return 'Library Store';
+    }
+
+    if (sourceType === RAVENSIGHT_LIBRARY_PROTOCOL.source.feedCache) {
+        return 'Feed Cache';
+    }
+
+    return 'Local Fallback';
+};
 
 const getLocalFallbackVideos = (currentUserId) => {
     return getMergedLocalVideos(currentUserId).map((video, index) => normalizeVideo(video, index));
@@ -33,6 +61,24 @@ const VideoLibrary = ({ onNotification }) => {
         loadUserVideos();
     }, []);
 
+    useEffect(() => {
+        const handleSaved = () => {
+            loadUserVideos();
+        };
+
+        const handlePostsUpdated = () => {
+            loadUserVideos();
+        };
+
+        window.addEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, handleSaved);
+        window.addEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated, handlePostsUpdated);
+
+        return () => {
+            window.removeEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.videoSaved, handleSaved);
+            window.removeEventListener(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated, handlePostsUpdated);
+        };
+    }, [user?.id]);
+
     const loadUserVideos = async () => {
         setLoading(true);
         try {
@@ -42,9 +88,8 @@ const VideoLibrary = ({ onNotification }) => {
                 : [];
 
             const fallbackVideos = getLocalFallbackVideos(user?.id);
-            const mergedVideos = [...responseVideos, ...fallbackVideos]
-                .filter((video) => !!video.videoUrl)
-                .filter((video, idx, all) => all.findIndex((item) => (item.id || item.videoUrl) === (video.id || video.videoUrl)) === idx);
+            const mergedVideos = mergeVideoRecords(responseVideos, fallbackVideos)
+                .filter((video) => !!video.videoUrl);
 
             setVideos(mergedVideos);
             setSelectedVideoIds([]);
@@ -354,6 +399,26 @@ const VideoLibrary = ({ onNotification }) => {
                                     }}>
                                         {video.storageMode === 'permanent' ? 'Permanent storage' : 'Temporary storage'}
                                     </span>
+                                    <span style={{
+                                        display: 'inline-block',
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '11px',
+                                        background: 'rgba(79,116,214,0.18)',
+                                        color: '#9cc1ff'
+                                    }}>
+                                        Source: {getSourceLabel(video.sourceType)}
+                                    </span>
+                                    <span style={{
+                                        display: 'inline-block',
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '11px',
+                                        background: 'rgba(255,255,255,0.08)',
+                                        color: 'var(--text-color)'
+                                    }}>
+                                        Access: {getAccessLabel(video.accessProtocol)}
+                                    </span>
                                     {video.expiresAt && (
                                         <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
                                             Expires {new Date(video.expiresAt).toLocaleDateString()}
@@ -428,6 +493,9 @@ const VideoLibrary = ({ onNotification }) => {
                     <div>
                         <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>Ravensight Library</div>
                         <h2 style={{ margin: '4px 0 0', fontSize: '26px' }}>Manage saved objects</h2>
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)' }}>
+                            Protocol: Save to library first, then display by validated URL source with local fallback continuity.
+                        </div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         <button

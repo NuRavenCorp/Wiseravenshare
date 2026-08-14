@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import { FiClock, FiRefreshCw, FiVideo } from 'react-icons/fi';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { VideoItem, videoService } from '../../services/videoService';
+import { VideoItem, videoService } from '../../Services/videoService';
 
 export const VideoLibrary: React.FC = () => {
     const [videos, setVideos] = useState<VideoItem[]>([]);

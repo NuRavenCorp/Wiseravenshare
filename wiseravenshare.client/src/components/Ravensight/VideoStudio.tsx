@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { videoService } from '../../services/videoService';
+import { videoService } from '../../Services/videoService';
 import {
     getRavensightLocalSaveRootPreference,
     getRavensightLocalFolderPermission,

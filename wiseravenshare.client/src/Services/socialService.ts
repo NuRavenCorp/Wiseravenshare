@@ -1,4 +1,4 @@
-import { getAuthToken as getSharedAuthToken } from '../Services/authStorage.js';
+import { getAuthToken as getSharedAuthToken } from './authStorage.js';
 
 const apiBase = import.meta.env.VITE_API_URL || '';
 
@@ -18,6 +18,7 @@ export type PublishSocialContentRequest = {
   videoUrl?: string;
   publishToFacebook: boolean;
   publishToTikTok: boolean;
+  publishToYouTube?: boolean;
 };
 
 export type SocialPublishResult = {

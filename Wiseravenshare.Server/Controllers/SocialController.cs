@@ -67,7 +67,7 @@ public class SocialController : ControllerBase
             });
         }
 
-        if (!request.PublishToFacebook && !request.PublishToTikTok)
+        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube)
         {
             return BadRequest(new ErrorResponse
             {
