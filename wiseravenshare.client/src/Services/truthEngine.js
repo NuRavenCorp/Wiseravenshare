@@ -1,4 +1,4 @@
-import { truthEngine } from '../Services/TruthDetectionEngine';
+import { truthEngine } from './TruthDetectionEngine';
 
 export { truthEngine };
 export default truthEngine;

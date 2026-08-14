@@ -1,4 +1,4 @@
-import { getAuthToken as getSharedAuthToken } from '../Services/authStorage.js';
+import { getAuthToken as getSharedAuthToken } from './authStorage.js';
 
 const apiBase = import.meta.env.VITE_API_URL || '';
 
@@ -49,10 +49,38 @@ export type SubscriptionStatus = {
   stripeSubscriptionId?: string;
 };
 
+export type CatalogPrice = {
+  priceId: string;
+  configured: boolean;
+  amountUsd: number;
+};
+
+export type CatalogPlan = {
+  planId: string;
+  name: string;
+  tagline: string;
+  badge: string;
+  monthly: CatalogPrice;
+  annual: CatalogPrice;
+};
+
+export type ProductCatalogResponse = {
+  source: string;
+  plans: CatalogPlan[];
+};
+
 export const subscriptionService = {
   getSubscriptionStatus: () => request<SubscriptionStatus>('/api/billing/subscription', { method: 'GET' }),
 
-  createCheckoutSession: (payload: { priceId: string; successUrl: string; cancelUrl: string }) =>
+  getProductCatalog: () => request<ProductCatalogResponse>('/api/payments/catalog', { method: 'GET' }),
+
+  createCheckoutSession: (payload: {
+    priceId: string;
+    successUrl: string;
+    cancelUrl: string;
+    plan?: string;
+    billingCycle?: 'monthly' | 'annual';
+  }) =>
     request<{ sessionId: string; url: string }>('/api/billing/checkout-session', {
       method: 'POST',
       body: JSON.stringify(payload),

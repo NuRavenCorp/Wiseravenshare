@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FiEye, FiHeart } from 'react-icons/fi';
 import { Card } from '../ui/Card';
-import { VideoItem, videoService } from '../../services/videoService';
+import { VideoItem, videoService } from '../../Services/videoService';
 
 export const VideoFeed: React.FC = () => {
     const [videos, setVideos] = useState<VideoItem[]>([]);

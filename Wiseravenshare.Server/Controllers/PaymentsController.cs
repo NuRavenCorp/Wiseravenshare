@@ -41,6 +41,42 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    [HttpGet("catalog")]
+    [AllowAnonymous]
+    public IActionResult GetCatalog()
+    {
+        var catalog = new[]
+        {
+            BuildCatalogPlan(
+                planId: "creator_pro",
+                name: "Creator Pro",
+                tagline: "For solo creators shipping consistently",
+                badge: "Most popular",
+                defaultMonthlyAmount: 19,
+                defaultAnnualAmount: 190),
+            BuildCatalogPlan(
+                planId: "growth_suite",
+                name: "Growth Suite",
+                tagline: "For creators scaling their audience",
+                badge: "Best for growth",
+                defaultMonthlyAmount: 39,
+                defaultAnnualAmount: 390),
+            BuildCatalogPlan(
+                planId: "studio_plus",
+                name: "Studio Plus",
+                tagline: "For teams and agencies",
+                badge: "For teams",
+                defaultMonthlyAmount: 79,
+                defaultAnnualAmount: 790)
+        };
+
+        return Ok(new
+        {
+            source = "stripe_config",
+            plans = catalog
+        });
+    }
+
     [HttpPost("checkout-session")]
     public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
     {
@@ -184,6 +220,38 @@ public class PaymentsController : ControllerBase
     private string ResolveConfig(string sectionKey, string envKey)
     {
         return (_configuration[sectionKey] ?? _configuration[envKey] ?? string.Empty).Trim();
+    }
+
+    private object BuildCatalogPlan(
+        string planId,
+        string name,
+        string tagline,
+        string badge,
+        int defaultMonthlyAmount,
+        int defaultAnnualAmount)
+    {
+        var monthlyPriceId = ResolvePriceId(planId, "monthly");
+        var annualPriceId = ResolvePriceId(planId, "annual");
+
+        return new
+        {
+            planId,
+            name,
+            tagline,
+            badge,
+            monthly = new
+            {
+                priceId = monthlyPriceId,
+                configured = !string.IsNullOrWhiteSpace(monthlyPriceId),
+                amountUsd = defaultMonthlyAmount
+            },
+            annual = new
+            {
+                priceId = annualPriceId,
+                configured = !string.IsNullOrWhiteSpace(annualPriceId),
+                amountUsd = defaultAnnualAmount
+            }
+        };
     }
 }
 

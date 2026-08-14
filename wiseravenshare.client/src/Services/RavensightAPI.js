@@ -238,6 +238,9 @@ class RavensightAPI {
     // Video Upload
     async uploadVideo(formData, onProgress) {
         const requestConfig = {
+            timeout: 600000,
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
             onUploadProgress: (progressEvent) => {
                 if (onProgress) {
                     const total = progressEvent.total || progressEvent.loaded || 1;
@@ -255,6 +258,15 @@ class RavensightAPI {
             data: formData,
             ...requestConfig
         }).catch((error) => {
+            const status = Number(error?.response?.status || 0);
+            if (status === 413) {
+                throw new Error('Upload rejected by gateway size limits. Increase proxy body limits or upload a smaller file.');
+            }
+
+            if (error?.code === 'ECONNABORTED') {
+                throw new Error('Upload timed out while processing. Please retry or reduce file size.');
+            }
+
             throw new Error(extractErrorMessage(error, 'Video upload failed.'));
         });
 
@@ -266,6 +278,25 @@ class RavensightAPI {
             video: normalizedVideo,
             mediaUrl: payload.mediaUrl || normalizedVideo?.mediaUrl || normalizedVideo?.videoUrl || '',
             filePath: payload.filePath || normalizedVideo?.videoUrl || normalizedVideo?.mediaUrl || ''
+        };
+    }
+
+    async saveVideoReference(payload) {
+        const response = await this.requestWithFallback('post', [
+            '/videos/save-reference'
+        ], {
+            data: payload
+        }).catch((error) => {
+            throw new Error(extractErrorMessage(error, 'Failed to persist this video to library storage.'));
+        });
+
+        const body = response?.data || {};
+        const normalizedVideo = normalizeVideoEntityPayload(body);
+
+        return {
+            ...body,
+            video: normalizedVideo,
+            mediaUrl: body.mediaUrl || normalizedVideo?.mediaUrl || normalizedVideo?.videoUrl || ''
         };
     }
 
