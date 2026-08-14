@@ -359,6 +359,69 @@ ON CONFLICT (""MigrationId"") DO NOTHING;";
     logger.LogInformation("EF migration history baseline was reconciled with initial migration {MigrationId}.", initialMigration);
 }
 
+static bool IsDuplicateMigrationConflict(Exception exception)
+{
+    if (exception is PostgresException pg)
+    {
+        return pg.SqlState == PostgresErrorCodes.DuplicateTable
+            || pg.SqlState == PostgresErrorCodes.DuplicateObject
+            || pg.SqlState == PostgresErrorCodes.DuplicateColumn;
+    }
+
+    return exception.InnerException is not null && IsDuplicateMigrationConflict(exception.InnerException);
+}
+
+static async Task<bool> HasCorePostSchemaAsync(AppDbContext dbContext, CancellationToken cancellationToken = default)
+{
+    const string sql = @"
+SELECT COUNT(*)
+FROM information_schema.tables
+WHERE table_schema = 'app_data'
+  AND table_name IN ('Users', 'Posts', 'PostLikes', 'PostReposts', 'PostBookmarks');";
+
+    var result = await dbContext.Database.SqlQueryRaw<int>(sql).ToListAsync(cancellationToken);
+    var existing = result.FirstOrDefault();
+    return existing >= 5;
+}
+
+static async Task MarkMigrationsAppliedAsync(AppDbContext dbContext, ILogger logger, IReadOnlyCollection<string> migrationIds, CancellationToken cancellationToken = default)
+{
+    if (migrationIds.Count == 0)
+    {
+        return;
+    }
+
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var productVersion = typeof(DbContext).Assembly.GetName().Version is { } version
+        ? $"{version.Major}.{version.Minor}.{version.Build}"
+        : "10.0.10";
+
+    await EnsureMigrationsHistoryTableAsync(dbContext, cancellationToken);
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string insertSql = @"
+INSERT INTO app_data.""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+VALUES (@migrationId, @productVersion)
+ON CONFLICT (""MigrationId"") DO NOTHING;";
+
+    foreach (var migrationId in migrationIds)
+    {
+        await using var command = new NpgsqlCommand(insertSql, connection);
+        command.Parameters.AddWithValue("migrationId", migrationId);
+        command.Parameters.AddWithValue("productVersion", productVersion);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    logger.LogInformation("Reconciled EF migration history for existing schema objects: {MigrationIds}", string.Join(", ", migrationIds));
+}
+
 static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
 {
     try
@@ -366,7 +429,22 @@ static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logg
         var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         if (pendingMigrations.Count > 0)
         {
-            await dbContext.Database.MigrateAsync(cancellationToken);
+            try
+            {
+                await dbContext.Database.MigrateAsync(cancellationToken);
+            }
+            catch (Exception migrateEx) when (IsDuplicateMigrationConflict(migrateEx))
+            {
+                var schemaReady = await HasCorePostSchemaAsync(dbContext, cancellationToken);
+                if (!schemaReady)
+                {
+                    throw;
+                }
+
+                await MarkMigrationsAppliedAsync(dbContext, logger, pendingMigrations, cancellationToken);
+                logger.LogInformation("Skipped duplicate-object migration failure because required schema already exists.");
+            }
+
             return;
         }
 
@@ -403,7 +481,23 @@ static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logg
 
         try
         {
-            await dbContext.Database.MigrateAsync(cancellationToken);
+            var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+            if (pendingMigrations.Count > 0)
+            {
+                await dbContext.Database.MigrateAsync(cancellationToken);
+            }
+        }
+        catch (Exception migrateRetryEx) when (IsDuplicateMigrationConflict(migrateRetryEx))
+        {
+            var schemaReady = await HasCorePostSchemaAsync(dbContext, cancellationToken);
+            if (!schemaReady)
+            {
+                throw;
+            }
+
+            var remainingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+            await MarkMigrationsAppliedAsync(dbContext, logger, remainingMigrations, cancellationToken);
+            logger.LogInformation("Final migration pass detected duplicate objects on an operational schema; migration history was reconciled.");
         }
         catch (Exception migrateRetryEx)
         {
