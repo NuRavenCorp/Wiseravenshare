@@ -155,7 +155,11 @@ const VideoFeed = ({ onNotification }) => {
                 if (status === 401 || status === 403) {
                     onNotification('Sign in to load your Ravensight feed.', 'warning');
                 } else if (status === 404 || status === 405) {
-                    onNotification('Ravensight feed endpoint was not found. Check API route configuration.', 'error');
+                    if (fallback.length > 0) {
+                        onNotification('Ravensight feed is temporarily unavailable. Showing your local video feed.', 'warning');
+                    } else {
+                        onNotification('Ravensight feed is temporarily unavailable. Please refresh and try again.', 'error');
+                    }
                 } else if (status === 0) {
                     onNotification('Unable to reach Ravensight API. Check network/API host settings.', 'error');
                 } else if (fallback.length > 0) {

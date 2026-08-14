@@ -247,11 +247,16 @@ class RavensightAPI {
 
     // Get Video Feed
     async getVideoFeed(params = {}) {
+        const sameOriginApiBase = typeof window !== 'undefined' && window.location?.origin
+            ? `${window.location.origin.replace(/\/+$/, '')}/api`
+            : null;
+
         const candidateUrls = [
             '/videos/feed',
             '/feed',
-            `${this.generalApiBaseUrl}/ravensight/videos/feed`
-        ];
+            `${this.generalApiBaseUrl}/ravensight/videos/feed`,
+            sameOriginApiBase ? `${sameOriginApiBase}/ravensight/videos/feed` : null
+        ].filter(Boolean);
 
         const requestedFilter = String(params?.filter || 'all').toLowerCase();
         const shouldUseAnonymousFirst = requestedFilter !== 'my_videos';
