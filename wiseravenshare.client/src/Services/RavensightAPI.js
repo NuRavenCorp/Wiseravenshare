@@ -2,9 +2,12 @@ import axios from 'axios';
 import { getAdminPassToken, getAuthToken } from './authStorage.js';
 
 const ensureApiBase = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    return /\/api$/i.test(raw) ? raw : `${raw.replace(/\/+$/, '')}/api`;
+    let normalized = String(value || '').trim().replace(/\/+$/, '');
+    if (!normalized) return '';
+    while (/\/api$/i.test(normalized)) {
+        normalized = normalized.replace(/\/api$/i, '').replace(/\/+$/, '');
+    }
+    return `${normalized}/api`;
 };
 
 const extractErrorMessage = (error, fallback) => {

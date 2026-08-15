@@ -5,7 +5,13 @@ const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
 const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').trim());
 
-const stripApiSegment = (value = '') => String(value || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+const stripApiSegment = (value = '') => {
+    let normalized = String(value || '').trim().replace(/\/+$/, '');
+    while (/\/api$/i.test(normalized)) {
+        normalized = normalized.replace(/\/api$/i, '').replace(/\/+$/, '');
+    }
+    return normalized;
+};
 
 const resolveHubBaseUrl = () => {
     const configuredApi = String(import.meta.env.VITE_API_URL || '').trim();
