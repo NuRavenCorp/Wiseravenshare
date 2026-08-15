@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.AspNetCore.OutputCaching;
 using Wiseravenshare.Server.Models.Evolution;
 using Wiseravenshare.Server.Services;
 
@@ -21,6 +22,7 @@ public sealed class EvolutionController : ControllerBase
     }
 
     [HttpGet("updates")]
+    [OutputCache(PolicyName = "EvolutionCatalog")]
     public IActionResult GetUpdates()
     {
         EnsureSeededModules();
@@ -46,6 +48,7 @@ public sealed class EvolutionController : ControllerBase
     }
 
     [HttpGet("modules/{moduleId}")]
+    [OutputCache(PolicyName = "EvolutionCatalog")]
     public IActionResult GetModule(string moduleId)
     {
         EnsureSeededModules();
@@ -61,6 +64,7 @@ public sealed class EvolutionController : ControllerBase
     }
 
     [HttpGet("modules/{moduleId}/latest")]
+    [OutputCache(PolicyName = "EvolutionCatalog")]
     public IActionResult GetLatestModule(string moduleId)
     {
         EnsureSeededModules();
@@ -84,6 +88,7 @@ public sealed class EvolutionController : ControllerBase
     }
 
     [HttpGet("plugins/discover")]
+    [OutputCache(PolicyName = "EvolutionCatalog")]
     public IActionResult DiscoverPlugins()
     {
         EnsureSeededModules();

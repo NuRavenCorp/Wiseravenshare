@@ -188,6 +188,7 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
 
         setIsUploading(true);
         setUploadProgress(0);
+    let uploadSucceeded = false;
 
         try {
             const formData = new FormData();
@@ -213,6 +214,9 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             const response = await ravensightAPI.uploadVideo(formData, (progress) => {
                 setUploadProgress(progress);
             });
+
+            uploadSucceeded = true;
+            setUploadProgress(100);
 
             if (response?.video) {
                 upsertLocalVideo({
@@ -240,6 +244,9 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             upsertLocalVideo(fallbackVideo);
             onNotification(error?.message || 'Service unavailable: video saved locally and will remain visible in your feed/library.', 'warning');
         } finally {
+            if (uploadSucceeded) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+            }
             setIsUploading(false);
             setUploadProgress(0);
         }

@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -22,6 +23,8 @@ public class AuthController : ControllerBase
     private static readonly ConcurrentDictionary<string, PasswordResetRecord> PasswordResetsByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, RefreshTokenRecord> RefreshTokensByToken = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, AdminPassTokenRecord> AdminPassTokensByToken = new(StringComparer.Ordinal);
+    private static int _seededUsersLogWritten;
     private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
     private const int MaxFailedLoginAttempts = 5;
@@ -30,6 +33,8 @@ public class AuthController : ControllerBase
     private readonly UserStore _userStore;
     private readonly IUserRepository _userRepository;
     private readonly GrowthService _growthService;
+    private readonly TeamAccessService _teamAccessService;
+    private readonly IEmailService _emailService;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -37,12 +42,16 @@ public class AuthController : ControllerBase
         UserStore userStore,
         IUserRepository userRepository,
         GrowthService growthService,
+        TeamAccessService teamAccessService,
+        IEmailService emailService,
         ILogger<AuthController> logger)
     {
         _configuration = configuration;
         _userStore = userStore;
         _userRepository = userRepository;
         _growthService = growthService;
+        _teamAccessService = teamAccessService;
+        _emailService = emailService;
         _logger = logger;
     }
 
@@ -54,7 +63,7 @@ public class AuthController : ControllerBase
 
         if (!IsSelfRegistrationAllowed())
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Self-registration is disabled." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Admin-only access is enabled. Public sign-up is disabled." });
         }
 
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
@@ -114,12 +123,15 @@ public class AuthController : ControllerBase
         }
 
         var domainUserId = await EnsureDomainUserAsync(user);
-        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var accessScope = ResolveAccessScope(user.Email);
+        var teamRole = ResolveTeamRole(user.Email);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+        var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
-        return Ok(new { token, refreshToken, user = responseUser });
+        return Ok(new { token, refreshToken, adminPassToken, user = responseUser });
     }
 
     [HttpPost("login")]
@@ -147,6 +159,12 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Invalid email or password." });
         }
 
+        if (!IsAuthenticationAllowed(user.Email))
+        {
+            RecordFailedLogin(attemptKey);
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
+        }
+
         ClearFailedLogins(attemptKey);
 
         try
@@ -159,12 +177,15 @@ public class AuthController : ControllerBase
         }
 
         var domainUserId = await EnsureDomainUserAsync(user);
-        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var accessScope = ResolveAccessScope(user.Email);
+        var teamRole = ResolveTeamRole(user.Email);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+        var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
-        return Ok(new { token, refreshToken, user = responseUser });
+        return Ok(new { token, refreshToken, adminPassToken, user = responseUser });
     }
 
     [HttpPost("refresh-token")]
@@ -188,13 +209,22 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "User not found." });
         }
 
+        if (!IsAuthenticationAllowed(user.Email))
+        {
+            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
+        }
+
         RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
 
         var domainUserId = await EnsureDomainUserAsync(user);
-        var newToken = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name);
+        var accessScope = ResolveAccessScope(user.Email);
+        var teamRole = ResolveTeamRole(user.Email);
+        var newToken = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var newRefreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+        var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
 
-        return Ok(new { token = newToken, refreshToken = newRefreshToken });
+        return Ok(new { token = newToken, refreshToken = newRefreshToken, adminPassToken });
     }
 
     [HttpPost("verify")]
@@ -236,10 +266,21 @@ public class AuthController : ControllerBase
                 user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
             }
 
+            if (!IsAuthenticationAllowed(user.Email))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { valid = false, message = "Access requires admin approval or an active team invite." });
+            }
+
             var domainUserId = await EnsureDomainUserAsync(user);
             var responseUser = UserStore.ToResponse(user);
             responseUser.Id = domainUserId.ToString("N");
-            return Ok(new { valid = true, user = responseUser });
+            var accessScope = ResolveAccessScope(user.Email);
+            return Ok(new
+            {
+                valid = true,
+                user = responseUser,
+                adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase)
+            });
         }
         catch
         {
@@ -279,6 +320,11 @@ public class AuthController : ControllerBase
             return NotFound(new { message = "User not found." });
         }
 
+        if (!IsAuthenticationAllowed(user.Email))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
+        }
+
         if (!UserStore.VerifyPassword(request.CurrentPassword, user.PasswordHash))
         {
             return BadRequest(new { message = "Current password is incorrect." });
@@ -310,9 +356,12 @@ public class AuthController : ControllerBase
         var jwtKey = _configuration["Authentication:Jwt:Key"];
         var jwtKeyConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
 
+        var allowSelfRegistration = IsSelfRegistrationAllowed();
         return Ok(new
         {
-            selfRegistrationEnabled = IsSelfRegistrationAllowed(),
+            selfRegistrationEnabled = allowSelfRegistration,
+            adminOnlyLogin = false,
+            teamInviteLoginEnabled = true,
             jwt = new
             {
                 issuerConfigured = jwtIssuerConfigured,
@@ -320,6 +369,368 @@ public class AuthController : ControllerBase
                 keyConfigured = jwtKeyConfigured
             }
         });
+    }
+
+    [HttpPost("team-access/invites")]
+    [Authorize]
+    public async Task<IActionResult> CreateTeamInvite([FromBody] TeamInviteRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var inviteeEmail = request.Email?.Trim() ?? string.Empty;
+        if (!IsValidEmail(inviteeEmail))
+        {
+            return BadRequest(new { message = "A valid invitee email is required." });
+        }
+
+        var ttlHours = request.ExpiresInHours <= 0 ? 72 : Math.Clamp(request.ExpiresInHours, 1, 336);
+        var issued = _teamAccessService.IssueInvite(
+            actorEmail,
+            inviteeEmail,
+            request.Name ?? string.Empty,
+            request.TeamRole ?? "member",
+            TimeSpan.FromHours(ttlHours),
+            prearranged: false);
+
+        RecordTeamAccessPolicyShift(
+            actorEmail,
+            "team-access.invite-issued",
+            "Team invite token issued",
+            $"Issued team invite token for {issued.InviteeEmail} as {issued.TeamRole}.",
+            "active",
+            $"inviteId={issued.InviteId};expiresAtUtc={issued.ExpiresAtUtc:O};prearranged={issued.Prearranged}");
+
+        if (!TryBuildInviteLink(issued.InviteToken, issued.InviteeEmail, out var inviteLink))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Invite delivery is not configured. Set App:PublicBaseUrl to an absolute URL." });
+        }
+
+        var emailDelivered = await _emailService.SendTeamInviteEmailAsync(new TeamInviteEmailMessage
+        {
+            ToEmail = issued.InviteeEmail,
+            ToName = issued.DisplayName,
+            InviterEmail = actorEmail,
+            TeamRole = issued.TeamRole,
+            Prearranged = false,
+            ExpiresAtUtc = issued.ExpiresAtUtc,
+            InviteLink = inviteLink
+        });
+
+        return Ok(new
+        {
+            success = true,
+            invite = issued,
+            inviteLink,
+            emailDelivered,
+            emailDispatchStatus = emailDelivered ? "sent" : "not_sent"
+        });
+    }
+
+    [HttpPost("admin-pass")]
+    [Authorize]
+    public IActionResult IssueAdminPassToken()
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized(new { message = "Unable to resolve authenticated administrator identity." });
+        }
+
+        var token = GenerateAdminPassToken(userId, actorEmail, "admin");
+        return Ok(new
+        {
+            adminPassToken = token,
+            scope = "all-access",
+            expiresAtUtc = DateTime.UtcNow.AddHours(24)
+        });
+    }
+
+    [HttpPost("team-access/prearrange")]
+    [Authorize]
+    public async Task<IActionResult> CreatePrearrangedTeamToken([FromBody] TeamInviteRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var inviteeEmail = request.Email?.Trim() ?? string.Empty;
+        if (!IsValidEmail(inviteeEmail))
+        {
+            return BadRequest(new { message = "A valid team-member email is required." });
+        }
+
+        var ttlHours = request.ExpiresInHours <= 0 ? 168 : Math.Clamp(request.ExpiresInHours, 1, 336);
+        var issued = _teamAccessService.IssueInvite(
+            actorEmail,
+            inviteeEmail,
+            request.Name ?? string.Empty,
+            request.TeamRole ?? "member",
+            TimeSpan.FromHours(ttlHours),
+            prearranged: true);
+
+        RecordTeamAccessPolicyShift(
+            actorEmail,
+            "team-access.prearranged-issued",
+            "Prearranged team token issued",
+            $"Issued prearranged team token for {issued.InviteeEmail} as {issued.TeamRole}.",
+            "active",
+            $"inviteId={issued.InviteId};expiresAtUtc={issued.ExpiresAtUtc:O};prearranged={issued.Prearranged}");
+
+        if (!TryBuildInviteLink(issued.InviteToken, issued.InviteeEmail, out var inviteLink))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Invite delivery is not configured. Set App:PublicBaseUrl to an absolute URL." });
+        }
+
+        var emailDelivered = await _emailService.SendTeamInviteEmailAsync(new TeamInviteEmailMessage
+        {
+            ToEmail = issued.InviteeEmail,
+            ToName = issued.DisplayName,
+            InviterEmail = actorEmail,
+            TeamRole = issued.TeamRole,
+            Prearranged = true,
+            ExpiresAtUtc = issued.ExpiresAtUtc,
+            InviteLink = inviteLink
+        });
+
+        return Ok(new
+        {
+            success = true,
+            prearrangedToken = issued,
+            inviteLink,
+            emailDelivered,
+            emailDispatchStatus = emailDelivered ? "sent" : "not_sent"
+        });
+    }
+
+    [HttpPost("team-access/invites/{inviteId}/revoke")]
+    [Authorize]
+    public IActionResult RevokePendingTeamInvite(string inviteId, [FromBody] TeamAccessAdminActionRequest? request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(inviteId))
+        {
+            return BadRequest(new { message = "inviteId is required." });
+        }
+
+        var revoked = _teamAccessService.RevokePendingInvite(inviteId, actorEmail, request?.Reason ?? string.Empty);
+        if (revoked is null)
+        {
+            return NotFound(new { message = "Pending invite was not found or can no longer be revoked." });
+        }
+
+        RecordTeamAccessPolicyShift(
+            actorEmail,
+            "team-access.invite-revoked",
+            "Team invite token revoked",
+            $"Revoked team invite token for {revoked.InviteeEmail}.",
+            "active",
+            $"inviteId={revoked.InviteId};reason={revoked.RevokedReason}");
+
+        return Ok(new { success = true, invite = revoked });
+    }
+
+    [HttpPost("team-access/members/{email}/status")]
+    [Authorize]
+    public IActionResult SetTeamMemberStatus(string email, [FromBody] TeamMemberStatusUpdateRequest request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var normalizedEmail = (email ?? string.Empty).Trim();
+        if (!IsValidEmail(normalizedEmail))
+        {
+            return BadRequest(new { message = "A valid member email is required." });
+        }
+
+        var updated = _teamAccessService.SetMemberActiveStatus(normalizedEmail, request.Active, actorEmail, request.Reason ?? string.Empty);
+        if (updated is null)
+        {
+            return NotFound(new { message = "Team member not found." });
+        }
+
+        var actionKey = request.Active ? "team-access.member-reactivated" : "team-access.member-suspended";
+        var actionTitle = request.Active ? "Team member reactivated" : "Team member suspended";
+        var actionSummary = request.Active
+            ? $"Reactivated team access for {updated.Email}."
+            : $"Suspended team access for {updated.Email}.";
+        RecordTeamAccessPolicyShift(
+            actorEmail,
+            actionKey,
+            actionTitle,
+            actionSummary,
+            "active",
+            $"reason={(request.Reason ?? string.Empty).Trim()};role={updated.TeamRole}");
+
+        return Ok(new { success = true, member = updated });
+    }
+
+    [HttpGet("team-access")]
+    [Authorize]
+    public IActionResult GetTeamAccessSnapshot()
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var snapshot = _teamAccessService.GetSnapshot();
+        return Ok(snapshot);
+    }
+
+    [HttpGet("team-access/podcast-control-state")]
+    [Authorize]
+    public IActionResult GetPodcastControlState()
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var accessScope = ResolveAccessScope(actorEmail);
+        var teamRole = ResolveTeamRole(actorEmail);
+        var state = BuildPodcastControlState(accessScope, teamRole);
+        return Ok(new
+        {
+            accessScope,
+            teamRole,
+            effectiveRole = state.EffectiveRole,
+            allowedRoles = state.AllowedRoles,
+            permissions = state.Permissions,
+            policyVersion = "podcast-control-v1",
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost("team-access/podcast-control-role")]
+    [Authorize]
+    public IActionResult RequestPodcastControlRole([FromBody] PodcastControlRoleRequest? request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var accessScope = ResolveAccessScope(actorEmail);
+        var teamRole = ResolveTeamRole(actorEmail);
+        var state = BuildPodcastControlState(accessScope, teamRole);
+
+        var requested = NormalizePodcastRole(request?.RequestedRole);
+        var grantedRole = state.AllowedRoles.Contains(requested, StringComparer.OrdinalIgnoreCase)
+            ? requested
+            : state.EffectiveRole;
+        var permissions = BuildPodcastRolePermissions(grantedRole);
+
+        return Ok(new
+        {
+            accessScope,
+            teamRole,
+            requestedRole = requested,
+            grantedRole,
+            allowedRoles = state.AllowedRoles,
+            permissions,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost("team-access/accept")]
+    [AllowAnonymous]
+    public async Task<IActionResult> AcceptTeamInvite([FromBody] TeamInviteAcceptRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var inviteToken = request.InviteToken?.Trim() ?? string.Empty;
+        var inviteeEmail = request.Email?.Trim() ?? string.Empty;
+        var password = request.Password ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(inviteToken) || string.IsNullOrWhiteSpace(inviteeEmail) || string.IsNullOrWhiteSpace(password))
+        {
+            return BadRequest(new { message = "Invite token, email, and password are required." });
+        }
+
+        if (!IsValidEmail(inviteeEmail))
+        {
+            return BadRequest(new { message = "A valid email address is required." });
+        }
+
+        if (!MeetsPasswordPolicy(password))
+        {
+            return BadRequest(new { message = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character." });
+        }
+
+        var accepted = _teamAccessService.TryConsumeInvite(inviteToken, inviteeEmail);
+        if (accepted is null)
+        {
+            return Unauthorized(new { message = "Invite token is invalid, expired, or already consumed." });
+        }
+
+        UserRecord user;
+        var safeName = string.IsNullOrWhiteSpace(request.Name)
+            ? (string.IsNullOrWhiteSpace(accepted.DisplayName) ? inviteeEmail.Split('@')[0] : accepted.DisplayName)
+            : request.Name.Trim();
+
+        if (_userStore.TryGetByEmail(inviteeEmail, out var existingUser) && existingUser is not null)
+        {
+            _userStore.UpdatePassword(inviteeEmail, password);
+            user = existingUser;
+            if (!string.IsNullOrWhiteSpace(safeName) && !string.Equals(user.Name, safeName, StringComparison.Ordinal))
+            {
+                user = _userStore.UpdateProfile(user.Id, new UpdateUserProfileRequest { Name = safeName });
+            }
+        }
+        else
+        {
+            user = _userStore.CreateUser(safeName, inviteeEmail, password, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var domainUserId = await EnsureDomainUserAsync(user);
+        var accessScope = ResolveAccessScope(user.Email);
+        var teamRole = ResolveTeamRole(user.Email);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
+        var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+
+        var responseUser = UserStore.ToResponse(user);
+        responseUser.Id = domainUserId.ToString("N");
+
+        try
+        {
+            _growthService.TrackEvent(
+                user.Id,
+                user.Email,
+                "team_access_granted",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["accessScope"] = accessScope,
+                    ["teamRole"] = teamRole,
+                    ["prearranged"] = accepted.Prearranged ? "true" : "false"
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Growth tracking failed when accepting team invite for {Email}.", user.Email);
+        }
+
+        return Ok(new { token, refreshToken, user = responseUser, accessScope, teamRole, accepted.Prearranged });
     }
 
     [HttpPost("forgot-password")]
@@ -332,6 +743,15 @@ public class AuthController : ControllerBase
         if (!IsValidEmail(email))
         {
             return BadRequest(new { message = "A valid email address is required." });
+        }
+
+        if (!IsAuthenticationAllowed(email))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                success = false,
+                message = "Access requires admin approval or an active team invite."
+            });
         }
 
         if (!_userStore.EmailExists(email))
@@ -392,6 +812,12 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Reset token is invalid or expired." });
         }
 
+        if (!IsAuthenticationAllowed(record.Email))
+        {
+            PasswordResetsByToken.TryRemove(token, out _);
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
+        }
+
         try
         {
             _userStore.UpdatePassword(record.Email, request.NewPassword);
@@ -425,7 +851,7 @@ public class AuthController : ControllerBase
         };
     }
 
-    private string GenerateToken(string id, string email, string name)
+    private string GenerateToken(string id, string email, string name, string accessScope = "admin", string teamRole = "owner")
     {
         var claims = new List<Claim>
         {
@@ -433,8 +859,15 @@ public class AuthController : ControllerBase
             new(ClaimTypes.NameIdentifier, id),
             new(JwtRegisteredClaimNames.Email, email),
             new(ClaimTypes.Name, name),
-            new(ClaimTypes.Email, email)
+            new(ClaimTypes.Email, email),
+            new(ClaimTypes.Role, teamRole),
+            new("access_scope", accessScope)
         };
+
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            claims.Add(new Claim("admin_pass", "all-access"));
+        }
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey()));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
@@ -484,7 +917,259 @@ public class AuthController : ControllerBase
 
     private bool IsSelfRegistrationAllowed()
     {
-        return _configuration.GetValue("Authentication:AllowSelfRegistration", true);
+        var configured = _configuration.GetValue<bool?>("Authentication:AllowSelfRegistration");
+        return configured ?? true;
+    }
+
+    private IReadOnlyCollection<string> GetConfiguredAdminEmails()
+    {
+        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
+        return AuthAccessPolicy.GetConfiguredAdminEmails(configuredAdminEmails, Enumerable.Empty<string>());
+    }
+
+    private bool IsConfiguredAdminUser(string? email)
+    {
+        return AuthAccessPolicy.IsAdminLoginAllowed(email, GetConfiguredAdminEmails());
+    }
+
+    private bool IsAuthenticationAllowed(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return false;
+        }
+
+        return IsConfiguredAdminUser(email)
+            || _teamAccessService.IsTeamMemberAllowed(email)
+            || IsSelfRegistrationAllowed();
+    }
+
+    private string ResolveAccessScope(string? email)
+    {
+        return IsConfiguredAdminUser(email) ? "admin" : "team";
+    }
+
+    private string ResolveTeamRole(string? email)
+    {
+        if (IsConfiguredAdminUser(email))
+        {
+            return "owner";
+        }
+
+        var snapshot = _teamAccessService.GetSnapshot();
+        var member = snapshot.Members.FirstOrDefault(candidate =>
+            candidate.Email.Equals((email ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase));
+        return member?.TeamRole ?? "member";
+    }
+
+    private string GenerateAdminPassTokenIfEligible(string userId, string email, string accessScope)
+    {
+        if (!string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (!IsConfiguredAdminUser(email))
+        {
+            return string.Empty;
+        }
+
+        return GenerateAdminPassToken(userId, email, accessScope);
+    }
+
+    private static string GenerateAdminPassToken(string userId, string email, string accessScope)
+    {
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        AdminPassTokensByToken[token] = new AdminPassTokenRecord
+        {
+            UserId = userId,
+            Email = (email ?? string.Empty).Trim().ToLowerInvariant(),
+            Scope = string.IsNullOrWhiteSpace(accessScope) ? "team" : accessScope.Trim().ToLowerInvariant(),
+            IssuedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddHours(24)
+        };
+        return token;
+    }
+
+    private PodcastControlState BuildPodcastControlState(string accessScope, string teamRole)
+    {
+        var normalizedScope = (accessScope ?? string.Empty).Trim().ToLowerInvariant();
+        var normalizedTeamRole = NormalizePodcastRole(teamRole);
+
+        if (normalizedScope == "admin" || normalizedTeamRole == "owner")
+        {
+            var ownerPermissions = BuildPodcastRolePermissions("owner");
+            return new PodcastControlState
+            {
+                EffectiveRole = "owner",
+                AllowedRoles = new[] { "owner", "producer", "host", "editor", "script-lead", "guest" },
+                Permissions = ownerPermissions
+            };
+        }
+
+        if (normalizedTeamRole == "producer")
+        {
+            return new PodcastControlState
+            {
+                EffectiveRole = "producer",
+                AllowedRoles = new[] { "producer", "host", "editor", "script-lead", "guest" },
+                Permissions = BuildPodcastRolePermissions("producer")
+            };
+        }
+
+        if (normalizedTeamRole == "host")
+        {
+            return new PodcastControlState
+            {
+                EffectiveRole = "host",
+                AllowedRoles = new[] { "host", "editor", "script-lead", "guest" },
+                Permissions = BuildPodcastRolePermissions("host")
+            };
+        }
+
+        if (normalizedTeamRole == "editor")
+        {
+            return new PodcastControlState
+            {
+                EffectiveRole = "editor",
+                AllowedRoles = new[] { "editor", "script-lead", "guest" },
+                Permissions = BuildPodcastRolePermissions("editor")
+            };
+        }
+
+        if (normalizedTeamRole == "script-lead")
+        {
+            return new PodcastControlState
+            {
+                EffectiveRole = "script-lead",
+                AllowedRoles = new[] { "script-lead", "guest" },
+                Permissions = BuildPodcastRolePermissions("script-lead")
+            };
+        }
+
+        // Public/self-registered users can still collaborate safely as guests.
+        return new PodcastControlState
+        {
+            EffectiveRole = "guest",
+            AllowedRoles = new[] { "guest" },
+            Permissions = BuildPodcastRolePermissions("guest")
+        };
+    }
+
+    private static string NormalizePodcastRole(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "owner" => "owner",
+            "producer" => "producer",
+            "host" => "host",
+            "editor" => "editor",
+            "script lead" => "script-lead",
+            "script_lead" => "script-lead",
+            "script-lead" => "script-lead",
+            "guest" => "guest",
+            _ => "guest"
+        };
+    }
+
+    private static object BuildPodcastRolePermissions(string normalizedRole)
+    {
+        var role = NormalizePodcastRole(normalizedRole);
+        return role switch
+        {
+            "owner" => new
+            {
+                canGoLive = true,
+                canEditScript = true,
+                canAssignShots = true,
+                canApproveSegments = true,
+                canSwitchMonitors = true,
+                canManageGuests = true
+            },
+            "producer" => new
+            {
+                canGoLive = true,
+                canEditScript = true,
+                canAssignShots = true,
+                canApproveSegments = true,
+                canSwitchMonitors = true,
+                canManageGuests = true
+            },
+            "host" => new
+            {
+                canGoLive = true,
+                canEditScript = true,
+                canAssignShots = true,
+                canApproveSegments = false,
+                canSwitchMonitors = true,
+                canManageGuests = false
+            },
+            "editor" => new
+            {
+                canGoLive = false,
+                canEditScript = true,
+                canAssignShots = true,
+                canApproveSegments = true,
+                canSwitchMonitors = true,
+                canManageGuests = false
+            },
+            "script-lead" => new
+            {
+                canGoLive = false,
+                canEditScript = true,
+                canAssignShots = true,
+                canApproveSegments = true,
+                canSwitchMonitors = false,
+                canManageGuests = false
+            },
+            _ => new
+            {
+                canGoLive = false,
+                canEditScript = false,
+                canAssignShots = false,
+                canApproveSegments = false,
+                canSwitchMonitors = false,
+                canManageGuests = false
+            }
+        };
+    }
+
+    private bool TryGetCurrentActorEmail(out string email)
+    {
+        email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
+            ?? string.Empty;
+        email = email.Trim();
+        return !string.IsNullOrWhiteSpace(email);
+    }
+
+    private void RecordTeamAccessPolicyShift(string actorEmail, string policyKey, string title, string summary, string status, string notes)
+    {
+        try
+        {
+            var userId = "system";
+            var userEmail = actorEmail.Trim();
+
+            if (_userStore.TryGetByEmail(actorEmail, out var actorUser) && actorUser is not null)
+            {
+                userId = actorUser.Id;
+                userEmail = actorUser.Email;
+            }
+
+            _growthService.RecordAdminPolicyShift(userId, userEmail, new AdminPolicyShiftRequest
+            {
+                PolicyKey = policyKey,
+                Title = title,
+                Summary = summary,
+                Status = status,
+                Notes = notes
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record team-access policy audit event {PolicyKey}.", policyKey);
+        }
     }
 
     private static bool MeetsPasswordPolicy(string password)
@@ -569,13 +1254,34 @@ public class AuthController : ControllerBase
     private void EnsureConfiguredUsersSeeded()
     {
         var configuredUsers = ReadConfiguredUsers().ToList();
-        _logger.LogWarning("Bootstrapping auth with {ConfiguredUserCount} configured user(s).", configuredUsers.Count);
-        foreach (var configuredUser in configuredUsers.Take(3))
+        if (Interlocked.Exchange(ref _seededUsersLogWritten, 1) == 0)
         {
-            _logger.LogWarning("Configured auth user: Name='{Name}', Email='{Email}', PasswordPresent={PasswordPresent}", configuredUser.Name, configuredUser.Email, !string.IsNullOrWhiteSpace(configuredUser.Password));
+            _logger.LogInformation("Bootstrapping auth with {ConfiguredUserCount} configured user(s).", configuredUsers.Count);
         }
 
         _userStore.EnsureSeeded(configuredUsers);
+    }
+
+    private bool TryBuildInviteLink(string inviteToken, string inviteeEmail, out string inviteLink)
+    {
+        inviteLink = string.Empty;
+
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(configuredBaseUrl) || !Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var baseUri))
+        {
+            _logger.LogError("Unable to build invite link because App:PublicBaseUrl is missing or invalid.");
+            return false;
+        }
+
+        if (!HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment() &&
+            !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError("Unable to build invite link because App:PublicBaseUrl must use https outside development.");
+            return false;
+        }
+
+        inviteLink = $"{baseUri}?teamToken={Uri.EscapeDataString(inviteToken)}&email={Uri.EscapeDataString(inviteeEmail)}";
+        return true;
     }
 
     private IEnumerable<(string Name, string Email, string Password)> ReadConfiguredUsers()
@@ -726,6 +1432,30 @@ public class AuthController : ControllerBase
         public string UserId { get; set; } = string.Empty;
         public DateTime ExpiresAtUtc { get; set; }
     }
+
+    private sealed class AdminPassTokenRecord
+    {
+        public string UserId { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Scope { get; set; } = "team";
+        public DateTime IssuedAtUtc { get; set; }
+        public DateTime ExpiresAtUtc { get; set; }
+    }
+
+    private sealed class PodcastControlState
+    {
+        public string EffectiveRole { get; init; } = "guest";
+        public string[] AllowedRoles { get; init; } = new[] { "guest" };
+        public object Permissions { get; init; } = new
+        {
+            canGoLive = false,
+            canEditScript = false,
+            canAssignShots = false,
+            canApproveSegments = false,
+            canSwitchMonitors = false,
+            canManageGuests = false
+        };
+    }
 }
 
 public sealed class LoginRequest
@@ -771,4 +1501,36 @@ public sealed class ChangePasswordRequest
 {
     public string CurrentPassword { get; set; } = string.Empty;
     public string NewPassword { get; set; } = string.Empty;
+}
+
+public sealed class TeamInviteRequest
+{
+    public string Email { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string TeamRole { get; set; } = "member";
+    public int ExpiresInHours { get; set; } = 72;
+}
+
+public sealed class TeamInviteAcceptRequest
+{
+    public string InviteToken { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+public sealed class TeamAccessAdminActionRequest
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class TeamMemberStatusUpdateRequest
+{
+    public bool Active { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class PodcastControlRoleRequest
+{
+    public string RequestedRole { get; set; } = string.Empty;
 }

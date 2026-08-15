@@ -27,10 +27,11 @@ public class RavensightController : ControllerBase
     private readonly IBlobStorageService _blobStorageService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService, IHttpClientFactory httpClientFactory)
+    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService, IHttpClientFactory httpClientFactory, OutputCacheInvalidationService cacheInvalidation)
     {
         _environment = environment;
         _youTubeService = youTubeService;
@@ -40,6 +41,7 @@ public class RavensightController : ControllerBase
         _blobStorageService = blobStorageService;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _cacheInvalidation = cacheInvalidation;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
         {
@@ -184,6 +186,8 @@ public class RavensightController : ControllerBase
             saved = BuildFallbackVideo(userId, upload, absoluteVideoUrl, youtubeUrl, tiktokUrl, facebookUrl, resolvedStorageMode, hasActiveSubscription);
         }
 
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+
         return Ok(new
         {
             video = saved,
@@ -214,10 +218,15 @@ public class RavensightController : ControllerBase
         }
 
         var destinationFolder = NormalizeDestinationFolder(request.DestinationFolder, _defaultVideoDestination);
-        var persistedUrl = await PersistExternalVideoToBlobAsync(request.VideoUrl, destinationFolder, cancellationToken);
-        if (string.IsNullOrWhiteSpace(persistedUrl))
+        var persisted = await PersistExternalVideoToBlobAsync(request.VideoUrl, destinationFolder, cancellationToken);
+        if (string.IsNullOrWhiteSpace(persisted.PublicUrl))
         {
-            return StatusCode(StatusCodes.Status502BadGateway, new { message = "Unable to copy source video into blob storage." });
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message = string.IsNullOrWhiteSpace(persisted.Error)
+                    ? "Unable to copy source video into blob storage."
+                    : persisted.Error
+            });
         }
 
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
@@ -235,7 +244,7 @@ public class RavensightController : ControllerBase
                     Title = title,
                     Description = request.Description?.Trim() ?? string.Empty,
                     Tags = request.Tags ?? [],
-                    VideoUrl = persistedUrl,
+                    VideoUrl = persisted.PublicUrl,
                     ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
                     PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
                     Status = "published",
@@ -249,7 +258,7 @@ public class RavensightController : ControllerBase
                     Title = title,
                     Description = request.Description?.Trim() ?? string.Empty,
                     Tags = request.Tags?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
-                    VideoUrl = persistedUrl,
+                    VideoUrl = persisted.PublicUrl,
                     ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
                     Status = "published",
                     PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
@@ -271,7 +280,7 @@ public class RavensightController : ControllerBase
                 Title = title,
                 Description = request.Description?.Trim() ?? string.Empty,
                 Tags = request.Tags?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
-                VideoUrl = persistedUrl,
+                VideoUrl = persisted.PublicUrl,
                 ThumbnailUrl = request.ThumbnailUrl?.Trim() ?? string.Empty,
                 Status = "published",
                 PrivacyStatus = string.IsNullOrWhiteSpace(request.PrivacyStatus) ? "unlisted" : request.PrivacyStatus,
@@ -282,10 +291,12 @@ public class RavensightController : ControllerBase
             };
         }
 
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+
         return Ok(new
         {
             video = saved,
-            mediaUrl = persistedUrl,
+            mediaUrl = persisted.PublicUrl,
             blobStored = true,
             persistenceStatus
         });
@@ -363,14 +374,31 @@ public class RavensightController : ControllerBase
         }
     }
 
-    private async Task<string?> PersistExternalVideoToBlobAsync(string sourceVideoUrl, string destinationFolder, CancellationToken cancellationToken)
+    private async Task<(string? PublicUrl, string? Error)> PersistExternalVideoToBlobAsync(string sourceVideoUrl, string destinationFolder, CancellationToken cancellationToken)
     {
         try
         {
+            var blobObjectKey = _blobStorageService.ResolveObjectKey(sourceVideoUrl);
+            if (!string.IsNullOrWhiteSpace(blobObjectKey))
+            {
+                var existingBlobStream = await _blobStorageService.OpenReadAsync(blobObjectKey, cancellationToken);
+                if (existingBlobStream is not null)
+                {
+                    await using (existingBlobStream)
+                    {
+                        var blobExtension = ResolveVideoExtensionFromPath(blobObjectKey);
+                        var blobFileName = $"{Guid.NewGuid():N}{blobExtension}";
+                        var blobTargetObjectKey = BuildBlobObjectKey(destinationFolder, blobFileName);
+                        var blobUploadResult = await _blobStorageService.UploadAsync(blobTargetObjectKey, existingBlobStream, "video/mp4", cancellationToken);
+                        return (blobUploadResult.PublicUrl, null);
+                    }
+                }
+            }
+
             var sourceUri = BuildSourceUri(sourceVideoUrl);
             if (sourceUri is null)
             {
-                return null;
+                return (null, "Source video URL is invalid or unreachable from the API host.");
             }
 
             var client = _httpClientFactory.CreateClient();
@@ -378,7 +406,7 @@ public class RavensightController : ControllerBase
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to fetch source video {SourceVideoUrl}. Status {StatusCode}", sourceVideoUrl, (int)response.StatusCode);
-                return null;
+                return (null, $"Source video fetch failed ({(int)response.StatusCode}).");
             }
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "video/mp4";
@@ -388,12 +416,12 @@ public class RavensightController : ControllerBase
 
             await using var sourceStream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var uploadResult = await _blobStorageService.UploadAsync(objectKey, sourceStream, contentType, cancellationToken);
-            return uploadResult.PublicUrl;
+            return (uploadResult.PublicUrl, null);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Unable to persist external video source {SourceVideoUrl} to blob storage", sourceVideoUrl);
-            return null;
+            return (null, $"Blob persistence failed: {ex.Message}");
         }
     }
 
@@ -424,6 +452,17 @@ public class RavensightController : ControllerBase
         if (contentType.Contains("webm", StringComparison.OrdinalIgnoreCase)) return ".webm";
         if (contentType.Contains("quicktime", StringComparison.OrdinalIgnoreCase)) return ".mov";
         if (contentType.Contains("x-msvideo", StringComparison.OrdinalIgnoreCase)) return ".avi";
+        return ".mp4";
+    }
+
+    private static string ResolveVideoExtensionFromPath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        if (!string.IsNullOrWhiteSpace(extension) && AllowedVideoTypes.Contains(extension))
+        {
+            return extension;
+        }
+
         return ".mp4";
     }
 
@@ -533,6 +572,7 @@ public class RavensightController : ControllerBase
             return NotFound(new { message = "Video not found." });
         }
 
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
         return Ok(updated);
     }
 
@@ -564,6 +604,8 @@ public class RavensightController : ControllerBase
             return NotFound(new { message = "Video not found." });
         }
 
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+
         return Ok(new
         {
             success = true,
@@ -576,6 +618,11 @@ public class RavensightController : ControllerBase
     public async Task<IActionResult> LikeVideo([FromRoute] string videoId, CancellationToken cancellationToken)
     {
         var updated = await _videoStore.AddLikeAsync(videoId, cancellationToken);
+        if (updated)
+        {
+            await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+        }
+
         return updated ? Ok(new { success = true }) : NotFound(new { message = "Video not found." });
     }
 
@@ -583,6 +630,11 @@ public class RavensightController : ControllerBase
     public async Task<IActionResult> UnlikeVideo([FromRoute] string videoId, CancellationToken cancellationToken)
     {
         var updated = await _videoStore.RemoveLikeAsync(videoId, cancellationToken);
+        if (updated)
+        {
+            await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+        }
+
         return updated ? Ok(new { success = true }) : NotFound(new { message = "Video not found." });
     }
 
@@ -601,7 +653,13 @@ public class RavensightController : ControllerBase
         }
 
         var comment = await _videoStore.AddCommentAsync(videoId, userId, request.Comment, cancellationToken);
-        return comment is null ? NotFound(new { message = "Video not found." }) : Ok(comment);
+        if (comment is null)
+        {
+            return NotFound(new { message = "Video not found." });
+        }
+
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+        return Ok(comment);
     }
 
     [HttpGet("{videoId}/comments")]
@@ -620,6 +678,11 @@ public class RavensightController : ControllerBase
 
     private async Task<bool> HasActiveSubscriptionAsync(string? userId)
     {
+        if (IsAllAccessAdmin())
+        {
+            return true;
+        }
+
         if (string.IsNullOrWhiteSpace(userId) || !Guid.TryParse(userId, out var parsedUserId))
         {
             return false;
@@ -635,6 +698,18 @@ public class RavensightController : ControllerBase
         }
 
         return subscription.Status is "active" or "trialing" or "past_due";
+    }
+
+    private bool IsAllAccessAdmin()
+    {
+        var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
+        return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
     }
 
     private static VideoLibraryVideo BuildFallbackVideo(string userId, RavensightVideoUploadDto upload, string absoluteVideoUrl, string? youtubeUrl, string? tiktokUrl, string? facebookUrl, string resolvedStorageMode, bool hasActiveSubscription)

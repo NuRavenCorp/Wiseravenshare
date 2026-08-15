@@ -10,6 +10,10 @@ using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Hubs;
+using System.IO.Compression;
+using System.Diagnostics;
+using System.Globalization;
+using Microsoft.AspNetCore.ResponseCompression;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -650,6 +654,8 @@ var requireDatabase = builder.Configuration.GetValue("Persistence:RequireDatabas
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
 var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "bucket-wrs-01010";
 var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
+var cacheConnection = builder.Configuration["Cache:ConnectionString"];
+var useRedisCache = builder.Configuration.GetValue("Cache:UseRedis", false);
 
 if (requireDatabase && string.IsNullOrWhiteSpace(defaultConnectionString))
 {
@@ -668,6 +674,56 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
+builder.Services.AddDistributedMemoryCache();
+
+if (useRedisCache && !string.IsNullOrWhiteSpace(cacheConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = cacheConnection;
+        options.InstanceName = builder.Configuration["Cache:InstanceName"] ?? "wiseravenshare:";
+    });
+}
+
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "application/problem+json"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+
+builder.Services.AddOutputCache(options =>
+{
+    options.AddPolicy("MarketQuotes", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(30))
+            .SetVaryByQuery("symbols")
+            .Tag("market"));
+
+    options.AddPolicy("EvolutionCatalog", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(45))
+            .Tag("evolution"));
+
+    options.AddPolicy("PublicFeedShort", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(20))
+            .Tag("feed"));
+});
+
 builder.Services.AddSignalR();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
@@ -679,7 +735,7 @@ builder.Services.AddScoped<IAgentRepository, AgentRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IEmailService, NoopEmailService>();
+builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
@@ -694,6 +750,10 @@ builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
+builder.Services.AddSingleton<TeamAccessService>();
+builder.Services.AddSingleton<PerformanceMetricsService>();
+builder.Services.AddScoped<OutputCacheInvalidationService>();
+builder.Services.AddSingleton<VideoFeedCollaborationService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
@@ -761,22 +821,23 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ClientPolicy", policy =>
     {
+        policy.AllowAnyHeader().AllowAnyMethod();
+
         if (configuredClientOrigins.Length > 0)
         {
             policy.WithOrigins(configuredClientOrigins)
-                  .AllowAnyHeader()
-                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+                  .AllowCredentials();
         }
         else if (builder.Environment.IsDevelopment())
         {
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowCredentials();
         }
         else
         {
             // Fail-safe: block cross-origin in production if CLIENT_ORIGIN is missing
             policy.WithOrigins("https://wise-ravens.com", "https://www.wise-ravens.com")
-                  .AllowAnyHeader()
-                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+                  .AllowCredentials();
         }
     });
 });
@@ -876,6 +937,16 @@ if (app.Environment.IsDevelopment())
 // Security headers for all responses
 app.Use(async (context, next) =>
 {
+    var startTimestamp = Stopwatch.GetTimestamp();
+
+    context.Response.OnStarting(() =>
+    {
+        var elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        context.Response.Headers["Server-Timing"] = $"app;dur={elapsedMs.ToString("0.###", CultureInfo.InvariantCulture)}";
+        context.Response.Headers["X-Response-Time-Ms"] = elapsedMs.ToString("0.###", CultureInfo.InvariantCulture);
+        return Task.CompletedTask;
+    });
+
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
@@ -884,13 +955,37 @@ app.Use(async (context, next) =>
     {
         context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     }
+
     await next();
+
+    var totalElapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+    if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+    {
+        var metricsService = context.RequestServices.GetRequiredService<PerformanceMetricsService>();
+        metricsService.RecordRequest(
+            context.Request.Method,
+            context.Request.Path.Value ?? string.Empty,
+            context.Response.StatusCode,
+            totalElapsedMs);
+    }
+
+    if (totalElapsedMs >= 1200)
+    {
+        app.Logger.LogWarning(
+            "Slow request detected: {Method} {Path} responded {StatusCode} in {ElapsedMs}ms.",
+            context.Request.Method,
+            context.Request.Path,
+            context.Response.StatusCode,
+            totalElapsedMs.ToString("0.###", CultureInfo.InvariantCulture));
+    }
 });
 
 app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseResponseCompression();
+app.UseOutputCache();
 
 var frontendDistPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
 var frontendDistExists = Directory.Exists(frontendDistPath);
@@ -905,7 +1000,21 @@ if (frontendDistExists)
 
     app.UseStaticFiles(new StaticFileOptions
     {
-        FileProvider = new PhysicalFileProvider(frontendDistPath)
+        FileProvider = new PhysicalFileProvider(frontendDistPath),
+        OnPrepareResponse = context =>
+        {
+            var responseHeaders = context.Context.Response.Headers;
+            var extension = Path.GetExtension(context.File.Name);
+            var isHtml = string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase);
+
+            if (isHtml)
+            {
+                responseHeaders["Cache-Control"] = "no-cache, no-store, must-revalidate";
+                return;
+            }
+
+            responseHeaders["Cache-Control"] = "public,max-age=604800,stale-while-revalidate=60";
+        }
     });
 }
 

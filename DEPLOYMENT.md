@@ -258,6 +258,16 @@ pwsh -File ./scripts/repair-do-schema.ps1 `
   -ProjectFolder wiseravenshare/
 ```
 
+## 11) Journalism Upgrade Schema
+
+Before deploying the journalism and truth-dispatch upgrade, apply:
+
+```powershell
+psql "$env:DATABASE_URL" -f ./scripts/20260815_truth_dispatch_upgrade.sql
+```
+
+This adds the post columns needed for truth dispatch tracking and creates the supporting indexes for location and dispatch lookups.
+
 Then verify API reports healthy schema:
 
 ```powershell

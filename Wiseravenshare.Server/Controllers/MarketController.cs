@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -22,16 +25,29 @@ public sealed class MarketController : ControllerBase
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IMemoryCache _cache;
+    private readonly IDistributedCache _distributedCache;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<MarketController> _logger;
+    private readonly PerformanceMetricsService _metricsService;
 
-    public MarketController(IHttpClientFactory httpClientFactory, IMemoryCache cache, IConfiguration configuration)
+    public MarketController(
+        IHttpClientFactory httpClientFactory,
+        IMemoryCache cache,
+        IDistributedCache distributedCache,
+        IConfiguration configuration,
+        ILogger<MarketController> logger,
+        PerformanceMetricsService metricsService)
     {
         _httpClientFactory = httpClientFactory;
         _cache = cache;
+        _distributedCache = distributedCache;
         _configuration = configuration;
+        _logger = logger;
+        _metricsService = metricsService;
     }
 
     [HttpGet("quotes")]
+    [OutputCache(PolicyName = "MarketQuotes")]
     public async Task<IActionResult> GetQuotes([FromQuery] string? symbols = null)
     {
         var requestedSymbols = ParseSymbols(symbols);
@@ -41,7 +57,8 @@ public sealed class MarketController : ControllerBase
         }
 
         var cacheKey = $"market-quotes:{string.Join(',', requestedSymbols)}";
-        if (_cache.TryGetValue<CachedMarketResponse>(cacheKey, out var cachedResponse) && cachedResponse is not null)
+        var cachedResponse = await TryGetCachedResponseAsync(cacheKey, HttpContext.RequestAborted);
+        if (cachedResponse is not null)
         {
             return Ok(new
             {
@@ -57,7 +74,8 @@ public sealed class MarketController : ControllerBase
         try
         {
             // Double-check cache after lock acquisition to avoid thundering herd refreshes.
-            if (_cache.TryGetValue<CachedMarketResponse>(cacheKey, out cachedResponse) && cachedResponse is not null)
+            cachedResponse = await TryGetCachedResponseAsync(cacheKey, HttpContext.RequestAborted);
+            if (cachedResponse is not null)
             {
                 return Ok(new
                 {
@@ -69,6 +87,8 @@ public sealed class MarketController : ControllerBase
                 });
             }
 
+            _metricsService.RecordCacheMiss("market_quotes", "composite");
+
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
             timeoutCts.CancelAfter(ProviderTimeout);
 
@@ -76,7 +96,7 @@ public sealed class MarketController : ControllerBase
             if (liveResponse.Quotes.Count == 0)
             {
                 var fallback = BuildFallbackResponse(requestedSymbols, "Provider returned no live quotes");
-                _cache.Set(cacheKey, fallback, TimeSpan.FromMinutes(2));
+                await SetCachedResponseAsync(cacheKey, fallback, TimeSpan.FromMinutes(2), HttpContext.RequestAborted);
                 return Ok(new
                 {
                     quotes = fallback.Quotes,
@@ -88,7 +108,7 @@ public sealed class MarketController : ControllerBase
                 });
             }
 
-            _cache.Set(cacheKey, liveResponse, QuoteCacheDuration);
+            await SetCachedResponseAsync(cacheKey, liveResponse, QuoteCacheDuration, HttpContext.RequestAborted);
 
             return Ok(new
             {
@@ -101,7 +121,8 @@ public sealed class MarketController : ControllerBase
         }
         catch (Exception ex)
         {
-            if (_cache.TryGetValue<CachedMarketResponse>(cacheKey, out cachedResponse) && cachedResponse is not null)
+            cachedResponse = await TryGetCachedResponseAsync(cacheKey, HttpContext.RequestAborted);
+            if (cachedResponse is not null)
             {
                 return Ok(new
                 {
@@ -115,7 +136,7 @@ public sealed class MarketController : ControllerBase
             }
 
             var fallback = BuildFallbackResponse(requestedSymbols, ex.Message);
-            _cache.Set(cacheKey, fallback, TimeSpan.FromMinutes(2));
+            await SetCachedResponseAsync(cacheKey, fallback, TimeSpan.FromMinutes(2), HttpContext.RequestAborted);
             return Ok(new
             {
                 quotes = fallback.Quotes,
@@ -129,6 +150,61 @@ public sealed class MarketController : ControllerBase
         finally
         {
             RefreshLock.Release();
+        }
+    }
+
+    private async Task<CachedMarketResponse?> TryGetCachedResponseAsync(string cacheKey, CancellationToken cancellationToken)
+    {
+        if (_cache.TryGetValue<CachedMarketResponse>(cacheKey, out var memoryCached) && memoryCached is not null)
+        {
+            _metricsService.RecordCacheHit("market_quotes", "memory");
+            return memoryCached;
+        }
+
+        try
+        {
+            var payload = await _distributedCache.GetStringAsync(cacheKey, cancellationToken);
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return null;
+            }
+
+            var distributedCached = JsonSerializer.Deserialize<CachedMarketResponse>(payload, JsonOptions);
+            if (distributedCached is null)
+            {
+                return null;
+            }
+
+            _cache.Set(cacheKey, distributedCached, TimeSpan.FromMinutes(1));
+            _metricsService.RecordCacheHit("market_quotes", "distributed");
+            return distributedCached;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Distributed cache read failed for key {CacheKey}.", cacheKey);
+            return null;
+        }
+    }
+
+    private async Task SetCachedResponseAsync(string cacheKey, CachedMarketResponse value, TimeSpan ttl, CancellationToken cancellationToken)
+    {
+        _cache.Set(cacheKey, value, ttl);
+
+        try
+        {
+            var payload = JsonSerializer.Serialize(value, JsonOptions);
+            await _distributedCache.SetStringAsync(
+                cacheKey,
+                payload,
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = ttl
+                },
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Distributed cache write failed for key {CacheKey}.", cacheKey);
         }
     }
 

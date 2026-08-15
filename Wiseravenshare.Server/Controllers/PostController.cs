@@ -1,6 +1,7 @@
 ﻿// Wiseravenshare.Server/Controllers/PostsController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using System.Security.Claims;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
@@ -20,12 +21,18 @@ namespace Wiseravenshare.Server.Controllers
         private readonly IPostService _postService;
         private readonly IUserRepository _userRepository;
         private readonly ILogger<PostsController> _logger;
+        private readonly OutputCacheInvalidationService _cacheInvalidation;
 
-        public PostsController(IPostService postService, IUserRepository userRepository, ILogger<PostsController> logger)
+        public PostsController(
+            IPostService postService,
+            IUserRepository userRepository,
+            ILogger<PostsController> logger,
+            OutputCacheInvalidationService cacheInvalidation)
         {
             _postService = postService;
             _userRepository = userRepository;
             _logger = logger;
+            _cacheInvalidation = cacheInvalidation;
         }
 
         /// <summary>
@@ -41,11 +48,13 @@ namespace Wiseravenshare.Server.Controllers
             {
                 var userId = await ResolveEffectiveUserIdAsync();
                 var post = await _postService.CreatePostAsync(userId, dto);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
             }
 
             var fallbackUserId = Guid.NewGuid();
             var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
         }
 
@@ -73,6 +82,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var post = await _postService.UpdatePostAsync(userId, id, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(post);
         }
 
@@ -86,6 +96,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             await _postService.DeletePostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return NoContent();
         }
 
@@ -113,6 +124,7 @@ namespace Wiseravenshare.Server.Controllers
         /// </summary>
         [HttpGet("user/{userId}")]
         [AllowAnonymous]
+        [OutputCache(PolicyName = "PublicFeedShort")]
         [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetUserPosts(Guid userId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
@@ -130,6 +142,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.LikePostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 
@@ -143,6 +156,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.UnlikePostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 
@@ -156,6 +170,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.RepostPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 
@@ -169,6 +184,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.UnrepostPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 
@@ -182,6 +198,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.BookmarkPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 
@@ -195,6 +212,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.UnbookmarkPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
 

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo } from 'react-icons/fa';
+import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo, FaUsers } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
 import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
+import CollaborativeScriptRoom from './CollaborativeScriptRoom';
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -50,12 +51,12 @@ const getLocalFallbackVideos = (currentUserId, filterMode = 'all') => {
 const VideoFeed = ({ onNotification }) => {
     const [videos, setVideos] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [selectedVideo, setSelectedVideo] = useState(null);
     const [filter, setFilter] = useState('all'); // all, trending, subscribed, my_videos
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [sharingVideoIds, setSharingVideoIds] = useState([]);
     const [savingVideoIds, setSavingVideoIds] = useState([]);
+    const [scriptVideo, setScriptVideo] = useState(null);
     const observerRef = useRef();
     const { user } = useAuth();
 
@@ -577,6 +578,21 @@ const VideoFeed = ({ onNotification }) => {
                         >
                             <FaDownload /> {isSaving ? 'Saving...' : 'Save'}
                         </button>
+                        <button
+                            onClick={() => setScriptVideo(video)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-color)',
+                                cursor: 'pointer'
+                            }}
+                            title="Open collaborative script room"
+                        >
+                            <FaUsers /> Script Room
+                        </button>
                     </div>
                     </div>
                 </div>
@@ -655,6 +671,14 @@ const VideoFeed = ({ onNotification }) => {
                     <h3>No videos found</h3>
                     <p>Check back later for new content!</p>
                 </div>
+            )}
+
+            {scriptVideo && (
+                <CollaborativeScriptRoom
+                    video={scriptVideo}
+                    onClose={() => setScriptVideo(null)}
+                    onNotification={onNotification}
+                />
             )}
         </div>
     );

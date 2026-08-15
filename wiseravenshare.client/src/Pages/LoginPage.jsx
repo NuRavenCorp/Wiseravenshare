@@ -28,6 +28,7 @@ const LoginPage = ({ onAuth }) => {
     const [location, setLocation] = useState(initialDraft?.location || '');
     const [website, setWebsite] = useState(initialDraft?.website || '');
     const [referralCode, setReferralCode] = useState(initialDraft?.referralCode || '');
+    const [inviteToken, setInviteToken] = useState(initialDraft?.inviteToken || '');
     const [avatarFile, setAvatarFile] = useState(null);
     const [avatarPreview, setAvatarPreview] = useState(initialDraft?.avatarPreview || '');
     const [cameraOpen, setCameraOpen] = useState(false);
@@ -35,8 +36,38 @@ const LoginPage = ({ onAuth }) => {
     const [cameraStream, setCameraStream] = useState(null);
     const [error, setError] = useState('');
     const [info, setInfo] = useState(initialDraft?.info || '');
+    const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(true);
+    const [loginRevealed, setLoginRevealed] = useState(false);
+    const [isAdminLoginVisible, setIsAdminLoginVisible] = useState(false);
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
+
+    useEffect(() => {
+        let mounted = true;
+
+        authService.getStatus()
+            .then((status) => {
+                if (!mounted) {
+                    return;
+                }
+
+                const enabled = Boolean(status?.selfRegistrationEnabled);
+                setSelfRegistrationEnabled(enabled);
+                if (!enabled) {
+                    setMode('login');
+                }
+            })
+            .catch(() => {
+                if (mounted) {
+                    setSelfRegistrationEnabled(false);
+                    setMode('login');
+                }
+            });
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -48,16 +79,38 @@ const LoginPage = ({ onAuth }) => {
             params.get('ref') ||
             params.get('referral') ||
             params.get('referralCode');
+        const teamTokenFromUrl =
+            params.get('teamToken') ||
+            params.get('inviteToken') ||
+            params.get('memberToken');
+        const emailFromUrl = params.get('email') || '';
+
+        if (teamTokenFromUrl?.trim()) {
+            setInviteToken(teamTokenFromUrl.trim());
+            if (emailFromUrl.trim()) {
+                setEmail(emailFromUrl.trim());
+            }
+            setMode('teamInvite');
+            setInfo('Team access token detected. Set your password to activate your team login.');
+            return;
+        }
 
         const normalizedCode = referralFromUrl?.trim();
         if (!normalizedCode) {
             return;
         }
 
+        if (selfRegistrationEnabled) {
+            setReferralCode(normalizedCode);
+            setMode('signup');
+            setInfo('Referral code detected. Complete signup to redeem it.');
+            return;
+        }
+
         setReferralCode(normalizedCode);
-        setMode('signup');
-        setInfo('Referral code detected. Complete signup to redeem it.');
-    }, []);
+        setMode('login');
+        setInfo('Admin-only access is enabled. Sign in with the configured admin account.');
+    }, [selfRegistrationEnabled]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -74,12 +127,13 @@ const LoginPage = ({ onAuth }) => {
             location,
             website,
             referralCode,
+            inviteToken,
             avatarPreview,
             info
         };
 
         window.localStorage.setItem(AUTH_DRAFT_KEY, JSON.stringify(payload));
-    }, [mode, name, email, password, resetToken, bio, location, website, referralCode, avatarPreview, info]);
+    }, [mode, name, email, password, resetToken, bio, location, website, referralCode, inviteToken, avatarPreview, info]);
 
     useEffect(() => {
         if (cameraOpen && videoRef.current && cameraStream) {
@@ -190,6 +244,16 @@ const LoginPage = ({ onAuth }) => {
                 setError('Please fill all required fields.');
                 return;
             }
+        } else if (mode === 'teamInvite') {
+            if (!loginValue || !password.trim() || !inviteToken.trim()) {
+                setError('Email, invite token, and password are required.');
+                return;
+            }
+
+            if (password.length < 8) {
+                setError('Password must be at least 8 characters.');
+                return;
+            }
         } else if (mode === 'forgot') {
             if (!loginValue) {
                 setError('Please enter your email address.');
@@ -239,7 +303,8 @@ const LoginPage = ({ onAuth }) => {
                 website,
                 avatar: avatarPreview,
                 avatarFile,
-                referralCode
+                referralCode,
+                inviteToken
             });
             clearAuthDraft();
         } catch (err) {
@@ -292,6 +357,7 @@ const LoginPage = ({ onAuth }) => {
                 <h2 style={{ marginBottom: '12px' }}>
                     {mode === 'signup' && 'Create Account'}
                     {mode === 'login' && 'Sign In'}
+                    {mode === 'teamInvite' && 'Team Invite Access'}
                     {mode === 'forgot' && 'Forgot Password'}
                     {mode === 'reset' && 'Reset Password'}
                 </h2>
@@ -301,11 +367,10 @@ const LoginPage = ({ onAuth }) => {
                     </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
                     <button
-                        onClick={() => { setMode('login'); setError(''); setInfo(''); }}
+                        onClick={() => { setMode('login'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
                         style={{
-                            flex: 1,
                             padding: '10px',
                             borderRadius: '8px',
                             border: '1px solid var(--border-color)',
@@ -317,9 +382,8 @@ const LoginPage = ({ onAuth }) => {
                         Login
                     </button>
                     <button
-                        onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
+                        onClick={() => { setMode('signup'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
                         style={{
-                            flex: 1,
                             padding: '10px',
                             borderRadius: '8px',
                             border: '1px solid var(--border-color)',
@@ -329,6 +393,32 @@ const LoginPage = ({ onAuth }) => {
                         }}
                     >
                         Sign Up
+                    </button>
+                    <button
+                        onClick={() => { setMode('teamInvite'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
+                        style={{
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: mode === 'teamInvite' ? 'var(--highlight-color)' : 'transparent',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Team Invite
+                    </button>
+                    <button
+                        onClick={() => { setMode('login'); setError(''); setInfo(''); setIsAdminLoginVisible(true); }}
+                        style={{
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: isAdminLoginVisible || mode === 'admin' ? 'var(--highlight-color)' : 'transparent',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Admin login only
                     </button>
                 </div>
 
@@ -504,6 +594,41 @@ const LoginPage = ({ onAuth }) => {
                     </>
                 )}
 
+                {mode === 'teamInvite' && (
+                    <>
+                        <input
+                            type="text"
+                            placeholder="Full name (optional)"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            style={{
+                                width: '100%',
+                                marginBottom: '12px',
+                                padding: '12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.05)',
+                                color: 'var(--text-color)'
+                            }}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Team invite token"
+                            value={inviteToken}
+                            onChange={(e) => setInviteToken(e.target.value)}
+                            style={{
+                                width: '100%',
+                                marginBottom: '12px',
+                                padding: '12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.05)',
+                                color: 'var(--text-color)'
+                            }}
+                        />
+                    </>
+                )}
+
                 {mode !== 'reset' && (
                     <input
                         type="email"
@@ -599,24 +724,86 @@ const LoginPage = ({ onAuth }) => {
                 {error && <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>}
                 {info && <p style={{ color: '#93c5fd', marginBottom: '12px' }}>{info}</p>}
 
-                <button
-                    onClick={submit}
-                    style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: 'var(--highlight-color)',
-                        color: 'var(--text-color)',
-                        cursor: 'pointer',
-                        fontWeight: 'bold'
-                    }}
-                >
-                    {mode === 'signup' && 'Create Account'}
-                    {mode === 'login' && 'Continue'}
-                    {mode === 'forgot' && 'Request Reset Token'}
-                    {mode === 'reset' && 'Set New Password'}
-                </button>
+                {mode === 'login' && (
+                    <button
+                        type="button"
+                        onClick={submit}
+                        style={{
+                            width: '100%',
+                            padding: '12px',
+                            border: 'none',
+                            borderRadius: '8px',
+                            background: 'var(--highlight-color)',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            marginBottom: '12px'
+                        }}
+                    >
+                        Sign In
+                    </button>
+                )}
+
+                {mode === 'login' && isAdminLoginVisible && !loginRevealed && (
+                    <button
+                        type="button"
+                        onClick={() => { setLoginRevealed(true); setInfo('Admin login revealed. Use the admin credential field below.'); }}
+                        style={{
+                            width: '100%',
+                            padding: '12px',
+                            border: '1px dashed var(--border-color)',
+                            borderRadius: '8px',
+                            background: 'rgba(255,255,255,0.03)',
+                            color: 'var(--light-color)',
+                            cursor: 'pointer',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        Reveal admin login
+                    </button>
+                )}
+
+                {mode === 'login' && isAdminLoginVisible && loginRevealed && (
+                    <button
+                        type="button"
+                        onClick={submit}
+                        onDoubleClick={() => { setLoginRevealed(false); setInfo('Admin login hidden. Click reveal admin login to access it again.'); }}
+                        style={{
+                            width: '100%',
+                            padding: '12px',
+                            border: 'none',
+                            borderRadius: '8px',
+                            background: 'var(--highlight-color)',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        Continue as Admin
+                    </button>
+                )}
+
+                {mode !== 'login' && (
+                    <button
+                        type="button"
+                        onClick={submit}
+                        style={{
+                            width: '100%',
+                            padding: '12px',
+                            border: 'none',
+                            borderRadius: '8px',
+                            background: 'var(--highlight-color)',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        {mode === 'signup' && 'Create Account'}
+                        {mode === 'teamInvite' && 'Activate Team Access'}
+                        {mode === 'forgot' && 'Request Reset Token'}
+                        {mode === 'reset' && 'Set New Password'}
+                    </button>
+                )}
                 <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '12px', color: 'var(--light-color)' }}>
                     By using Wise-Ravens you agree to our{' '}
                     <a

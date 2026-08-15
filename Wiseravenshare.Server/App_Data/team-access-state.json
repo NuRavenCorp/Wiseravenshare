@@ -1,0 +1,50 @@
+{
+  "Invites": [
+    {
+      "InviteId": "6222338f0d18491cae8d91b0274e20df",
+      "InviteeEmail": "arnold.spence308@gmail.com",
+      "DisplayName": "Bery Moreno",
+      "TeamRole": "member",
+      "CreatedByEmail": "admin@wise-ravens.com",
+      "CreatedAtUtc": "2026-08-15T12:51:55.0064551Z",
+      "ExpiresAtUtc": "2026-08-18T12:51:55.0064551Z",
+      "TokenHash": "7FF7DF335C8220D2B30CBCC2144DA3A2E1346C0762918625E568B83D37515DC3",
+      "Prearranged": false,
+      "ConsumedAtUtc": null,
+      "RevokedAtUtc": "2026-08-15T12:52:36.1874227Z",
+      "RevokedByEmail": "",
+      "RevokedReason": "Superseded by a new invite token."
+    },
+    {
+      "InviteId": "a98ed221f498487db8054c9aa6d52b95",
+      "InviteeEmail": "arnold.spence308@gmail.com",
+      "DisplayName": "bert",
+      "TeamRole": "member",
+      "CreatedByEmail": "admin@wise-ravens.com",
+      "CreatedAtUtc": "2026-08-15T12:52:36.1874227Z",
+      "ExpiresAtUtc": "2026-08-18T12:52:36.1874227Z",
+      "TokenHash": "EA7A1371E164A8D272A21EED252A0D207D05E9616E314C4D93B84159E6ACE010",
+      "Prearranged": false,
+      "ConsumedAtUtc": null,
+      "RevokedAtUtc": null,
+      "RevokedByEmail": "",
+      "RevokedReason": ""
+    },
+    {
+      "InviteId": "77ec8589f3984c9b8f1da92d13226cb7",
+      "InviteeEmail": "teammate@example.com",
+      "DisplayName": "Teammate QA",
+      "TeamRole": "member",
+      "CreatedByEmail": "admin@wise-ravens.com",
+      "CreatedAtUtc": "2026-08-15T12:55:27.674938Z",
+      "ExpiresAtUtc": "2026-08-18T12:55:27.674938Z",
+      "TokenHash": "326AC143C41F368C99377FBD74676D21E296311BF471F47BF28AEA1C4C44C381",
+      "Prearranged": false,
+      "ConsumedAtUtc": null,
+      "RevokedAtUtc": null,
+      "RevokedByEmail": "",
+      "RevokedReason": ""
+    }
+  ],
+  "Members": []
+}
