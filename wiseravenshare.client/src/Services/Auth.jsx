@@ -74,7 +74,11 @@ class AuthService {
 
     async getStatus() {
         try {
-            return await this.postAuth('/status');
+            const response = await api.get('/auth/status', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS
+            });
+
+            return response?.data ?? {};
         } catch (error) {
             throw this.handleError(error);
         }
@@ -95,6 +99,13 @@ class AuthService {
             this.setUser(response.user);
             return response;
         } catch (error) {
+            if (!error?.response && error?.message?.includes('Network') || error?.code === 'ERR_NETWORK') {
+                const networkError = new Error('The backend API is unavailable or unreachable. Start the ASP.NET server and retry.');
+                networkError.status = 0;
+                networkError.cause = error;
+                throw networkError;
+            }
+
             throw this.handleError(error);
         }
     }

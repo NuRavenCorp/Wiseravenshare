@@ -3,10 +3,26 @@ import { getAuthToken, getAdminPassToken, setAuthToken, clearAuthToken } from '.
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
+const stripTrailingApiSegment = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const normalized = raw.replace(/\/+$/, '');
+    if (!/\/api$/i.test(normalized)) {
+        return normalized;
+    }
+
+    return normalized.replace(/\/api$/i, '');
+};
+
 const ensureApiBase = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    return /\/api$/i.test(raw) ? raw : `${raw.replace(/\/+$/, '')}/api`;
+
+    const root = stripTrailingApiSegment(raw);
+    if (!root) return '/api';
+
+    return `${root}/api`;
 };
 
 const resolveApiBaseUrl = () => {
@@ -135,7 +151,15 @@ const normalizeRequestPath = (url = '', baseUrl = '') => {
     }
 
     const trimmedBase = String(baseUrl || '').replace(/\/+$/, '');
-    let trimmedUrl = url.replace(/^\/+/, '');
+    let trimmedUrl = url.trim();
+
+    if (!trimmedUrl) {
+        return trimmedUrl;
+    }
+
+    if (trimmedUrl.startsWith('/')) {
+        trimmedUrl = trimmedUrl.replace(/^\/+/, '');
+    }
 
     if (!trimmedBase) {
         return trimmedUrl;
@@ -143,6 +167,10 @@ const normalizeRequestPath = (url = '', baseUrl = '') => {
 
     if (trimmedBase.endsWith('/api') && trimmedUrl.startsWith('api/')) {
         trimmedUrl = trimmedUrl.replace(/^api\//, '');
+    }
+
+    if (trimmedBase.endsWith('/api') && !trimmedUrl.startsWith('auth/') && !trimmedUrl.startsWith('posts/') && !trimmedUrl.startsWith('users/') && !trimmedUrl.startsWith('messages/') && !trimmedUrl.startsWith('notifications') && !trimmedUrl.startsWith('media/') && !trimmedUrl.startsWith('news/') && !trimmedUrl.startsWith('ravensight/') && !trimmedUrl.startsWith('social/') && !trimmedUrl.startsWith('subscription/') && !trimmedUrl.startsWith('video/')) {
+        return trimmedUrl;
     }
 
     return trimmedUrl;
@@ -293,6 +321,9 @@ const isMissingEndpointStatus = (status) => status === 404 || status === 405 || 
 // Request interceptor
 api.interceptors.request.use(
     (config) => {
+        const resolvedBaseUrl = config?.baseURL || API_BASE_URL || 'http://localhost:5242/api';
+        config.baseURL = resolvedBaseUrl;
+
         const token = getAuthToken();
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
@@ -304,7 +335,7 @@ api.interceptors.request.use(
         }
 
         if (config?.url) {
-            config.url = normalizeRequestPath(config.url, config.baseURL || API_BASE_URL);
+            config.url = normalizeRequestPath(config.url, resolvedBaseUrl);
         }
 
         return config;
