@@ -4,15 +4,11 @@ import { getAuthToken, getAdminPassToken, setAuthToken, clearAuthToken } from '.
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
 const stripTrailingApiSegment = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-
-    const normalized = raw.replace(/\/+$/, '');
-    if (!/\/api$/i.test(normalized)) {
-        return normalized;
+    let normalized = String(value || '').trim().replace(/\/+$/, '');
+    while (/\/api$/i.test(normalized)) {
+        normalized = normalized.replace(/\/api$/i, '').replace(/\/+$/, '');
     }
-
-    return normalized.replace(/\/api$/i, '');
+    return normalized;
 };
 
 const ensureApiBase = (value) => {
