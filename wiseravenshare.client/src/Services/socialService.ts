@@ -1,6 +1,15 @@
 import { getAuthToken as getSharedAuthToken } from './authStorage.js';
 
-const apiBase = import.meta.env.VITE_API_URL || '';
+const normalizeApiBase = (value: string) => {
+  const raw = String(value || '').trim().replace(/\/+$/, '');
+  if (!raw) {
+    return '';
+  }
+
+  return /\/api$/i.test(raw) ? raw.replace(/\/api$/i, '') : raw;
+};
+
+const apiBase = normalizeApiBase(String(import.meta.env.VITE_API_URL || ''));
 
 export type SocialFeedItem = {
   platform: 'facebook' | 'tiktok' | string;
