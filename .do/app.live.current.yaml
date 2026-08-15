@@ -174,10 +174,10 @@ static_sites:
   envs:
   - key: VITE_API_URL
     scope: BUILD_TIME
-    value: ${api.PUBLIC_URL}/api
+    value: `${APP_URL}/api
   - key: VITE_RAVENSIGHT_API_URL
     scope: BUILD_TIME
-    value: ${api.PUBLIC_URL}/api/ravensight
+    value: `${APP_URL}/api/ravensight
   - key: VITE_STRIPE_PUBLISHABLE_KEY
     scope: BUILD_TIME
     value: ${STRIPE_PUBLISHABLE_KEY}
