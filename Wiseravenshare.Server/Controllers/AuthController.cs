@@ -940,7 +940,8 @@ public class AuthController : ControllerBase
                 && !string.IsNullOrWhiteSpace(candidate.Password)
                 && (
                     string.Equals(candidate.Email.Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(BuildHandle(candidate.Name, candidate.Email), loginIdentifier, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals((candidate.Email ?? string.Empty).Trim().Split('@')[0], loginIdentifier.TrimStart('@'), StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(((candidate.Name ?? string.Empty).Trim().Replace(" ", string.Empty)), loginIdentifier.TrimStart('@'), StringComparison.OrdinalIgnoreCase)
                     || string.Equals((candidate.Name ?? string.Empty).Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase)));
 
         if (string.IsNullOrWhiteSpace(configuredUser.Email) || string.IsNullOrWhiteSpace(configuredUser.Password))
