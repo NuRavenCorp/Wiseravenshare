@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, clearAuthToken } from './authStorage.js';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
@@ -296,6 +296,11 @@ api.interceptors.request.use(
         const token = getAuthToken();
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
+        }
+
+        const adminPassToken = getAdminPassToken();
+        if (adminPassToken) {
+            config.headers['X-Admin-Pass-Token'] = adminPassToken;
         }
 
         if (config?.url) {
@@ -837,6 +842,8 @@ export const apiService = {
     getGrowthFunnelSummary: (days = 30) => api.get('/growth/funnel', { params: { days } }),
     createReferralInvite: (inviteeEmail, message = '') => api.post('/growth/referrals/invite', { inviteeEmail, message }),
     getReferralStats: () => api.get('/growth/referrals'),
+    getAdminPolicyHistory: () => api.get('/growth/policy'),
+    recordAdminPolicyShift: (payload) => api.post('/growth/policy', payload),
     initializeRevenueAgent: () => api.post('/growth/revenue/initialize'),
     getRevenueAgent: () => api.get('/growth/revenue/agent'),
     getRevenueSummary: () => api.get('/growth/revenue/summary'),

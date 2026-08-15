@@ -24,6 +24,11 @@ namespace Wiseravenshare.Server.DTOs.Post
         public decimal? TruthScore { get; set; }
         public string? TruthCorrection { get; set; }
         public string? LocationName { get; set; }
+        [JsonPropertyName("truthDispatch")]
+        public bool IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool TruthDeclarationAccepted { get; set; }
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
         public bool IsSensitive { get; set; }
@@ -77,6 +82,11 @@ namespace Wiseravenshare.Server.DTOs.Post
         public Guid? RepostOfId { get; set; }
         public Guid? QuoteOfId { get; set; }
         public string? LocationName { get; set; }
+        [JsonPropertyName("truthDispatch")]
+        public bool IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool TruthDeclarationAccepted { get; set; }
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
         public bool IsSensitive { get; set; }
@@ -88,5 +98,11 @@ namespace Wiseravenshare.Server.DTOs.Post
         public string? Content { get; set; }
 
         public bool? IsSensitive { get; set; }
+
+        [JsonPropertyName("truthDispatch")]
+        public bool? IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool? TruthDeclarationAccepted { get; set; }
     }
 }

@@ -95,6 +95,8 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'notifications', icon: 'fas fa-bell', label: 'Notifications' },
         { id: 'messages', icon: 'fas fa-envelope', label: 'Messages' },
         { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
+        { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
+        { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
         { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
@@ -102,7 +104,12 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     ];
 
     if (isAdminUser) {
-        menuItems.splice(8, 0, { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' });
+        menuItems.splice(
+            8,
+            0,
+            { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
+            { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' }
+        );
     }
 
     const profile = {

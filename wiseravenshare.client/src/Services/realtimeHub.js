@@ -23,7 +23,8 @@ export const createHubConnection = (hubPath) => {
 
     return new HubConnectionBuilder()
         .withUrl(`${base}${path}`, {
-            accessTokenFactory: () => getAuthToken() || ''
+            accessTokenFactory: () => getAuthToken() || '',
+            withCredentials: false
         })
         .withAutomaticReconnect()
         .configureLogging(LogLevel.Warning)

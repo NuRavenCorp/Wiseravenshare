@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Stripe;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.DTOs;
@@ -77,9 +78,36 @@ public class BillingController : ControllerBase
     [ProducesResponseType(typeof(SubscriptionStatusDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSubscription()
     {
+        if (IsAllAccessAdmin())
+        {
+            var now = DateTime.UtcNow;
+            return Ok(new SubscriptionStatusDto
+            {
+                HasActiveSubscription = true,
+                Status = "admin_all_access",
+                PriceId = "admin-pass",
+                CurrentPeriodEnd = now.AddYears(10),
+                CancelAtPeriodEnd = false,
+                StripeCustomerId = "admin-pass",
+                StripeSubscriptionId = "admin-pass"
+            });
+        }
+
         var userId = User.GetUserId();
         var result = await _subscriptionService.GetSubscriptionStatusAsync(userId);
         return Ok(result);
+    }
+
+    private bool IsAllAccessAdmin()
+    {
+        var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
+        return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
     }
 
     [AllowAnonymous]

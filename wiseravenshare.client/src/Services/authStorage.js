@@ -1,4 +1,5 @@
 const AUTH_TOKEN_KEY = 'auth_token';
+const ADMIN_PASS_TOKEN_KEY = 'admin_pass_token';
 const LEGACY_TOKEN_KEYS = ['ws.accessToken', 'wise-raven-token'];
 const AUTH_COOKIE_NAME = 'wr_auth_token';
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -99,4 +100,27 @@ export const clearAuthToken = () => {
     }
 
     clearCookie();
+};
+
+export const getAdminPassToken = () => {
+    const storage = getStorage();
+    return storage?.getItem(ADMIN_PASS_TOKEN_KEY) || '';
+};
+
+export const setAdminPassToken = (token) => {
+    const storage = getStorage();
+    if (!storage) {
+        return;
+    }
+
+    if (token) {
+        storage.setItem(ADMIN_PASS_TOKEN_KEY, token);
+    } else {
+        storage.removeItem(ADMIN_PASS_TOKEN_KEY);
+    }
+};
+
+export const clearAdminPassToken = () => {
+    const storage = getStorage();
+    storage?.removeItem(ADMIN_PASS_TOKEN_KEY);
 };

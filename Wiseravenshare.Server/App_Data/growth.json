@@ -95,9 +95,185 @@
       "EventName": "signup_completed",
       "CreatedAtUtc": "2026-08-14T09:39:19.4158832Z",
       "Metadata": {}
+    },
+    {
+      "Id": "07ac4a1d9eb04dcba8c2f1823b776a39",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:10:56.3413501Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "db2a7134e6064cfbbf104a97a90d705d",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:19:16.0933282Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "09477c65a1c54d04b21c62ca0c645895",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:19:58.0402525Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "83fa347d11634d479c56287070043f70",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:20:14.2677319Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "737ba3095ddc453793be326de62fc05a",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:20:35.7357389Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "5687701acfae4af180e68db4acf89ce0",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:28:06.1411703Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "e8ea50269c134ac5ad5b7c8cedb5f29e",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:32:23.572643Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "4bfdea2eddd64f2f9bc1931514b718ea",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:45:53.5613648Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "256139dcc3fd4ebbafa12b644d210852",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:47:48.2235572Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "7f84928581cd4fc192d7c64da4ea513c",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:49:41.843347Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "21a053b0d8024e6d95163ab3a4ab74aa",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T12:49:47.1764428Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "e11f3d2f5ed14258a5ed26af4b13c196",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:53:39.756349Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "0139ffba2b164dd1ac5edc41e0ff7099",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T12:55:27.6583123Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "18b6075d3f2e4405a41f55a1bef4fd33",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T13:16:32.3930644Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "aada74aa0f74407c912ade5e85aae0da",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T13:17:08.9503443Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],
   "Reports": [],
-  "RevenueAgents": []
+  "RevenueAgents": [],
+  "PolicyHistory": [
+    {
+      "Id": "a2729becc378448ab3494afc5b6cfeab",
+      "PolicyKey": "team-access.invite-issued",
+      "Title": "Team invite token issued",
+      "Summary": "Issued team invite token for arnold.spence308@gmail.com as member.",
+      "Status": "active",
+      "Notes": "inviteId=6222338f0d18491cae8d91b0274e20df;expiresAtUtc=2026-08-18T12:51:55.0064551Z;prearranged=False",
+      "ChangedByUserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "ChangedByEmail": "admin@wise-ravens.com",
+      "EffectiveFromUtc": "2026-08-15T12:51:55.0115447Z",
+      "CreatedAtUtc": "2026-08-15T12:51:55.0115723Z"
+    },
+    {
+      "Id": "3dcf8eaae3e34f6f886816eeadf74082",
+      "PolicyKey": "team-access.invite-issued",
+      "Title": "Team invite token issued",
+      "Summary": "Issued team invite token for arnold.spence308@gmail.com as member.",
+      "Status": "active",
+      "Notes": "inviteId=a98ed221f498487db8054c9aa6d52b95;expiresAtUtc=2026-08-18T12:52:36.1874227Z;prearranged=False",
+      "ChangedByUserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "ChangedByEmail": "admin@wise-ravens.com",
+      "EffectiveFromUtc": "2026-08-15T12:52:36.1886297Z",
+      "CreatedAtUtc": "2026-08-15T12:52:36.1886297Z"
+    },
+    {
+      "Id": "b42e892762c7402986a109c6375614e1",
+      "PolicyKey": "team-access.invite-issued",
+      "Title": "Team invite token issued",
+      "Summary": "Issued team invite token for teammate@example.com as member.",
+      "Status": "active",
+      "Notes": "inviteId=77ec8589f3984c9b8f1da92d13226cb7;expiresAtUtc=2026-08-18T12:55:27.6749380Z;prearranged=False",
+      "ChangedByUserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "ChangedByEmail": "admin@wise-ravens.com",
+      "EffectiveFromUtc": "2026-08-15T12:55:27.6773329Z",
+      "CreatedAtUtc": "2026-08-15T12:55:27.6773329Z"
+    }
+  ]
 }
