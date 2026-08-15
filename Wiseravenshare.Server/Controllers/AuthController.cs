@@ -155,7 +155,7 @@ public class AuthController : ControllerBase
         var user = _userStore.FindByLoginIdentifier(request.Email);
         if (user is null || !UserStore.VerifyPassword(request.Password, user.PasswordHash))
         {
-            if (!TryAuthenticateConfiguredAdmin(request.Email, request.Password, out user) || user is null)
+            if (!TryAuthenticateConfiguredCredential(request.Email, request.Password, out user) || user is null)
             {
                 RecordFailedLogin(attemptKey);
                 return Unauthorized(new { message = "Invalid email or password." });
@@ -924,7 +924,7 @@ public class AuthController : ControllerBase
         return configured ?? true;
     }
 
-    private bool TryAuthenticateConfiguredAdmin(string emailOrIdentifier, string password, out UserRecord? user)
+    private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out UserRecord? user)
     {
         user = null;
 
@@ -934,24 +934,26 @@ public class AuthController : ControllerBase
             return false;
         }
 
-        var configuredAdmin = ReadConfiguredUsers()
+        var configuredUser = ReadConfiguredUsers()
             .FirstOrDefault(candidate =>
                 !string.IsNullOrWhiteSpace(candidate.Email)
                 && !string.IsNullOrWhiteSpace(candidate.Password)
-                && IsConfiguredAdminUser(candidate.Email)
-                && string.Equals(candidate.Email.Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase));
+                && (
+                    string.Equals(candidate.Email.Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(BuildHandle(candidate.Name, candidate.Email), loginIdentifier, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals((candidate.Name ?? string.Empty).Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase)));
 
-        if (string.IsNullOrWhiteSpace(configuredAdmin.Email) || string.IsNullOrWhiteSpace(configuredAdmin.Password))
+        if (string.IsNullOrWhiteSpace(configuredUser.Email) || string.IsNullOrWhiteSpace(configuredUser.Password))
         {
             return false;
         }
 
-        if (!string.Equals(configuredAdmin.Password, password, StringComparison.Ordinal))
+        if (!PasswordsMatch(configuredUser.Password, password))
         {
             return false;
         }
 
-        var normalizedEmail = configuredAdmin.Email.Trim();
+        var normalizedEmail = configuredUser.Email.Trim();
 
         if (_userStore.TryGetByEmail(normalizedEmail, out var existingUser) && existingUser is not null)
         {
@@ -965,9 +967,9 @@ public class AuthController : ControllerBase
             return user is not null;
         }
 
-        var safeName = string.IsNullOrWhiteSpace(configuredAdmin.Name)
+        var safeName = string.IsNullOrWhiteSpace(configuredUser.Name)
             ? normalizedEmail.Split('@')[0]
-            : configuredAdmin.Name.Trim();
+            : configuredUser.Name.Trim();
 
         user = _userStore.CreateUser(
             safeName,
@@ -979,6 +981,26 @@ public class AuthController : ControllerBase
             string.Empty);
 
         return true;
+    }
+
+    private static bool PasswordsMatch(string configuredPassword, string providedPassword)
+    {
+        static string Normalize(string value)
+        {
+            var trimmed = (value ?? string.Empty).Trim();
+            if (trimmed.Length >= 2)
+            {
+                if ((trimmed.StartsWith('"') && trimmed.EndsWith('"')) ||
+                    (trimmed.StartsWith('\'') && trimmed.EndsWith('\'')))
+                {
+                    return trimmed[1..^1];
+                }
+            }
+
+            return trimmed;
+        }
+
+        return string.Equals(Normalize(configuredPassword), Normalize(providedPassword), StringComparison.Ordinal);
     }
 
     private IReadOnlyCollection<string> GetConfiguredAdminEmails()
