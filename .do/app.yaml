@@ -140,6 +140,12 @@ ingress:
         preserve_path_prefix: true
     - match:
         path:
+          prefix: /hubs
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
           prefix: /health
       component:
         name: api
