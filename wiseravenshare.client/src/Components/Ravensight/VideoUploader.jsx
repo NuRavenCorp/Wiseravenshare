@@ -156,6 +156,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
 
         setIsUploading(true);
         setUploadProgress(0);
+        let uploadSucceeded = false;
 
         const formData = new FormData();
         formData.append('video', selectedFile);
@@ -187,6 +188,9 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                 setUploadProgress(progress);
             });
 
+            uploadSucceeded = true;
+            setUploadProgress(100);
+
             setUploadedVideos(prev => [response.video, ...prev]);
             if (response?.video) {
                 upsertLocalVideo({
@@ -214,6 +218,9 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
             onNotification(libraryOnly ? 'Your video is still visible in your current session while the service is temporarily unavailable.' : 'Your video is still visible in your current session while the service is temporarily unavailable.', 'warning');
             resetForm();
         } finally {
+            if (uploadSucceeded) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+            }
             setIsUploading(false);
         }
     };

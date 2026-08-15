@@ -407,6 +407,40 @@ public sealed class GrowthController : ControllerBase
         return Ok(evidence);
     }
 
+    [HttpGet("policy")]
+    public IActionResult GetAdminPolicyHistory()
+    {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
+        var history = _growthService.GetAdminPolicyHistory();
+        return Ok(new { history, totalCount = history.Count });
+    }
+
+    [HttpPost("policy")]
+    public IActionResult RecordAdminPolicyShift([FromBody] AdminPolicyShiftRequest request)
+    {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
+        if (!TryGetCurrentUser(out var user))
+        {
+            return Unauthorized(new { message = "Unable to resolve current user." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.PolicyKey) || string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Summary))
+        {
+            return BadRequest(new { message = "policyKey, title, and summary are required." });
+        }
+
+        var record = _growthService.RecordAdminPolicyShift(user.Id, user.Email, request);
+        return Ok(record);
+    }
+
     private bool TryGetCurrentUser([NotNullWhen(true)] out UserRecord? user)
     {
         user = null;

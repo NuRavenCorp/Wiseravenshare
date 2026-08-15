@@ -1,5 +1,5 @@
 import api from './api';
-import { getAuthToken, setAuthToken, clearAuthToken } from './authStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken, clearAdminPassToken } from './authStorage.js';
 
 const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 12000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
@@ -9,6 +9,11 @@ class AuthService {
         const token = this.getToken();
         if (token) {
             api.defaults.headers.common.Authorization = `Bearer ${token}`;
+        }
+
+        const adminPassToken = this.getAdminPassToken();
+        if (adminPassToken) {
+            api.defaults.headers.common['X-Admin-Pass-Token'] = adminPassToken;
         }
     }
 
@@ -40,12 +45,14 @@ class AuthService {
         const source = payload && typeof payload === 'object' ? payload : {};
         const token = source.token || source.accessToken || source.AccessToken || source.jwt || '';
         const refreshToken = source.refreshToken || source.RefreshToken || '';
+        const adminPassToken = source.adminPassToken || source.AdminPassToken || '';
         const user = source.user || source.User || null;
 
         return {
             ...source,
             token,
             refreshToken,
+            adminPassToken,
             user
         };
     }
@@ -65,6 +72,14 @@ class AuthService {
         return response?.data ?? {};
     }
 
+    async getStatus() {
+        try {
+            return await this.postAuth('/status');
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
     async login(email, password) {
         try {
             const response = this.normalizeAuthResponse(await this.postAuth('/login', { email, password }));
@@ -76,6 +91,7 @@ class AuthService {
 
             this.setToken(response.token);
             this.setRefreshToken(response.refreshToken);
+            this.setAdminPassToken(response.adminPassToken);
             this.setUser(response.user);
             return response;
         } catch (error) {
@@ -89,9 +105,190 @@ class AuthService {
             if (response.token) {
                 this.setToken(response.token);
                 this.setRefreshToken(response.refreshToken);
+                this.setAdminPassToken(response.adminPassToken);
                 this.setUser(response.user);
             }
 
+            return response;
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async acceptTeamInvite({ inviteToken, email, password, name }) {
+        try {
+            const response = this.normalizeAuthResponse(await this.postAuth('/team-access/accept', {
+                inviteToken,
+                email,
+                password,
+                name
+            }));
+
+            if (!response.token) {
+                const err = new Error('Team invite acceptance did not return an authentication token.');
+                err.status = 500;
+                throw err;
+            }
+
+            this.setToken(response.token);
+            this.setRefreshToken(response.refreshToken);
+            this.setAdminPassToken(response.adminPassToken);
+            this.setUser(response.user);
+            return response;
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async createTeamInvite(payload) {
+        try {
+            return await this.postAuth('/team-access/invites', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async createPrearrangedTeamToken(payload) {
+        try {
+            return await this.postAuth('/team-access/prearrange', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async revokeTeamInvite(inviteId, reason = '') {
+        try {
+            return await this.postAuth(`/team-access/invites/${encodeURIComponent(inviteId)}/revoke`, { reason }, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async setTeamMemberStatus(email, active, reason = '') {
+        try {
+            return await this.postAuth(`/team-access/members/${encodeURIComponent(email)}/status`, { active: Boolean(active), reason }, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async getTeamAccessSnapshot() {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    decodeTokenPayload() {
+        const token = this.getToken();
+        if (!token || token.split('.').length < 2) {
+            return null;
+        }
+
+        try {
+            const [, payloadSegment] = token.split('.');
+            const normalized = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+            const json = decodeURIComponent(
+                atob(normalized)
+                    .split('')
+                    .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+                    .join('')
+            );
+
+            return JSON.parse(json);
+        } catch {
+            return null;
+        }
+    }
+
+    buildPodcastControlFallbackState() {
+        const payload = this.decodeTokenPayload() || {};
+        const accessScope = String(payload.access_scope || '').trim().toLowerCase() || 'team';
+        const rawRole = String(
+            payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
+            || payload.role
+            || ''
+        ).trim().toLowerCase();
+
+        const normalizeRole = (value) => {
+            if (value === 'owner') return 'owner';
+            if (value === 'producer') return 'producer';
+            if (value === 'host') return 'host';
+            if (value === 'editor') return 'editor';
+            if (value === 'script lead' || value === 'script_lead' || value === 'script-lead') return 'script-lead';
+            return 'guest';
+        };
+
+        const role = normalizeRole(rawRole);
+        const canGoLive = role === 'owner' || role === 'producer' || role === 'host';
+        const canEditScript = role !== 'guest';
+        const canAssignShots = role === 'owner' || role === 'producer' || role === 'host' || role === 'editor' || role === 'script-lead';
+        const canApproveSegments = role === 'owner' || role === 'producer' || role === 'editor' || role === 'script-lead';
+
+        return {
+            accessScope,
+            teamRole: role,
+            effectiveRole: role,
+            allowedRoles: role === 'owner'
+                ? ['owner', 'producer', 'host', 'editor', 'script-lead', 'guest']
+                : [role],
+            permissions: {
+                canGoLive,
+                canEditScript,
+                canAssignShots,
+                canApproveSegments,
+                canSwitchMonitors: canAssignShots,
+                canManageGuests: role === 'owner' || role === 'producer'
+            },
+            policyVersion: 'podcast-control-fallback-v1',
+            syncedAtUtc: new Date().toISOString(),
+            isFallback: true
+        };
+    }
+
+    async getPodcastControlState() {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-control-state', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return {
+                ...(response?.data ?? {}),
+                isFallback: false
+            };
+        } catch (error) {
+            const fallback = this.buildPodcastControlFallbackState();
+            if (fallback?.effectiveRole) {
+                return fallback;
+            }
+
+            throw this.handleError(error);
+        }
+    }
+
+    async requestPodcastControlRole(requestedRole) {
+        try {
+            return await this.postAuth('/team-access/podcast-control-role', { requestedRole }, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async issueAdminPassToken() {
+        try {
+            const response = await this.postAuth('/admin-pass', {}, { withAuth: true });
+            const token = response?.adminPassToken || '';
+            if (token) {
+                this.setAdminPassToken(token);
+            }
             return response;
         } catch (error) {
             throw this.handleError(error);
@@ -169,14 +366,36 @@ class AuthService {
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
 
+    setAdminPassToken(token) {
+        setAdminPassToken(token || '');
+        if (token) {
+            api.defaults.headers.common['X-Admin-Pass-Token'] = token;
+        } else {
+            delete api.defaults.headers.common['X-Admin-Pass-Token'];
+        }
+    }
+
+    getAdminPassToken() {
+        return getAdminPassToken();
+    }
+
     getToken() {
         return getAuthToken();
     }
 
     clearToken() {
         clearAuthToken();
+        clearAdminPassToken();
         this.clearRefreshToken();
         delete api.defaults.headers.common['Authorization'];
+        delete api.defaults.headers.common['X-Admin-Pass-Token'];
+    }
+
+    isAdminAllAccess() {
+        const payload = this.decodeTokenPayload() || {};
+        const accessScope = String(payload.access_scope || '').trim().toLowerCase();
+        const claim = String(payload.admin_pass || '').trim().toLowerCase();
+        return Boolean(this.getAdminPassToken()) || accessScope === 'admin' || claim === 'all-access';
     }
 
     setUser(user) {

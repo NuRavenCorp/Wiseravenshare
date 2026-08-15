@@ -159,6 +159,11 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
     private async Task<bool> HasActiveSubscriptionAsync(Guid userId)
     {
+        if (IsAllAccessAdmin())
+        {
+            return true;
+        }
+
         var subscription = await _dbContext.Set<UserSubscription>()
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted);
@@ -169,6 +174,18 @@ public sealed class RavensightVideoMediaController : ControllerBase
         }
 
         return subscription.Status is "active" or "trialing" or "past_due";
+    }
+
+    private bool IsAllAccessAdmin()
+    {
+        var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
+        return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
     }
 
     private static VideoLibraryVideo BuildFallbackVideo(Guid userId, SaveRavensightVideoDto dto, string mediaUrl, string resolvedStorageMode, bool hasActiveSubscription)

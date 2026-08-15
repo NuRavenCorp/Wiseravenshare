@@ -16,6 +16,8 @@ namespace Wiseravenshare.Server.Entities
         public string? TruthCorrection { get; set; }
         public JsonDocument? TruthSources { get; set; }
         public string? LocationName { get; set; }
+        public bool IsTruthDispatch { get; set; }
+        public bool TruthDeclarationAccepted { get; set; }
         public decimal? Latitude { get; set; }
         public decimal? Longitude { get; set; }
         public bool IsSensitive { get; set; }

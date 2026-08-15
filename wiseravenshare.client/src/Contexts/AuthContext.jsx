@@ -165,6 +165,27 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const acceptTeamInvite = async ({ inviteToken, email, password, name }) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await authService.acceptTeamInvite({ inviteToken, email, password, name });
+            const normalizedUser = normalizeUser(response.user);
+            setUser(normalizedUser);
+            authService.setToken(response.token);
+            localStorage.setItem('user_data', JSON.stringify(normalizedUser));
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(normalizedUser?.socialFeeds || {}));
+            window.dispatchEvent(new Event('wiseraven:social-updated'));
+            return { ...response, user: normalizedUser };
+        } catch (err) {
+            clearAuthState();
+            setError(err?.message || 'Team invite sign-in failed.');
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const logout = async () => {
         try {
             await authService.logout();
@@ -198,6 +219,7 @@ export const AuthProvider = ({ children }) => {
         error,
         login,
         register,
+        acceptTeamInvite,
         logout,
         updateProfile,
         isAuthenticated: !!user

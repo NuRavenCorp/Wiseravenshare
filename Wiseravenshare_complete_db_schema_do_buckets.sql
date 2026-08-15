@@ -146,6 +146,8 @@ CREATE TABLE app_data."Posts" (
     "TruthCorrection" text,
     "TruthSources" jsonb,
     "LocationName" text,
+    "IsTruthDispatch" boolean NOT NULL DEFAULT false,
+    "TruthDeclarationAccepted" boolean NOT NULL DEFAULT false,
     "Latitude" numeric,
     "Longitude" numeric,
     "IsSensitive" boolean NOT NULL,

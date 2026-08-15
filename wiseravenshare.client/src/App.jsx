@@ -18,7 +18,11 @@ import TruthSeeker from './Components/Truth/TruthSeeker';
 import AINews from './Components/News/AINews';
 import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
+import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
+import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
+import AmateurJournalistPage from './Pages/AmateurJournalistPage';
+import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
@@ -55,7 +59,7 @@ const App = () => {
         }
     });
     const [articleBackPage, setArticleBackPage] = useState('ainews');
-    const { user, isAuthenticated, loading, login, register, logout } = useAuth();
+    const { user, isAuthenticated, loading, login, register, acceptTeamInvite, logout } = useAuth();
     const { addToast } = useNotification();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
@@ -193,12 +197,19 @@ const App = () => {
         }
     };
 
-    const handleLogin = async ({ mode, name, email, password, bio, location, website, avatar, referralCode }) => {
+    const handleLogin = async ({ mode, name, email, password, bio, location, website, avatar, referralCode, inviteToken }) => {
         if (mode === 'signup') {
             await register({ name, email, password, bio, location, website, avatar, referralCode });
             addToast('Account created successfully.', 'success');
             setCurrentPage('profile');
             addToast('You are signed in. Finish your profile on this page.', 'info');
+            return;
+        }
+
+        if (mode === 'teamInvite') {
+            await acceptTeamInvite({ inviteToken, email, password, name });
+            addToast('Team invite accepted. You are signed in.', 'success');
+            setCurrentPage('feed');
             return;
         }
 
@@ -244,6 +255,13 @@ const App = () => {
         setCurrentPage('ravensight');
         setIsRavensightMode(true);
         addToast('Ravensight mode enabled.', 'info');
+    };
+
+    const openRavensightWithTab = (tabId = 'record') => {
+        queueRavensightTab(tabId);
+        setCurrentPage('ravensight');
+        setIsRavensightMode(true);
+        addToast('Opening Ravensight control room.', 'info');
     };
 
     const exitRavensightMode = () => {
@@ -312,8 +330,16 @@ const App = () => {
                 return isAdminUser
                     ? <RevenueConsolePage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'team-access-admin':
+                return isAdminUser
+                    ? <TeamAccessAdminPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'ravensight':
                 return <RavensightVideo />;
+            case 'newsroom-video':
+                return <NewsroomRecorderPage onSendToPodcastControlRoom={() => openRavensightWithTab('podcast')} />;
+            case 'amateur-journalist':
+                return <AmateurJournalistPage onNavigate={setCurrentPage} />;
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             default:
@@ -336,13 +362,19 @@ const App = () => {
         { id: 'notifications', label: 'Notifications' },
         { id: 'messages', label: 'Messages' },
         { id: 'planner', label: 'Planner' },
+        { id: 'newsroom-video', label: 'Newsroom Video' },
+        { id: 'amateur-journalist', label: 'Amateur Journalist' },
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'profile', label: 'Profile' }
     ];
 
     if (isAdminUser) {
-        navItems.splice(8, 0, { id: 'growth', label: 'Growth' }, { id: 'revenue', label: 'Revenue' });
+        navItems.splice(8, 0,
+            { id: 'growth', label: 'Growth' },
+            { id: 'revenue', label: 'Revenue' },
+            { id: 'team-access-admin', label: 'Team Access' }
+        );
     }
 
     if (isRavensightMode) {

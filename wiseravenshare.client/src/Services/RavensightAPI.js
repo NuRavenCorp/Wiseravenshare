@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken } from './authStorage.js';
+import { getAdminPassToken, getAuthToken } from './authStorage.js';
 
 const ensureApiBase = (value) => {
     const raw = String(value || '').trim();
@@ -172,6 +172,11 @@ class RavensightAPI {
                 if (!config.skipAuth && token) {
                     config.headers.Authorization = `Bearer ${token}`;
                 }
+
+                const adminPassToken = getAdminPassToken();
+                if (adminPassToken) {
+                    config.headers['X-Admin-Pass-Token'] = adminPassToken;
+                }
                 return config;
             },
             (error) => Promise.reject(error)
@@ -269,6 +274,10 @@ class RavensightAPI {
 
             throw new Error(extractErrorMessage(error, 'Video upload failed.'));
         });
+
+        if (onProgress) {
+            onProgress(100);
+        }
 
         const payload = response?.data || {};
         const normalizedVideo = normalizeVideoEntityPayload(payload);
@@ -440,6 +449,55 @@ class RavensightAPI {
             return payload;
         }
         return { comments: [], page };
+    }
+
+    // Collaborative Script Workspace
+    async getScriptWorkspace(feedId, title = '') {
+        const normalizedFeedId = encodeURIComponent(String(feedId || '').trim() || 'default-feed');
+        const response = await this.requestWithFallback('get', [
+            `${this.generalApiBaseUrl}/ravensight/scripts/${normalizedFeedId}`,
+            `/scripts/${normalizedFeedId}`
+        ], {
+            params: { title }
+        });
+
+        return response?.data || null;
+    }
+
+    async upsertScriptLine(feedId, title, payload) {
+        const normalizedFeedId = encodeURIComponent(String(feedId || '').trim() || 'default-feed');
+        const response = await this.requestWithFallback('post', [
+            `${this.generalApiBaseUrl}/ravensight/scripts/${normalizedFeedId}/lines`,
+            `/scripts/${normalizedFeedId}/lines`
+        ], {
+            params: { title },
+            data: payload
+        });
+
+        return response?.data || null;
+    }
+
+    async deleteScriptLine(feedId, lineId) {
+        const normalizedFeedId = encodeURIComponent(String(feedId || '').trim() || 'default-feed');
+        const normalizedLineId = encodeURIComponent(String(lineId || '').trim());
+        const response = await this.requestWithFallback('delete', [
+            `${this.generalApiBaseUrl}/ravensight/scripts/${normalizedFeedId}/lines/${normalizedLineId}`,
+            `/scripts/${normalizedFeedId}/lines/${normalizedLineId}`
+        ]);
+
+        return response?.data || null;
+    }
+
+    async suggestScriptLine(feedId, payload) {
+        const normalizedFeedId = encodeURIComponent(String(feedId || '').trim() || 'default-feed');
+        const response = await this.requestWithFallback('post', [
+            `${this.generalApiBaseUrl}/ravensight/scripts/${normalizedFeedId}/ai-suggest`,
+            `/scripts/${normalizedFeedId}/ai-suggest`
+        ], {
+            data: payload
+        });
+
+        return response?.data || null;
     }
 
     // YouTube Integration

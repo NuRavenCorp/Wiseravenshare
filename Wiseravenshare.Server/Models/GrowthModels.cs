@@ -169,3 +169,26 @@ public sealed class RevenueAgentSummary
     public bool OnTrackForDeadline { get; set; }
     public RevenueMilestone? ActiveMilestone { get; set; }
 }
+
+public sealed class AdminPolicyShiftRequest
+{
+    public string PolicyKey { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string Status { get; set; } = "draft";
+    public string Notes { get; set; } = string.Empty;
+}
+
+public sealed class AdminPolicyShiftRecord
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string PolicyKey { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string Status { get; set; } = "draft";
+    public string Notes { get; set; } = string.Empty;
+    public string ChangedByUserId { get; set; } = string.Empty;
+    public string ChangedByEmail { get; set; } = string.Empty;
+    public DateTime EffectiveFromUtc { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}

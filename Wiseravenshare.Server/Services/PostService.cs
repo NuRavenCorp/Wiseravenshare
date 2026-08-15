@@ -85,6 +85,8 @@ public class PostService : IPostService
             RepostOfId = dto.RepostOfId,
             QuoteOfId = dto.QuoteOfId,
             LocationName = dto.LocationName,
+            IsTruthDispatch = dto.IsTruthDispatch,
+            TruthDeclarationAccepted = dto.TruthDeclarationAccepted,
             Latitude = dto.Latitude.HasValue ? (decimal?)dto.Latitude.Value : null,
             Longitude = dto.Longitude.HasValue ? (decimal?)dto.Longitude.Value : null,
             IsSensitive = dto.IsSensitive
@@ -181,6 +183,16 @@ public class PostService : IPostService
         if (dto.IsSensitive.HasValue)
         {
             post.IsSensitive = dto.IsSensitive.Value;
+        }
+
+        if (dto.IsTruthDispatch.HasValue)
+        {
+            post.IsTruthDispatch = dto.IsTruthDispatch.Value;
+        }
+
+        if (dto.TruthDeclarationAccepted.HasValue)
+        {
+            post.TruthDeclarationAccepted = dto.TruthDeclarationAccepted.Value;
         }
 
         await _postRepository.UpdateAsync(post);
@@ -365,6 +377,8 @@ public class PostService : IPostService
             TruthScore = post.TruthScore,
             TruthCorrection = post.TruthCorrection,
             LocationName = post.LocationName,
+            IsTruthDispatch = post.IsTruthDispatch,
+            TruthDeclarationAccepted = post.TruthDeclarationAccepted,
             Latitude = post.Latitude.HasValue ? (double?)post.Latitude.Value : null,
             Longitude = post.Longitude.HasValue ? (double?)post.Longitude.Value : null,
             IsSensitive = post.IsSensitive,

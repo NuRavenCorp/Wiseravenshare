@@ -1,6 +1,7 @@
 ﻿// Wiseravenshare.Server/Controllers/VideoController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using Wiseravenshare.Server.DTOs.Video;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -17,11 +18,13 @@ namespace Wiseravenshare.Server.Controllers
     {
         private readonly IVideoService _videoService;
         private readonly ILogger<VideoController> _logger;
+        private readonly OutputCacheInvalidationService _cacheInvalidation;
 
-        public VideoController(IVideoService videoService, ILogger<VideoController> logger)
+        public VideoController(IVideoService videoService, ILogger<VideoController> logger, OutputCacheInvalidationService cacheInvalidation)
         {
             _videoService = videoService;
             _logger = logger;
+            _cacheInvalidation = cacheInvalidation;
         }
 
         /// <summary>
@@ -35,6 +38,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             var video = await _videoService.UploadVideoAsync(userId, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return CreatedAtAction(nameof(GetVideo), new { id = video.Id }, video);
         }
 
@@ -62,6 +66,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             var video = await _videoService.UpdateVideoAsync(userId, id, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(video);
         }
 
@@ -75,6 +80,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             await _videoService.DeleteVideoAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return NoContent();
         }
 
@@ -95,6 +101,7 @@ namespace Wiseravenshare.Server.Controllers
         /// </summary>
         [HttpGet("feed")]
         [AllowAnonymous]
+        [OutputCache(PolicyName = "PublicFeedShort")]
         [ProducesResponseType(typeof(IEnumerable<VideoDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetVideoFeed([FromQuery] string? filter = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
@@ -112,6 +119,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             await _videoService.LikeVideoAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return NoContent();
         }
 
@@ -125,6 +133,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             await _videoService.UnlikeVideoAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return NoContent();
         }
 
@@ -138,6 +147,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = User.GetUserId();
             await _videoService.ShareVideoAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return NoContent();
         }
 

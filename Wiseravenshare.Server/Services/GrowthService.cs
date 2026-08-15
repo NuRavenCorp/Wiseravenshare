@@ -607,6 +607,45 @@ public sealed class GrowthService
         }
     }
 
+    public IReadOnlyList<AdminPolicyShiftRecord> GetAdminPolicyHistory()
+    {
+        EnsureLoaded();
+
+        lock (_lock)
+        {
+            return _state.PolicyHistory
+                .OrderByDescending(item => item.EffectiveFromUtc)
+                .ThenByDescending(item => item.CreatedAtUtc)
+                .ToList();
+        }
+    }
+
+    public AdminPolicyShiftRecord RecordAdminPolicyShift(string userId, string email, AdminPolicyShiftRequest request)
+    {
+        EnsureLoaded();
+
+        lock (_lock)
+        {
+            var record = new AdminPolicyShiftRecord
+            {
+                PolicyKey = request.PolicyKey.Trim(),
+                Title = request.Title.Trim(),
+                Summary = request.Summary.Trim(),
+                Status = string.IsNullOrWhiteSpace(request.Status) ? "draft" : request.Status.Trim(),
+                Notes = request.Notes.Trim(),
+                ChangedByUserId = userId.Trim(),
+                ChangedByEmail = email.Trim(),
+                EffectiveFromUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            _state.PolicyHistory.Add(record);
+            TrimUnsafe();
+            PersistUnsafe();
+            return record;
+        }
+    }
+
     private void EnsureLoaded()
     {
         if (_loaded)
@@ -648,6 +687,7 @@ public sealed class GrowthService
         _state.Invites ??= [];
         _state.Reports ??= [];
         _state.RevenueAgents ??= [];
+        _state.PolicyHistory ??= [];
     }
 
     private void PersistUnsafe()
@@ -734,6 +774,15 @@ public sealed class GrowthService
                     .OrderBy(item => item.OccurredAtUtc)
                     .ToList();
             }
+        }
+
+        if (_state.PolicyHistory.Count > 1000)
+        {
+            _state.PolicyHistory = _state.PolicyHistory
+                .OrderByDescending(item => item.EffectiveFromUtc)
+                .Take(750)
+                .OrderBy(item => item.EffectiveFromUtc)
+                .ToList();
         }
     }
 
@@ -916,5 +965,6 @@ public sealed class GrowthService
         public List<InviteRecord> Invites { get; set; } = [];
         public List<ModerationReport> Reports { get; set; } = [];
         public List<RevenueAgentPlan> RevenueAgents { get; set; } = [];
+        public List<AdminPolicyShiftRecord> PolicyHistory { get; set; } = [];
     }
 }

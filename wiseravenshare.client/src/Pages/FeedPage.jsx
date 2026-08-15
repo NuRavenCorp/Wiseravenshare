@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import PostCreator from '../Components/Common/Postcreator';
 import PostCard from '../Components/Feed/PostCard.jsx';
 import VideoFeedMini from '../Components/Feed/VideoFeedMini.jsx';
@@ -17,10 +17,33 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
+    const [feedScope, setFeedScope] = useState('local');
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
+    const localRegion = String(user?.location || '').trim();
 
     const normalizePost = (post) => normalizeFeedPost(post, currentUser);
+    const normalizeLocation = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const isLocalPost = (post) => {
+        if (!localRegion) {
+            return false;
+        }
+
+        const postRegion = String(post?.locationName || post?.location || '').trim();
+        if (!postRegion) {
+            return false;
+        }
+
+        const normalizedUserRegion = normalizeLocation(localRegion);
+        const normalizedPostRegion = normalizeLocation(postRegion);
+        if (!normalizedUserRegion || !normalizedPostRegion) {
+            return false;
+        }
+
+        return normalizedPostRegion === normalizedUserRegion
+            || normalizedPostRegion.includes(normalizedUserRegion)
+            || normalizedUserRegion.includes(normalizedPostRegion);
+    };
 
     const buildIntegrityReport = (post, mode = 'manual') => {
         const content = String(post?.content || '').trim();
@@ -232,11 +255,24 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
         }
     };
 
-    const filteredPosts = posts.filter(post =>
-        post.userId === currentUser.id || following.includes(post.userId)
-    );
+    const rankedFeedPosts = useMemo(() => {
+        const ranked = rankPostsByPredictedEngagement(posts, { horizonHours: 18 });
 
-    const rankedFeedPosts = rankPostsByPredictedEngagement(filteredPosts, { horizonHours: 18 });
+        if (feedScope !== 'local' || !localRegion) {
+            return ranked;
+        }
+
+        return [...ranked].sort((left, right) => {
+            const leftLocal = isLocalPost(left);
+            const rightLocal = isLocalPost(right);
+
+            if (leftLocal === rightLocal) {
+                return 0;
+            }
+
+            return leftLocal ? -1 : 1;
+        });
+    }, [posts, feedScope, localRegion]);
 
     useEffect(() => {
         setIntegrityReports((prev) => {
@@ -287,11 +323,36 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                     top: '88px',
                     zIndex: 15,
                     display: 'flex',
-                    justifyContent: 'flex-end',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '12px',
                     marginBottom: '12px',
                     pointerEvents: 'none'
                 }}
             >
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', pointerEvents: 'auto' }}>
+                    {[
+                        { id: 'local', label: 'Local' },
+                        { id: 'national', label: 'National' }
+                    ].map((option) => (
+                        <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setFeedScope(option.id)}
+                            style={{
+                                border: feedScope === option.id ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                                background: feedScope === option.id ? 'rgba(255,255,255,0.08)' : 'rgba(17, 24, 39, 0.7)',
+                                color: 'var(--text-color)',
+                                borderRadius: '999px',
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                backdropFilter: 'blur(6px)'
+                            }}
+                        >
+                            {option.label}
+                        </button>
+                    ))}
+                </div>
                 <div
                     style={{
                         background: 'rgba(17, 24, 39, 0.7)',
@@ -304,6 +365,13 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                 >
                     <WiseRavenLogo showTagline={false} />
                 </div>
+            </div>
+            <div style={{ marginBottom: '10px', fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.5 }}>
+                {feedScope === 'local'
+                    ? (localRegion
+                        ? `Local feed prioritized for ${localRegion}.`
+                        : 'Local feed is active, but no signup location is available yet.')
+                    : 'National feed is active.'}
             </div>
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} />
             <div style={{ marginTop: '20px' }}>

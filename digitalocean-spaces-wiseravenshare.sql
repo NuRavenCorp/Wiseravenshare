@@ -1,6 +1,11 @@
 -- Wiseravenshare DigitalOcean Spaces / Storage Registry Setup
 -- Copy into Postgres SQL editor or run via psql.
 -- This keeps the media bucket dedicated to Wiseravenshare and records metadata in app_data.bucket_objects.
+-- Required object-key prefixes for deployment:
+--   wiseravenshare/ravensight/video/
+--   wiseravenshare/ravensight/photo/
+--   wiseravenshare/ravensight/music/
+--   wiseravenshare/journalist_dispatches/
 
 CREATE SCHEMA IF NOT EXISTS app_data;
 

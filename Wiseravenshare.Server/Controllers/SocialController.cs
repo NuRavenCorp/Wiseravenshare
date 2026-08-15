@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -12,13 +13,16 @@ namespace Wiseravenshare.Server.Controllers;
 public class SocialController : ControllerBase
 {
     private readonly ISocialPlatformService _socialPlatformService;
+    private readonly OutputCacheInvalidationService _cacheInvalidation;
 
-    public SocialController(ISocialPlatformService socialPlatformService)
+    public SocialController(ISocialPlatformService socialPlatformService, OutputCacheInvalidationService cacheInvalidation)
     {
         _socialPlatformService = socialPlatformService;
+        _cacheInvalidation = cacheInvalidation;
     }
 
     [HttpGet("feed/facebook")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetFacebookFeed([FromQuery] string? pageId = null, [FromQuery] int limit = 10)
     {
@@ -27,6 +31,7 @@ public class SocialController : ControllerBase
     }
 
     [HttpGet("feed/tiktok")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetTikTokFeed([FromQuery] string? username = null, [FromQuery] int limit = 10)
     {
@@ -35,6 +40,7 @@ public class SocialController : ControllerBase
     }
 
     [HttpGet("feed")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCombinedFeed(
         [FromQuery] string? pageId = null,
@@ -77,6 +83,7 @@ public class SocialController : ControllerBase
 
         var userId = User.GetUserId();
         var result = await _socialPlatformService.PublishAsync(userId, request);
+        await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
         return Ok(result);
     }
 }

@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import VideoRecorder from './VideoRecorder';
 import VideoFeed from './VideoFeed';
 import VideoUploader from './VideoUploader';
 import VideoLibrary from './VideoLibrary';
 import WiseRavenLogo from '../Common/WiseRavenLogo';
+import PodcastStudioPage from '../../Pages/PodcastStudioPage';
+import { consumeRavensightTab } from '../../Services/podcastStudioBridge';
+import { authService } from '../../Services/Auth.jsx';
 import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
 import { subscriptionService } from '../../Services/subscriptionService';
@@ -187,7 +190,7 @@ const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
 };
 
 const RavensightVideo = () => {
-    const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library
+    const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library, podcast, subscribe
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
     const [billingSync, setBillingSync] = useState({
@@ -228,6 +231,27 @@ const RavensightVideo = () => {
         }
     });
     const selectedPlan = getPlanById(selectedPlanId);
+    const isAdminAllAccess = useMemo(() => authService.isAdminAllAccess(), [user?.id, user?.email]);
+
+    useEffect(() => {
+        if (!isAdminAllAccess) {
+            return;
+        }
+
+        if (authService.getAdminPassToken()) {
+            return;
+        }
+
+        authService.issueAdminPassToken().catch(() => null);
+    }, [isAdminAllAccess]);
+
+    useEffect(() => {
+        const queuedTab = consumeRavensightTab();
+        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        if (allowedTabs.has(queuedTab)) {
+            setActiveTab(queuedTab);
+        }
+    }, []);
 
     const getCatalogPlanById = (planId = DEFAULT_PLAN_ID) => {
         const matched = stripeCatalog.find((plan) => plan.planId === planId);
@@ -246,7 +270,9 @@ const RavensightVideo = () => {
         return match?.planId || null;
     };
 
-    const activePlanId = billingSync.hasActiveSubscription
+    const activePlanId = isAdminAllAccess
+        ? 'studio_plus'
+        : billingSync.hasActiveSubscription
         ? (resolvePlanIdFromPriceId(billingSync.priceId) || subscription?.planId || DEFAULT_PLAN_ID)
         : selectedPlanId;
 
@@ -325,6 +351,31 @@ const RavensightVideo = () => {
         let cancelled = false;
 
         const syncBillingStatus = async () => {
+            if (isAdminAllAccess) {
+                if (cancelled) {
+                    return;
+                }
+
+                setBillingSync({
+                    source: 'server',
+                    status: 'admin_all_access',
+                    hasActiveSubscription: true,
+                    currentPeriodEnd: null,
+                    priceId: 'admin-pass',
+                    error: ''
+                });
+                setSubscription((current) => ({
+                    ...current,
+                    tier: 'Administrator All Access',
+                    isActive: true,
+                    billingCycle: 'admin',
+                    planId: 'studio_plus',
+                    price: 0,
+                    renewsAt: null
+                }));
+                return;
+            }
+
             try {
                 const response = await subscriptionService.getSubscriptionStatus();
                 if (cancelled) {
@@ -379,7 +430,7 @@ const RavensightVideo = () => {
         return () => {
             cancelled = true;
         };
-    }, [subscriptionStorageKey, user?.id]);
+    }, [isAdminAllAccess, subscriptionStorageKey, user?.id]);
 
     useEffect(() => {
         safeTrackGrowthEvent('paywall_plan_selected', {
@@ -572,6 +623,7 @@ const RavensightVideo = () => {
         { id: 'feed', label: '📺 Video Feed', icon: '📺' },
         { id: 'upload', label: '📤 Upload to YouTube/TikTok', icon: '📤' },
         { id: 'library', label: '📚 My Library', icon: '📚' },
+        { id: 'podcast', label: '🎙 Podcast Control Room', icon: '🎙' },
         { id: 'subscribe', label: '💎 Subscribe', icon: '💎' }
     ];
 
@@ -609,7 +661,11 @@ const RavensightVideo = () => {
                         background: billingSync.hasActiveSubscription ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.12)',
                         border: '1px solid rgba(255,255,255,0.18)'
                     }}>
-                        {billingSync.source === 'server' ? 'Billing synced' : 'Billing preview mode'}
+                        {isAdminAllAccess
+                            ? 'Administrator all-access'
+                            : billingSync.source === 'server'
+                                ? 'Billing synced'
+                                : 'Billing preview mode'}
                     </span>
                     {billingSync.error && (
                         <span style={{ color: '#ffd7d7' }}>
@@ -703,7 +759,9 @@ const RavensightVideo = () => {
                                 {billingSync.hasActiveSubscription ? 'Active subscription verified' : 'Subscription not active'}
                             </div>
                             <div style={{ color: 'var(--light-color)', marginTop: '4px' }}>
-                                {billingSync.source === 'server'
+                                {isAdminAllAccess
+                                    ? 'Administrator account has permanent all-access to subscription features.'
+                                    : billingSync.source === 'server'
                                     ? `Synced from Stripe with status ${billingSync.status}.`
                                     : 'Showing local preview until Stripe status is available.'}
                             </div>
@@ -721,7 +779,7 @@ const RavensightVideo = () => {
                 {activeTab === 'record' && (
                     <VideoRecorder
                         onNotification={addNotification}
-                        canDirectUpload={Boolean(subscription?.isActive)}
+                        canDirectUpload={isAdminAllAccess || Boolean(subscription?.isActive)}
                         subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
@@ -731,12 +789,26 @@ const RavensightVideo = () => {
                 {activeTab === 'upload' && (
                     <VideoUploader
                         onNotification={addNotification}
-                        canDirectUpload={Boolean(subscription?.isActive)}
+                        canDirectUpload={isAdminAllAccess || Boolean(subscription?.isActive)}
                         subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
                 {activeTab === 'library' && (
                     <VideoLibrary onNotification={addNotification} />
+                )}
+                {activeTab === 'podcast' && (
+                    <div style={{ display: 'grid', gap: '14px' }}>
+                        <div style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '14px',
+                            background: 'rgba(255,255,255,0.02)',
+                            padding: '14px',
+                            color: 'var(--light-color)'
+                        }}>
+                            Podcast Studio now runs inside Ravensight so team recording and publishing stay in one production lane.
+                        </div>
+                        <PodcastStudioPage />
+                    </div>
                 )}
                 {activeTab === 'subscribe' && (
                     <div style={{ maxWidth: '980px', margin: '0 auto' }}>

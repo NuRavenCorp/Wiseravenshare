@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../Services/api';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
+import { authService } from '../Services/Auth.jsx';
 
 const MODERATION_QUEUE_PREFS_KEY = 'wiseModerationQueuePrefsV1';
 
@@ -52,6 +53,25 @@ const GrowthPage = () => {
     const [queuePage, setQueuePage] = useState(1);
     const [queuePageSize, setQueuePageSize] = useState(Number.isFinite(queuePrefs?.queuePageSize) ? Math.min(50, Math.max(10, Number(queuePrefs.queuePageSize))) : 10);
     const [queueJumpPage, setQueueJumpPage] = useState('1');
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [securitySaving, setSecuritySaving] = useState(false);
+    const [policyHistory, setPolicyHistory] = useState(null);
+    const [policyKey, setPolicyKey] = useState('content-moderation');
+    const [policyTitle, setPolicyTitle] = useState('');
+    const [policySummary, setPolicySummary] = useState('');
+    const [policyStatus, setPolicyStatus] = useState('draft');
+    const [policyNotes, setPolicyNotes] = useState('');
+    const [policySaving, setPolicySaving] = useState(false);
+    const [teamAccess, setTeamAccess] = useState(null);
+    const [teamMemberEmail, setTeamMemberEmail] = useState('');
+    const [teamMemberName, setTeamMemberName] = useState('');
+    const [teamMemberRole, setTeamMemberRole] = useState('member');
+    const [teamTokenExpiryHours, setTeamTokenExpiryHours] = useState(72);
+    const [teamActionReason, setTeamActionReason] = useState('');
+    const [teamInviteResult, setTeamInviteResult] = useState(null);
+    const [teamActionSaving, setTeamActionSaving] = useState(false);
     const { addToast } = useNotification();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
@@ -65,6 +85,8 @@ const GrowthPage = () => {
             setFunnel(null);
             setReferrals(null);
             setModerationQueue(null);
+            setPolicyHistory(null);
+            setTeamAccess(null);
             return;
         }
 
@@ -72,7 +94,9 @@ const GrowthPage = () => {
             const requests = [
                 apiService.getOnboardingState(),
                 apiService.getGrowthFunnelSummary(30),
-                apiService.getReferralStats()
+                apiService.getReferralStats(),
+                apiService.getAdminPolicyHistory(),
+                authService.getTeamAccessSnapshot()
             ];
 
             requests.push(apiService.getModerationReports({
@@ -83,11 +107,13 @@ const GrowthPage = () => {
             }));
 
             const responses = await Promise.all(requests);
-            const [onboardingRes, funnelRes, referralsRes, moderationQueueRes] = responses;
+            const [onboardingRes, funnelRes, referralsRes, policyHistoryRes, teamAccessRes, moderationQueueRes] = responses;
 
             setOnboarding(onboardingRes.data);
             setFunnel(funnelRes.data);
             setReferrals(referralsRes.data);
+            setPolicyHistory(policyHistoryRes?.data || null);
+            setTeamAccess(teamAccessRes || null);
             setModerationQueue(moderationQueueRes?.data || null);
         } catch (error) {
             addToast(error?.message || 'Failed to load growth insights.', 'error');
@@ -206,6 +232,144 @@ const GrowthPage = () => {
         localStorage.removeItem(MODERATION_QUEUE_PREFS_KEY);
     };
 
+    const handleAdminPasswordChange = async () => {
+        if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
+            addToast('Fill in the current password, new password, and confirmation.', 'warning');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            addToast('New password and confirmation do not match.', 'warning');
+            return;
+        }
+
+        setSecuritySaving(true);
+        try {
+            await authService.changePassword(currentPassword.trim(), newPassword.trim());
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            addToast('Admin password updated successfully.', 'success');
+        } catch (error) {
+            addToast(error?.message || 'Unable to update admin password.', 'error');
+        } finally {
+            setSecuritySaving(false);
+        }
+    };
+
+    const handlePolicyShiftSubmit = async () => {
+        if (!policyKey.trim() || !policyTitle.trim() || !policySummary.trim()) {
+            addToast('Policy key, title, and summary are required.', 'warning');
+            return;
+        }
+
+        setPolicySaving(true);
+        try {
+            await apiService.recordAdminPolicyShift({
+                policyKey: policyKey.trim(),
+                title: policyTitle.trim(),
+                summary: policySummary.trim(),
+                status: policyStatus,
+                notes: policyNotes.trim()
+            });
+            setPolicyTitle('');
+            setPolicySummary('');
+            setPolicyNotes('');
+            setPolicyStatus('draft');
+            await load();
+            addToast('Policy shift recorded.', 'success');
+        } catch (error) {
+            addToast(error?.message || 'Unable to record policy shift.', 'error');
+        } finally {
+            setPolicySaving(false);
+        }
+    };
+
+    const refreshTeamAccess = async () => {
+        if (!isAdminUser) {
+            return;
+        }
+
+        try {
+            const snapshot = await authService.getTeamAccessSnapshot();
+            setTeamAccess(snapshot || null);
+        } catch (error) {
+            addToast(error?.message || 'Unable to refresh team access.', 'error');
+        }
+    };
+
+    const handleIssueTeamToken = async (prearranged) => {
+        if (!teamMemberEmail.trim()) {
+            addToast('Team member email is required.', 'warning');
+            return;
+        }
+
+        setTeamActionSaving(true);
+        try {
+            const payload = {
+                email: teamMemberEmail.trim(),
+                name: teamMemberName.trim(),
+                teamRole: teamMemberRole,
+                expiresInHours: Number.isFinite(Number(teamTokenExpiryHours)) ? Number(teamTokenExpiryHours) : 72
+            };
+
+            const response = prearranged
+                ? await authService.createPrearrangedTeamToken(payload)
+                : await authService.createTeamInvite(payload);
+
+            const invite = response?.invite || response?.prearrangedToken || null;
+            setTeamInviteResult({
+                link: response?.inviteLink || '',
+                invite
+            });
+            setTeamMemberEmail('');
+            setTeamMemberName('');
+            setTeamActionReason('');
+            addToast(prearranged ? 'Prearranged team token issued.' : 'Team invite token issued.', 'success');
+            await Promise.all([load(), refreshTeamAccess()]);
+        } catch (error) {
+            addToast(error?.message || 'Unable to issue team token.', 'error');
+        } finally {
+            setTeamActionSaving(false);
+        }
+    };
+
+    const handleRevokePendingInvite = async (inviteId) => {
+        if (!inviteId) {
+            return;
+        }
+
+        setTeamActionSaving(true);
+        try {
+            await authService.revokeTeamInvite(inviteId, teamActionReason.trim());
+            setTeamActionReason('');
+            addToast('Pending invite revoked.', 'success');
+            await Promise.all([load(), refreshTeamAccess()]);
+        } catch (error) {
+            addToast(error?.message || 'Unable to revoke invite.', 'error');
+        } finally {
+            setTeamActionSaving(false);
+        }
+    };
+
+    const handleToggleTeamMember = async (email, activate) => {
+        if (!email) {
+            return;
+        }
+
+        setTeamActionSaving(true);
+        try {
+            await authService.setTeamMemberStatus(email, activate, teamActionReason.trim());
+            setTeamActionReason('');
+            addToast(activate ? 'Team member reactivated.' : 'Team member suspended.', 'success');
+            await Promise.all([load(), refreshTeamAccess()]);
+        } catch (error) {
+            addToast(error?.message || 'Unable to update team member status.', 'error');
+        } finally {
+            setTeamActionSaving(false);
+        }
+    };
+
     if (!isAdminUser) {
         return (
             <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
@@ -239,6 +403,108 @@ const GrowthPage = () => {
             </div>
 
             <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
+                <h3 style={{ marginTop: 0 }}>Admin Login And Policy Control</h3>
+                <div style={{ color: 'var(--light-color)', fontSize: '13px', marginBottom: '12px' }}>
+                    Default admin login: <strong>admin</strong> / <strong>1@Chinchin234</strong>. Rotate it from inside the app after first sign-in.
+                </div>
+                <div style={{ display: 'grid', gap: '8px', maxWidth: '420px' }}>
+                    <input
+                        type="password"
+                        placeholder="Current admin password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <input
+                        type="password"
+                        placeholder="New admin password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <button onClick={handleAdminPasswordChange} style={buttonStyle} disabled={securitySaving}>
+                        {securitySaving ? 'Saving...' : 'Update Admin Password'}
+                    </button>
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--light-color)' }}>
+                    Policy and moderation controls already live in this console; this section handles credential rotation.
+                </div>
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
+                <h3 style={{ marginTop: 0 }}>Policy Audit Trail</h3>
+                <div style={{ display: 'grid', gap: '8px', maxWidth: '560px', marginBottom: '14px' }}>
+                    <input
+                        type="text"
+                        placeholder="Policy key"
+                        value={policyKey}
+                        onChange={(e) => setPolicyKey(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <input
+                        type="text"
+                        placeholder="Policy title"
+                        value={policyTitle}
+                        onChange={(e) => setPolicyTitle(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <textarea
+                        placeholder="Policy summary"
+                        value={policySummary}
+                        onChange={(e) => setPolicySummary(e.target.value)}
+                        rows={3}
+                        style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                    <select
+                        value={policyStatus}
+                        onChange={(e) => setPolicyStatus(e.target.value)}
+                        style={inputStyle}
+                    >
+                        <option value="draft">Draft</option>
+                        <option value="active">Active</option>
+                        <option value="paused">Paused</option>
+                        <option value="retired">Retired</option>
+                    </select>
+                    <textarea
+                        placeholder="Notes for the audit trail"
+                        value={policyNotes}
+                        onChange={(e) => setPolicyNotes(e.target.value)}
+                        rows={2}
+                        style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                    <button onClick={handlePolicyShiftSubmit} style={buttonStyle} disabled={policySaving}>
+                        {policySaving ? 'Recording...' : 'Record Policy Shift'}
+                    </button>
+                </div>
+                {Array.isArray(policyHistory?.history) && policyHistory.history.length > 0 ? (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                        {policyHistory.history.slice(0, 6).map((record) => (
+                            <div key={record.id} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '12px', color: 'var(--light-color)' }}>
+                                    <span>{record.policyKey}</span>
+                                    <span>{record.status}</span>
+                                </div>
+                                <div style={{ fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>{record.title}</div>
+                                <div style={{ fontSize: '13px', marginTop: '4px' }}>{record.summary}</div>
+                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
+                                    {new Date(record.effectiveFromUtc || record.createdAtUtc).toLocaleString()} by {record.changedByEmail || 'unknown'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>No policy shifts recorded yet.</div>
+                )}
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
                 <h3 style={{ marginTop: 0 }}>Referral And Invite</h3>
                 <input
                     type="email"
@@ -265,6 +531,160 @@ const GrowthPage = () => {
                         Pending: {referrals.pendingInvites} | Redeemed: {referrals.redeemedInvites}
                     </div>
                 )}
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
+                <h3 style={{ marginTop: 0 }}>Team Access Tokens And Member Control</h3>
+                <div style={{ color: 'var(--light-color)', fontSize: '13px', marginBottom: '10px' }}>
+                    Issue invite or prearranged tokens, then suspend/reactivate team logins without opening public registration.
+                </div>
+                <div style={{ display: 'grid', gap: '8px', maxWidth: '620px' }}>
+                    <input
+                        type="email"
+                        placeholder="Team member email"
+                        value={teamMemberEmail}
+                        onChange={(e) => setTeamMemberEmail(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <input
+                        type="text"
+                        placeholder="Display name"
+                        value={teamMemberName}
+                        onChange={(e) => setTeamMemberName(e.target.value)}
+                        style={inputStyle}
+                    />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <input
+                            type="text"
+                            placeholder="Role (member, producer, host, etc.)"
+                            value={teamMemberRole}
+                            onChange={(e) => setTeamMemberRole(e.target.value)}
+                            style={inputStyle}
+                        />
+                        <input
+                            type="number"
+                            min={1}
+                            max={336}
+                            placeholder="Token expiry hours"
+                            value={teamTokenExpiryHours}
+                            onChange={(e) => setTeamTokenExpiryHours(Number.parseInt(e.target.value, 10) || 72)}
+                            style={inputStyle}
+                        />
+                    </div>
+                    <textarea
+                        placeholder="Reason for revoke/suspend/reactivate actions (saved in policy audit)"
+                        value={teamActionReason}
+                        onChange={(e) => setTeamActionReason(e.target.value)}
+                        rows={2}
+                        style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button onClick={() => handleIssueTeamToken(false)} style={buttonStyle} disabled={teamActionSaving}>
+                            {teamActionSaving ? 'Working...' : 'Issue Invite Token'}
+                        </button>
+                        <button
+                            onClick={() => handleIssueTeamToken(true)}
+                            style={{ ...buttonStyle, background: 'transparent', color: 'var(--text-color)' }}
+                            disabled={teamActionSaving}
+                        >
+                            Issue Prearranged Token
+                        </button>
+                        <button
+                            onClick={refreshTeamAccess}
+                            style={{ ...buttonStyle, background: 'transparent', color: 'var(--text-color)' }}
+                            disabled={teamActionSaving}
+                        >
+                            Refresh Team Access
+                        </button>
+                    </div>
+                </div>
+
+                {teamInviteResult?.invite && (
+                    <div style={{ marginTop: '12px', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', fontSize: '13px' }}>
+                        <div>Invite for: {teamInviteResult.invite.inviteeEmail}</div>
+                        <div>Role: {teamInviteResult.invite.teamRole}</div>
+                        <div>Expires: {new Date(teamInviteResult.invite.expiresAtUtc).toLocaleString()}</div>
+                        <div style={{ marginTop: '6px', wordBreak: 'break-all' }}>
+                            Token: <span style={{ color: 'var(--highlight-color)' }}>{teamInviteResult.invite.inviteToken}</span>
+                        </div>
+                        {teamInviteResult.link && (
+                            <div style={{ marginTop: '6px', wordBreak: 'break-all' }}>
+                                Link: <span style={{ color: 'var(--highlight-color)' }}>{teamInviteResult.link}</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
+                    <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>Pending Team Invites</div>
+                        {Array.isArray(teamAccess?.pendingInvites) && teamAccess.pendingInvites.length > 0 ? (
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                {teamAccess.pendingInvites.map((invite) => (
+                                    <div key={invite.inviteId} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                        <div style={{ fontSize: '13px' }}>{invite.inviteeEmail} ({invite.teamRole})</div>
+                                        <div style={{ color: 'var(--light-color)', fontSize: '12px', marginTop: '4px' }}>
+                                            Created {new Date(invite.createdAtUtc).toLocaleString()} · Expires {new Date(invite.expiresAtUtc).toLocaleString()}
+                                        </div>
+                                        <div style={{ marginTop: '8px' }}>
+                                            <button
+                                                onClick={() => handleRevokePendingInvite(invite.inviteId)}
+                                                style={{ ...buttonStyle, background: 'transparent', color: 'var(--text-color)' }}
+                                                disabled={teamActionSaving}
+                                            >
+                                                Revoke Invite
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>No pending team invites.</div>
+                        )}
+                    </div>
+
+                    <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>Team Members</div>
+                        {Array.isArray(teamAccess?.members) && teamAccess.members.length > 0 ? (
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                {teamAccess.members.map((member) => (
+                                    <div key={member.email} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                        <div style={{ fontSize: '13px' }}>{member.email} ({member.teamRole})</div>
+                                        <div style={{ color: 'var(--light-color)', fontSize: '12px', marginTop: '4px' }}>
+                                            Status: {member.isActive ? 'Active' : 'Suspended'} · Granted {new Date(member.grantedAtUtc).toLocaleString()}
+                                        </div>
+                                        {member.suspensionReason && !member.isActive && (
+                                            <div style={{ color: 'var(--light-color)', fontSize: '12px', marginTop: '4px' }}>
+                                                Suspension reason: {member.suspensionReason}
+                                            </div>
+                                        )}
+                                        <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                            {member.isActive ? (
+                                                <button
+                                                    onClick={() => handleToggleTeamMember(member.email, false)}
+                                                    style={{ ...buttonStyle, background: 'transparent', color: 'var(--text-color)' }}
+                                                    disabled={teamActionSaving}
+                                                >
+                                                    Suspend Member
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleToggleTeamMember(member.email, true)}
+                                                    style={buttonStyle}
+                                                    disabled={teamActionSaving}
+                                                >
+                                                    Reactivate Member
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>No team members have accepted access yet.</div>
+                        )}
+                    </div>
+                </div>
             </div>
 
             <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>

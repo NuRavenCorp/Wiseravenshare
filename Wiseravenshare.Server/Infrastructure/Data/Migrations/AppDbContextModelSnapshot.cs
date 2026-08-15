@@ -497,6 +497,9 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Property<bool>("IsSensitive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsTruthDispatch")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal?>("Latitude")
                         .HasColumnType("numeric");
 
@@ -532,6 +535,9 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("TruthCorrection")
                         .HasColumnType("text");
+
+                    b.Property<bool>("TruthDeclarationAccepted")
+                        .HasColumnType("boolean");
 
                     b.Property<decimal?>("TruthScore")
                         .HasColumnType("numeric");

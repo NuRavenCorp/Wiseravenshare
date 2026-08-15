@@ -16,15 +16,17 @@ public class MediaController : ControllerBase
     private readonly IYouTubeService _youTubeService;
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly ILogger<MediaController> _logger;
+    private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger)
+    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _videoLibraryStore = videoLibraryStore;
         _logger = logger;
+        _cacheInvalidation = cacheInvalidation;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
         {
@@ -156,6 +158,8 @@ public class MediaController : ControllerBase
         }
 
         var mediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
+
         return Ok(new
         {
             fileName = uniqueFileName,
