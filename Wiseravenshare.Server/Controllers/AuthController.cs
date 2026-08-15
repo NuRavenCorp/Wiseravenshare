@@ -155,8 +155,11 @@ public class AuthController : ControllerBase
         var user = _userStore.FindByLoginIdentifier(request.Email);
         if (user is null || !UserStore.VerifyPassword(request.Password, user.PasswordHash))
         {
-            RecordFailedLogin(attemptKey);
-            return Unauthorized(new { message = "Invalid email or password." });
+            if (!TryAuthenticateConfiguredAdmin(request.Email, request.Password, out user) || user is null)
+            {
+                RecordFailedLogin(attemptKey);
+                return Unauthorized(new { message = "Invalid email or password." });
+            }
         }
 
         if (!IsAuthenticationAllowed(user.Email))
@@ -919,6 +922,63 @@ public class AuthController : ControllerBase
     {
         var configured = _configuration.GetValue<bool?>("Authentication:AllowSelfRegistration");
         return configured ?? true;
+    }
+
+    private bool TryAuthenticateConfiguredAdmin(string emailOrIdentifier, string password, out UserRecord? user)
+    {
+        user = null;
+
+        var loginIdentifier = (emailOrIdentifier ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(loginIdentifier) || string.IsNullOrWhiteSpace(password))
+        {
+            return false;
+        }
+
+        var configuredAdmin = ReadConfiguredUsers()
+            .FirstOrDefault(candidate =>
+                !string.IsNullOrWhiteSpace(candidate.Email)
+                && !string.IsNullOrWhiteSpace(candidate.Password)
+                && IsConfiguredAdminUser(candidate.Email)
+                && string.Equals(candidate.Email.Trim(), loginIdentifier, StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(configuredAdmin.Email) || string.IsNullOrWhiteSpace(configuredAdmin.Password))
+        {
+            return false;
+        }
+
+        if (!string.Equals(configuredAdmin.Password, password, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var normalizedEmail = configuredAdmin.Email.Trim();
+
+        if (_userStore.TryGetByEmail(normalizedEmail, out var existingUser) && existingUser is not null)
+        {
+            if (!UserStore.VerifyPassword(password, existingUser.PasswordHash))
+            {
+                _userStore.UpdatePassword(normalizedEmail, password);
+                _userStore.TryGetByEmail(normalizedEmail, out existingUser);
+            }
+
+            user = existingUser;
+            return user is not null;
+        }
+
+        var safeName = string.IsNullOrWhiteSpace(configuredAdmin.Name)
+            ? normalizedEmail.Split('@')[0]
+            : configuredAdmin.Name.Trim();
+
+        user = _userStore.CreateUser(
+            safeName,
+            normalizedEmail,
+            password,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty);
+
+        return true;
     }
 
     private IReadOnlyCollection<string> GetConfiguredAdminEmails()
