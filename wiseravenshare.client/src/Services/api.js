@@ -25,6 +25,8 @@ const ensureApiBase = (value) => {
     return `${root}/api`;
 };
 
+const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').trim());
+
 const resolveApiBaseUrl = () => {
     const configured = ensureApiBase(import.meta.env.VITE_API_URL || '');
     const localhostApi = 'http://localhost:5242/api';
@@ -39,19 +41,28 @@ const resolveApiBaseUrl = () => {
     const isLocalHost = host === 'localhost' || host === '127.0.0.1';
     const isViteDevServer = VITE_DEV_PORTS.has(window.location.port);
     const isHybridRuntime = protocol === 'capacitor:' || protocol === 'file:';
+    const configuredIsAbsolute = isAbsoluteUrl(configured);
 
     // Hybrid runtimes do not host the API at localhost from the device perspective.
     if (isHybridRuntime) {
-        return configured || productionApi;
+        if (configuredIsAbsolute) {
+            return configured;
+        }
+        return productionApi;
     }
 
+    // In local dev, relative API bases (e.g. /api) resolve to Vite host and cause 404s.
     if (isLocalHost || isViteDevServer) {
-        return configured || localhostApi;
+        return configuredIsAbsolute ? configured : localhostApi;
     }
 
     // In production/non-local environments prefer configured API host when provided.
     if (configured) {
-        return configured;
+        if (configuredIsAbsolute) {
+            return configured;
+        }
+        const relativePath = configured.startsWith('/') ? configured : `/${configured}`;
+        return `${window.location.origin}${relativePath}`;
     }
 
     // Fallback for same-origin ingress deployments.
@@ -165,8 +176,10 @@ const normalizeRequestPath = (url = '', baseUrl = '') => {
         return trimmedUrl;
     }
 
-    if (trimmedBase.endsWith('/api') && trimmedUrl.startsWith('api/')) {
-        trimmedUrl = trimmedUrl.replace(/^api\//, '');
+    if (trimmedBase.endsWith('/api')) {
+        while (trimmedUrl.startsWith('api/')) {
+            trimmedUrl = trimmedUrl.replace(/^api\//, '');
+        }
     }
 
     if (trimmedBase.endsWith('/api') && !trimmedUrl.startsWith('auth/') && !trimmedUrl.startsWith('posts/') && !trimmedUrl.startsWith('users/') && !trimmedUrl.startsWith('messages/') && !trimmedUrl.startsWith('notifications') && !trimmedUrl.startsWith('media/') && !trimmedUrl.startsWith('news/') && !trimmedUrl.startsWith('ravensight/') && !trimmedUrl.startsWith('social/') && !trimmedUrl.startsWith('subscription/') && !trimmedUrl.startsWith('video/')) {
