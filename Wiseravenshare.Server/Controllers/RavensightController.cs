@@ -762,21 +762,21 @@ public sealed class RavensightVideoUploadDto
 {
     public IFormFile? Video { get; set; }
     public IFormFile? File { get; set; }
-    public string DestinationFolder { get; set; } = string.Empty;
+    public string? DestinationFolder { get; set; }
     public bool PublishToYouTube { get; set; }
     public bool PublishToTikTok { get; set; }
     public bool PublishToFacebook { get; set; }
-    public string YouTubeChannelOrEmail { get; set; } = string.Empty;
-    public string TikTokUsername { get; set; } = string.Empty;
-    public string FacebookPageOrProfile { get; set; } = string.Empty;
+    public string? YouTubeChannelOrEmail { get; set; }
+    public string? TikTokUsername { get; set; }
+    public string? FacebookPageOrProfile { get; set; }
     public bool YouTubePermissionGranted { get; set; }
     public bool TikTokPermissionGranted { get; set; }
     public bool FacebookPermissionGranted { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string Tags { get; set; } = "[]";
-    public string PrivacyStatus { get; set; } = "unlisted";
-    public string StorageMode { get; set; } = "temporary";
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public string? Tags { get; set; }
+    public string? PrivacyStatus { get; set; }
+    public string? StorageMode { get; set; }
     public bool IsPermanent { get; set; }
 }
 
