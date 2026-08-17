@@ -101,13 +101,19 @@ const TeamAccessAdminPage = () => {
             const invite = response?.invite || response?.prearrangedToken || null;
             setIssued({
                 invite,
-                link: response?.inviteLink || ''
+                link: response?.inviteLink || '',
+                emailDelivered: response?.emailDelivered === true,
+                emailDispatchStatus: response?.emailDispatchStatus || 'unknown'
             });
             setEmail('');
             setName('');
             setActionReason('');
             await load();
-            addToast(prearranged ? 'Prearranged token issued.' : 'Invite token issued.', 'success');
+            if (response?.emailDelivered === true) {
+                addToast(prearranged ? 'Prearranged token issued and email sent.' : 'Invite token issued and email sent.', 'success');
+            } else {
+                addToast('Invite token issued, but email delivery failed. Copy and share the invite link/token manually.', 'warning');
+            }
         } catch (error) {
             addToast(error?.message || 'Unable to issue token.', 'error');
         } finally {
@@ -238,6 +244,10 @@ const TeamAccessAdminPage = () => {
                         <div>Issued for: {issued.invite.inviteeEmail}</div>
                         <div>Role: {issued.invite.teamRole}</div>
                         <div>Expires: {new Date(issued.invite.expiresAtUtc).toLocaleString()}</div>
+                        <div>
+                            Email delivery: {issued.emailDelivered ? 'Sent' : 'Not sent'}
+                            {issued.emailDispatchStatus ? ` (${issued.emailDispatchStatus})` : ''}
+                        </div>
                         <div style={{ marginTop: '8px', wordBreak: 'break-all' }}>
                             Token: <span style={{ color: 'var(--highlight-color)' }}>{issued.invite.inviteToken}</span>
                         </div>

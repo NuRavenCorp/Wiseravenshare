@@ -320,12 +320,18 @@ const GrowthPage = () => {
             const invite = response?.invite || response?.prearrangedToken || null;
             setTeamInviteResult({
                 link: response?.inviteLink || '',
-                invite
+                invite,
+                emailDelivered: response?.emailDelivered === true,
+                emailDispatchStatus: response?.emailDispatchStatus || 'unknown'
             });
             setTeamMemberEmail('');
             setTeamMemberName('');
             setTeamActionReason('');
-            addToast(prearranged ? 'Prearranged team token issued.' : 'Team invite token issued.', 'success');
+            if (response?.emailDelivered === true) {
+                addToast(prearranged ? 'Prearranged team token issued and email sent.' : 'Team invite token issued and email sent.', 'success');
+            } else {
+                addToast('Team token issued, but email delivery failed. Copy and share the invite link/token manually.', 'warning');
+            }
             await Promise.all([load(), refreshTeamAccess()]);
         } catch (error) {
             addToast(error?.message || 'Unable to issue team token.', 'error');
@@ -604,6 +610,10 @@ const GrowthPage = () => {
                         <div>Invite for: {teamInviteResult.invite.inviteeEmail}</div>
                         <div>Role: {teamInviteResult.invite.teamRole}</div>
                         <div>Expires: {new Date(teamInviteResult.invite.expiresAtUtc).toLocaleString()}</div>
+                        <div>
+                            Email delivery: {teamInviteResult.emailDelivered ? 'Sent' : 'Not sent'}
+                            {teamInviteResult.emailDispatchStatus ? ` (${teamInviteResult.emailDispatchStatus})` : ''}
+                        </div>
                         <div style={{ marginTop: '6px', wordBreak: 'break-all' }}>
                             Token: <span style={{ color: 'var(--highlight-color)' }}>{teamInviteResult.invite.inviteToken}</span>
                         </div>
