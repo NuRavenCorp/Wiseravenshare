@@ -228,11 +228,16 @@ const buildFallbackQuotes = (symbols = MARKET_SYMBOLS) => symbols
 const isImageAvatar = (value) => {
     if (typeof value !== 'string') return false;
     const normalized = value.trim();
-    return normalized.startsWith('data:image/') || /^https?:\/\//i.test(normalized);
+    if (!normalized) return false;
+    if (normalized.startsWith('data:image/')) {
+        return normalized.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(normalized);
+    }
+    if (normalized.startsWith('/')) return true;
+    return /^https?:\/\//i.test(normalized) || /^blob:/i.test(normalized);
 };
 
 const avatarFallback = (profile) => {
-    const base = String(profile?.name || profile?.handle || profile?.avatar || 'U').trim();
+    const base = String(profile?.name || profile?.handle || 'U').trim();
     if (!base) return 'U';
 
     const tokens = base
@@ -240,11 +245,11 @@ const avatarFallback = (profile) => {
         .split(/\s+/)
         .filter(Boolean);
 
-    if (tokens.length >= 2) {
+    if (tokens.length >= 2 && tokens[0][0] && tokens[1][0]) {
         return `${tokens[0][0]}${tokens[1][0]}`.toUpperCase();
     }
 
-    return tokens[0].slice(0, 2).toUpperCase();
+    return (tokens[0] || 'U').slice(0, 2).toUpperCase();
 };
 
 const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
@@ -270,6 +275,12 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
                     src={avatar}
                     alt={String(profile?.name || 'User avatar')}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.parentElement) {
+                            e.currentTarget.parentElement.textContent = avatarFallback(profile);
+                        }
+                    }}
                 />
             ) : (
                 avatarFallback(profile)

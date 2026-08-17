@@ -5,6 +5,25 @@ import { useNotification } from '../Contexts/NotificationContext';
 
 const STORAGE_KEY = 'wiseMessagesConversations';
 
+const isImageSource = (v) => {
+    if (!v || typeof v !== 'string') return false;
+    const t = v.trim();
+    if (t.startsWith('data:image/')) return /^data:image\/[a-z0-9.+-]+;base64,/i.test(t) && t.length <= 2_000_000;
+    return /^https?:\/\//i.test(t) || t.startsWith('/') || /^blob:/i.test(t);
+};
+
+const renderAvatarContent = (avatarValue, name) => {
+    if (isImageSource(avatarValue)) {
+        return <img src={avatarValue} alt={name || 'User'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} onError={(e) => { e.target.style.display = 'none'; if (e.target.parentElement) e.target.parentElement.textContent = (name || 'U').charAt(0).toUpperCase(); }} />;
+    }
+    const cleanAvatar = String(avatarValue || '').trim();
+    if (cleanAvatar && cleanAvatar.length <= 2 && !cleanAvatar.includes('/') && !cleanAvatar.includes('<')) {
+        return cleanAvatar.toUpperCase();
+    }
+    const base = String(name || 'U').trim();
+    return base.charAt(0).toUpperCase();
+};
+
 const formatClock = (value) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const relativeTime = (value) => {
@@ -323,7 +342,7 @@ const MessagesPage = () => {
                                 fontWeight: 'bold',
                                 position: 'relative'
                             }}>
-                                {conv.avatar}
+                                {renderAvatarContent(conv.avatar, conv.name)}
                                 {conv.online && (
                                     <div style={{
                                         position: 'absolute',
@@ -385,7 +404,7 @@ const MessagesPage = () => {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 fontWeight: 'bold'
-                            }}>{selectedConversation.avatar}</div>
+                            }}>{renderAvatarContent(selectedConversation.avatar, selectedConversation.name)}</div>
                             <div>
                                 <div style={{ fontWeight: 'bold' }}>{selectedConversation.name}</div>
                                 <div style={{ fontSize: '12px', color: selectedConversation.online ? '#4caf50' : 'var(--highlight-color)' }}>
