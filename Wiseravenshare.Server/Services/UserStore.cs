@@ -377,11 +377,29 @@ public sealed class UserStore
             Bio = user.Bio,
             Location = user.Location,
             Website = user.Website,
-            Avatar = user.Avatar,
+            Avatar = NormalizeAvatarForResponse(user.Avatar),
             CreatedAt = user.CreatedAtUtc,
             UpdatedAt = user.UpdatedAtUtc,
             SocialFeeds = user.SocialFeeds ?? new SocialFeedSettings()
         };
+    }
+
+    private static string NormalizeAvatarForResponse(string? avatar)
+    {
+        var value = (avatar ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        // Prevent oversized inline payloads (base64 data URLs) from breaking auth responses.
+        const int maxInlineAvatarLength = 16 * 1024;
+        if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && value.Length > maxInlineAvatarLength)
+        {
+            return string.Empty;
+        }
+
+        return value;
     }
 
     public static string HashPassword(string password)
