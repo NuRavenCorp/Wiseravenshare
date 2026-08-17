@@ -377,6 +377,32 @@ class AuthService {
         }
     }
 
+    getSocialLoginStartUrl(providerId, returnUrl) {
+        const provider = String(providerId || '').trim().toLowerCase();
+        const baseUrl = String(api?.defaults?.baseURL || '').trim();
+        const safeReturnUrl = String(returnUrl || '').trim();
+
+        if (!provider) {
+            throw new Error('Social provider is required.');
+        }
+
+        const callbackPath = `/auth/oauth/${encodeURIComponent(provider)}/start`;
+        const query = safeReturnUrl ? `?returnUrl=${encodeURIComponent(safeReturnUrl)}` : '';
+
+        if (/^https?:\/\//i.test(baseUrl)) {
+            return `${baseUrl.replace(/\/+$/, '')}${callbackPath}${query}`;
+        }
+
+        if (typeof window !== 'undefined') {
+            const root = baseUrl.startsWith('/')
+                ? `${window.location.origin}${baseUrl}`
+                : `${window.location.origin}/${baseUrl}`;
+            return `${root.replace(/\/+$/, '')}${callbackPath}${query}`;
+        }
+
+        return `/api${callbackPath}${query}`;
+    }
+
     setToken(token) {
         setAuthToken(token);
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;

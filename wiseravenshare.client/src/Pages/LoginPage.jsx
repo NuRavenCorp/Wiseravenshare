@@ -8,6 +8,12 @@ import { ForgotPassword } from './Auth/ForgotPassword';
 import { ResetPassword } from './Auth/ResetPassword';
 
 const AUTH_DRAFT_KEY = 'wiseAuthFormDraft';
+const SOCIAL_PROVIDERS = [
+    { id: 'google', label: 'Continue with Google' },
+    { id: 'microsoft', label: 'Continue with Microsoft' },
+    { id: 'facebook', label: 'Continue with Facebook' },
+    { id: 'tiktok', label: 'Continue with TikTok' }
+];
 
 const readAuthDraft = () => {
     if (typeof window === 'undefined') return null;
@@ -55,11 +61,44 @@ const LoginPage = ({ onAuth }) => {
             })
             .catch(() => {
                 if (mounted) {
-                    setSelfRegistrationEnabled(false);
-                    setMode('login');
+                    // Keep public auth flow available when status probe is temporarily unreachable.
+                    setSelfRegistrationEnabled(true);
                 }
             });
         return () => { mounted = false; };
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const params = new URLSearchParams(window.location.search);
+        const authToken = params.get('authToken') || '';
+        const refreshToken = params.get('refreshToken') || '';
+        const adminPassToken = params.get('adminPassToken') || '';
+        const socialError = params.get('socialAuthError') || '';
+
+        if (socialError.trim()) {
+            setError(socialError.trim());
+            params.delete('socialAuthError');
+            params.delete('authProvider');
+            const next = params.toString();
+            window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
+            return;
+        }
+
+        if (!authToken.trim()) return;
+
+        authService.setToken(authToken.trim());
+        authService.setRefreshToken(refreshToken.trim());
+        authService.setAdminPassToken(adminPassToken.trim());
+        window.localStorage.removeItem(AUTH_DRAFT_KEY);
+
+        params.delete('authToken');
+        params.delete('refreshToken');
+        params.delete('adminPassToken');
+        params.delete('authProvider');
+        const next = params.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
+        window.location.reload();
     }, []);
 
     useEffect(() => {
@@ -203,6 +242,14 @@ const LoginPage = ({ onAuth }) => {
         }
     };
 
+    const startSocialAuth = (providerId) => {
+        if (typeof window === 'undefined') return;
+        setError('');
+        const returnUrl = `${window.location.origin}${window.location.pathname}`;
+        const endpoint = authService.getSocialLoginStartUrl(providerId, returnUrl);
+        window.location.assign(endpoint);
+    };
+
     return (
         <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', padding: '20px' }}>
             <div style={{ background: 'var(--card-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', padding: '40px', width: '100%', maxWidth: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
@@ -218,6 +265,29 @@ const LoginPage = ({ onAuth }) => {
                     {mode === 'teamInvite' && <TeamInvite name={name} setName={setName} email={email} setEmail={setEmail} inviteToken={inviteToken} setInviteToken={setInviteToken} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} isAdminLoginVisible={isAdminLoginVisible} setIsAdminLoginVisible={setIsAdminLoginVisible} />}
                     {mode === 'forgot' && <ForgotPassword email={email} setEmail={setEmail} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
                     {mode === 'reset' && <ResetPassword resetToken={resetToken} setResetToken={setResetToken} password={password} setPassword={setPassword} submit={submit} />}
+                    {(mode === 'login' || mode === 'signup') && (
+                        <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {SOCIAL_PROVIDERS.map((provider) => (
+                                <button
+                                    key={provider.id}
+                                    type="button"
+                                    onClick={() => startSocialAuth(provider.id)}
+                                    style={{
+                                        width: '100%',
+                                        borderRadius: '10px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'transparent',
+                                        color: 'var(--text-color)',
+                                        padding: '10px 12px',
+                                        cursor: 'pointer',
+                                        fontWeight: 600
+                                    }}
+                                >
+                                    {provider.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

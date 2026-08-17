@@ -3,6 +3,7 @@ import { computeTrendingTopics } from '../../Services/EngagementAlgorithms';
 import { apiService } from '../../Services/api';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
+import { mergeFeedPosts, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../../Services/postFeedPayload';
 
 const MAX_POSTS_FOR_SIDEBAR = 200;
 const MARKET_SYMBOLS = ['MSFT', 'IBM'];
@@ -75,6 +76,61 @@ const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
         })
         .sort((left, right) => right.momentum - left.momentum)
         .slice(0, limit);
+};
+
+const isDispatchReportPost = (post) => {
+    if (!post || typeof post !== 'object') {
+        return false;
+    }
+
+    if (post.truthDispatch || post.truthDeclarationAccepted) {
+        return true;
+    }
+
+    const content = String(post.content || '').toLowerCase();
+    return content.startsWith('[local report for ') || content.startsWith('[national report]');
+};
+
+const parseDispatchContent = (content) => {
+    const text = String(content || '').trim();
+    if (!text) {
+        return {
+            audienceLabel: 'Field report',
+            headline: 'Dispatch report',
+            body: ''
+        };
+    }
+
+    const match = text.match(/^\[([^\]]+)\]\s*([^\n]+)(?:\n+([\s\S]*))?$/);
+    if (!match) {
+        const [firstLine, ...rest] = text.split('\n').filter(Boolean);
+        return {
+            audienceLabel: 'Field report',
+            headline: sanitizeSidebarPreview(firstLine, 'Dispatch report', 120),
+            body: rest.join('\n').trim()
+        };
+    }
+
+    return {
+        audienceLabel: sanitizeSidebarPreview(match[1], 'Field report', 80),
+        headline: sanitizeSidebarPreview(match[2], 'Dispatch report', 120),
+        body: String(match[3] || '').trim()
+    };
+};
+
+const toDispatchReportPreview = (post) => {
+    const parsed = parseDispatchContent(post?.content);
+    return {
+        id: String(post?.id || `dispatch-${Math.random().toString(36).slice(2)}`),
+        userName: String(post?.user?.name || 'Citizen Journalist').trim() || 'Citizen Journalist',
+        userHandle: String(post?.user?.handle || '').trim(),
+        audienceLabel: parsed.audienceLabel,
+        headline: parsed.headline,
+        body: parsed.body,
+        mediaUrl: String(post?.mediaUrl || '').trim(),
+        mediaType: String(post?.mediaType || post?.type || '').toLowerCase(),
+        createdAt: post?.createdAt || null
+    };
 };
 
 const formatFollowers = (count) => {
@@ -300,6 +356,8 @@ const RightSidebar = ({ onNavigate }) => {
     const [stockData, setStockData] = useState([]);
     const [marketLoading, setMarketLoading] = useState(true);
     const [marketError, setMarketError] = useState('');
+    const [dispatchReports, setDispatchReports] = useState([]);
+    const [activeDispatchReport, setActiveDispatchReport] = useState(null);
     const { user } = useAuth();
     const isAdminUser = parseAdminEmails().has(String(user?.email || '').trim().toLowerCase());
 
@@ -387,9 +445,16 @@ const RightSidebar = ({ onNavigate }) => {
                 const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
                 setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
                 setTrendingPostAnnouncements(buildTrendingPostAnnouncements(mergedPosts, 4));
+                const dispatches = mergedPosts
+                    .filter(isDispatchReportPost)
+                    .sort((left, right) => new Date(right?.createdAt || 0).getTime() - new Date(left?.createdAt || 0).getTime())
+                    .slice(0, 6)
+                    .map(toDispatchReportPreview);
+                setDispatchReports(dispatches);
             } catch (error) {
                 setTrendingTopics(computeTrendingTopics([], 6));
                 setTrendingPostAnnouncements([]);
+                setDispatchReports([]);
             }
         };
 
@@ -416,6 +481,29 @@ const RightSidebar = ({ onNavigate }) => {
             window.removeEventListener('wiseraven:social-updated', listener);
         };
     }, [user?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const syncSidebarPosts = async () => {
+            try {
+                const response = await apiService.getPosts({ page: 1, pageSize: 40 });
+                const fetched = normalizePostsPayload(response?.data ?? response);
+                const merged = mergeFeedPosts(readStoredFeedPosts(), fetched);
+                writeStoredFeedPosts(merged);
+                if (!cancelled) {
+                    window.dispatchEvent(new Event('wiseraven:posts-updated'));
+                }
+            } catch {
+                // Keep sidebar on local cache if feed refresh fails.
+            }
+        };
+
+        syncSidebarPosts();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
@@ -562,7 +650,8 @@ const RightSidebar = ({ onNavigate }) => {
     };
 
     return (
-        <aside className="right-column">
+        <>
+            <aside className="right-column">
             {/* Search Box */}
             <div style={{
                 display: 'flex',
@@ -725,6 +814,63 @@ const RightSidebar = ({ onNavigate }) => {
                 marginBottom: '20px',
                 border: '1px solid var(--border-color)'
             }}>
+                <h3 style={{ marginBottom: '12px', color: 'var(--light-color)' }}>
+                    <i className="fas fa-newspaper"></i> Dispatch Reports
+                </h3>
+                <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '10px' }}>
+                    Amateur Journalist reports available to review.
+                </div>
+                {dispatchReports.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        No dispatch reports yet.
+                    </div>
+                )}
+                {dispatchReports.map((report) => (
+                    <div
+                        key={report.id}
+                        style={{
+                            padding: '10px 0',
+                            borderBottom: '1px solid var(--border-color)',
+                            display: 'grid',
+                            gap: '6px'
+                        }}
+                    >
+                        <div style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>
+                            {report.audienceLabel} • {report.userName}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '13px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                            {report.headline}
+                        </div>
+                        {report.userHandle && (
+                            <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>{report.userHandle}</div>
+                        )}
+                        <button
+                            onClick={() => setActiveDispatchReport(report)}
+                            style={{
+                                justifySelf: 'start',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)',
+                                borderRadius: '999px',
+                                padding: '5px 10px',
+                                cursor: 'pointer',
+                                fontSize: '11px',
+                                fontWeight: 700
+                            }}
+                        >
+                            View report
+                        </button>
+                    </div>
+                ))}
+            </div>
+
+            <div style={{
+                background: 'var(--card-bg)',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px',
+                border: '1px solid var(--border-color)'
+            }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '15px' }}>
                     <h3 style={{ marginBottom: 0, color: 'var(--light-color)' }}>
                         <i className="fas fa-chart-line"></i> Market Watch
@@ -879,7 +1025,101 @@ const RightSidebar = ({ onNavigate }) => {
                     </div>
                 ))}
             </div>
-        </aside>
+            </aside>
+
+            {activeDispatchReport && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.55)',
+                        zIndex: 1200,
+                        display: 'flex',
+                        justifyContent: 'flex-end'
+                    }}
+                    onClick={() => setActiveDispatchReport(null)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        onClick={(event) => event.stopPropagation()}
+                        style={{
+                            width: 'min(520px, 100vw)',
+                            height: '100%',
+                            background: 'var(--card-bg)',
+                            borderLeft: '1px solid var(--border-color)',
+                            padding: '18px',
+                            display: 'grid',
+                            gridTemplateRows: 'auto 1fr',
+                            gap: '14px',
+                            overflow: 'auto'
+                        }}
+                    >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
+                            <div>
+                                <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                    {activeDispatchReport.audienceLabel}
+                                </div>
+                                <h3 style={{ margin: '6px 0 0', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                    {activeDispatchReport.headline}
+                                </h3>
+                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                    {activeDispatchReport.userName}
+                                    {activeDispatchReport.userHandle ? ` • ${activeDispatchReport.userHandle}` : ''}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setActiveDispatchReport(null)}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    borderRadius: '8px',
+                                    padding: '6px 10px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Close
+                            </button>
+                        </div>
+
+                        <div style={{ display: 'grid', gap: '12px', alignContent: 'start' }}>
+                            {activeDispatchReport.mediaUrl && (
+                                activeDispatchReport.mediaType === 'video'
+                                    || /\.(mp4|mov|webm|avi)(\?|#|$)/i.test(activeDispatchReport.mediaUrl)
+                                    ? (
+                                        <video
+                                            controls
+                                            src={activeDispatchReport.mediaUrl}
+                                            style={{ width: '100%', borderRadius: '10px', border: '1px solid var(--border-color)', background: '#000' }}
+                                        />
+                                    )
+                                    : (
+                                        <img
+                                            src={activeDispatchReport.mediaUrl}
+                                            alt={activeDispatchReport.headline}
+                                            style={{ width: '100%', borderRadius: '10px', border: '1px solid var(--border-color)', objectFit: 'cover' }}
+                                        />
+                                    )
+                            )}
+                            {activeDispatchReport.body && (
+                                <div
+                                    style={{
+                                        whiteSpace: 'pre-wrap',
+                                        lineHeight: 1.6,
+                                        color: 'var(--text-color)',
+                                        overflowWrap: 'anywhere',
+                                        wordBreak: 'break-word'
+                                    }}
+                                >
+                                    {activeDispatchReport.body}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 
