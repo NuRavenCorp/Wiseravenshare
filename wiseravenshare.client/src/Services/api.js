@@ -23,6 +23,16 @@ const ensureApiBase = (value) => {
 
 const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').trim());
 
+const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
+
+const getAbsoluteHost = (value = '') => {
+    try {
+        return new URL(String(value || '').trim()).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+};
+
 const resolveApiBaseUrl = () => {
     const configured = ensureApiBase(import.meta.env.VITE_API_URL || '');
     const localhostApi = 'http://localhost:5242/api';
@@ -38,6 +48,11 @@ const resolveApiBaseUrl = () => {
     const isViteDevServer = VITE_DEV_PORTS.has(window.location.port);
     const isHybridRuntime = protocol === 'capacitor:' || protocol === 'file:';
     const configuredIsAbsolute = isAbsoluteUrl(configured);
+    const configuredHost = configuredIsAbsolute ? getAbsoluteHost(configured) : '';
+    const shouldPreferSameOriginOnDoPreview = configuredIsAbsolute
+        && isDigitalOceanAppHost(host)
+        && configuredHost
+        && configuredHost !== host;
 
     // Hybrid runtimes do not host the API at localhost from the device perspective.
     if (isHybridRuntime) {
@@ -50,6 +65,10 @@ const resolveApiBaseUrl = () => {
     // In local dev, relative API bases (e.g. /api) resolve to Vite host and cause 404s.
     if (isLocalHost || isViteDevServer) {
         return configuredIsAbsolute ? configured : localhostApi;
+    }
+
+    if (shouldPreferSameOriginOnDoPreview) {
+        return `${window.location.origin}/api`;
     }
 
     // In production/non-local environments prefer configured API host when provided.
