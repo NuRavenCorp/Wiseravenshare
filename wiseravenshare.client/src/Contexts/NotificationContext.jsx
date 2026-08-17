@@ -106,7 +106,7 @@ export const NotificationProvider = ({ children }) => {
         };
 
         const connectNotificationsHub = async () => {
-            const connection = createHubConnection('/hubs/notifications');
+            const connection = createHubConnection('/api/hubs/notifications');
 
             connection.on('PersonnelNotification', (payload) => {
                 const sender = String(payload?.sender || 'Wiseravenshare Personnel').trim();

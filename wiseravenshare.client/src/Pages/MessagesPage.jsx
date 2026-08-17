@@ -105,7 +105,7 @@ const MessagesPage = () => {
         }
 
         let isMounted = true;
-        const connection = createHubConnection('/hubs/messages');
+        const connection = createHubConnection('/api/hubs/messages');
         connectionRef.current = connection;
 
         const onIncomingMessage = (rawPayload) => {

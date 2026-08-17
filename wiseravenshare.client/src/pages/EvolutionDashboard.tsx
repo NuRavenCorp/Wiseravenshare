@@ -17,7 +17,7 @@ import { api } from '../Services/api';
 
 const EvolutionDashboard: React.FC = () => {
     const { agents, evolutions, systemStatus, refreshData } = useEvolution();
-    const { connection } = useSignalR('/hubs/evolution');
+    const { connection } = useSignalR('/api/hubs/evolution');
     const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
     // Subscribe to real-time evolution events
