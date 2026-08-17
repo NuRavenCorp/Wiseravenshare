@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.IdentityModel.Tokens.Jwt;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,9 +26,11 @@ public class AuthController : ControllerBase
     private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, RefreshTokenRecord> RefreshTokensByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, AdminPassTokenRecord> AdminPassTokensByToken = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, OAuthStateRecord> OAuthStatesByToken = new(StringComparer.Ordinal);
     private static int _seededUsersLogWritten;
     private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan OAuthStateLifetime = TimeSpan.FromMinutes(10);
     private const int MaxFailedLoginAttempts = 5;
 
     private readonly IConfiguration _configuration;
@@ -146,16 +150,39 @@ public class AuthController : ControllerBase
         }
 
         var attemptKey = BuildAttemptKey(request.Email);
-        if (IsLockedOut(attemptKey, out var retryAfter))
+        UserRecord? user;
+        var matchedStoreUser = _userStore.FindByLoginIdentifier(request.Email);
+        var hasValidStoredCredential = matchedStoreUser is not null && UserStore.VerifyPassword(request.Password, matchedStoreUser.PasswordHash);
+        var hasValidConfiguredCredential = false;
+        UserRecord? configuredUser = null;
+        if (!hasValidStoredCredential)
         {
-            Response.Headers["Retry-After"] = Math.Max((int)Math.Ceiling(retryAfter.TotalSeconds), 1).ToString();
-            return StatusCode(StatusCodes.Status429TooManyRequests, new { message = "Too many failed login attempts. Please try again later." });
+            hasValidConfiguredCredential = TryAuthenticateConfiguredCredential(request.Email, request.Password, out configuredUser) && configuredUser is not null;
         }
 
-        var user = _userStore.FindByLoginIdentifier(request.Email);
-        if (user is null || !UserStore.VerifyPassword(request.Password, user.PasswordHash))
+        if (IsLockedOut(attemptKey, out var retryAfter))
         {
-            if (!TryAuthenticateConfiguredCredential(request.Email, request.Password, out user) || user is null)
+            // Let any valid credential recover immediately from lockout.
+            if (!hasValidStoredCredential && !hasValidConfiguredCredential)
+            {
+                Response.Headers["Retry-After"] = Math.Max((int)Math.Ceiling(retryAfter.TotalSeconds), 1).ToString();
+                return StatusCode(StatusCodes.Status429TooManyRequests, new { message = "Too many failed login attempts. Please try again later." });
+            }
+
+            user = hasValidStoredCredential ? matchedStoreUser : configuredUser;
+            ClearFailedLogins(attemptKey);
+        }
+        else
+        {
+            if (hasValidStoredCredential)
+            {
+                user = matchedStoreUser;
+            }
+            else if (hasValidConfiguredCredential)
+            {
+                user = configuredUser;
+            }
+            else
             {
                 RecordFailedLogin(attemptKey);
                 return Unauthorized(new { message = "Invalid email or password." });
@@ -374,6 +401,163 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpGet("oauth/{provider}/start")]
+    [AllowAnonymous]
+    public IActionResult StartOAuth(string provider, [FromQuery] string? returnUrl = null)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedReturnUrl = ResolveOAuthReturnUrl(returnUrl);
+        var normalizedProvider = NormalizeOAuthProvider(provider);
+        if (string.IsNullOrWhiteSpace(normalizedProvider))
+        {
+            return Redirect(BuildOAuthErrorRedirect(normalizedReturnUrl, provider, "Unsupported OAuth provider."));
+        }
+
+        var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
+        if (!providerConfig.IsEnabled)
+        {
+            return Redirect(BuildOAuthErrorRedirect(
+                normalizedReturnUrl,
+                normalizedProvider,
+                $"{normalizedProvider} sign-in is not configured. Add OAuth credentials in Authentication:OAuthProviders."));
+        }
+
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        if (string.IsNullOrWhiteSpace(callbackUrl))
+        {
+            return Redirect(BuildOAuthErrorRedirect(normalizedReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL."));
+        }
+
+        CleanupExpiredOAuthStates();
+        var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        OAuthStatesByToken[state] = new OAuthStateRecord
+        {
+            Provider = normalizedProvider,
+            ReturnUrl = normalizedReturnUrl,
+            ExpiresAtUtc = DateTime.UtcNow.Add(OAuthStateLifetime)
+        };
+
+        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedProvider, providerConfig, callbackUrl, state);
+        return Redirect(authorizationUrl);
+    }
+
+    [HttpGet("oauth/{provider}/callback")]
+    [AllowAnonymous]
+    public async Task<IActionResult> OAuthCallback(
+        string provider,
+        [FromQuery] string? code = null,
+        [FromQuery] string? state = null,
+        [FromQuery] string? error = null,
+        [FromQuery(Name = "error_description")] string? errorDescription = null)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedProvider = NormalizeOAuthProvider(provider);
+        if (string.IsNullOrWhiteSpace(normalizedProvider))
+        {
+            var unsupportedUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), provider, "Unsupported OAuth provider.");
+            return Redirect(unsupportedUrl);
+        }
+
+        var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
+        if (!providerConfig.IsEnabled)
+        {
+            var unavailableUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), normalizedProvider, $"{normalizedProvider} sign-in is not configured.");
+            return Redirect(unavailableUrl);
+        }
+
+        if (string.IsNullOrWhiteSpace(state) || !OAuthStatesByToken.TryRemove(state, out var stateRecord))
+        {
+            var staleStateUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), normalizedProvider, "Sign-in session expired. Please try again.");
+            return Redirect(staleStateUrl);
+        }
+
+        if (!string.Equals(stateRecord.Provider, normalizedProvider, StringComparison.OrdinalIgnoreCase) || stateRecord.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            var staleStateUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Sign-in session expired. Please try again.");
+            return Redirect(staleStateUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            var externalError = string.IsNullOrWhiteSpace(errorDescription) ? error : errorDescription;
+            var deniedUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, $"Sign-in was cancelled: {externalError}");
+            return Redirect(deniedUrl);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            var missingCodeUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Authorization code was not returned.");
+            return Redirect(missingCodeUrl);
+        }
+
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        if (string.IsNullOrWhiteSpace(callbackUrl))
+        {
+            var callbackErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL.");
+            return Redirect(callbackErrorUrl);
+        }
+
+        SocialProfile profile;
+        try
+        {
+            profile = await ResolveSocialProfileAsync(normalizedProvider, providerConfig, code, callbackUrl);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "OAuth exchange failed for {Provider}.", normalizedProvider);
+            var oauthErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "OAuth provider request failed.");
+            return Redirect(oauthErrorUrl);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(ex, "OAuth exchange timed out for {Provider}.", normalizedProvider);
+            var oauthTimeoutUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "OAuth provider timed out.");
+            return Redirect(oauthTimeoutUrl);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "OAuth response parsing failed for {Provider}.", normalizedProvider);
+            var parseErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "OAuth provider returned an unreadable response.");
+            return Redirect(parseErrorUrl);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "OAuth response validation failed for {Provider}.", normalizedProvider);
+            var profileErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, ex.Message);
+            return Redirect(profileErrorUrl);
+        }
+
+        var normalizedEmail = ResolveSocialEmail(profile, normalizedProvider);
+        if (!_userStore.EmailExists(normalizedEmail) && !IsAuthenticationAllowed(normalizedEmail))
+        {
+            var blockedUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Access requires admin approval or an active team invite.");
+            return Redirect(blockedUrl);
+        }
+
+        UserRecord user;
+        if (_userStore.TryGetByEmail(normalizedEmail, out var existingUser) && existingUser is not null)
+        {
+            user = existingUser;
+        }
+        else
+        {
+            var displayName = string.IsNullOrWhiteSpace(profile.Name) ? normalizedEmail.Split('@')[0] : profile.Name.Trim();
+            var generatedPassword = $"Wr!{Convert.ToHexString(RandomNumberGenerator.GetBytes(16))}aA1";
+            user = _userStore.CreateUser(displayName, normalizedEmail, generatedPassword, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var domainUserId = await EnsureDomainUserAsync(user);
+        var accessScope = ResolveAccessScope(user.Email);
+        var teamRole = ResolveTeamRole(user.Email);
+        var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
+        var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+        var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+        var successUrl = BuildOAuthSuccessRedirect(stateRecord.ReturnUrl, normalizedProvider, token, refreshToken, adminPassToken);
+        return Redirect(successUrl);
+    }
+
     [HttpPost("team-access/invites")]
     [Authorize]
     public async Task<IActionResult> CreateTeamInvite([FromBody] TeamInviteRequest request)
@@ -430,7 +614,10 @@ public class AuthController : ControllerBase
             invite = issued,
             inviteLink,
             emailDelivered,
-            emailDispatchStatus = emailDelivered ? "sent" : "not_sent"
+            emailDispatchStatus = emailDelivered ? "sent" : "not_sent",
+            emailDispatchMessage = emailDelivered
+                ? "Invite email sent."
+                : "Invite token created but email was not sent. Verify SMTP settings and share the invite link manually."
         });
     }
 
@@ -516,7 +703,10 @@ public class AuthController : ControllerBase
             prearrangedToken = issued,
             inviteLink,
             emailDelivered,
-            emailDispatchStatus = emailDelivered ? "sent" : "not_sent"
+            emailDispatchStatus = emailDelivered ? "sent" : "not_sent",
+            emailDispatchMessage = emailDelivered
+                ? "Invite email sent."
+                : "Prearranged token created but email was not sent. Verify SMTP settings and share the invite link manually."
         });
     }
 
@@ -1255,6 +1445,364 @@ public class AuthController : ControllerBase
         }
     }
 
+    private static string NormalizeOAuthProvider(string? provider)
+    {
+        var value = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "google" => "google",
+            "microsoft" => "microsoft",
+            "facebook" => "facebook",
+            "tiktok" => "tiktok",
+            _ => string.Empty
+        };
+    }
+
+    private OAuthProviderConfig ReadOAuthProviderConfig(string provider)
+    {
+        var sectionName = provider switch
+        {
+            "google" => "Google",
+            "microsoft" => "Microsoft",
+            "facebook" => "Facebook",
+            "tiktok" => "TikTok",
+            _ => string.Empty
+        };
+
+        var section = _configuration.GetSection($"Authentication:OAuthProviders:{sectionName}");
+        return new OAuthProviderConfig
+        {
+            ClientId = (section["ClientId"] ?? string.Empty).Trim(),
+            ClientSecret = (section["ClientSecret"] ?? string.Empty).Trim(),
+            TenantId = (section["TenantId"] ?? string.Empty).Trim()
+        };
+    }
+
+    private string BuildOAuthCallbackUrl(string provider)
+    {
+        var callbackPath = $"/api/auth/oauth/{provider}/callback";
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
+        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri))
+        {
+            return $"{configuredUri.GetLeftPart(UriPartial.Authority)}{callbackPath}";
+        }
+
+        return $"{Request.Scheme}://{Request.Host}{callbackPath}";
+    }
+
+    private string ResolveOAuthReturnUrl(string? returnUrl)
+    {
+        var fallback = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(fallback))
+        {
+            fallback = $"{Request.Scheme}://{Request.Host}";
+        }
+
+        if (string.IsNullOrWhiteSpace(returnUrl))
+        {
+            return fallback;
+        }
+
+        if (!Uri.TryCreate(returnUrl, UriKind.Absolute, out var requestedUri))
+        {
+            return fallback;
+        }
+
+        if (!string.Equals(requestedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(requestedUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return fallback;
+        }
+
+        if (!Uri.TryCreate(fallback, UriKind.Absolute, out var fallbackUri))
+        {
+            return fallback;
+        }
+
+        if (!string.Equals(requestedUri.Host, fallbackUri.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            return fallback;
+        }
+
+        return requestedUri.GetLeftPart(UriPartial.Path) + requestedUri.Query + requestedUri.Fragment;
+    }
+
+    private string BuildOAuthAuthorizationUrl(string provider, OAuthProviderConfig config, string callbackUrl, string state)
+    {
+        return provider switch
+        {
+            "google" => BuildUrl("https://accounts.google.com/o/oauth2/v2/auth", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "openid email profile",
+                ["state"] = state,
+                ["access_type"] = "offline",
+                ["prompt"] = "consent"
+            }),
+            "microsoft" => BuildUrl($"https://login.microsoftonline.com/{(string.IsNullOrWhiteSpace(config.TenantId) ? "common" : config.TenantId)}/oauth2/v2.0/authorize", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["response_mode"] = "query",
+                ["scope"] = "openid profile email User.Read",
+                ["state"] = state
+            }),
+            "facebook" => BuildUrl("https://www.facebook.com/v19.0/dialog/oauth", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "email,public_profile",
+                ["state"] = state
+            }),
+            "tiktok" => BuildUrl("https://www.tiktok.com/v2/auth/authorize/", new Dictionary<string, string?>
+            {
+                ["client_key"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "user.info.basic,user.info.profile",
+                ["state"] = state
+            }),
+            _ => throw new InvalidOperationException("Unsupported OAuth provider.")
+        };
+    }
+
+    private async Task<SocialProfile> ResolveSocialProfileAsync(string provider, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(20)
+        };
+
+        return provider switch
+        {
+            "google" => await ResolveGoogleProfileAsync(httpClient, config, code, callbackUrl),
+            "microsoft" => await ResolveMicrosoftProfileAsync(httpClient, config, code, callbackUrl),
+            "facebook" => await ResolveFacebookProfileAsync(httpClient, config, code, callbackUrl),
+            "tiktok" => await ResolveTikTokProfileAsync(httpClient, config, code, callbackUrl),
+            _ => throw new InvalidOperationException("Unsupported OAuth provider.")
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveGoogleProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", new Dictionary<string, string>
+        {
+            ["code"] = code,
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["redirect_uri"] = callbackUrl,
+            ["grant_type"] = "authorization_code"
+        });
+
+        if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
+        {
+            throw new InvalidOperationException("Google access token was not returned.");
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
+        using var response = await httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(stream);
+        var root = profileJson.RootElement;
+
+        return new SocialProfile
+        {
+            ProviderUserId = root.TryGetProperty("sub", out var subNode) ? subNode.GetString() ?? string.Empty : string.Empty,
+            Name = root.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
+            Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveMicrosoftProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tenant = string.IsNullOrWhiteSpace(config.TenantId) ? "common" : config.TenantId;
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, $"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token", new Dictionary<string, string>
+        {
+            ["code"] = code,
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["redirect_uri"] = callbackUrl,
+            ["grant_type"] = "authorization_code",
+            ["scope"] = "openid profile email User.Read offline_access"
+        });
+
+        if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
+        {
+            throw new InvalidOperationException("Microsoft access token was not returned.");
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
+        using var response = await httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(stream);
+        var root = profileJson.RootElement;
+        var mail = root.TryGetProperty("mail", out var mailNode) ? mailNode.GetString() ?? string.Empty : string.Empty;
+        var upn = root.TryGetProperty("userPrincipalName", out var upnNode) ? upnNode.GetString() ?? string.Empty : string.Empty;
+
+        return new SocialProfile
+        {
+            ProviderUserId = root.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty,
+            Name = root.TryGetProperty("displayName", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
+            Email = !string.IsNullOrWhiteSpace(mail) ? mail : upn
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveFacebookProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenUrl = BuildUrl("https://graph.facebook.com/v19.0/oauth/access_token", new Dictionary<string, string?>
+        {
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["redirect_uri"] = callbackUrl,
+            ["code"] = code
+        });
+
+        using var tokenResponse = await httpClient.GetAsync(tokenUrl);
+        tokenResponse.EnsureSuccessStatusCode();
+        await using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(tokenStream);
+        var accessToken = tokenJson.RootElement.TryGetProperty("access_token", out var accessTokenNode)
+            ? accessTokenNode.GetString() ?? string.Empty
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("Facebook access token was not returned.");
+        }
+
+        var profileUrl = BuildUrl("https://graph.facebook.com/me", new Dictionary<string, string?>
+        {
+            ["fields"] = "id,name,email",
+            ["access_token"] = accessToken
+        });
+
+        using var profileResponse = await httpClient.GetAsync(profileUrl);
+        profileResponse.EnsureSuccessStatusCode();
+        await using var profileStream = await profileResponse.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(profileStream);
+        var root = profileJson.RootElement;
+
+        return new SocialProfile
+        {
+            ProviderUserId = root.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty,
+            Name = root.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
+            Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveTikTokProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://open.tiktokapis.com/v2/oauth/token/", new Dictionary<string, string>
+        {
+            ["client_key"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["code"] = code,
+            ["grant_type"] = "authorization_code",
+            ["redirect_uri"] = callbackUrl
+        });
+
+        if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
+        {
+            throw new InvalidOperationException("TikTok access token was not returned.");
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,username");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
+        using var response = await httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(stream);
+        var root = profileJson.RootElement;
+        var userNode = root.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty("user", out var userDataNode)
+            ? userDataNode
+            : root;
+
+        var displayName = userNode.TryGetProperty("display_name", out var displayNameNode) ? displayNameNode.GetString() ?? string.Empty : string.Empty;
+        var username = userNode.TryGetProperty("username", out var usernameNode) ? usernameNode.GetString() ?? string.Empty : string.Empty;
+
+        return new SocialProfile
+        {
+            ProviderUserId = userNode.TryGetProperty("open_id", out var openIdNode) ? openIdNode.GetString() ?? string.Empty : string.Empty,
+            Name = !string.IsNullOrWhiteSpace(displayName) ? displayName : username,
+            Email = string.Empty
+        };
+    }
+
+    private static async Task<TokenExchangePayload> ExchangeCodeForTokenAsync(HttpClient httpClient, string tokenUrl, Dictionary<string, string> formValues)
+    {
+        using var response = await httpClient.PostAsync(tokenUrl, new FormUrlEncodedContent(formValues));
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(stream);
+        var root = tokenJson.RootElement;
+
+        return new TokenExchangePayload
+        {
+            AccessToken = root.TryGetProperty("access_token", out var accessTokenNode) ? accessTokenNode.GetString() ?? string.Empty : string.Empty,
+            IdToken = root.TryGetProperty("id_token", out var idTokenNode) ? idTokenNode.GetString() ?? string.Empty : string.Empty
+        };
+    }
+
+    private string BuildOAuthSuccessRedirect(string returnUrl, string provider, string token, string refreshToken, string adminPassToken)
+    {
+        return BuildUrl(returnUrl, new Dictionary<string, string?>
+        {
+            ["authToken"] = token,
+            ["refreshToken"] = refreshToken,
+            ["adminPassToken"] = adminPassToken,
+            ["authProvider"] = provider
+        });
+    }
+
+    private string BuildOAuthErrorRedirect(string returnUrl, string provider, string message)
+    {
+        return BuildUrl(returnUrl, new Dictionary<string, string?>
+        {
+            ["socialAuthError"] = message,
+            ["authProvider"] = provider
+        });
+    }
+
+    private static string ResolveSocialEmail(SocialProfile profile, string provider)
+    {
+        var email = (profile.Email ?? string.Empty).Trim().ToLowerInvariant();
+        if (IsValidEmail(email))
+        {
+            return email;
+        }
+
+        var providerUserId = string.IsNullOrWhiteSpace(profile.ProviderUserId)
+            ? Convert.ToHexString(RandomNumberGenerator.GetBytes(12)).ToLowerInvariant()
+            : profile.ProviderUserId.Trim().ToLowerInvariant();
+        return $"{provider}.{providerUserId}@oauth.wise-ravens.local";
+    }
+
+    private static string BuildUrl(string baseUrl, IReadOnlyDictionary<string, string?> queryParameters)
+    {
+        var encoded = queryParameters
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+            .Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value ?? string.Empty)}");
+        var separator = baseUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{baseUrl}{separator}{string.Join("&", encoded)}";
+    }
+
+    private static void CleanupExpiredOAuthStates()
+    {
+        var utcNow = DateTime.UtcNow;
+        foreach (var candidate in OAuthStatesByToken.Where(entry => entry.Value.ExpiresAtUtc <= utcNow).ToList())
+        {
+            OAuthStatesByToken.TryRemove(candidate.Key, out _);
+        }
+    }
+
     private static bool MeetsPasswordPolicy(string password)
     {
         if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
@@ -1523,6 +2071,34 @@ public class AuthController : ControllerBase
         public string Scope { get; set; } = "team";
         public DateTime IssuedAtUtc { get; set; }
         public DateTime ExpiresAtUtc { get; set; }
+    }
+
+    private sealed class OAuthStateRecord
+    {
+        public string Provider { get; set; } = string.Empty;
+        public string ReturnUrl { get; set; } = string.Empty;
+        public DateTime ExpiresAtUtc { get; set; }
+    }
+
+    private sealed class OAuthProviderConfig
+    {
+        public string ClientId { get; set; } = string.Empty;
+        public string ClientSecret { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public bool IsEnabled => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+    }
+
+    private sealed class TokenExchangePayload
+    {
+        public string AccessToken { get; init; } = string.Empty;
+        public string IdToken { get; init; } = string.Empty;
+    }
+
+    private sealed class SocialProfile
+    {
+        public string ProviderUserId { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
+        public string Email { get; init; } = string.Empty;
     }
 
     private sealed class PodcastControlState
