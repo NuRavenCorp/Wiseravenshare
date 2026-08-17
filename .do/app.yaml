@@ -122,9 +122,9 @@ static_sites:
     error_document: index.html
     envs:
       - key: VITE_API_URL
-        value: `${APP_URL}/api
+        value: ${APP_URL}/api
       - key: VITE_RAVENSIGHT_API_URL
-        value: `${APP_URL}/api/ravensight
+        value: ${APP_URL}/api/ravensight
       - key: VITE_STRIPE_PUBLISHABLE_KEY
         value: ${STRIPE_PUBLISHABLE_KEY}
       - key: VITE_ADMIN_EMAILS
