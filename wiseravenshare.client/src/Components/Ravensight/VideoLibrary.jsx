@@ -295,15 +295,29 @@ const VideoLibrary = ({ onNotification }) => {
                             style={{ width: '16px', height: '16px', accentColor: 'var(--highlight-color)' }}
                         />
                     </div>
-                    <img
-                        src={video.thumbnailUrl || 'https://via.placeholder.com/160x90?text=Video'}
-                        alt={video.title}
-                        style={{
-                            width: '160px',
-                            height: '90px',
-                            objectFit: 'cover'
-                        }}
-                    />
+                    {video.videoUrl || video.mediaUrl ? (
+                        <video
+                            src={video.videoUrl || video.mediaUrl}
+                            controls
+                            preload="metadata"
+                            poster={video.thumbnailUrl || undefined}
+                            style={{
+                                width: '160px',
+                                height: '90px',
+                                objectFit: 'cover'
+                            }}
+                        />
+                    ) : (
+                        <img
+                            src={video.thumbnailUrl || 'https://via.placeholder.com/160x90?text=Video'}
+                            alt={video.title}
+                            style={{
+                                width: '160px',
+                                height: '90px',
+                                objectFit: 'cover'
+                            }}
+                        />
+                    )}
                     <div style={{ flex: 1, padding: '10px 10px 10px 0' }}>
                         {isEditing ? (
                             <div>
