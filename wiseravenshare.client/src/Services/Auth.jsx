@@ -86,7 +86,12 @@ class AuthService {
 
     async login(email, password) {
         try {
-            const response = this.normalizeAuthResponse(await this.postAuth('/login', { email, password }));
+            const normalizedLogin = String(email || '').trim();
+            const response = this.normalizeAuthResponse(await this.postAuth('/login', {
+                email: normalizedLogin,
+                usernameOrEmail: normalizedLogin,
+                password
+            }));
             if (!response.token) {
                 const err = new Error('Authentication token was not returned by the server.');
                 err.status = 500;
