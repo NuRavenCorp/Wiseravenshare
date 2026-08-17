@@ -4,6 +4,15 @@ import { getAuthToken } from './authStorage.js';
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
 const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').trim());
+const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
+
+const getAbsoluteHost = (value = '') => {
+    try {
+        return new URL(String(value || '').trim()).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+};
 
 const stripApiSegment = (value = '') => {
     let normalized = String(value || '').trim().replace(/\/+$/, '');
@@ -16,15 +25,25 @@ const stripApiSegment = (value = '') => {
 const resolveHubBaseUrl = () => {
     const configuredApi = String(import.meta.env.VITE_API_URL || '').trim();
     const configuredRoot = stripApiSegment(configuredApi);
+    const configuredIsAbsolute = isAbsoluteUrl(configuredRoot);
+    const configuredHost = configuredIsAbsolute ? getAbsoluteHost(configuredRoot) : '';
 
     if (typeof window !== 'undefined') {
         const host = String(window.location.hostname || '').toLowerCase();
         const isLocalHost = host === 'localhost' || host === '127.0.0.1';
         const isViteDevServer = VITE_DEV_PORTS.has(String(window.location.port || ''));
+        const shouldPreferSameOriginOnDoPreview = configuredIsAbsolute
+            && isDigitalOceanAppHost(host)
+            && configuredHost
+            && configuredHost !== host;
 
         // Relative configured API URLs on Vite dev resolve to :5173 and break SignalR hubs.
         if ((isLocalHost || isViteDevServer) && !isAbsoluteUrl(configuredApi)) {
             return 'http://localhost:5242';
+        }
+
+        if (shouldPreferSameOriginOnDoPreview) {
+            return window.location.origin.replace(/\/+$/, '');
         }
     }
 
