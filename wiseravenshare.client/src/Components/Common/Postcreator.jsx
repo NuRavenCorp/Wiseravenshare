@@ -38,6 +38,21 @@ const sanitizeServerMessage = (value, fallback) => {
     return text;
 };
 
+const isImageSource = (value) => {
+    if (!value || typeof value !== 'string') return false;
+    const v = value.trim();
+    if (v.startsWith('data:image/')) return /^data:image\/[a-z0-9.+-]+;base64,/i.test(v) && v.length <= 2_000_000;
+    return /^https?:\/\//i.test(v) || v.startsWith('/') || /^blob:/i.test(v);
+};
+
+const safeAvatarInitials = (value, name) => {
+    if (!value || !isImageSource(value)) {
+        const fallback = String(name || 'U').trim();
+        return (fallback.charAt(0) || 'U').toUpperCase();
+    }
+    return null; // use <img> instead
+};
+
 const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
     const [content, setContent] = useState('');
     const [mediaFile, setMediaFile] = useState(null);
@@ -415,7 +430,13 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontWeight: 'bold'
-                }}>{user.avatar}</div>
+                }}>{
+                    (() => {
+                        const initials = safeAvatarInitials(user.avatar, user.name);
+                        if (initials !== null) return initials;
+                        return <img src={user.avatar} alt={user.name || 'User'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.textContent = (user.name || 'U').charAt(0).toUpperCase(); }} />;
+                    })()
+                }</div>
                 <textarea
                     placeholder="What wisdom do you share today? (Truth detection active)"
                     value={content}

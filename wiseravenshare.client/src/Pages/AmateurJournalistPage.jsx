@@ -44,11 +44,39 @@ const getVideoDurationSeconds = (file) => {
 
 const extractUploadedMediaUrl = (payload) => {
     const source = payload?.data || payload || {};
-    return (
+    const fileName = source.fileName
+        || source.file?.fileName
+        || source.file?.FileName
+        || '';
+    const directUrl = (
         source.mediaUrl
         || source.filePath
+        || source.file?.mediaUrl
+        || source.file?.MediaUrl
+        || source.file?.publicUrl
+        || source.file?.PublicUrl
+        || source.file?.filePath
         || source.video?.videoUrl
+        || source.video?.VideoUrl
         || source.video?.mediaUrl
+        || source.video?.MediaUrl
+        || source.video?.filePath
+        || source.url
+        || source.Url
+        || ''
+    );
+
+    if (directUrl) {
+        return directUrl;
+    }
+
+    if (fileName && typeof window !== 'undefined') {
+        return `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
+    }
+
+    return (
+        source.file?.relativePath
+        || source.file?.RelativePath
         || ''
     );
 };

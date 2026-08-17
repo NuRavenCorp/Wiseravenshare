@@ -1,4 +1,4 @@
-﻿DO $EF$
+﻿﻿DO $EF$
 BEGIN
     IF NOT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'app_data') THEN
         CREATE SCHEMA app_data;
@@ -519,7 +519,7 @@ BEGIN
     END IF;
 END $WS$;
 
--- UserStore durable auth/profile persistence table.
+-- UserStore durable auth/profile persistence table schema definition.
 CREATE TABLE IF NOT EXISTS app_data.app_users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,

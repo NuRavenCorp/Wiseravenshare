@@ -45,6 +45,17 @@ const parseAdminEmails = () => {
     return new Set([...defaults, ...fromEnv]);
 };
 
+const isImageSource = (value) => {
+    if (!value || typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('data:image/')) {
+        return trimmed.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed);
+    }
+    if (trimmed.startsWith('/')) return true;
+    return /^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed);
+};
+
 const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     const { user, updateProfile } = useAuth();
     const { addToast } = useNotification();
@@ -428,9 +439,8 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         { id: 'likes', label: `Likes (${tabCounts.likes})`, icon: 'fas fa-heart' }
     ];
 
-    const isImageAvatar = typeof user?.avatar === 'string' && (user.avatar.startsWith('data:image/') || user.avatar.startsWith('http'));
-    const focusedIsImageAvatar = typeof focusedProfile?.avatar === 'string'
-        && (focusedProfile.avatar.startsWith('data:image/') || focusedProfile.avatar.startsWith('http'));
+    const isImageAvatar = isImageSource(user?.avatar);
+    const focusedIsImageAvatar = isImageSource(focusedProfile?.avatar);
     const isFollowingFocusedProfile = focusedProfile?.id
         ? socialGraphService.isFollowing(user?.id, focusedProfile.id)
         : false;
@@ -464,9 +474,15 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                         src={focusedProfile.avatar}
                                         alt="Focused profile avatar"
                                         style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                        onError={(e) => {
+                                            e.currentTarget.style.display = 'none';
+                                            if (e.currentTarget.parentElement) {
+                                                e.currentTarget.parentElement.textContent = (focusedProfile.name || 'U').charAt(0).toUpperCase();
+                                            }
+                                        }}
                                     />
                                 ) : (
-                                    focusedProfile.avatar
+                                    (focusedProfile.name || 'U').charAt(0).toUpperCase()
                                 )}
                             </div>
                             <div>
@@ -555,9 +571,15 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                 src={user.avatar}
                                 alt="Profile avatar"
                                 style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                    if (e.currentTarget.parentElement) {
+                                        e.currentTarget.parentElement.textContent = (user.name || 'U').charAt(0).toUpperCase();
+                                    }
+                                }}
                             />
                         ) : (
-                            user.avatar || user.name?.charAt(0) || 'U'
+                            (user.name || 'U').charAt(0).toUpperCase()
                         )}
                     </div>
 
@@ -1013,7 +1035,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             <canvas ref={canvasRef} style={{ display: 'none' }} />
                                         </div>
                                     )}
-                                    {editForm.avatar && typeof editForm.avatar === 'string' && (editForm.avatar.startsWith('data:image/') || editForm.avatar.startsWith('http')) && (
+                                    {editForm.avatar && typeof editForm.avatar === 'string' && isImageSource(editForm.avatar) && (
                                         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}>
                                             <img
                                                 src={editForm.avatar}
