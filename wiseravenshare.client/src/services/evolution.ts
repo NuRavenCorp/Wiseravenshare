@@ -11,7 +11,7 @@ class EvolutionService {
     }
 
     private initializeSignalR() {
-        this.signalR.connect('/hubs/evolution');
+        this.signalR.connect('/api/hubs/evolution');
         this.signalR.on('AgentEvolved', this.handleAgentEvolved);
         this.signalR.on('SystemMetrics', this.handleSystemMetrics);
         this.signalR.on('EvolutionSuggestion', this.handleEvolutionSuggestion);

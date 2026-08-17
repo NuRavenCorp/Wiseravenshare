@@ -785,7 +785,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/hubs/messages") || path.StartsWithSegments("/hubs/notifications") || path.StartsWithSegments("/hubs/evolution")))
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/hubs")))
                 {
                     context.Token = accessToken;
                 }
@@ -1019,9 +1019,9 @@ if (frontendDistExists)
 }
 
 app.MapControllers();
-app.MapHub<EvolutionHub>("/hubs/evolution");
-app.MapHub<NotificationHub>("/hubs/notifications");
-app.MapHub<MessageHub>("/hubs/messages");
+app.MapHub<EvolutionHub>("/api/hubs/evolution");
+app.MapHub<NotificationHub>("/api/hubs/notifications");
+app.MapHub<MessageHub>("/api/hubs/messages");
 
 if (frontendDistExists)
 {
@@ -1056,6 +1056,9 @@ app.MapGet("/health/db", async () =>
             "Users",
             "Posts",
             "PostBookmarks",
+            "Bookmarks",
+            "Likes",
+            "Reposts",
             "PostLikes",
             "PostReposts",
             "UserFollows",

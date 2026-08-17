@@ -233,6 +233,73 @@
       "EventName": "login_success",
       "CreatedAtUtc": "2026-08-15T13:17:08.9503443Z",
       "Metadata": {}
+    },
+    {
+      "Id": "f94dd2c05214480b93bdd8069ca3862b",
+      "UserId": "902ea936ab5a4e0a9016106a007b1f56",
+      "Email": "debug.user\u002Blogincheck@wiseravenshare.local",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-15T15:42:39.7657955Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "e372dbe5ba734ea3b53bc058aaf73abb",
+      "UserId": "902ea936ab5a4e0a9016106a007b1f56",
+      "Email": "debug.user\u002Blogincheck@wiseravenshare.local",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T15:42:40.4696102Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "ad5a4161f7264e2799bea7c4dedcebf1",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T15:42:45.7423117Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "7c492c7d64fd4eddb8b7d7dc91e3bb59",
+      "UserId": "db709b14bbe849f2a522e0eeef6c88d6",
+      "Email": "localqa@example.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-15T16:49:59.6755843Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "47ed403a783e4f268837b5a541a85a32",
+      "UserId": "db709b14bbe849f2a522e0eeef6c88d6",
+      "Email": "localqa@example.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T16:51:08.7104363Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "03c109a31c6442d7ad42959c88ac6824",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-15T16:54:03.2404083Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "37ed47caf362471b8d70d0023da5542f",
+      "UserId": "a78130aeb1ed4fa8bcb2409331e559a8",
+      "Email": "arnold_spence308@wise-raven.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-15T17:27:10.274334Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "a261c942d1d6435991a92fd1b69d72e5",
+      "UserId": "a78130aeb1ed4fa8bcb2409331e559a8",
+      "Email": "arnold_spence308@wise-raven.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-15T17:38:55.0902509Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
     }
   ],
   "Invites": [],
