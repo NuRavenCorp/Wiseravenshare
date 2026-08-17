@@ -18,6 +18,9 @@ public sealed class ModuleDefinition
 
     [MaxLength(255)]
     public string EntryPoint { get; set; } = string.Empty;
+    
+    [MaxLength(255)]
+    public string Component { get; set; } = string.Empty;
 
     [MaxLength(500)]
     public string Description { get; set; } = string.Empty;

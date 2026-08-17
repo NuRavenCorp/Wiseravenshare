@@ -30,18 +30,22 @@ public sealed class EvolutionController : ControllerBase
         var modules = _cache.Get<List<ModuleDefinition>>(ModulesCacheKey) ?? new List<ModuleDefinition>();
         var updates = modules.Select(module => new
         {
-            ModuleId = module.Id,
-            CurrentVersion = module.Version,
-            LatestVersion = BumpPatchVersion(module.Version),
-            UpdateAvailable = true
+            moduleId = module.Id,
+            currentVersion = module.Version,
+            latestVersion = BumpPatchVersion(module.Version),
+            updateAvailable = true,
+            component = module.Component,
+            dependencies = module.Dependencies
         });
 
         var response = updates.Select(u => new
         {
-            id = u.ModuleId,
-            version = u.LatestVersion,
-            currentVersion = u.CurrentVersion,
-            updateAvailable = u.UpdateAvailable
+            id = u.moduleId,
+            version = u.latestVersion,
+            currentVersion = u.currentVersion,
+            updateAvailable = u.updateAvailable,
+            component = u.component,
+            dependencies = u.dependencies
         });
 
         return Ok(response);
@@ -148,6 +152,7 @@ public sealed class EvolutionController : ControllerBase
                 Name = "Feed Core",
                 Version = "1.0.0",
                 EntryPoint = "FeedPage",
+                Component = "FeedPage",
                 Description = "Core feed rendering module.",
                 Dependencies = new List<string>()
             },
@@ -157,6 +162,7 @@ public sealed class EvolutionController : ControllerBase
                 Name = "Ravensight Video",
                 Version = "1.0.0",
                 EntryPoint = "RavensightVideo",
+                Component = "RavensightVideo",
                 Description = "Short-form video subsystem.",
                 Dependencies = new List<string> { "feed-core" }
             },
@@ -166,6 +172,7 @@ public sealed class EvolutionController : ControllerBase
                 Name = "Truth Seeker",
                 Version = "1.0.0",
                 EntryPoint = "TruthSeeker",
+                Component = "TruthSeeker",
                 Description = "Truth analysis and verification module.",
                 Dependencies = new List<string> { "feed-core" }
             }
