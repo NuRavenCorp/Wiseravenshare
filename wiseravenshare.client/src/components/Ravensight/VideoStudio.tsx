@@ -41,7 +41,7 @@ export const VideoStudio: React.FC = () => {
     const [videoURL, setVideoURL] = useState<string | null>(null);
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
-    const [publishToYoutube, setPublishToYoutube] = useState(true);
+    const [publishToYoutube, setPublishToYoutube] = useState(false);
     const [privacy, setPrivacy] = useState('unlisted');
     const [isAutoSaving, setIsAutoSaving] = useState(false);
     const [hasAutoSaved, setHasAutoSaved] = useState(false);
@@ -67,12 +67,21 @@ export const VideoStudio: React.FC = () => {
 
     const buildUploadFormData = (blob: Blob) => {
         const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'video/webm' });
+        const shouldPublishToYouTube = false;
         const formData = new FormData();
         formData.append('video', file);
+        formData.append('file', file);
         formData.append('title', title || 'Untitled Recording');
         formData.append('description', description);
-        formData.append('publishToYoutube', String(publishToYoutube));
+        formData.append('publishToYouTube', String(shouldPublishToYouTube));
+        formData.append('publishToYoutube', String(shouldPublishToYouTube));
+        formData.append('youTubeChannelOrEmail', '');
+        formData.append('youTubePermissionGranted', 'false');
         formData.append('privacy', privacy);
+        formData.append('privacyStatus', privacy);
+        formData.append('destinationFolder', '/wiseravenshare/ravensight/video');
+        formData.append('storageMode', 'temporary');
+        formData.append('isPermanent', 'false');
         return formData;
     };
 

@@ -67,6 +67,17 @@ const hasConfiguredFeeds = (feeds) => {
     });
 };
 
+const isImageSource = (value) => {
+    if (!value || typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('data:image/')) {
+        return trimmed.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed);
+    }
+    if (trimmed.startsWith('/')) return true;
+    return /^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed);
+};
+
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
     const adminEmails = parseAdminEmails();
@@ -119,7 +130,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         following: counts.following
     };
 
-    const hasImageAvatar = typeof profile.avatar === 'string' && (profile.avatar.startsWith('data:image/') || profile.avatar.startsWith('http'));
+    const hasImageAvatar = isImageSource(profile.avatar);
 
     const feeds = hasConfiguredFeeds(user?.socialFeeds)
         ? (user?.socialFeeds || {})
@@ -189,9 +200,15 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                             src={profile.avatar}
                             alt="User avatar"
                             style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                            onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                if (e.currentTarget.parentElement) {
+                                    e.currentTarget.parentElement.textContent = (profile.name || 'U').charAt(0).toUpperCase();
+                                }
+                            }}
                         />
                     ) : (
-                        profile.avatar
+                        (profile.name || 'U').charAt(0).toUpperCase()
                     )}
                 </div>
                 <h3>{profile.name}</h3>
