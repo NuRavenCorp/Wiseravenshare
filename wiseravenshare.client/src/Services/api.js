@@ -370,7 +370,14 @@ api.interceptors.response.use(
 
 export const apiService = {
     // Auth endpoints
-    login: (email, password) => api.post('/auth/login', { email, password }),
+    login: (email, password) => {
+        const normalizedLogin = String(email || '').trim();
+        return api.post('/auth/login', {
+            email: normalizedLogin,
+            usernameOrEmail: normalizedLogin,
+            password
+        });
+    },
     register: (userData) => api.post('/auth/register', userData),
     logout: () => api.post('/auth/logout'),
     verifyToken: (token) => api.post('/auth/verify', { token }),
