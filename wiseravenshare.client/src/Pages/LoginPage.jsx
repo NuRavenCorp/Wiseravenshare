@@ -246,8 +246,15 @@ const LoginPage = ({ onAuth }) => {
         if (typeof window === 'undefined') return;
         setError('');
         const returnUrl = `${window.location.origin}${window.location.pathname}`;
-        const endpoint = authService.getSocialLoginStartUrl(providerId, returnUrl);
-        window.location.assign(endpoint);
+        authService.socialLogin(providerId, returnUrl)
+            .then((response) => {
+                if (response?.token) {
+                    window.location.reload();
+                }
+            })
+            .catch((err) => {
+                setError(err?.message || 'Social sign-in failed.');
+            });
     };
 
     return (
