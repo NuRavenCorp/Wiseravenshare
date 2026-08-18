@@ -59,6 +59,12 @@ services:
       - key: STRIPE_PRICE_ANNUAL_ID
         value: ${STRIPE_PRICE_ANNUAL_ID}
         type: SECRET
+      - key: Authentication__OAuthProviders__Google__ClientId
+        value: ${GOOGLE_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Google__ClientSecret
+        value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+        type: SECRET
       - key: Social__Facebook__PageId
         value: ${SOCIAL_FACEBOOK_PAGE_ID}
         type: SECRET
