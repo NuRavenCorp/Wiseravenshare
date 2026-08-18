@@ -90,6 +90,14 @@ services:
     scope: RUN_AND_BUILD_TIME
     type: SECRET
     value: EV[1:rRG4x6DariYxJyXIZTGCu9slkbFMKE/d:/xOwr21bN7ye1TU8evyn/62eqN/lRHF3mzeKH88RF9RdtK8lWuVDm64=]
+  - key: Authentication__OAuthProviders__Google__ClientId
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${GOOGLE_OAUTH_CLIENT_ID}
+  - key: Authentication__OAuthProviders__Google__ClientSecret
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${GOOGLE_OAUTH_CLIENT_SECRET}
   - key: Social__Facebook__PageId
     scope: RUN_AND_BUILD_TIME
     type: SECRET
