@@ -477,10 +477,7 @@ class AuthService {
                 const session = await firebaseAuth.signInWithProvider(provider);
                 return await this.exchangeFirebaseSession(session.idToken);
             } catch (error) {
-                const message = String(error?.message || '').toLowerCase();
-                if (!this.shouldFallbackToLegacyAuth(error) && !message.includes('not configured')) {
-                    throw this.handleError(error);
-                }
+                throw this.handleError(this.normalizeFirebaseSocialError(error, provider));
             }
         }
 
@@ -489,6 +486,25 @@ class AuthService {
         }
 
         return null;
+    }
+
+    normalizeFirebaseSocialError(error, provider) {
+        const code = String(error?.code || '').toLowerCase();
+        const providerLabel = provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Social';
+
+        if (code === 'auth/operation-not-allowed') {
+            const err = new Error(`${providerLabel} sign-in is disabled in Firebase. Enable the provider in Firebase Authentication.`);
+            err.status = 403;
+            return err;
+        }
+
+        if (code === 'auth/unauthorized-domain') {
+            const err = new Error('This domain is not authorized in Firebase Authentication. Add wise-ravens.com and www.wise-ravens.com to Authorized domains.');
+            err.status = 403;
+            return err;
+        }
+
+        return error;
     }
 
     setToken(token) {
