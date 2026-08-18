@@ -955,23 +955,24 @@ const RavensightVideo = () => {
                                                 opacity: !getCatalogPlanById(selectedPlanId).monthly.configured && !allowLocalCheckoutFallback ? 0.6 : 1
                                             }}
                                         >
-                                            Start {selectedPlan.name} • {formatMoney(getCatalogPlanById(selectedPlanId).monthly.amountUsd)}/mo
+                                            Unlock Direct Publishing • {formatMoney(getCatalogPlanById(selectedPlanId).monthly.amountUsd)}/mo
                                         </button>
                                         <button
                                             onClick={() => subscribeNow(selectedPlanId, 'annual')}
                                             disabled={!getCatalogPlanById(selectedPlanId).annual.configured && !allowLocalCheckoutFallback}
                                             style={{
                                                 border: '1px solid var(--border-color)',
-                                                background: 'var(--card-bg)',
-                                                color: 'var(--text-color)',
+                                                background: 'var(--highlight-color)',
+                                                color: '#fff',
                                                 borderRadius: '999px',
                                                 padding: '12px 18px',
                                                 fontWeight: 700,
                                                 cursor: 'pointer',
+                                                boxShadow: '0 4px 14px rgba(79,116,214,0.3)',
                                                 opacity: !getCatalogPlanById(selectedPlanId).annual.configured && !allowLocalCheckoutFallback ? 0.6 : 1
                                             }}
                                         >
-                                            Annual {formatMoney(getCatalogPlanById(selectedPlanId).annual.amountUsd)} • Save more
+                                            Get 2 Months Free (Annual) • {formatMoney(getCatalogPlanById(selectedPlanId).annual.amountUsd)}
                                         </button>
                                     </>
                                 ) : (
@@ -994,6 +995,35 @@ const RavensightVideo = () => {
                                         >
                                             Manage billing
                                         </button>
+                                        {billingSync.source === 'local' && allowLocalCheckoutFallback && (
+                                            <button
+                                                onClick={() => {
+                                                    persistSubscription({
+                                                        tier: getPlanById().name,
+                                                        isActive: false,
+                                                        billingCycle: DEFAULT_BILLING_CYCLE,
+                                                        price: getPlanById().monthlyPrice,
+                                                        renewsAt: null,
+                                                        planId: DEFAULT_PLAN_ID
+                                                    });
+                                                    safeTrackGrowthEvent('subscription_cancelled_local', {
+                                                        source: 'ravensight_video'
+                                                    });
+                                                    addNotification('Local test subscription cancelled.', 'info');
+                                                }}
+                                                style={{
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'rgba(255,50,50,0.1)',
+                                                    color: '#ff8888',
+                                                    borderRadius: '999px',
+                                                    padding: '12px 18px',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Cancel local test
+                                            </button>
+                                        )}
                                     </>
                                 )}
                             </div>
