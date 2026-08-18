@@ -254,18 +254,48 @@ public sealed class UserStore
 
     public UserRecord UpsertFromToken(string id, string email, string name)
     {
-        if (_usersByEmail.TryGetValue(email, out var existing))
+        return UpsertFromExternalIdentity(id, email, name, string.Empty);
+    }
+
+    public UserRecord UpsertFromExternalIdentity(string id, string email, string name, string avatar)
+    {
+        var normalizedEmail = email.Trim();
+        if (_usersByEmail.TryGetValue(normalizedEmail, out var existing))
         {
+            var shouldPersist = false;
+            var safeName = string.IsNullOrWhiteSpace(name) ? normalizedEmail.Split('@')[0] : name.Trim();
+            var safeAvatar = (avatar ?? string.Empty).Trim();
+
+            if (!string.Equals(existing.Name, safeName, StringComparison.Ordinal))
+            {
+                existing.Name = safeName;
+                existing.Handle = BuildHandle(safeName, normalizedEmail);
+                shouldPersist = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(safeAvatar) && !string.Equals(existing.Avatar, safeAvatar, StringComparison.Ordinal))
+            {
+                existing.Avatar = safeAvatar;
+                shouldPersist = true;
+            }
+
+            if (shouldPersist)
+            {
+                existing.UpdatedAtUtc = DateTime.UtcNow;
+                PersistUsers(existing);
+            }
+
             return existing;
         }
 
         var user = new UserRecord
         {
-            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id,
-            Email = email,
-            Name = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name,
-            Handle = BuildHandle(name, email),
-            PasswordHash = string.Empty,
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id.Trim(),
+            Email = normalizedEmail,
+            Name = string.IsNullOrWhiteSpace(name) ? normalizedEmail.Split('@')[0] : name.Trim(),
+            Handle = BuildHandle(name, normalizedEmail),
+            PasswordHash = HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
+            Avatar = (avatar ?? string.Empty).Trim(),
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };

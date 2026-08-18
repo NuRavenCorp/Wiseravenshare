@@ -7,13 +7,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using FirebaseAdmin;
+using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using Google.Apis.Auth.OAuth2;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
+using AppUserRecord = Wiseravenshare.Server.Models.UserRecord;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -27,11 +31,13 @@ public class AuthController : ControllerBase
     private static readonly ConcurrentDictionary<string, RefreshTokenRecord> RefreshTokensByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, AdminPassTokenRecord> AdminPassTokensByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, OAuthStateRecord> OAuthStatesByToken = new(StringComparer.Ordinal);
+    private static readonly object FirebaseAppLock = new();
     private static int _seededUsersLogWritten;
     private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan OAuthStateLifetime = TimeSpan.FromMinutes(10);
     private const int MaxFailedLoginAttempts = 5;
+    private static FirebaseApp? _firebaseApp;
 
     private readonly IConfiguration _configuration;
     private readonly UserStore _userStore;
@@ -90,7 +96,7 @@ public class AuthController : ControllerBase
             return Conflict(new { message = "An account with that email already exists." });
         }
 
-        UserRecord user;
+        AppUserRecord user;
         try
         {
             user = _userStore.CreateUser(
@@ -150,11 +156,11 @@ public class AuthController : ControllerBase
         }
 
         var attemptKey = BuildAttemptKey(request.Email);
-        UserRecord? user;
+        AppUserRecord? user;
         var matchedStoreUser = _userStore.FindByLoginIdentifier(request.Email);
         var hasValidStoredCredential = matchedStoreUser is not null && UserStore.VerifyPassword(request.Password, matchedStoreUser.PasswordHash);
         var hasValidConfiguredCredential = false;
-        UserRecord? configuredUser = null;
+        AppUserRecord? configuredUser = null;
         if (!hasValidStoredCredential)
         {
             hasValidConfiguredCredential = TryAuthenticateConfiguredCredential(request.Email, request.Password, out configuredUser) && configuredUser is not null;
@@ -392,6 +398,7 @@ public class AuthController : ControllerBase
             selfRegistrationEnabled = allowSelfRegistration,
             adminOnlyLogin = false,
             teamInviteLoginEnabled = true,
+            firebaseConfigured = IsFirebaseConfigured(),
             jwt = new
             {
                 issuerConfigured = jwtIssuerConfigured,
@@ -399,6 +406,74 @@ public class AuthController : ControllerBase
                 keyConfigured = jwtKeyConfigured
             }
         });
+    }
+
+    [HttpPost("firebase/exchange")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ExchangeFirebase([FromBody] FirebaseSignInRequest request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        if (!IsFirebaseConfigured())
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Firebase authentication is not configured." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.IdToken))
+        {
+            return BadRequest(new { message = "Firebase ID token is required." });
+        }
+
+        var firebaseAuth = GetFirebaseAuth();
+        if (firebaseAuth is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Firebase authentication is not available." });
+        }
+
+        try
+        {
+            var decodedToken = await firebaseAuth.VerifyIdTokenAsync(request.IdToken.Trim());
+            var email = GetFirebaseClaim(decodedToken.Claims, "email");
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                return BadRequest(new { message = "Firebase account does not include an email address." });
+            }
+
+            var name = GetFirebaseClaim(decodedToken.Claims, "name");
+            var picture = GetFirebaseClaim(decodedToken.Claims, "picture");
+            var firebaseUserId = decodedToken.Uid;
+
+            var user = _userStore.UpsertFromExternalIdentity(firebaseUserId, email, name, picture);
+            if (!IsAuthenticationAllowed(user.Email))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
+            }
+
+            try
+            {
+                _growthService.TrackEvent(user.Id, user.Email, "login_success");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Growth tracking failed during Firebase sign-in for {Email}.", user.Email);
+            }
+
+            var domainUserId = await EnsureDomainUserAsync(user);
+            var accessScope = ResolveAccessScope(user.Email);
+            var teamRole = ResolveTeamRole(user.Email);
+            var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
+            var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+            var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+
+            var responseUser = UserStore.ToResponse(user);
+            responseUser.Id = domainUserId.ToString("N");
+            return Ok(new { token, refreshToken, adminPassToken, user = responseUser, provider = "firebase" });
+        }
+        catch (FirebaseAuthException ex)
+        {
+            _logger.LogWarning(ex, "Firebase token verification failed.");
+            return Unauthorized(new { message = "Firebase sign-in failed. Please try again." });
+        }
     }
 
     [HttpGet("oauth/{provider}/start")]
@@ -536,7 +611,7 @@ public class AuthController : ControllerBase
             return Redirect(blockedUrl);
         }
 
-        UserRecord user;
+        AppUserRecord user;
         if (_userStore.TryGetByEmail(normalizedEmail, out var existingUser) && existingUser is not null)
         {
             user = existingUser;
@@ -877,7 +952,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Invite token is invalid, expired, or already consumed." });
         }
 
-        UserRecord user;
+        AppUserRecord user;
         var safeName = string.IsNullOrWhiteSpace(request.Name)
             ? (string.IsNullOrWhiteSpace(accepted.DisplayName) ? inviteeEmail.Split('@')[0] : accepted.DisplayName)
             : request.Name.Trim();
@@ -1114,7 +1189,7 @@ public class AuthController : ControllerBase
         return configured ?? true;
     }
 
-    private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out UserRecord? user)
+    private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out AppUserRecord? user)
     {
         user = null;
 
@@ -1532,6 +1607,93 @@ public class AuthController : ControllerBase
         }
 
         return requestedUri.GetLeftPart(UriPartial.Path) + requestedUri.Query + requestedUri.Fragment;
+    }
+
+    private bool IsFirebaseConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_configuration["Firebase:ProjectId"])
+            && (!string.IsNullOrWhiteSpace(_configuration["Firebase:ServiceAccountJson"])
+                || !string.IsNullOrWhiteSpace(_configuration["Firebase:ServiceAccountPath"]));
+    }
+
+    private FirebaseAuth? GetFirebaseAuth()
+    {
+        var app = GetOrCreateFirebaseApp();
+        return app is null ? null : FirebaseAuth.GetAuth(app);
+    }
+
+    private FirebaseApp? GetOrCreateFirebaseApp()
+    {
+        lock (FirebaseAppLock)
+        {
+            if (_firebaseApp is not null)
+            {
+                return _firebaseApp;
+            }
+
+            var projectId = (_configuration["Firebase:ProjectId"] ?? string.Empty).Trim();
+            var serviceAccountJson = (_configuration["Firebase:ServiceAccountJson"] ?? string.Empty).Trim();
+            var serviceAccountPath = (_configuration["Firebase:ServiceAccountPath"] ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(serviceAccountJson) && string.IsNullOrWhiteSpace(serviceAccountPath))
+            {
+                return null;
+            }
+
+            GoogleCredential credential;
+            if (!string.IsNullOrWhiteSpace(serviceAccountJson))
+            {
+                credential = GoogleCredential.FromJson(serviceAccountJson);
+                if (string.IsNullOrWhiteSpace(projectId) && TryExtractJsonValue(serviceAccountJson, "project_id", out var inferredProjectId))
+                {
+                    projectId = inferredProjectId;
+                }
+            }
+            else
+            {
+                credential = GoogleCredential.FromFile(serviceAccountPath);
+                if (string.IsNullOrWhiteSpace(projectId) && TryExtractJsonValue(global::System.IO.File.ReadAllText(serviceAccountPath), "project_id", out var inferredProjectId))
+                {
+                    projectId = inferredProjectId;
+                }
+            }
+
+            var options = new AppOptions
+            {
+                Credential = credential,
+                ProjectId = projectId
+            };
+
+            _firebaseApp = FirebaseApp.Create(options, "wiseravenshare-firebase");
+            return _firebaseApp;
+        }
+    }
+
+    private static bool TryExtractJsonValue(string json, string propertyName, out string value)
+    {
+        value = string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty(propertyName, out var property))
+            {
+                value = property.GetString() ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(value);
+            }
+        }
+        catch
+        {
+            // Ignore malformed service-account JSON here; configuration validation happens on sign-in.
+        }
+
+        return false;
+    }
+
+    private static string GetFirebaseClaim(IReadOnlyDictionary<string, object> claims, string claimName)
+    {
+        return claims.TryGetValue(claimName, out var value)
+            ? value?.ToString() ?? string.Empty
+            : string.Empty;
     }
 
     private string ResolvePublicAppOrigin()
@@ -1997,7 +2159,7 @@ public class AuthController : ControllerBase
         }
     }
 
-    private async Task<Guid> EnsureDomainUserAsync(UserRecord authUser)
+    private async Task<Guid> EnsureDomainUserAsync(AppUserRecord authUser)
     {
         if (!Guid.TryParse(authUser.Id, out var parsedId))
         {
@@ -2170,6 +2332,11 @@ public sealed class RegisterRequest
 public sealed class VerifyRequest
 {
     public string Token { get; set; } = string.Empty;
+}
+
+public sealed class FirebaseSignInRequest
+{
+    public string IdToken { get; set; } = string.Empty;
 }
 
 public sealed class ForgotPasswordRequest
