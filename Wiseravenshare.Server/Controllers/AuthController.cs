@@ -1481,22 +1481,12 @@ public class AuthController : ControllerBase
     private string BuildOAuthCallbackUrl(string provider)
     {
         var callbackPath = $"/api/auth/oauth/{provider}/callback";
-        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
-        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri))
-        {
-            return $"{configuredUri.GetLeftPart(UriPartial.Authority)}{callbackPath}";
-        }
-
-        return $"{Request.Scheme}://{Request.Host}{callbackPath}";
+        return $"{ResolvePublicAppOrigin()}{callbackPath}";
     }
 
     private string ResolveOAuthReturnUrl(string? returnUrl)
     {
-        var fallback = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim().TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(fallback))
-        {
-            fallback = $"{Request.Scheme}://{Request.Host}";
-        }
+        var fallback = ResolvePublicAppOrigin();
 
         if (string.IsNullOrWhiteSpace(returnUrl))
         {
@@ -1519,12 +1509,54 @@ public class AuthController : ControllerBase
             return fallback;
         }
 
-        if (!string.Equals(requestedUri.Host, fallbackUri.Host, StringComparison.OrdinalIgnoreCase))
+        var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            fallbackUri.Host
+        };
+
+        if (Request.Host.HasValue && !string.IsNullOrWhiteSpace(Request.Host.Host))
+        {
+            allowedHosts.Add(Request.Host.Host);
+        }
+
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
+        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri)
+            && !string.IsNullOrWhiteSpace(configuredUri.Host))
+        {
+            allowedHosts.Add(configuredUri.Host);
+        }
+
+        if (!allowedHosts.Contains(requestedUri.Host))
         {
             return fallback;
         }
 
         return requestedUri.GetLeftPart(UriPartial.Path) + requestedUri.Query + requestedUri.Fragment;
+    }
+
+    private string ResolvePublicAppOrigin()
+    {
+        var requestOrigin = $"{Request.Scheme}://{Request.Host}".TrimEnd('/');
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
+
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredUri))
+        {
+            return requestOrigin;
+        }
+
+        var configuredOrigin = configuredUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        if (Request.Host.HasValue && string.Equals(configuredUri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredOrigin;
+        }
+
+        // Prefer the active request origin to avoid redirecting users to stale/misconfigured domains.
+        if (Request.Host.HasValue)
+        {
+            return requestOrigin;
+        }
+
+        return configuredOrigin;
     }
 
     private string BuildOAuthAuthorizationUrl(string provider, OAuthProviderConfig config, string callbackUrl, string state)
