@@ -113,5 +113,10 @@
     "id": "t23",
     "claim": "I plan to start a non-profit organization.",
     "expected": "true"
+  },
+  {
+    "id": "t24",
+    "claim": "What is truth?",
+    "expected": "true"
   }
 ]

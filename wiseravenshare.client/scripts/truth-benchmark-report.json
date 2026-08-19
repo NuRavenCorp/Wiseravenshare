@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-08-19T13:40:38.915Z",
+  "generatedAt": "2026-08-19T13:48:24.321Z",
   "metrics": {
-    "total": 23,
+    "total": 24,
     "accuracy": 100,
-    "confidentDecisions": 17,
+    "confidentDecisions": 18,
     "confidentAccuracy": 100,
     "p99TargetMet": true
   },
@@ -191,6 +191,14 @@
       "score": 100,
       "correct": true,
       "claim": "I plan to start a non-profit organization."
+    },
+    {
+      "id": "t24",
+      "expected": "true",
+      "predicted": "true",
+      "score": 100,
+      "correct": true,
+      "claim": "What is truth?"
     }
   ]
 }
