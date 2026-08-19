@@ -1,0 +1,196 @@
+{
+  "generatedAt": "2026-08-19T13:40:38.915Z",
+  "metrics": {
+    "total": 23,
+    "accuracy": 100,
+    "confidentDecisions": 17,
+    "confidentAccuracy": 100,
+    "p99TargetMet": true
+  },
+  "rows": [
+    {
+      "id": "t1",
+      "expected": "true",
+      "predicted": "true",
+      "score": 76,
+      "correct": true,
+      "claim": "Water boils at 100C at sea level."
+    },
+    {
+      "id": "t2",
+      "expected": "true",
+      "predicted": "true",
+      "score": 73,
+      "correct": true,
+      "claim": "The sky is blue during daytime."
+    },
+    {
+      "id": "t3",
+      "expected": "false",
+      "predicted": "false",
+      "score": 24,
+      "correct": true,
+      "claim": "Earth is flat."
+    },
+    {
+      "id": "t4",
+      "expected": "false",
+      "predicted": "false",
+      "score": 24,
+      "correct": true,
+      "claim": "Vaccines cause autism."
+    },
+    {
+      "id": "t5",
+      "expected": "false",
+      "predicted": "false",
+      "score": 24,
+      "correct": true,
+      "claim": "5G causes covid."
+    },
+    {
+      "id": "t6",
+      "expected": "false",
+      "predicted": "false",
+      "score": 30,
+      "correct": true,
+      "claim": "Humans have three lungs."
+    },
+    {
+      "id": "t7",
+      "expected": "false",
+      "predicted": "false",
+      "score": 30,
+      "correct": true,
+      "claim": "The Milky Way has only one planet."
+    },
+    {
+      "id": "t8",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "The sky is orange at sunset."
+    },
+    {
+      "id": "t9",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "Everyone always lies."
+    },
+    {
+      "id": "t10",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "This startup will 10x revenue in 12 months."
+    },
+    {
+      "id": "t11",
+      "expected": "false",
+      "predicted": "false",
+      "score": 27,
+      "correct": true,
+      "claim": "Grass is red."
+    },
+    {
+      "id": "t12",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "Birds are real."
+    },
+    {
+      "id": "t13",
+      "expected": "false",
+      "predicted": "false",
+      "score": 27,
+      "correct": true,
+      "claim": "Fire is cold."
+    },
+    {
+      "id": "t14",
+      "expected": "false",
+      "predicted": "false",
+      "score": 24,
+      "correct": true,
+      "claim": "The sun revolves around Earth."
+    },
+    {
+      "id": "t15",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "The sky appears purple at sunrise."
+    },
+    {
+      "id": "t16",
+      "expected": "false",
+      "predicted": "false",
+      "score": 27,
+      "correct": true,
+      "claim": "Water is dry."
+    },
+    {
+      "id": "t17",
+      "expected": "false",
+      "predicted": "false",
+      "score": 27,
+      "correct": true,
+      "claim": "Planets are square."
+    },
+    {
+      "id": "t18",
+      "expected": "unknown",
+      "predicted": "unknown",
+      "score": 50,
+      "correct": true,
+      "claim": "No one can prove this 97% statistic."
+    },
+    {
+      "id": "t19",
+      "expected": "false",
+      "predicted": "false",
+      "score": 27,
+      "correct": true,
+      "claim": "The sky is frozen."
+    },
+    {
+      "id": "t20",
+      "expected": "false",
+      "predicted": "false",
+      "score": 24,
+      "correct": true,
+      "claim": "Climate change is fake."
+    },
+    {
+      "id": "t21",
+      "expected": "true",
+      "predicted": "true",
+      "score": 100,
+      "correct": true,
+      "claim": "I intend to build a better future for my community."
+    },
+    {
+      "id": "t22",
+      "expected": "true",
+      "predicted": "true",
+      "score": 100,
+      "correct": true,
+      "claim": "My intention is to learn software engineering."
+    },
+    {
+      "id": "t23",
+      "expected": "true",
+      "predicted": "true",
+      "score": 100,
+      "correct": true,
+      "claim": "I plan to start a non-profit organization."
+    }
+  ]
+}

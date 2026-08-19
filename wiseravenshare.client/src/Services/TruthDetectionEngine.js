@@ -466,6 +466,14 @@ class TruthEngine {
         return opinionIndicators.test(normalized);
     }
 
+    isIntent(sentence) {
+        const str = String(sentence || '').trim();
+        if (!str) return false;
+        const normalized = this.normalizeClaim(str);
+        const intentIndicators = /\b(i\s+intend|my\s+intention|i\s+plan|i\s+aim|i\s+commit|i\s+pledge|i\s+promise|my\s+goal|my\s+purpose|i\s+strive|i\s+vow|i\s+will|i\s+am\s+going\s+to|i\s+want\s+to|my\s+intentions|i\s+dedicate|my\s+ambition|i\s+hope\s+to|i\s+aspire|my\s+mission|i\s+seek\s+to|i\s+guarantee|i\s+swear)\b/i;
+        return intentIndicators.test(normalized);
+    }
+
     isLikelyVerifiableAssertion(sentence) {
         if (this.isQuestion(sentence) || this.isOpinion(sentence)) {
             return false;
@@ -550,6 +558,21 @@ class TruthEngine {
                     source: 'Truth Engine',
                     confidence: 0.5,
                     evidenceType: 'opinion'
+                });
+                continue;
+            }
+
+            if (this.isIntent(claimText)) {
+                findings.push({
+                    claim: claimText,
+                    isTrue: true,
+                    isIntent: true,
+                    isQuestion: false,
+                    isOpinion: false,
+                    correction: 'Declared personal intention — 100% subjective truth representing authentic individual agency and self-determined purpose.',
+                    source: 'Self-Ascribed Intention (Personal Truth)',
+                    confidence: 1.0,
+                    evidenceType: 'personal_intention'
                 });
                 continue;
             }
@@ -740,7 +763,15 @@ class TruthEngine {
     }
 
     getTruthScore(content) {
+        if (this.isIntent(content)) {
+            return 100;
+        }
+
         const analysis = this.analyzeContent(content);
+        if (analysis.length > 0 && analysis.every(f => f.isIntent)) {
+            return 100;
+        }
+
         // Exclude questions and opinions from factoring into truth score calculations
         const verifiableAnalysis = analysis.filter(f => !f.isQuestion && !f.isOpinion);
 
@@ -977,9 +1008,54 @@ class TruthEngine {
     verifyClaim(claimText) {
         const claim = String(claimText || '').trim();
         const findings = this.analyzeContent(claim);
+        const strongest = findings[0] || null;
+
+        if (this.isIntent(claim) || strongest?.isIntent) {
+            return {
+                id: String(Date.now()),
+                claim,
+                normalizedClaim: this.normalizeClaim(claim),
+                isTrue: true,
+                isIntent: true,
+                truthScore: 100,
+                confidence: 100,
+                confidenceScore: 1.0,
+                correction: null,
+                explanation: 'This statement expresses personal intention and self-determined purpose. Personal intentions represent 100% personal truth and individual agency rather than empirical external physical facts.',
+                sources: [
+                    {
+                        name: 'Self-Ascribed Intention (Personal Truth)',
+                        type: 'personal_intention',
+                        confidence: 100,
+                        verdict: 'supports',
+                        url: 'self://personal-intention'
+                    }
+                ],
+                findings: findings.length > 0 ? findings : [{
+                    claim,
+                    isTrue: true,
+                    isIntent: true,
+                    isQuestion: false,
+                    isOpinion: false,
+                    correction: 'Declared personal intention — 100% subjective truth representing authentic individual agency.',
+                    source: 'Self-Ascribed Intention (Personal Truth)',
+                    confidence: 1.0,
+                    evidenceType: 'personal_intention'
+                }],
+                timestamp: new Date(),
+                verificationDepth: 'standard',
+                breakdown: {
+                    knowledgeBaseScore: 100,
+                    aiScore: 100,
+                    sourceScore: 100,
+                    temporalScore: 100,
+                    consensusScore: 100
+                }
+            };
+        }
+
         const sourcesResult = this.verifyWithSources(claim);
         const truthScore = this.calculateTruthScore(findings, sourcesResult);
-        const strongest = findings[0] || null;
 
         return {
             id: String(Date.now()),

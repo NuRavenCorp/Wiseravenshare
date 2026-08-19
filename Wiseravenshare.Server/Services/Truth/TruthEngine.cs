@@ -58,6 +58,35 @@ public class TruthEngineService : ITruthEngineService
             return cachedResult;
         }
 
+        if (IsIntent(claim))
+        {
+            var intentResult = new TruthVerificationResult
+            {
+                Claim = claim,
+                NormalizedClaim = normalizedClaim,
+                IsTrue = true,
+                IsIntent = true,
+                ConfidenceScore = 1.00m,
+                Explanation = "This is a statement of personal intention — 100% personal subjective truth representing authentic individual agency and self-determined purpose.",
+                Timestamp = DateTime.UtcNow,
+                VerificationDepth = depth,
+                Sources = new List<Source>
+                {
+                    new() { Url = "self://personal-intention", Title = "Self-Ascribed Personal Intention (Personal Truth)", SourceType = "Subjective Intent", ReliabilityScore = 1.00m, Verdict = SourceVerdict.Supports, IsVerified = true }
+                },
+                Breakdown = new VerificationBreakdown
+                {
+                    KnowledgeBaseScore = 1.00m,
+                    AIScore = 1.00m,
+                    SourceScore = 1.00m,
+                    TemporalScore = 1.00m,
+                    ConsensusScore = 1.00m
+                }
+            };
+            _cache.Set(cacheKey, intentResult, TimeSpan.FromHours(6));
+            return intentResult;
+        }
+
         if (IsQuestion(claim))
         {
             var questionResult = new TruthVerificationResult
@@ -143,7 +172,7 @@ public class TruthEngineService : ITruthEngineService
         }
 
         // Exclude questions and opinions from factoring into fact/truth score calculations
-        var verifiableResults = results.Where(r => !r.IsQuestion && !r.IsOpinion).ToList();
+        var verifiableResults = results.Where(r => r.IsIntent || (!r.IsQuestion && !r.IsOpinion)).ToList();
         if (!verifiableResults.Any())
         {
             return new TruthScore
@@ -333,6 +362,13 @@ public class TruthEngineService : ITruthEngineService
         return Regex.IsMatch(normalized, @"\b(i\s+think|i\s+feel|i\s+believe|in\s+my\s+opinion|my\s+favorite|best|worst|better|prettier|uglier|ugly|beautiful|awesome|terrible|horrible|overrated|underrated|should|ought\s+to|preference|subjective|coolest|dislike|like\s+more|i\s+prefer)\b", RegexOptions.IgnoreCase);
     }
 
+    private static bool IsIntent(string sentence)
+    {
+        if (string.IsNullOrWhiteSpace(sentence)) return false;
+        var normalized = NormalizeClaim(sentence);
+        return Regex.IsMatch(normalized, @"\b(i\s+intend|my\s+intention|i\s+plan|i\s+aim|i\s+commit|i\s+pledge|i\s+promise|my\s+goal|my\s+purpose|i\s+strive|i\s+vow|i\s+will|i\s+am\s+going\s+to|i\s+want\s+to|my\s+intentions|i\s+dedicate|my\s+ambition|i\s+hope\s+to|i\s+aspire|my\s+mission|i\s+seek\s+to|i\s+guarantee|i\s+swear)\b", RegexOptions.IgnoreCase);
+    }
+
     private static string NormalizeClaim(string claim)
     {
         claim = claim.ToLowerInvariant();
@@ -405,6 +441,7 @@ public class TruthVerificationResult
     public string Claim { get; set; } = string.Empty;
     public string NormalizedClaim { get; set; } = string.Empty;
     public bool? IsTrue { get; set; }
+    public bool IsIntent { get; set; }
     public bool IsQuestion { get; set; }
     public bool IsOpinion { get; set; }
     public decimal ConfidenceScore { get; set; }

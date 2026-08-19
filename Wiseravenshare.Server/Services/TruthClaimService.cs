@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Services/TruthService.cs
+// Wiseravenshare.Server/Services/TruthService.cs
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Wiseravenshare.Server.DTOs;
@@ -44,6 +44,23 @@ namespace Wiseravenshare.Server.Services
 
         public async Task<ClaimVerificationResultDto> AnalyzeContentAsync(string content)
         {
+            if (IsIntent(content))
+            {
+                return new ClaimVerificationResultDto
+                {
+                    ClaimText = content,
+                    IsTrue = true,
+                    Confidence = 1.0m,
+                    TruthScore = 100,
+                    Verdict = "100% Personal Truth",
+                    Explanation = "This is a statement of personal intention — 100% personal subjective truth representing authentic individual agency and self-determined purpose.",
+                    Sources = new List<SourceDto>
+                    {
+                        new() { Name = "Self-Ascribed Intention (Personal Truth)", Url = "self://personal-intention", Confidence = 100, Verdict = "supports" }
+                    }
+                };
+            }
+
             // Extract claims from content
             var claims = await ExtractClaimsAsync(content);
 
@@ -107,6 +124,22 @@ namespace Wiseravenshare.Server.Services
         public async Task<TruthClaimDto> VerifyClaimAsync(Guid userId, VerifyClaimDto dto)
         {
             var normalizedClaim = NormalizeClaim(dto.ClaimText);
+
+            if (IsIntent(dto.ClaimText))
+            {
+                return new TruthClaimDto
+                {
+                    Id = Guid.NewGuid(),
+                    ClaimText = dto.ClaimText,
+                    IsTrue = true,
+                    Correction = null,
+                    Explanation = "This is a statement of personal intention — 100% personal subjective truth representing authentic individual agency.",
+                    Confidence = 1.0m,
+                    Category = dto.Category ?? "Personal Intention",
+                    VerificationCount = 1,
+                    CreatedAt = DateTime.UtcNow
+                };
+            }
 
             // Check if already exists
             var existingClaim = await _truthRepository.GetClaimByTextAsync(normalizedClaim);
@@ -212,6 +245,13 @@ namespace Wiseravenshare.Server.Services
         private string NormalizeClaim(string claim)
         {
             return claim.Trim().ToLowerInvariant();
+        }
+
+        private static bool IsIntent(string sentence)
+        {
+            if (string.IsNullOrWhiteSpace(sentence)) return false;
+            var normalized = sentence.Trim().ToLowerInvariant();
+            return System.Text.RegularExpressions.Regex.IsMatch(normalized, @"\b(i\s+intend|my\s+intention|i\s+plan|i\s+aim|i\s+commit|i\s+pledge|i\s+promise|my\s+goal|my\s+purpose|i\s+strive|i\s+vow|i\s+will|i\s+am\s+going\s+to|i\s+want\s+to|my\s+intentions|i\s+dedicate|my\s+ambition|i\s+hope\s+to|i\s+aspire|my\s+mission|i\s+seek\s+to|i\s+guarantee|i\s+swear)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
         private async Task StoreClaimAsync(string claim, AIVerificationResult result)
