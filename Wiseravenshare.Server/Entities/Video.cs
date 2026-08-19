@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Entities/Video.cs
+// Wiseravenshare.Server/Entities/Video.cs
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Wiseravenshare.Server.Entities;
@@ -42,7 +42,6 @@ namespace Wiseravenshare.Server.Entities
         public PrivacyStatus Privacy { get; set; } = PrivacyStatus.Unlisted;
         public VideoStatus Status { get; set; } = VideoStatus.Processing;
         public DateTime? PublishedAt { get; set; }
-        public DateTime? DeletedAt { get; set; }
 
         // Navigation Properties
         public virtual User User { get; set; } = null!;
@@ -95,7 +94,6 @@ namespace Wiseravenshare.Server.Entities
         public PrivacyStatus Privacy { get; set; } = PrivacyStatus.Unlisted;
         public VideoStatus Status { get; set; } = VideoStatus.Processing;
         public DateTime? PublishedAt { get; set; }
-        public DateTime? DeletedAt { get; set; }
 
         // Navigation Properties
         public virtual User User { get; set; } = null!;
@@ -155,7 +153,6 @@ namespace Wiseravenshare.Server.Entities
         public string Content { get; set; } = string.Empty;
 
         public int LikesCount { get; set; }
-        public bool IsDeleted { get; set; }
 
         // Navigation Properties
         public virtual Video Video { get; set; } = null!;
@@ -183,7 +180,6 @@ namespace Wiseravenshare.Server.Entities
         public string Content { get; set; } = string.Empty;
 
         public int LikesCount { get; set; }
-        public bool IsDeleted { get; set; }
 
         // Navigation Properties
         public virtual Video Video { get; set; } = null!;

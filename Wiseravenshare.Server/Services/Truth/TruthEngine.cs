@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -53,9 +53,43 @@ public class TruthEngineService : ITruthEngineService
     {
         var normalizedClaim = NormalizeClaim(claim);
         var cacheKey = $"truth_verify_{normalizedClaim.GetHashCode()}";
-        if (_cache.TryGetValue(cacheKey, out TruthVerificationResult cachedResult))
+        if (_cache.TryGetValue(cacheKey, out TruthVerificationResult? cachedResult) && cachedResult is not null)
         {
             return cachedResult;
+        }
+
+        if (IsQuestion(claim))
+        {
+            var questionResult = new TruthVerificationResult
+            {
+                Claim = claim,
+                NormalizedClaim = normalizedClaim,
+                IsTrue = null,
+                IsQuestion = true,
+                ConfidenceScore = 0.50m,
+                Explanation = "This is a question asking for information, not an objective factual assertion.",
+                Timestamp = DateTime.UtcNow,
+                VerificationDepth = depth
+            };
+            _cache.Set(cacheKey, questionResult, TimeSpan.FromHours(6));
+            return questionResult;
+        }
+
+        if (IsOpinion(claim))
+        {
+            var opinionResult = new TruthVerificationResult
+            {
+                Claim = claim,
+                NormalizedClaim = normalizedClaim,
+                IsTrue = null,
+                IsOpinion = true,
+                ConfidenceScore = 0.50m,
+                Explanation = "This is an opinion or subjective statement and cannot be evaluated as an objective fact.",
+                Timestamp = DateTime.UtcNow,
+                VerificationDepth = depth
+            };
+            _cache.Set(cacheKey, opinionResult, TimeSpan.FromHours(6));
+            return opinionResult;
         }
 
         var knowledgeBaseResult = await CheckKnowledgeBaseAsync(normalizedClaim);
@@ -108,12 +142,25 @@ public class TruthEngineService : ITruthEngineService
             results.Add(await VerifyClaimAsync(claim, VerificationDepth.Quick));
         }
 
-        var weightedScore = results.Count == 0 ? 0.50m : results.Average(r => r.ConfidenceScore);
+        // Exclude questions and opinions from factoring into fact/truth score calculations
+        var verifiableResults = results.Where(r => !r.IsQuestion && !r.IsOpinion).ToList();
+        if (!verifiableResults.Any())
+        {
+            return new TruthScore
+            {
+                Score = 0.50m,
+                Confidence = 0.50m,
+                Accuracy = 0.50m,
+                Claims = results.Select(r => new ClaimScore { Claim = r.Claim, Score = r.ConfidenceScore, IsTrue = r.IsTrue, Evidence = r.Sources.Select(s => s.Url).ToList() }).ToList()
+            };
+        }
+
+        var weightedScore = verifiableResults.Average(r => r.ConfidenceScore);
         return new TruthScore
         {
             Score = weightedScore,
             Confidence = weightedScore,
-            Accuracy = results.Count == 0 ? 0.50m : results.Count(r => r.IsTrue == true) / (decimal)results.Count,
+            Accuracy = verifiableResults.Count(r => r.IsTrue == true) / (decimal)verifiableResults.Count,
             Claims = results.Select(r => new ClaimScore { Claim = r.Claim, Score = r.ConfidenceScore, IsTrue = r.IsTrue, Evidence = r.Sources.Select(s => s.Url).ToList() }).ToList()
         };
     }
@@ -269,6 +316,23 @@ public class TruthEngineService : ITruthEngineService
         return (consistent ? 0.80m : 0.20m) * 0.50m + recent * 0.50m;
     }
 
+    private static bool IsQuestion(string sentence)
+    {
+        if (string.IsNullOrWhiteSpace(sentence)) return false;
+        var trimmed = sentence.Trim();
+        if (trimmed.EndsWith('?')) return true;
+
+        var normalized = NormalizeClaim(trimmed);
+        return Regex.IsMatch(normalized, @"^(where|what|when|why|how|who|whom|whose|which|is\s+it|why\s+dont|why\s+not|why\s+cant|is|are|was|were|can|could|would|should|do|does|did|has|have|had|will|shall)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsOpinion(string sentence)
+    {
+        if (string.IsNullOrWhiteSpace(sentence)) return false;
+        var normalized = NormalizeClaim(sentence);
+        return Regex.IsMatch(normalized, @"\b(i\s+think|i\s+feel|i\s+believe|in\s+my\s+opinion|my\s+favorite|best|worst|better|prettier|uglier|ugly|beautiful|awesome|terrible|horrible|overrated|underrated|should|ought\s+to|preference|subjective|coolest|dislike|like\s+more|i\s+prefer)\b", RegexOptions.IgnoreCase);
+    }
+
     private static string NormalizeClaim(string claim)
     {
         claim = claim.ToLowerInvariant();
@@ -341,6 +405,8 @@ public class TruthVerificationResult
     public string Claim { get; set; } = string.Empty;
     public string NormalizedClaim { get; set; } = string.Empty;
     public bool? IsTrue { get; set; }
+    public bool IsQuestion { get; set; }
+    public bool IsOpinion { get; set; }
     public decimal ConfidenceScore { get; set; }
     public string Explanation { get; set; } = string.Empty;
     public List<Source> Sources { get; set; } = new();

@@ -448,7 +448,28 @@ class TruthEngine {
             .slice(0, 20);
     }
 
+    isQuestion(sentence) {
+        const str = String(sentence || '').trim();
+        if (!str) return false;
+        if (str.endsWith('?')) return true;
+
+        const normalized = this.normalizeClaim(str);
+        const questionPrefixes = /^(where|what|when|why|how|who|whom|whose|which|is\s+it|why\s+dont|why\s+don\s*t|why\s+not|why\s+cant|why\s+can\s*t|is|are|was|were|can|could|would|should|do|does|did|has|have|had|will|shall)\b/i;
+        return questionPrefixes.test(normalized);
+    }
+
+    isOpinion(sentence) {
+        const str = String(sentence || '').trim();
+        if (!str) return false;
+        const normalized = this.normalizeClaim(str);
+        const opinionIndicators = /\b(i\s+think|i\s+feel|i\s+believe|in\s+my\s+opinion|my\s+favorite|best|worst|better|prettier|uglier|ugly|beautiful|awesome|terrible|horrible|overrated|underrated|should|ought\s+to|preference|subjective|coolest|dislike|like\s+more|i\s+prefer)\b/i;
+        return opinionIndicators.test(normalized);
+    }
+
     isLikelyVerifiableAssertion(sentence) {
+        if (this.isQuestion(sentence) || this.isOpinion(sentence)) {
+            return false;
+        }
         const value = this.normalizeClaim(sentence);
         if (!value || value.length < 6) {
             return false;
@@ -497,16 +518,46 @@ class TruthEngine {
     }
 
     analyzeContent(content) {
-        const claims = this.splitIntoClaims(content)
-            .filter((sentence) => this.isLikelyVerifiableAssertion(sentence));
-
-        if (claims.length === 0) {
+        const sentences = this.splitIntoClaims(content);
+        if (sentences.length === 0) {
             return [];
         }
 
         const findings = [];
 
-        for (const claimText of claims) {
+        for (const claimText of sentences) {
+            if (this.isQuestion(claimText)) {
+                findings.push({
+                    claim: claimText,
+                    isTrue: null,
+                    isQuestion: true,
+                    isOpinion: false,
+                    correction: 'This is a question asking for information, not a factual assertion.',
+                    source: 'Truth Engine',
+                    confidence: 0.5,
+                    evidenceType: 'question'
+                });
+                continue;
+            }
+
+            if (this.isOpinion(claimText)) {
+                findings.push({
+                    claim: claimText,
+                    isTrue: null,
+                    isOpinion: true,
+                    isQuestion: false,
+                    correction: 'This is an opinion or subjective statement and cannot be evaluated as an objective fact.',
+                    source: 'Truth Engine',
+                    confidence: 0.5,
+                    evidenceType: 'opinion'
+                });
+                continue;
+            }
+
+            if (!this.isLikelyVerifiableAssertion(claimText)) {
+                continue;
+            }
+
             const lowerContent = claimText.toLowerCase();
 
             this.mapQuestionClaimsToKnowledge(findings, lowerContent);
@@ -690,9 +741,12 @@ class TruthEngine {
 
     getTruthScore(content) {
         const analysis = this.analyzeContent(content);
-        const trueClaims = analysis.filter((f) => f.isTrue === true);
-        const falseClaims = analysis.filter((f) => f.isTrue === false);
-        const unknownClaims = analysis.filter((f) => f.isTrue === null);
+        // Exclude questions and opinions from factoring into truth score calculations
+        const verifiableAnalysis = analysis.filter(f => !f.isQuestion && !f.isOpinion);
+
+        const trueClaims = verifiableAnalysis.filter((f) => f.isTrue === true);
+        const falseClaims = verifiableAnalysis.filter((f) => f.isTrue === false);
+        const unknownClaims = verifiableAnalysis.filter((f) => f.isTrue === null);
 
         // Conservative abstention: no hard evidence should not imply correctness.
         if (trueClaims.length === 0 && falseClaims.length === 0) {
