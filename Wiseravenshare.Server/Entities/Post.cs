@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Entities/Post.cs
+// Wiseravenshare.Server/Entities/Post.cs
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -22,7 +22,6 @@ namespace Wiseravenshare.Server.Entities
         public decimal? Longitude { get; set; }
         public bool IsSensitive { get; set; }
         public bool IsPinned { get; set; }
-        public bool IsDeleted { get; set; }
         public Guid? ReplyToId { get; set; }
         public Guid? RepostOfId { get; set; }
         public Guid? QuoteOfId { get; set; }

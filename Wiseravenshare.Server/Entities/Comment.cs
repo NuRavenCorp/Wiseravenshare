@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Entities/Comment.cs
+// Wiseravenshare.Server/Entities/Comment.cs
 using System.ComponentModel.DataAnnotations;
 using Wiseravenshare.Server.Entities;
 
@@ -16,7 +16,6 @@ namespace Wiseravenshare.Server.Entities
 
         public int LikesCount { get; set; }
         public int RepliesCount { get; set; }
-        public bool IsDeleted { get; set; }
 
         // Navigation Properties
         public virtual Post Post { get; set; } = null!;

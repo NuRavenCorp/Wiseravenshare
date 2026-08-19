@@ -28,6 +28,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:10000
       CLIENT_ORIGIN: http://localhost:5173
+      # We tell ASP.NET that it is running behind a proxy, enabling ForwardedHeaders automatically
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=CHANGE_ME;SSL Mode=Disable;Trust Server Certificate=true
     ports:
       - "10000:10000"

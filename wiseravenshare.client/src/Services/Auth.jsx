@@ -101,7 +101,7 @@ class AuthService {
 
             return await this.legacyLogin(email, password);
         } catch (error) {
-            if (!error?.response && error?.message?.includes('Network') || error?.code === 'ERR_NETWORK') {
+            if ((!error?.response && error?.message?.includes('Network')) || (error?.code === 'ERR_NETWORK' && !error?.response)) {
                 const networkError = new Error('The backend API is unavailable or unreachable. Start the ASP.NET server and retry.');
                 networkError.status = 0;
                 networkError.cause = error;
@@ -431,6 +431,9 @@ class AuthService {
     }
 
     shouldFallbackToLegacyAuth(error) {
+        if (!error) {
+            return true;
+        }
         const code = String(error?.code || error?.error?.code || '').toLowerCase();
         return [
             'auth/user-not-found',
@@ -440,7 +443,7 @@ class AuthService {
             'auth/api-key-not-valid',
             'auth/internal-error',
             'auth/network-request-failed'
-        ].includes(code) || code.startsWith('auth/');
+        ].includes(code) || code.startsWith('auth/') || !code;
     }
 
     getSocialLoginStartUrl(providerId, returnUrl) {
@@ -568,7 +571,11 @@ class AuthService {
 
     handleError(error) {
         if (error.response) {
-            const err = new Error(error.response.data.message || 'Server error');
+            const data = error.response.data;
+            const message = (data && typeof data === 'object')
+                ? (data.message || data.error || data.title || data.detail || (typeof data.errors === 'object' ? Object.values(data.errors).flat().join(' ') : null))
+                : (typeof data === 'string' && data.trim() ? data : null);
+            const err = new Error(message || (error.response.status === 401 ? 'Invalid email or password.' : 'Authentication failed.'));
             err.status = error.response.status;
             return err;
         } else if (error?.status) {

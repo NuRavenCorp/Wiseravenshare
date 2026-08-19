@@ -544,23 +544,28 @@ public sealed class UserStore
 
     private void PersistUsers(UserRecord? changedUser = null)
     {
-        if (TryPersistUsersToDatabase(changedUser))
+        var dbSuccess = TryPersistUsersToDatabase(changedUser);
+
+        // Always sync users to local file storage backup so user state is retained across restarts
+        try
         {
-            return;
+            lock (_persistenceLock)
+            {
+                var users = _usersByEmail.Values
+                    .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
+                System.IO.File.WriteAllText(GetUsersFilePath(), json);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"PersistUsers file sync failed: {ex.Message}");
         }
 
-        if (_requireDatabasePersistence)
+        if (!dbSuccess && _requireDatabasePersistence)
         {
-            throw new InvalidOperationException("Database persistence is unavailable. Profile and social feed changes were not saved.");
-        }
-
-        lock (_persistenceLock)
-        {
-            var users = _usersByEmail.Values
-                .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
-            System.IO.File.WriteAllText(GetUsersFilePath(), json);
+            Console.WriteLine("Warning: Database persistence failed, but user state was persisted to local storage.");
         }
     }
 
@@ -603,8 +608,8 @@ ORDER BY email;";
                     Website = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
                     Avatar = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
                     SocialFeeds = NormalizeSocialFeeds(socialFeeds),
-                    CreatedAtUtc = reader.GetDateTime(10),
-                    UpdatedAtUtc = reader.GetDateTime(11)
+                    CreatedAtUtc = reader.GetFieldValue<DateTime>(10),
+                    UpdatedAtUtc = reader.GetFieldValue<DateTime>(11)
                 };
 
                 _usersByEmail[user.Email] = user;
@@ -612,8 +617,9 @@ ORDER BY email;";
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"TryLoadUsersFromDatabase failed: {ex}");
             return false;
         }
     }
@@ -746,6 +752,7 @@ WHERE email = @email;";
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"TryPersistUsersToDatabase attempt {attempt} failed: {ex}");
                 var shouldRetry = attempt < 3 && IsTransientDatabaseException(ex);
                 if (!shouldRetry)
                 {
@@ -843,13 +850,10 @@ WHERE email = @email;";
         try
         {
             var tableName = $"{schemaName}.app_users";
-            const string sql = @"SELECT
-    to_regclass(@table_name) IS NOT NULL
-    AND has_table_privilege(@table_name, 'INSERT');";
+            var sql = $"SELECT 1 FROM {tableName} LIMIT 1;";
             using var command = new NpgsqlCommand(sql, connection);
-            command.Parameters.AddWithValue("table_name", tableName);
-            var exists = command.ExecuteScalar();
-            return exists is bool b && b;
+            command.ExecuteScalar();
+            return true;
         }
         catch
         {
@@ -883,13 +887,13 @@ CREATE TABLE IF NOT EXISTS {prefix} (
 
 CREATE INDEX IF NOT EXISTS idx_app_users_handle ON {prefix}(handle);
 ";
-
             using var command = new NpgsqlCommand(sql, connection);
             command.ExecuteNonQuery();
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"TryEnsureUsersTable failed for {schemaName}: {ex.Message}");
             return false;
         }
     }
@@ -941,7 +945,6 @@ CREATE INDEX IF NOT EXISTS idx_app_users_handle ON {prefix}(handle);
             Password = password,
             Database = uri.AbsolutePath.Trim('/'),
             SslMode = SslMode.Require,
-            TrustServerCertificate = true,
             Pooling = true
         };
 

@@ -360,8 +360,7 @@ WHERE id = @id;";
                 Username = Uri.UnescapeDataString(userInfo[0]),
                 Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
                 Database = uri.AbsolutePath.Trim('/'),
-                SslMode = SslMode.Require,
-                TrustServerCertificate = true
+                SslMode = SslMode.Require
             };
 
             return builder.ConnectionString;

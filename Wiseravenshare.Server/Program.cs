@@ -64,7 +64,6 @@ static string NormalizeConnectionString(string connectionString)
         Password = password,
         Database = uri.AbsolutePath.Trim('/'),
         SslMode = SslMode.Require,
-        TrustServerCertificate = true,
         Pooling = true
     };
 
@@ -671,6 +670,16 @@ if (!builder.Environment.IsDevelopment())
 }
 
 // ── Services ─────────────────────────────────────────────────────────────────
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+    // Clearing networks automatically trusts the nearest proxy (e.g. docker network or cloud provider proxy)
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
@@ -980,6 +989,7 @@ app.Use(async (context, next) =>
     }
 });
 
+app.UseForwardedHeaders();
 app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();

@@ -203,19 +203,21 @@ const LoginPage = ({ onAuth }) => {
         setInfo('');
         const loginValue = email.trim();
 
+        const meetsPasswordPolicy = (pwd) => pwd.length >= 8 && /[A-Z]/.test(pwd) && /[a-z]/.test(pwd) && /\d/.test(pwd) && /[^a-zA-Z0-9]/.test(pwd);
+
         if (mode === 'signup') {
             if (!loginValue || !password.trim() || !name.trim()) { setError('Please fill all required fields.'); return; }
-            if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+            if (!meetsPasswordPolicy(password)) { setError('Password must be at least 8 characters and include uppercase, lowercase, number, and special character.'); return; }
         } else if (mode === 'login') {
             if (!loginValue || !password.trim()) { setError('Please fill all required fields.'); return; }
         } else if (mode === 'teamInvite') {
             if (!loginValue || !password.trim() || !inviteToken.trim()) { setError('Email, invite token, and password are required.'); return; }
-            if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+            if (!meetsPasswordPolicy(password)) { setError('Password must be at least 8 characters and include uppercase, lowercase, number, and special character.'); return; }
         } else if (mode === 'forgot') {
             if (!loginValue) { setError('Please enter your email address.'); return; }
         } else if (mode === 'reset') {
             if (!resetToken.trim() || !password.trim()) { setError('Reset token and new password are required.'); return; }
-            if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+            if (!meetsPasswordPolicy(password)) { setError('Password must be at least 8 characters and include uppercase, lowercase, number, and special character.'); return; }
         }
 
         try {
@@ -267,8 +269,8 @@ const LoginPage = ({ onAuth }) => {
                     {error && <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>}
                     {info && <p style={{ color: '#93c5fd', marginBottom: '12px' }}>{info}</p>}
 
-                    {mode === 'login' && <SignIn email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} isAdminLoginVisible={isAdminLoginVisible} setIsAdminLoginVisible={setIsAdminLoginVisible} loginRevealed={loginRevealed} setLoginRevealed={setLoginRevealed} />}
-                    {mode === 'signup' && <SignUp name={name} setName={setName} email={email} setEmail={setEmail} password={password} setPassword={setPassword} bio={bio} setBio={setBio} location={location} setLocation={setLocation} website={website} setWebsite={setWebsite} referralCode={referralCode} setReferralCode={setReferralCode} avatarPreview={avatarPreview} handleAvatarChange={handleAvatarChange} cameraOpen={cameraOpen} startCamera={startCamera} capturePhoto={capturePhoto} stopCamera={stopCamera} cameraError={cameraError} videoRef={videoRef} canvasRef={canvasRef} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} isAdminLoginVisible={isAdminLoginVisible} setIsAdminLoginVisible={setIsAdminLoginVisible} />}
+                    {mode === 'login' && <SignIn email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
+                    {mode === 'signup' && <SignUp name={name} setName={setName} email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
                     {mode === 'teamInvite' && <TeamInvite name={name} setName={setName} email={email} setEmail={setEmail} inviteToken={inviteToken} setInviteToken={setInviteToken} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} isAdminLoginVisible={isAdminLoginVisible} setIsAdminLoginVisible={setIsAdminLoginVisible} />}
                     {mode === 'forgot' && <ForgotPassword email={email} setEmail={setEmail} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
                     {mode === 'reset' && <ResetPassword resetToken={resetToken} setResetToken={setResetToken} password={password} setPassword={setPassword} submit={submit} />}

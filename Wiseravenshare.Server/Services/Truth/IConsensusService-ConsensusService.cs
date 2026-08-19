@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.Interfaces.Repositories;
 
@@ -47,7 +47,7 @@ public class ConsensusService : IConsensusService
     public async Task<ConsensusResult> GetConsensusForClaimAsync(string normalizedClaim)
     {
         var cacheKey = $"consensus_{normalizedClaim.GetHashCode()}";
-        if (_cache.TryGetValue(cacheKey, out ConsensusResult cachedResult))
+        if (_cache.TryGetValue(cacheKey, out ConsensusResult? cachedResult) && cachedResult is not null)
         {
             return cachedResult;
         }

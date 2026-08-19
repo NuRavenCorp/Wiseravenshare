@@ -117,7 +117,6 @@ public class VideoStreamingController : ControllerBase
             var blobStream = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
             if (blobStream is not null)
             {
-                var contentType = "application/octet-stream";
                 if (!_contentTypeProvider.TryGetContentType(fileName, out var resolvedContentType))
                 {
                     resolvedContentType = "application/octet-stream";
