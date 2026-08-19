@@ -104,7 +104,7 @@ public class AuthController : ControllerBase
                 request.Website,
                 request.Avatar);
         }
-        catch (InvalidOperationException ex) when (string.Equals(ex.Message, "Database persistence is unavailable. Profile and social feed changes were not saved.", StringComparison.Ordinal))
+        catch (InvalidOperationException ex)
         {
             if (!_userStore.TryGetByEmail(request.Email.Trim(), out var createdUser) || createdUser is null)
             {
@@ -189,6 +189,12 @@ public class AuthController : ControllerBase
                 RecordFailedLogin(attemptKey);
                 return Unauthorized(new { message = "Invalid email or password." });
             }
+        }
+
+        if (user is null)
+        {
+            RecordFailedLogin(attemptKey);
+            return Unauthorized(new { message = "Invalid email or password." });
         }
 
         if (!IsAuthenticationAllowed(user.Email))
@@ -285,7 +291,9 @@ public class AuthController : ControllerBase
         try
         {
             var claimsPrincipal = tokenHandler.ValidateToken(providedToken, BuildTokenValidationParameters(), out _);
-            var email = claimsPrincipal.FindFirstValue(ClaimTypes.Email);
+            var email = claimsPrincipal.FindFirstValue(ClaimTypes.Email)
+                ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Email)
+                ?? claimsPrincipal.FindFirstValue("email");
             if (string.IsNullOrWhiteSpace(email))
             {
                 return Unauthorized(new { valid = false, message = "Invalid token claims." });
@@ -293,8 +301,14 @@ public class AuthController : ControllerBase
 
             if (!_userStore.TryGetByEmail(email, out var user) || user is null)
             {
-                var nameFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0];
-                var subFromClaims = claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? string.Empty;
+                var nameFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.Name)
+                    ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Name)
+                    ?? claimsPrincipal.FindFirstValue("name")
+                    ?? email.Split('@')[0];
+                var subFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                    ?? claimsPrincipal.FindFirstValue("sub")
+                    ?? string.Empty;
                 user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
             }
 
@@ -1159,7 +1173,7 @@ public class AuthController : ControllerBase
     {
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var expiresAtUtc = DateTime.UtcNow.AddDays(7);
-        
+
         RefreshTokensByToken[token] = new RefreshTokenRecord
         {
             UserId = userId,
@@ -1187,8 +1201,12 @@ public class AuthController : ControllerBase
 
     private bool IsSelfRegistrationAllowed()
     {
-        var configured = _configuration.GetValue<bool?>("Authentication:AllowSelfRegistration");
-        return configured ?? true;
+        var raw = _configuration["Authentication:AllowSelfRegistration"];
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        if (bool.TryParse(raw, out var parsedBool)) return parsedBool;
+        if (string.Equals(raw, "1", StringComparison.Ordinal)) return true;
+        if (string.Equals(raw, "0", StringComparison.Ordinal)) return false;
+        return !string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out AppUserRecord? user)
@@ -1558,7 +1576,10 @@ public class AuthController : ControllerBase
     private string BuildOAuthCallbackUrl(string provider)
     {
         var callbackPath = $"/api/auth/oauth/{provider}/callback";
-        return $"{ResolvePublicAppOrigin()}{callbackPath}";
+        var apiOrigin = Request.Host.HasValue
+            ? $"{Request.Scheme}://{Request.Host}".TrimEnd('/')
+            : ResolvePublicAppOrigin();
+        return $"{apiOrigin}{callbackPath}";
     }
 
     private string ResolveOAuthReturnUrl(string? returnUrl)
@@ -2230,8 +2251,15 @@ public class AuthController : ControllerBase
 
 public sealed class LoginRequest
 {
-    public string Email { get; set; } = string.Empty;
+    private string _email = string.Empty;
+    public string Email
+    {
+        get => !string.IsNullOrWhiteSpace(_email) ? _email : (!string.IsNullOrWhiteSpace(UsernameOrEmail) ? UsernameOrEmail : (Username ?? string.Empty));
+        set => _email = value;
+    }
     public string Password { get; set; } = string.Empty;
+    public string? Username { get; set; }
+    public string? UsernameOrEmail { get; set; }
 }
 
 public sealed class RegisterRequest

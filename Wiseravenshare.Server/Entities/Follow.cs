@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Entities/Follow.cs
+// Wiseravenshare.Server/Entities/Follow.cs
 using System.Text.Json.Serialization;
 
 namespace Wiseravenshare.Server.Entities
@@ -8,7 +8,6 @@ namespace Wiseravenshare.Server.Entities
     {
         public Guid FollowerId { get; set; }
         public Guid FollowingId { get; set; }
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation Properties
         [JsonIgnore]

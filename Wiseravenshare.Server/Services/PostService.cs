@@ -46,6 +46,29 @@ public class PostService : IPostService
         _logger = logger;
     }
 
+    private static bool IsOpinionOrQuestion(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return false;
+        
+        var trimmed = content.Trim();
+        if (trimmed.EndsWith('?')) return true;
+
+        var lower = trimmed.ToLowerInvariant();
+        string[] questionWords = { "who ", "what ", "where ", "when ", "why ", "how " };
+        foreach (var word in questionWords)
+        {
+            if (lower.StartsWith(word)) return true;
+        }
+
+        string[] opinionPhrases = { "i think", "i believe", "my opinion", "in my opinion", "i feel", "seems to me", "i guess", "to me", "in my view" };
+        foreach (var phrase in opinionPhrases)
+        {
+            if (lower.Contains(phrase)) return true;
+        }
+
+        return false;
+    }
+
     public async Task<PostDto> CreatePostAsync(Guid userId, CreatePostDto dto)
     {
         User? user = null;
@@ -93,7 +116,7 @@ public class PostService : IPostService
         };
 
         // Analyze truth score when available, but never block post creation on the truth service.
-        if (!string.IsNullOrEmpty(dto.Content))
+        if (!string.IsNullOrEmpty(dto.Content) && !IsOpinionOrQuestion(dto.Content))
         {
             try
             {
@@ -105,6 +128,12 @@ public class PostService : IPostService
             {
                 _logger.LogWarning(ex, "Truth analysis failed for post creation; continuing without truth metadata.");
             }
+        }
+        else
+        {
+            // Nullify score for opinions/questions so UI ignores truth checks on them
+            post.TruthScore = null;
+            post.TruthCorrection = null;
         }
 
         var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
@@ -174,10 +203,18 @@ public class PostService : IPostService
         {
             post.Content = dto.Content;
 
-            // Re-analyze truth score
-            var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
-            post.TruthScore = truthResult.TruthScore;
-            post.TruthCorrection = truthResult.Correction;
+            if (!IsOpinionOrQuestion(dto.Content))
+            {
+                // Re-analyze truth score
+                var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
+                post.TruthScore = truthResult.TruthScore;
+                post.TruthCorrection = truthResult.Correction;
+            }
+            else
+            {
+                post.TruthScore = null;
+                post.TruthCorrection = null;
+            }
         }
 
         if (dto.IsSensitive.HasValue)

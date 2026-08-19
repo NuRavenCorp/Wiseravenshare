@@ -41,7 +41,7 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(DisableSpaProject)' != 'true'">
     <ProjectReference Include="..\wiseravenshare.client\wiseravenshare.client.esproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

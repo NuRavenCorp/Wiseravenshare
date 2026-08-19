@@ -30,6 +30,10 @@ __.ENV__*
 
 # Media uploads
 **/MediaStorage/
+**/Ravensight_videos/
+
+# Local dev data
+**/App_Data/*.json
 
 # OS
 .DS_Store

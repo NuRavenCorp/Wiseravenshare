@@ -690,7 +690,6 @@ LIMIT @limit OFFSET @offset;";
             Password = password,
             Database = uri.AbsolutePath.Trim('/'),
             SslMode = SslMode.Require,
-            TrustServerCertificate = true,
             Pooling = true
         };
 

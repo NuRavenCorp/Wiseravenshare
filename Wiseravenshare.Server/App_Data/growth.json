@@ -300,6 +300,161 @@
         "source": "ravensight_video",
         "plan": "creator_pro"
       }
+    },
+    {
+      "Id": "0c7eca432a184221b2d69de5cc4beab7",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-18T17:26:32.830098Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "9fcf33b83d7b416991dce94b02823c42",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-18T20:50:55.2189717Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "1a816cff9a414b2a884abca2e89f3d35",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-18T20:51:10.0951636Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "9b3732402634490a807ed9edf18186b4",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-18T20:51:27.4834854Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "d347d5981191408b91a8172c66261dd3",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-18T22:13:04.1475483Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "ba1c3e705c904a6b88319e6084312d91",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T03:56:03.2092542Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "ceb57de66e184cf18ab54961e91f823e",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "paywall_plan_selected",
+      "CreatedAtUtc": "2026-08-19T03:56:53.1900666Z",
+      "Metadata": {
+        "source": "ravensight_video",
+        "plan": "creator_pro"
+      }
+    },
+    {
+      "Id": "11c411be69e24669ac919277d74fedef",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T04:12:38.2497877Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "4a4307f628364806b06e85d2191c8772",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T04:12:41.4414645Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "6475df7f393d40c8b2b0e29fbd20f5bb",
+      "UserId": "18e991340e7d43f2bd24fb1c32d564f6",
+      "Email": "testuser@example.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-19T04:12:47.0105848Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "8ed89458011f40259f041f1303e039fe",
+      "UserId": "18e991340e7d43f2bd24fb1c32d564f6",
+      "Email": "testuser@example.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T04:12:50.4322055Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "b37a107d8dd24a558a2dc9cb1247f4fa",
+      "UserId": "095b40ebf89f42ae86419652cbe4fc11",
+      "Email": "x@x.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-19T04:15:28.0281481Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "50100bb0078147ca8d7bdef587220cda",
+      "UserId": "01484a9cfc534c44931fb335b63fa002",
+      "Email": "johndoe@example.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-19T09:17:50.1764121Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "7243d701fd174d59ae61011de30b6724",
+      "UserId": "01484a9cfc534c44931fb335b63fa002",
+      "Email": "johndoe@example.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T09:17:54.6276834Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "a1b3b2d4fd1f4eaaaa31bbc126960ff6",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T09:22:50.9464905Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "f08d3ad5d8c4416c91cab072da055204",
+      "UserId": "805e03fbf70c49e29fdc82db873731b3",
+      "Email": "arnold@voter-alliance.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-19T09:23:10.5647093Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "ae14ca6da543472daa3f8a13e960955b",
+      "UserId": "f2a8291881b6457e9d2fc7049093d569",
+      "Email": "arnold.spence308@gmail.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-19T09:23:34.0070859Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "d66a06c066ac4a02bd70626ad003f207",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T09:24:15.4939551Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "1fe91c211a664e04b23fd581855c8c38",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T09:26:14.5484745Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],

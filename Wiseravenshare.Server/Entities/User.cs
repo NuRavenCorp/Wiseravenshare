@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Core/Entities/User.cs
+// Wiseravenshare.Core/Entities/User.cs
 using System.Text.Json.Serialization;
 
 namespace Wiseravenshare.Server.Entities
@@ -27,7 +27,6 @@ namespace Wiseravenshare.Server.Entities
         public DateTime? RefreshTokenExpiryTime { get; set; }
         public string? PasswordResetToken { get; set; }
         public DateTime? PasswordResetTokenExpiryTime { get; set; }
-        public DateTime? DeletedAt { get; set; }
 
         // Navigation Properties
         public virtual ICollection<Post> Posts { get; set; } = new List<Post>();

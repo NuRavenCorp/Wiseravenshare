@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.Interfaces.Repositories;
 
@@ -76,7 +76,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public async Task<IEnumerable<TruthFact>> FindSimilarClaimsAsync(string normalizedClaim)
     {
         var cacheKey = $"similar_{normalizedClaim.GetHashCode()}";
-        if (_cache.TryGetValue(cacheKey, out IEnumerable<TruthFact>? cachedFacts))
+        if (_cache.TryGetValue(cacheKey, out IEnumerable<TruthFact>? cachedFacts) && cachedFacts is not null)
         {
             return cachedFacts;
         }

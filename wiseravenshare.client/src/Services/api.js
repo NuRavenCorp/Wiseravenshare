@@ -88,12 +88,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 
 const isAuthEndpoint = (url = '') => {
     const value = String(url || '').toLowerCase();
-    return value.includes('/auth/login')
-        || value.includes('/auth/register')
-        || value.includes('/auth/verify')
-        || value.includes('/auth/forgot-password')
-        || value.includes('/auth/reset-password')
-        || value.includes('/auth/status');
+    return value.includes('auth/');
 };
 
 const handleUnauthorized = () => {
@@ -329,6 +324,30 @@ const setStoredNotifications = (items) => {
     safeWriteJson('wiseNotifications', Array.isArray(items) ? items : []);
 };
 
+const getStoredPosts = () => {
+    const data = safeReadJson('wiseLocalPosts', []);
+    return Array.isArray(data) ? data : [];
+};
+
+const setStoredPosts = (items) => {
+    safeWriteJson('wiseLocalPosts', Array.isArray(items) ? items : []);
+};
+
+const saveLocalPost = (post) => {
+    if (!post || !post.id) return;
+    const existing = getStoredPosts();
+    const filtered = existing.filter((p) => p.id !== post.id);
+    setStoredPosts([post, ...filtered].slice(0, 100));
+};
+
+const mergeWithLocalPosts = (remotePosts = []) => {
+    const remote = Array.isArray(remotePosts) ? remotePosts : [];
+    const local = getStoredPosts();
+    const remoteIds = new Set(remote.map((p) => p?.id).filter(Boolean));
+    const localOnly = local.filter((p) => p?.id && !remoteIds.has(p.id));
+    return [...localOnly, ...remote];
+};
+
 const buildLocalComment = (postId, content) => {
     const user = safeReadJson('user_data', null);
     return {
@@ -409,36 +428,42 @@ export const apiService = {
         const page = Number(params.page) > 0 ? Number(params.page) : 1;
         const pageSize = Number(params.pageSize || params.limit) > 0 ? Number(params.pageSize || params.limit) : 20;
 
-        if (params.userId) {
-            const response = await api.get(`/posts/user/${encodeURIComponent(params.userId)}`, {
+        try {
+            if (params.userId) {
+                const response = await api.get(`/posts/user/${encodeURIComponent(params.userId)}`, {
+                    params: { page, pageSize }
+                });
+                const posts = mergeWithLocalPosts(toArrayPayload(response?.data));
+                return { ...response, data: posts };
+            }
+
+            if (String(params.sort || '').toLowerCase() === 'trending') {
+                const response = await api.get('/posts/trending', { params: { count: pageSize } });
+                const posts = mergeWithLocalPosts(toArrayPayload(response?.data));
+                return { ...response, data: posts };
+            }
+
+            const response = await api.get('/posts/feed', {
                 params: { page, pageSize }
             });
-            return {
-                ...response,
-                data: toArrayPayload(response?.data)
-            };
+            const posts = mergeWithLocalPosts(toArrayPayload(response?.data));
+            return { ...response, data: posts };
+        } catch (error) {
+            const local = getStoredPosts();
+            if (local.length > 0) {
+                return { data: local };
+            }
+            throw normalizeApiError(error, 'Failed to load posts.');
         }
-
-        if (String(params.sort || '').toLowerCase() === 'trending') {
-            const response = await api.get('/posts/trending', { params: { count: pageSize } });
-            return {
-                ...response,
-                data: toArrayPayload(response?.data)
-            };
-        }
-
-        const response = await api.get('/posts/feed', {
-            params: { page, pageSize }
-        });
-        return {
-            ...response,
-            data: toArrayPayload(response?.data)
-        };
     },
     getPost: (postId) => api.get(`/posts/${postId}`),
     createPost: async (postData) => {
         try {
-            return await api.post('/posts', postData);
+            const response = await api.post('/posts', postData);
+            if (response?.data) {
+                saveLocalPost(response.data);
+            }
+            return response;
         } catch (error) {
             const status = error?.response?.status;
             const isTimeout = error?.code === 'ECONNABORTED';
@@ -447,9 +472,30 @@ export const apiService = {
             // Single retry for transient connectivity/timeouts.
             if (isTimeout || isTransientNetwork || status === 502 || status === 503 || status === 504) {
                 try {
-                    return await api.post('/posts', postData);
+                    const retryResponse = await api.post('/posts', postData);
+                    if (retryResponse?.data) {
+                        saveLocalPost(retryResponse.data);
+                    }
+                    return retryResponse;
                 } catch (retryError) {
-                    throw normalizeApiError(retryError, 'Failed to save post to server. Please try again.');
+                    const user = safeReadJson('user_data', null);
+                    const localFallbackPost = {
+                        id: `local-post-${Date.now()}`,
+                        content: postData.content || postData.Content || '',
+                        type: postData.type || postData.Type || 'Text',
+                        mediaUrl: postData.mediaUrl || postData.MediaUrl || '',
+                        createdAt: new Date().toISOString(),
+                        user: {
+                            id: user?.id || 'local-user',
+                            name: user?.name || user?.username || 'You',
+                            avatar: user?.avatar || null
+                        },
+                        likesCount: 0,
+                        commentsCount: 0,
+                        repostsCount: 0
+                    };
+                    saveLocalPost(localFallbackPost);
+                    return { data: localFallbackPost };
                 }
             }
 

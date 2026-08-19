@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Entities/Message.cs
+// Wiseravenshare.Server/Entities/Message.cs
 using System.ComponentModel.DataAnnotations;
 using Wiseravenshare.Server.Entities;
 
@@ -42,7 +42,6 @@ namespace Wiseravenshare.Server.Entities
         public MessageType Type { get; set; } = MessageType.Text;
         public string[]? MediaUrls { get; set; }
         public bool IsRead { get; set; }
-        public bool IsDeleted { get; set; }
         public Guid? ReplyToId { get; set; }
         public DateTime? ReadAt { get; set; }
 
