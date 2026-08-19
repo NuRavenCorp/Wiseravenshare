@@ -98,5 +98,20 @@
     "id": "t20",
     "claim": "Climate change is fake.",
     "expected": "false"
+  },
+  {
+    "id": "t21",
+    "claim": "I intend to build a better future for my community.",
+    "expected": "true"
+  },
+  {
+    "id": "t22",
+    "claim": "My intention is to learn software engineering.",
+    "expected": "true"
+  },
+  {
+    "id": "t23",
+    "claim": "I plan to start a non-profit organization.",
+    "expected": "true"
   }
 ]
