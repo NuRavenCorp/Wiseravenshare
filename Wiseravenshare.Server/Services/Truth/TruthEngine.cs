@@ -95,10 +95,18 @@ public class TruthEngineService : ITruthEngineService
                 NormalizedClaim = normalizedClaim,
                 IsTrue = null,
                 IsQuestion = true,
-                ConfidenceScore = 0.50m,
-                Explanation = "This is a question asking for information, not an objective factual assertion.",
+                ConfidenceScore = 1.00m,
+                Explanation = "This is an open inquiry asking for information, not an empirical factual claim to verify.",
                 Timestamp = DateTime.UtcNow,
-                VerificationDepth = depth
+                VerificationDepth = depth,
+                Breakdown = new VerificationBreakdown
+                {
+                    KnowledgeBaseScore = 1.00m,
+                    AIScore = 1.00m,
+                    SourceScore = 1.00m,
+                    TemporalScore = 1.00m,
+                    ConsensusScore = 1.00m
+                }
             };
             _cache.Set(cacheKey, questionResult, TimeSpan.FromHours(6));
             return questionResult;
@@ -112,10 +120,18 @@ public class TruthEngineService : ITruthEngineService
                 NormalizedClaim = normalizedClaim,
                 IsTrue = null,
                 IsOpinion = true,
-                ConfidenceScore = 0.50m,
-                Explanation = "This is an opinion or subjective statement and cannot be evaluated as an objective fact.",
+                ConfidenceScore = 1.00m,
+                Explanation = "This is an opinion or subjective statement reflecting personal perspective rather than an objective empirical factual claim.",
                 Timestamp = DateTime.UtcNow,
-                VerificationDepth = depth
+                VerificationDepth = depth,
+                Breakdown = new VerificationBreakdown
+                {
+                    KnowledgeBaseScore = 1.00m,
+                    AIScore = 1.00m,
+                    SourceScore = 1.00m,
+                    TemporalScore = 1.00m,
+                    ConsensusScore = 1.00m
+                }
             };
             _cache.Set(cacheKey, opinionResult, TimeSpan.FromHours(6));
             return opinionResult;

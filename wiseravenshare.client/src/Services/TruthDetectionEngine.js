@@ -763,12 +763,12 @@ class TruthEngine {
     }
 
     getTruthScore(content) {
-        if (this.isIntent(content)) {
+        if (this.isIntent(content) || this.isQuestion(content) || this.isOpinion(content)) {
             return 100;
         }
 
         const analysis = this.analyzeContent(content);
-        if (analysis.length > 0 && analysis.every(f => f.isIntent)) {
+        if (analysis.length > 0 && analysis.every(f => f.isIntent || f.isQuestion || f.isOpinion)) {
             return 100;
         }
 
@@ -815,7 +815,10 @@ class TruthEngine {
         return Math.max(0, Math.min(100, Math.round(score)));
     }
 
-    getTruthBadge(score) {
+    getTruthBadge(score, options = {}) {
+        if (options.isQuestion) return { text: `❓ Open Inquiry / Question`, class: 'truth-inquiry', icon: '❓' };
+        if (options.isOpinion) return { text: `💬 Personal Opinion`, class: 'truth-opinion', icon: '💬' };
+        if (options.isIntent || score === 100) return { text: `🎯 100% Personal Truth: Authentic Intention`, class: 'truth-score', icon: '🎯' };
         if (score >= 90) return { text: `✓ Truth Score: ${score}%`, class: 'truth-score', icon: '✅' };
         if (score >= 70) return { text: `📊 Highly Supported: ${score}%`, class: 'truth-partial', icon: '📊' };
         if (score >= 55) return { text: `🟡 Mixed Evidence: ${score}%`, class: 'truth-partial', icon: '🟡' };
@@ -1009,6 +1012,80 @@ class TruthEngine {
         const claim = String(claimText || '').trim();
         const findings = this.analyzeContent(claim);
         const strongest = findings[0] || null;
+
+        if (this.isQuestion(claim) || strongest?.isQuestion) {
+            return {
+                id: String(Date.now()),
+                claim,
+                normalizedClaim: this.normalizeClaim(claim),
+                isTrue: null,
+                isQuestion: true,
+                isIntent: false,
+                isOpinion: false,
+                truthScore: 100,
+                confidence: 100,
+                confidenceScore: 1.0,
+                correction: null,
+                explanation: 'This is an open inquiry asking for information. Questions express inquiry rather than making empirical factual claims to verify.',
+                sources: [],
+                findings: findings.length > 0 ? findings : [{
+                    claim,
+                    isTrue: null,
+                    isQuestion: true,
+                    isOpinion: false,
+                    correction: 'This is a question asking for information, not a factual assertion.',
+                    source: 'Truth Engine',
+                    confidence: 1.0,
+                    evidenceType: 'question'
+                }],
+                timestamp: new Date(),
+                verificationDepth: 'standard',
+                breakdown: {
+                    knowledgeBaseScore: 100,
+                    aiScore: 100,
+                    sourceScore: 100,
+                    temporalScore: 100,
+                    consensusScore: 100
+                }
+            };
+        }
+
+        if (this.isOpinion(claim) || strongest?.isOpinion) {
+            return {
+                id: String(Date.now()),
+                claim,
+                normalizedClaim: this.normalizeClaim(claim),
+                isTrue: null,
+                isOpinion: true,
+                isQuestion: false,
+                isIntent: false,
+                truthScore: 100,
+                confidence: 100,
+                confidenceScore: 1.0,
+                correction: null,
+                explanation: 'This is an opinion or subjective statement reflecting personal perspective rather than an objective empirical factual claim.',
+                sources: [],
+                findings: findings.length > 0 ? findings : [{
+                    claim,
+                    isTrue: null,
+                    isOpinion: true,
+                    isQuestion: false,
+                    correction: 'This is an opinion or subjective statement and cannot be evaluated as an objective fact.',
+                    source: 'Truth Engine',
+                    confidence: 1.0,
+                    evidenceType: 'opinion'
+                }],
+                timestamp: new Date(),
+                verificationDepth: 'standard',
+                breakdown: {
+                    knowledgeBaseScore: 100,
+                    aiScore: 100,
+                    sourceScore: 100,
+                    temporalScore: 100,
+                    consensusScore: 100
+                }
+            };
+        }
 
         if (this.isIntent(claim) || strongest?.isIntent) {
             return {
