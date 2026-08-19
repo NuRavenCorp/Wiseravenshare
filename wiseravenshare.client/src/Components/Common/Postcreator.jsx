@@ -369,7 +369,17 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             setUploadProgress(0);
             setIsUploading(false);
 
-            if (truthScore < 70) {
+            const isQ = truthEngine.isQuestion(content);
+            const isOp = truthEngine.isOpinion(content);
+            const isInt = truthEngine.isIntent(content);
+
+            if (isQ) {
+                addTruthAlert('info', 'Post published! (Open Inquiry / Question)', null);
+            } else if (isOp) {
+                addTruthAlert('info', 'Post published! (Personal Opinion)', null);
+            } else if (isInt) {
+                addTruthAlert('success', 'Post published! 100% Personal Truth (Authentic Intention)', null);
+            } else if (truthScore < 70) {
                 addTruthAlert('warning', `Your post has a truth score of ${truthScore}%. Consider verifying your claims.`, null);
             } else {
                 addTruthAlert('success', `Post published! Truth score: ${truthScore}%`, null);
