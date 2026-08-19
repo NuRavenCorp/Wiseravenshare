@@ -1,15 +1,15 @@
-﻿// src/components/truth/TruthVerifier.tsx
+// src/components/truth/TruthVerifier.tsx
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTruthEngine } from '../../hooks/useTruthEngine';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
-import { 
-    FiCheckCircle, 
-    FiXCircle, 
-    FiAlertCircle, 
-    FiInfo, 
+import {
+    FiCheckCircle,
+    FiXCircle,
+    FiAlertCircle,
+    FiInfo,
     FiLink,
     FiFileText,
     FiUsers,
@@ -48,7 +48,8 @@ export const TruthVerifier: React.FC = () => {
         return <FiAlertCircle className="w-8 h-8 text-yellow-400" />;
     };
 
-    const getVerdictText = (isTrue: boolean | null) => {
+    const getVerdictText = (isTrue: boolean | null, isIntent?: boolean) => {
+        if (isIntent || (currentVerification as any)?.isIntent) return '100% Personal Truth - Authentic Intention';
         if (isTrue === true) return 'Verified - This claim is TRUE';
         if (isTrue === false) return 'Debunked - This claim is FALSE';
         return 'Uncertain - Insufficient evidence';
@@ -63,7 +64,7 @@ export const TruthVerifier: React.FC = () => {
                         <FiShield className="text-primary" />
                         Truth Verifier
                     </h3>
-                    
+
                     <div>
                         <label className="block text-sm font-medium text-gray-400 mb-2">
                             Enter a claim to verify
@@ -82,7 +83,7 @@ export const TruthVerifier: React.FC = () => {
                                     }
                                 }}
                             />
-                            <Button 
+                            <Button
                                 onClick={handleVerify}
                                 disabled={isVerifying || !claim.trim()}
                                 className="min-w-[120px]"
@@ -102,8 +103,8 @@ export const TruthVerifier: React.FC = () => {
                                 key={d}
                                 onClick={() => setDepth(d)}
                                 className={`px-3 py-1.5 rounded-lg text-sm transition ${
-                                    depth === d 
-                                        ? 'bg-primary text-white' 
+                                    depth === d
+                                        ? 'bg-primary text-white'
                                         : 'bg-white/5 hover:bg-white/10'
                                 }`}
                             >
@@ -136,7 +137,7 @@ export const TruthVerifier: React.FC = () => {
                                 </div>
                                 <div className="flex-1">
                                     <h4 className="text-lg font-semibold">
-                                        {getVerdictText(currentVerification.isTrue)}
+                                        {getVerdictText(currentVerification.isTrue, (currentVerification as any).isIntent)}
                                     </h4>
                                     <p className="text-sm text-gray-400 mt-1">
                                         {currentVerification.claim}
@@ -153,7 +154,7 @@ export const TruthVerifier: React.FC = () => {
                                     </span>
                                 </div>
                                 <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                                    <div 
+                                    <div
                                         className={`h-full transition-all duration-1000 ${
                                             currentVerification.confidenceScore >= 0.80 ? 'bg-green-500' :
                                             currentVerification.confidenceScore >= 0.60 ? 'bg-yellow-500' :
@@ -216,14 +217,14 @@ export const TruthVerifier: React.FC = () => {
                                     </h5>
                                     <div className="space-y-2 max-h-40 overflow-y-auto">
                                         {currentVerification.sources.slice(0, 5).map((source, index) => (
-                                            <div 
+                                            <div
                                                 key={index}
                                                 className="flex items-center justify-between p-2 bg-white/5 rounded-lg text-sm"
                                             >
                                                 <div className="flex-1 truncate">
-                                                    <a 
-                                                        href={source.url} 
-                                                        target="_blank" 
+                                                    <a
+                                                        href={source.url}
+                                                        target="_blank"
                                                         rel="noopener noreferrer"
                                                         className="hover:text-primary transition"
                                                     >
@@ -231,7 +232,7 @@ export const TruthVerifier: React.FC = () => {
                                                     </a>
                                                 </div>
                                                 <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                                    source.verdict === 'supports' 
+                                                    source.verdict === 'supports'
                                                         ? 'bg-green-500/20 text-green-400'
                                                         : source.verdict === 'contradicts'
                                                         ? 'bg-red-500/20 text-red-400'
