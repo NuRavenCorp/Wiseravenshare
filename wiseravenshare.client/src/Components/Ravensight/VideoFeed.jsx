@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo, FaUsers } from 'react-icons/fa';
+import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo, FaUsers, FaTrash } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
-import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
+import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, removeLocalVideo, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 import CollaborativeScriptRoom from './CollaborativeScriptRoom';
+import { resolveMediaUrl } from '../../utils/mediaUtils';
+import { sharePost } from '../../utils/socialShare';
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -17,14 +19,10 @@ const normalizeMediaSource = (value, fallback = '') => {
     }
 
     if (trimmed.startsWith('data:image/') || trimmed.startsWith('data:video/')) {
-        return trimmed.length <= 2_000_000 ? trimmed : fallback;
-    }
-
-    if (/^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed) || trimmed.startsWith('/')) {
         return trimmed;
     }
 
-    return fallback;
+    return resolveMediaUrl(trimmed) || fallback;
 };
 
 const normalizeVideo = (video, index = 0) => {
@@ -177,6 +175,25 @@ const VideoFeed = ({ onNotification }) => {
         }
     };
 
+    const handleDeleteVideo = async (video) => {
+        const videoId = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
+        if (!videoId) return;
+
+        const confirmed = window.confirm('Delete this video from Ravensight Video Studio? This action cannot be undone.');
+        if (!confirmed) return;
+
+        try {
+            await ravensightAPI.deleteVideo(videoId);
+            removeLocalVideo(videoId);
+            setVideos((prev) => prev.filter((item) => String(item?.id || item?.videoUrl || item?.mediaUrl || '') !== videoId));
+            onNotification('Video deleted successfully from Ravensight Video Studio.', 'success');
+        } catch {
+            removeLocalVideo(videoId);
+            setVideos((prev) => prev.filter((item) => String(item?.id || item?.videoUrl || item?.mediaUrl || '') !== videoId));
+            onNotification('Video removed from your local feed.', 'success');
+        }
+    };
+
     const handleLike = async (videoId) => {
         try {
             await ravensightAPI.likeVideo(videoId);
@@ -237,44 +254,10 @@ const VideoFeed = ({ onNotification }) => {
             return;
         }
 
-        const message = `Watch: ${String(video?.title || 'Ravensight video').trim()}`;
-        const videoUrl = String(video?.videoUrl || video?.mediaUrl || '').trim();
-
         setSharingVideoIds((prev) => [...new Set([...prev, videoId])]);
         try {
-            const result = await socialService.publishContent({
-                message,
-                linkUrl: videoUrl || undefined,
-                videoUrl: videoUrl || undefined,
-                publishToFacebook: true,
-                publishToTikTok: true,
-                publishToYouTube: true
-            });
-
-            const successfulPlatforms = Array.isArray(result?.results)
-                ? result.results.filter((entry) => entry?.success).map((entry) => entry.platform)
-                : [];
-            const failedResults = Array.isArray(result?.results)
-                ? result.results.filter((entry) => !entry?.success)
-                : [];
-
-            if (successfulPlatforms.length > 0) {
-                onNotification(`Shared to ${successfulPlatforms.join(', ')}.`, 'success');
-            }
-
-            if (failedResults.length > 0) {
-                const firstFailure = failedResults[0];
-                onNotification(
-                    `${firstFailure?.platform || 'Social publish'} failed: ${firstFailure?.error || 'Unknown error'}`,
-                    'warning'
-                );
-            }
-
-            if (successfulPlatforms.length === 0 && failedResults.length === 0) {
-                onNotification('Share request sent, but no platform response was returned.', 'warning');
-            }
-        } catch (error) {
-            onNotification(error?.message || 'Unable to share this video right now.', 'error');
+            // Native share sheet / clipboard first; cross-post only when the user opts in via the sheet.
+            await sharePost({ item: video, currentUser: null, onNotification });
         } finally {
             setSharingVideoIds((prev) => prev.filter((id) => id !== videoId));
         }
@@ -430,10 +413,11 @@ const VideoFeed = ({ onNotification }) => {
                     <div style={{ position: 'relative' }} onClick={handlePlayPause}>
                         <video
                             ref={videoRef}
-                            src={video.videoUrl}
-                            poster={video.thumbnailUrl}
+                            src={resolveMediaUrl(video.videoUrl)}
+                            poster={resolveMediaUrl(video.thumbnailUrl)}
                             muted={isMuted}
                             loop
+                            playsInline
                             style={{
                                 width: '100%',
                                 height: 'auto',
@@ -592,6 +576,21 @@ const VideoFeed = ({ onNotification }) => {
                             title="Open collaborative script room"
                         >
                             <FaUsers /> Script Room
+                        </button>
+                        <button
+                            onClick={() => handleDeleteVideo(video)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#f44336',
+                                cursor: 'pointer'
+                            }}
+                            title="Delete this video from Ravensight"
+                        >
+                            <FaTrash /> Delete
                         </button>
                     </div>
                     </div>

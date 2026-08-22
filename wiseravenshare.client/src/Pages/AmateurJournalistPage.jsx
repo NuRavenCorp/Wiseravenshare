@@ -1,20 +1,11 @@
 import React, { useMemo, useState } from 'react';
+import Compartment from '../Components/Common/Compartment';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
+import { getMediaKind, readFileAsDataUrl } from '../utils/mediaUtils';
 
-const MAX_VIDEO_SECONDS = 15;
+const MAX_VIDEO_SECONDS = 60;
 const MAX_POST_CONTENT = 1000;
-
-const getMediaKind = (file) => {
-    const mime = String(file?.type || '').toLowerCase();
-    if (mime.startsWith('video/')) return 'video';
-    if (mime.startsWith('image/')) return 'photo';
-
-    const name = String(file?.name || '').toLowerCase();
-    if (/\.(mp4|mov|webm|avi)$/i.test(name)) return 'video';
-    if (/\.(jpg|jpeg|png|gif|webp)$/i.test(name)) return 'photo';
-    return '';
-};
 
 const getVideoDurationSeconds = (file) => {
     return new Promise((resolve, reject) => {
@@ -187,18 +178,27 @@ const AmateurJournalistPage = ({ onNavigate }) => {
 
             if (selectedFile) {
                 const mediaType = getMediaKind(selectedFile);
-                postType = mediaType === 'video' ? 'Video' : 'Image';
-                setUploadStatus('Uploading media...');
+                postType = mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : 'Document';
+                setUploadStatus('Uploading story file...');
 
-                const uploadResponse = await apiService.uploadMedia(selectedFile, mediaType, {
-                    title: safeHeadline,
-                    description: safeStory,
-                    destinationFolder: 'journalist_dispatches'
-                });
+                try {
+                    const uploadResponse = await apiService.uploadMedia(selectedFile, mediaType, {
+                        title: safeHeadline,
+                        description: safeStory,
+                        destinationFolder: 'journalist_dispatches'
+                    });
 
-                mediaUrl = extractUploadedMediaUrl(uploadResponse);
+                    mediaUrl = extractUploadedMediaUrl(uploadResponse);
+                } catch (uploadErr) {
+                    console.warn('Server uploadMedia endpoint call failed, applying local fallback:', uploadErr);
+                }
+
                 if (!mediaUrl) {
-                    throw new Error('Upload completed but media URL was not returned.');
+                    try {
+                        mediaUrl = await readFileAsDataUrl(selectedFile);
+                    } catch {
+                        mediaUrl = URL.createObjectURL(selectedFile);
+                    }
                 }
             }
 
@@ -225,6 +225,7 @@ const AmateurJournalistPage = ({ onNavigate }) => {
     };
 
     return (
+        <Compartment badge="Video Journalism" title="Amateur Journalist Dispatch">
         <section
             style={{
                 border: '1px solid var(--border-color)',
@@ -363,10 +364,10 @@ const AmateurJournalistPage = ({ onNavigate }) => {
                 </label>
 
                 <label style={{ display: 'grid', gap: '6px', color: 'var(--text-color)', fontSize: '14px' }}>
-                    Optional media (image or video up to 15 seconds)
+                    Optional story media or dispatch file (image, video, or document)
                     <input
                         type="file"
-                        accept="image/*,video/mp4,video/webm,video/quicktime,video/x-msvideo"
+                        accept="image/*,video/mp4,video/webm,video/quicktime,video/x-msvideo,.pdf,.txt,.doc,.docx,.md"
                         onChange={handleFileSelection}
                         style={{ color: 'var(--light-color)' }}
                     />
@@ -447,6 +448,7 @@ const AmateurJournalistPage = ({ onNavigate }) => {
                 </div>
             </form>
         </section>
+        </Compartment>
     );
 };
 

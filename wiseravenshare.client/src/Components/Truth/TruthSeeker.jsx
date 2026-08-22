@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import Compartment from '../Common/Compartment';
 import { FaShieldAlt, FaSearch, FaCheckCircle, FaExclamationTriangle, FaTimesCircle } from 'react-icons/fa';
 import { truthEngine } from '../../Services/truthEngine';
 
@@ -71,6 +72,7 @@ const TruthSeeker = () => {
     const rank = analysis.score >= 90 ? 'Truth Legend' : analysis.score >= 70 ? 'Truth Guardian' : 'Truth Seeker';
 
     return (
+        <Compartment badge="Truth Engine" title="Truth Seeker">
         <div style={{
             background: 'var(--card-bg)',
             border: '1px solid var(--border-color)',
@@ -224,6 +226,7 @@ const TruthSeeker = () => {
                 </div>
             </div>
         </div>
+        </Compartment>
     );
 };
 

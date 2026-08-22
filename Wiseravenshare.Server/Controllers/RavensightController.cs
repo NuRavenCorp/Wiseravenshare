@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -21,6 +22,7 @@ public class RavensightController : ControllerBase
 
     private readonly IWebHostEnvironment _environment;
     private readonly IYouTubeService _youTubeService;
+    private readonly ISocialPlatformService _socialPlatformService;
     private readonly VideoLibraryStore _videoStore;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightController> _logger;
@@ -31,10 +33,11 @@ public class RavensightController : ControllerBase
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService, IHttpClientFactory httpClientFactory, OutputCacheInvalidationService cacheInvalidation)
+    public RavensightController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoStore, AppDbContext dbContext, ILogger<RavensightController> logger, IBlobStorageService blobStorageService, IHttpClientFactory httpClientFactory, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
+        _socialPlatformService = socialPlatformService;
         _videoStore = videoStore;
         _dbContext = dbContext;
         _logger = logger;
@@ -118,25 +121,6 @@ public class RavensightController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
-        string? youtubeUrl = null;
-        string? tiktokUrl = null;
-        string? facebookUrl = null;
-
-        if (upload.PublishToYouTube)
-        {
-            youtubeUrl = await _youTubeService.UploadVideoAsync(file, upload.Title, upload.Description);
-        }
-
-        if (upload.PublishToTikTok)
-        {
-            tiktokUrl = await _youTubeService.UploadTikTokVideoAsync(file, upload.Title, upload.Description);
-        }
-
-        if (upload.PublishToFacebook)
-        {
-            facebookUrl = await _youTubeService.UploadFacebookVideoAsync(file, upload.Title, upload.Description);
-        }
-
         var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
         if (_blobStorageService.IsConfigured)
         {
@@ -146,6 +130,54 @@ public class RavensightController : ControllerBase
                 absoluteVideoUrl = publicUrl;
             }
         }
+
+        string? youtubeUrl = null;
+        string? tiktokUrl = null;
+        string? facebookUrl = null;
+        PublishSocialContentResponse? socialShare = null;
+
+        var wantsSocialCrossPost = upload.PublishToYouTube || upload.PublishToTikTok || upload.PublishToFacebook;
+        if (wantsSocialCrossPost)
+        {
+            // Route the upload through the real social share pipeline so Facebook/TikTok/YouTube
+            // receive the same payload as feed shares, instead of placeholder URLs.
+            var shareUserId = Guid.TryParse(userId, out var parsedShareUserId) ? parsedShareUserId : Guid.Empty;
+            socialShare = await _socialPlatformService.PublishMediaUploadAsync(
+                shareUserId,
+                string.IsNullOrWhiteSpace(upload.Title) ? "New video upload from Wiseravenshare" : upload.Title.Trim(),
+                absoluteVideoUrl,
+                SocialMediaType.Video,
+                upload.PublishToFacebook,
+                upload.PublishToTikTok,
+                upload.PublishToYouTube);
+
+            foreach (var result in socialShare.Results)
+            {
+                if (!result.Success)
+                {
+                    _logger.LogWarning(
+                        "Social cross-post failed for upload {FileName} on {Platform}: {Error}",
+                        uniqueFileName,
+                        result.Platform,
+                        result.Error);
+                    continue;
+                }
+
+                if (string.Equals(result.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+                {
+                    facebookUrl = result.ExternalPostUrl;
+                }
+                else if (string.Equals(result.Platform, "tiktok", StringComparison.OrdinalIgnoreCase))
+                {
+                    tiktokUrl = result.ExternalPostUrl;
+                }
+                else if (string.Equals(result.Platform, "youtube", StringComparison.OrdinalIgnoreCase))
+                {
+                    youtubeUrl = result.ExternalPostUrl;
+                }
+            }
+        }
+
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
         var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(upload.StorageMode, upload.IsPermanent, hasActiveSubscription);
 
@@ -194,6 +226,10 @@ public class RavensightController : ControllerBase
             fileName = uniqueFileName,
             filePath = absoluteVideoUrl,
             mediaUrl = absoluteVideoUrl,
+            youtubeUrl,
+            tiktokUrl,
+            facebookUrl,
+            socialShare = socialShare?.Results,
             persistenceStatus
         });
     }

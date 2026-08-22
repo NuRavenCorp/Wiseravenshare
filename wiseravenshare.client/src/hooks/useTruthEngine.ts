@@ -1,56 +1,26 @@
-﻿// src/hooks/useTruthEngine.ts
-import { useState, useCallback } from 'react';
+// src/hooks/useTruthEngine.ts
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { truthService } from '../Services/truthService';
-
-interface TruthVerificationResult {
-    id?: string;
-    claim: string;
-    normalizedClaim: string;
-    isTrue: boolean | null;
-    confidenceScore: number;
-    explanation: string;
-    sources: Source[];
-    breakdown: VerificationBreakdown;
-    timestamp: Date;
-    verificationDepth: string;
-}
-
-interface Source {
-    url: string;
-    title: string;
-    sourceType: string;
-    reliabilityScore: number;
-    verdict: string;
-    publishedDate?: Date;
-}
-
-interface VerificationBreakdown {
-    knowledgeBaseScore: number;
-    aiScore: number;
-    sourceScore: number;
-    temporalScore: number;
-    consensusScore: number;
-}
+import { truthService, UnifiedVerificationResult } from '../Services/truthService';
 
 export const useTruthEngine = () => {
     const queryClient = useQueryClient();
-    const [currentVerification, setCurrentVerification] = useState<TruthVerificationResult | null>(null);
+    const [currentVerification, setCurrentVerification] = useState<UnifiedVerificationResult | null>(null);
     const [isVerifying, setIsVerifying] = useState(false);
 
-    // Verify a single claim
+    // Verify a single claim using tandem client/backend algorithms
     const verifyClaim = useMutation({
-        mutationFn: async (claim: string) => {
+        mutationFn: async (claim: string | { claimText?: string; claim?: string }, depth = 'deep') => {
             setIsVerifying(true);
             try {
-                const result = await truthService.verifyClaim(claim);
+                const result = await truthService.verifyClaim(claim, depth);
                 setCurrentVerification(result);
                 return result;
             } finally {
                 setIsVerifying(false);
             }
         },
-        onSuccess: (data) => {
+        onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['truth-history'] });
         }
     });
@@ -85,11 +55,25 @@ export const useTruthEngine = () => {
 
     // Vote on claim
     const voteOnClaim = useMutation({
-        mutationFn: async ({ claimId, vote }: { claimId: string; vote: boolean }) => {
-            return await truthService.voteOnClaim(claimId, vote);
+        mutationFn: async ({ claimId, vote, confidence }: { claimId: string; vote: boolean; confidence?: number }) => {
+            return await truthService.voteOnClaim(claimId, vote, confidence);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['consensus'] });
+        }
+    });
+
+    // Detect contradictions
+    const detectContradictions = useMutation({
+        mutationFn: async (claim: string) => {
+            return await truthService.detectContradictions(claim);
+        }
+    });
+
+    // Analyze temporal evolution
+    const analyzeTemporal = useMutation({
+        mutationFn: async (claim: string) => {
+            return await truthService.analyzeTemporal(claim);
         }
     });
 
@@ -124,6 +108,8 @@ export const useTruthEngine = () => {
         findSources: findSources.mutateAsync,
         getConsensus: getConsensus.mutateAsync,
         voteOnClaim: voteOnClaim.mutateAsync,
+        detectContradictions: detectContradictions.mutateAsync,
+        analyzeTemporal: analyzeTemporal.mutateAsync,
         analyzeContent: analyzeContent.mutateAsync,
         useTruthStats,
         useVerificationHistory,

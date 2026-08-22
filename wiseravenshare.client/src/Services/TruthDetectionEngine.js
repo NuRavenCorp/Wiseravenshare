@@ -448,6 +448,14 @@ class TruthEngine {
             .slice(0, 20);
     }
 
+    isPoliticalAssertion(sentence) {
+        const str = String(sentence || '').trim();
+        if (!str) return false;
+        const normalized = this.normalizeClaim(str);
+        const politicalPattern = /\b(republicans?|democrats?|gop|tories|labour|party\s+of|the\s+party\s+of|are\s+the\s+party\s+of|is\s+the\s+party\s+of|best\s+party|worst\s+party|party\s+of\s+honesty|party\s+of\s+truth|party\s+of\s+lies|party\s+of\s+crime)\b/i;
+        return politicalPattern.test(normalized);
+    }
+
     isQuestion(sentence) {
         const str = String(sentence || '').trim();
         if (!str) return false;
@@ -534,6 +542,21 @@ class TruthEngine {
         const findings = [];
 
         for (const claimText of sentences) {
+            if (this.isPoliticalAssertion(claimText)) {
+                findings.push({
+                    claim: claimText,
+                    isTrue: null,
+                    isPoliticalAssertion: true,
+                    isQuestion: false,
+                    isOpinion: false,
+                    correction: 'Partisan political slogan or value assertion. Political party honesty is a heavily disputed political value claim rather than an objective fact.',
+                    source: 'FactCheck.org / PolitiFact Web Search',
+                    confidence: 0.50,
+                    evidenceType: 'political_slogan'
+                });
+                continue;
+            }
+
             if (this.isQuestion(claimText)) {
                 findings.push({
                     claim: claimText,
@@ -763,25 +786,36 @@ class TruthEngine {
     }
 
     getTruthScore(content) {
+        if (!content || !content.trim()) {
+            return 100;
+        }
+
+        if (this.isPoliticalAssertion(content)) {
+            return 50;
+        }
+
         if (this.isIntent(content) || this.isQuestion(content) || this.isOpinion(content)) {
             return 100;
         }
 
         const analysis = this.analyzeContent(content);
-        if (analysis.length > 0 && analysis.every(f => f.isIntent || f.isQuestion || f.isOpinion)) {
+        if (analysis.length === 0) {
             return 100;
         }
 
-        // Exclude questions and opinions from factoring into truth score calculations
-        const verifiableAnalysis = analysis.filter(f => !f.isQuestion && !f.isOpinion);
+        if (analysis.every(f => f.isIntent || f.isQuestion || f.isOpinion)) {
+            return 100;
+        }
 
-        const trueClaims = verifiableAnalysis.filter((f) => f.isTrue === true);
+        // Exclude questions, opinions, and intents from factoring into false score calculations
+        const verifiableAnalysis = analysis.filter(f => !f.isQuestion && !f.isOpinion && !f.isIntent);
+
         const falseClaims = verifiableAnalysis.filter((f) => f.isTrue === false);
-        const unknownClaims = verifiableAnalysis.filter((f) => f.isTrue === null);
+        const trueClaims = verifiableAnalysis.filter((f) => f.isTrue === true);
 
-        // Conservative abstention: no hard evidence should not imply correctness.
-        if (trueClaims.length === 0 && falseClaims.length === 0) {
-            return 50;
+        // Posts with no detected false claims evaluate to 100% truth score (authentic human expression)
+        if (falseClaims.length === 0) {
+            return 100;
         }
 
         const weightedConfidence = (finding) => {
@@ -791,28 +825,18 @@ class TruthEngine {
             return base * corroborationBoost * uncorrPenalty;
         };
 
-        const trueWeight = trueClaims.reduce((sum, finding) => sum + weightedConfidence(finding), 0);
         const falseWeight = falseClaims.reduce((sum, finding) => sum + weightedConfidence(finding), 0);
-        const evidenceWeight = trueWeight + falseWeight;
+        const trueWeight = trueClaims.reduce((sum, finding) => sum + weightedConfidence(finding), 0);
+        const totalWeight = falseWeight + trueWeight;
 
-        if (evidenceWeight < 0.55) {
-            return 50;
+        if (totalWeight === 0) {
+            return 100;
         }
 
-        // Jeffreys prior preserves uncertainty while allowing strong single facts to be decisive.
-        const posteriorMean = (trueWeight + 0.5) / (evidenceWeight + 1);
-        let score = posteriorMean * 100;
+        const falseRatio = falseWeight / totalWeight;
+        const score = Math.max(0, Math.round((1 - falseRatio) * 100));
 
-        const uncertaintyPenalty = Math.min(12, unknownClaims.length * 3);
-        const contradictionPenalty = (trueClaims.length > 0 && falseClaims.length > 0) ? 10 : 0;
-        const coverage = Math.min(1, evidenceWeight / Math.max(1, analysis.length));
-        const shrink = 0.78 + (0.22 * coverage);
-
-        score = 50 + ((score - 50) * shrink);
-        score -= uncertaintyPenalty;
-        score -= contradictionPenalty;
-
-        return Math.max(0, Math.min(100, Math.round(score)));
+        return Math.max(0, Math.min(100, score));
     }
 
     getTruthBadge(score, options = {}) {

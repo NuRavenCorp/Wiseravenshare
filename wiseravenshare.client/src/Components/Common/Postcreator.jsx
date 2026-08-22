@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
+import { truthService } from '../../Services/truthService';
 import { apiService } from '../../Services/api';
 import { appendStoredFeedPost, normalizeFeedPost } from '../../Services/postFeedPayload';
 import {
@@ -204,7 +205,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
 
         // Analyze content for truth
         const analysis = truthEngine.analyzeContent(content);
-        const truthScore = truthEngine.getTruthScore(content);
+        const truthScoreResult = await truthService.getTruthScore(content);
+        const truthScore = truthScoreResult?.score ?? 100;
         let correction = null;
 
         if (analysis.length > 0 && analysis[0].isTrue === false && analysis[0].confidence > 0.9) {
@@ -372,6 +374,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             const isQ = truthEngine.isQuestion(content);
             const isOp = truthEngine.isOpinion(content);
             const isInt = truthEngine.isIntent(content);
+            const falseClaims = analysis.filter((f) => f.isTrue === false);
 
             if (isQ) {
                 addTruthAlert('info', 'Post published! (Open Inquiry / Question)', null);
@@ -379,7 +382,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 addTruthAlert('info', 'Post published! (Personal Opinion)', null);
             } else if (isInt) {
                 addTruthAlert('success', 'Post published! 100% Personal Truth (Authentic Intention)', null);
-            } else if (truthScore < 70) {
+            } else if (falseClaims.length > 0 && truthScore < 70) {
                 addTruthAlert('warning', `Your post has a truth score of ${truthScore}%. Consider verifying your claims.`, null);
             } else {
                 addTruthAlert('success', `Post published! Truth score: ${truthScore}%`, null);

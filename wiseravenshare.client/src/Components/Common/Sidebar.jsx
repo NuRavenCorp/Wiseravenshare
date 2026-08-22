@@ -108,6 +108,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
         { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
+        { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
         { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
@@ -124,8 +125,8 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     }
 
     const profile = {
-        name: user?.name || 'Alex Raven',
-        avatar: user?.avatar || (user?.name ? user.name.charAt(0).toUpperCase() : 'AR'),
+        name: user?.name || user?.displayName || 'Alex Raven',
+        avatar: user?.avatar || user?.avatarUrl || (user?.name || user?.displayName ? (user.name || user.displayName).charAt(0).toUpperCase() : 'AR'),
         followers: counts.followers,
         following: counts.following
     };
@@ -156,6 +157,27 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             icon: 'fab fa-instagram',
             color: '#f9a8d4',
             connection: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram'), 'instagram')
+        },
+        {
+            id: 'youtube-feed',
+            label: 'YouTube Feed',
+            icon: 'fab fa-youtube',
+            color: '#f87171',
+            connection: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'), 'youtube')
+        },
+        {
+            id: 'twitter-feed',
+            label: 'Twitter / X Feed',
+            icon: 'fab fa-twitter',
+            color: '#38bdf8',
+            connection: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter'), 'twitter')
+        },
+        {
+            id: 'linkedin-feed',
+            label: 'LinkedIn Feed',
+            icon: 'fab fa-linkedin',
+            color: '#60a5fa',
+            connection: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'), 'linkedin')
         }
     ];
 

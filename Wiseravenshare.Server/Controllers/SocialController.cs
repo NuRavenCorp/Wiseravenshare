@@ -81,6 +81,19 @@ public class SocialController : ControllerBase
             });
         }
 
+        var resolvedMediaType = (request.MediaType ?? "auto").Trim().ToLowerInvariant();
+        var isVideoShare = resolvedMediaType == "video"
+            || (resolvedMediaType == "auto" && !string.IsNullOrWhiteSpace(request.VideoUrl));
+
+        // TikTok and YouTube only accept video payloads; keep the request valid when they are unchecked for photo/text shares.
+        if (isVideoShare && request.PublishToTikTok && string.IsNullOrWhiteSpace(request.VideoUrl))
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Message = "TikTok sharing requires a public videoUrl."
+            });
+        }
+
         var userId = User.GetUserId();
         var result = await _socialPlatformService.PublishAsync(userId, request);
         await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);

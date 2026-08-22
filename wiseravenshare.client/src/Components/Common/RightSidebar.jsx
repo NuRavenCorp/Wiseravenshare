@@ -15,6 +15,33 @@ const FALLBACK_QUOTES = {
     TSLA: { name: 'Tesla', price: 251.8, changePercent: -1.23, volume: 97212581, currency: 'USD', marketState: 'Fallback Snapshot' }
 };
 
+const FALLBACK_ANNOUNCEMENTS = [
+    { id: 'ann-1', userName: 'Sarah Johnson', preview: 'Peaceful protest downtown sharing live updates with verified truth score.', momentum: 95 },
+    { id: 'ann-2', userName: 'Michael Chen', preview: 'The future of AI is here! DeepSeek model release discussion trending now.', momentum: 88 },
+    { id: 'ann-3', userName: 'WiseRaven Newsroom', preview: 'New dispatch field reports published in Citizen Journalism portal.', momentum: 82 }
+];
+
+const FALLBACK_DISPATCHES = [
+    {
+        id: 'dispatch-fb-1',
+        userName: 'Elena Rostova',
+        userHandle: '@elena_reports',
+        audienceLabel: 'Breaking Dispatch',
+        headline: 'Community impact and verified eyewitness accounts from local harbor',
+        body: 'Field footage verified by WiseRaven truth engine.',
+        createdAt: new Date().toISOString()
+    },
+    {
+        id: 'dispatch-fb-2',
+        userName: 'David Miller',
+        userHandle: '@dmiller_news',
+        audienceLabel: 'Field Update',
+        headline: 'AI-driven news verification technology rolling out to creator teams',
+        body: 'Producers and scriptwriters working in tandem across locales.',
+        createdAt: new Date(Date.now() - 3600000).toISOString()
+    }
+];
+
 const seedUsers = [
     { id: 'seed-wiseravenshare', name: 'WiseravenShare Community', handle: '@wiseravenshare', avatar: 'WS' },
     { id: 'seed-techguru', name: 'TechGuru', handle: '@techguru', avatar: 'TG' },
@@ -444,17 +471,18 @@ const RightSidebar = ({ onNavigate }) => {
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
                 const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
                 setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
-                setTrendingPostAnnouncements(buildTrendingPostAnnouncements(mergedPosts, 4));
+                const announcements = buildTrendingPostAnnouncements(mergedPosts, 4);
+                setTrendingPostAnnouncements(announcements.length > 0 ? announcements : FALLBACK_ANNOUNCEMENTS);
                 const dispatches = mergedPosts
                     .filter(isDispatchReportPost)
                     .sort((left, right) => new Date(right?.createdAt || 0).getTime() - new Date(left?.createdAt || 0).getTime())
                     .slice(0, 6)
                     .map(toDispatchReportPreview);
-                setDispatchReports(dispatches);
+                setDispatchReports(dispatches.length > 0 ? dispatches : FALLBACK_DISPATCHES);
             } catch (error) {
                 setTrendingTopics(computeTrendingTopics([], 6));
-                setTrendingPostAnnouncements([]);
-                setDispatchReports([]);
+                setTrendingPostAnnouncements(FALLBACK_ANNOUNCEMENTS);
+                setDispatchReports(FALLBACK_DISPATCHES);
             }
         };
 

@@ -297,10 +297,10 @@ const VideoLibrary = ({ onNotification }) => {
                     </div>
                     {video.videoUrl || video.mediaUrl ? (
                         <video
-                            src={video.videoUrl || video.mediaUrl}
+                            src={resolveMediaUrl(video.videoUrl || video.mediaUrl)}
                             controls
                             preload="metadata"
-                            poster={video.thumbnailUrl || undefined}
+                            poster={resolveMediaUrl(video.thumbnailUrl) || undefined}
                             style={{
                                 width: '160px',
                                 height: '90px',

@@ -35,12 +35,14 @@ public sealed class UserResponse
 {
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string DisplayName => Name;
     public string Email { get; set; } = string.Empty;
     public string Handle { get; set; } = string.Empty;
     public string Bio { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
     public string Website { get; set; } = string.Empty;
     public string Avatar { get; set; } = string.Empty;
+    public string AvatarUrl => Avatar;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public SocialFeedSettings SocialFeeds { get; set; } = new();
@@ -53,6 +55,7 @@ public sealed class UpdateUserProfileRequest
     public string? Location { get; set; }
     public string? Website { get; set; }
     public string? Avatar { get; set; }
+    public string? AvatarUrl { get; set; }
     public SocialFeedSettings? SocialFeeds { get; set; }
 }
 

@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --primary-color: #131a2f;
     --secondary-color: #1e2a4a;
     --accent-color: #a33a5d;
@@ -127,9 +127,17 @@ img, svg, video {
     animation: eyeGlow 3.2s ease-in-out infinite;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1200px) and (min-width: 993px) {
     .grid-3 {
-        grid-template-columns: 280px 1fr;
+        grid-template-columns: 220px 1fr 280px;
+        gap: 14px;
+    }
+}
+
+@media (max-width: 992px) {
+    .grid-3 {
+        grid-template-columns: 220px 1fr;
+        gap: 14px;
     }
 
     .right-column {
@@ -282,4 +290,41 @@ img, svg, video {
         opacity: 0;
         transform: translateX(-4px);
     }
+}
+
+/* 3D Leap Off Page Animations and Styling */
+@keyframes leapOffPage3D {
+    0% {
+        opacity: 0;
+        transform: perspective(1200px) translateZ(-100px) rotateX(15deg) scale(0.85);
+        box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    }
+    50% {
+        transform: perspective(1200px) translateZ(30px) rotateX(-3deg) scale(1.02);
+    }
+    100% {
+        opacity: 1;
+        transform: perspective(1200px) translateZ(0) rotateX(0deg) scale(1);
+        box-shadow: 0 30px 80px -15px rgba(0, 0, 0, 0.85), 0 0 50px rgba(79, 116, 214, 0.4);
+    }
+}
+
+.leap-3d-active {
+    animation: leapOffPage3D 0.38s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
+}
+
+.compartment-3d-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99998;
+    background: rgba(4, 8, 20, 0.85);
+    backdrop-filter: blur(12px);
+    animation: fadeInBackdrop 0.3s ease-out;
+}
+
+@keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }

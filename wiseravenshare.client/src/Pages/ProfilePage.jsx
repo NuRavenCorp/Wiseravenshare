@@ -6,6 +6,7 @@ import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useNotification } from '../Contexts/NotificationContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
+import { compressAvatarImage, isImageAvatar as checkIsImageAvatar } from '../utils/avatarUtils';
 
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
@@ -45,15 +46,46 @@ const parseAdminEmails = () => {
     return new Set([...defaults, ...fromEnv]);
 };
 
-const isImageSource = (value) => {
-    if (!value || typeof value !== 'string') return false;
-    const trimmed = value.trim();
-    if (!trimmed) return false;
-    if (trimmed.startsWith('data:image/')) {
-        return trimmed.length <= 2_000_000 && /^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed);
-    }
-    if (trimmed.startsWith('/')) return true;
-    return /^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed);
+const isImageSource = (value) => checkIsImageAvatar(value);
+
+const resizeImageToAvatarDataUrl = (fileOrDataUrl, maxWidth = 400, maxHeight = 400, quality = 0.85) => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+                if (width > maxWidth) {
+                    height = Math.round((height * maxWidth) / width);
+                    width = maxWidth;
+                }
+            } else {
+                if (height > maxHeight) {
+                    width = Math.round((width * maxHeight) / height);
+                    height = maxHeight;
+                }
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => reject(new Error('Failed to load image for resizing.'));
+
+        if (typeof fileOrDataUrl === 'string') {
+            img.src = fileOrDataUrl;
+        } else {
+            const reader = new FileReader();
+            reader.onload = () => { img.src = reader.result; };
+            reader.onerror = () => reject(new Error('Failed to read image file.'));
+            reader.readAsDataURL(fileOrDataUrl);
+        }
+    });
 };
 
 const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
@@ -115,11 +147,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
             }
 
             setEditForm({
-                name: draft?.name ?? user.name ?? '',
+                name: draft?.name ?? user.name ?? user.displayName ?? '',
                 bio: draft?.bio ?? user.bio ?? '',
                 location: draft?.location ?? user.location ?? '',
                 website: draft?.website ?? user.website ?? '',
-                avatar: draft?.avatar ?? user.avatar ?? '',
+                avatar: draft?.avatar ?? user.avatar ?? user.avatarUrl ?? '',
                 socialFeeds: normalizeSocialFeeds(draft?.socialFeeds || normalizedFeeds)
             });
         }
@@ -307,7 +339,15 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
 
     const handleEditSubmit = async () => {
         try {
-            await updateProfile(editForm);
+            let nextForm = { ...editForm };
+            if (nextForm.avatar && typeof nextForm.avatar === 'string' && nextForm.avatar.startsWith('data:image/')) {
+                try {
+                    nextForm.avatar = await compressAvatarImage(nextForm.avatar, 180, 60000);
+                } catch {
+                    /* fallback if compression fails */
+                }
+            }
+            await updateProfile(nextForm);
             if (user?.id) {
                 localStorage.removeItem(getProfileDraftKey(user.id));
             }
@@ -339,8 +379,8 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         }
 
         try {
-            const dataUrl = await readFileAsDataUrl(file);
-            setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
+            const resizedDataUrl = await compressAvatarImage(file, 180, 60000);
+            setEditForm((prev) => ({ ...prev, avatar: resizedDataUrl }));
             setCameraError('');
         } catch (err) {
             setCameraError(err.message || 'Unable to load photo.');
@@ -366,7 +406,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         setCameraOpen(false);
     };
 
-    const capturePhoto = () => {
+    const capturePhoto = async () => {
         if (!videoRef.current || !canvasRef.current) {
             return;
         }
@@ -378,8 +418,13 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         const context = canvas.getContext('2d');
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-        setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
+        const rawDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        try {
+            const resizedDataUrl = await compressAvatarImage(rawDataUrl, 180, 60000);
+            setEditForm((prev) => ({ ...prev, avatar: resizedDataUrl }));
+        } catch {
+            setEditForm((prev) => ({ ...prev, avatar: rawDataUrl }));
+        }
         stopCamera();
     };
 

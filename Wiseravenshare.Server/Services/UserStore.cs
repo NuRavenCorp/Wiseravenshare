@@ -339,9 +339,10 @@ public sealed class UserStore
             user.Website = request.Website.Trim();
         }
 
-        if (request.Avatar is not null)
+        var avatarValue = request.Avatar ?? request.AvatarUrl;
+        if (avatarValue is not null)
         {
-            user.Avatar = request.Avatar.Trim();
+            user.Avatar = avatarValue.Trim();
         }
 
         if (request.SocialFeeds is not null)
@@ -422,8 +423,8 @@ public sealed class UserStore
             return string.Empty;
         }
 
-        // Prevent oversized inline payloads (base64 data URLs) from breaking auth responses.
-        const int maxInlineAvatarLength = 16 * 1024;
+        // Allow inline payloads (base64 data URLs) up to 2MB to support user avatars.
+        const int maxInlineAvatarLength = 2 * 1024 * 1024;
         if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && value.Length > maxInlineAvatarLength)
         {
             return string.Empty;
