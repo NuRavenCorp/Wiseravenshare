@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import Compartment from '../Common/Compartment';
 
 const aiFallbackNews = [
     {
@@ -393,6 +394,7 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
     }, [availableCategories, filtered, selectedCategory]);
 
     return (
+        <Compartment badge="AI News" title="AI News Intelligence">
         <div style={{
             background: 'var(--card-bg)',
             borderRadius: '12px',
@@ -534,6 +536,7 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
                 )}
             </div>
         </div>
+        </Compartment>
     );
 };
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import Compartment from '../Common/Compartment';
 import VideoRecorder from './VideoRecorder';
 import VideoFeed from './VideoFeed';
 import VideoUploader from './VideoUploader';
@@ -628,6 +629,7 @@ const RavensightVideo = () => {
     ];
 
     return (
+        <Compartment badge="Ravensight" title="Ravensight Video Studio">
         <div style={{
             background: 'var(--card-bg)',
             borderRadius: '16px',
@@ -1129,6 +1131,7 @@ const RavensightVideo = () => {
                 ))}
             </div>
         </div>
+        </Compartment>
     );
 };
 

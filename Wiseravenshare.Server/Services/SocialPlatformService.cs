@@ -11,6 +11,19 @@ public interface ISocialPlatformService
     Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit);
     Task<IReadOnlyList<SocialFeedItemDto>> GetTikTokFeedAsync(string? username, int limit);
     Task<PublishSocialContentResponse> PublishAsync(Guid userId, PublishSocialContentRequest request);
+
+    /// <summary>
+    /// Cross-posts an uploaded media item (video or photo) to the requested social platforms.
+    /// Used by the video/photo upload endpoints so uploads land in the same share pipeline as feed shares.
+    /// </summary>
+    Task<PublishSocialContentResponse> PublishMediaUploadAsync(
+        Guid userId,
+        string message,
+        string publicMediaUrl,
+        string mediaType,
+        bool publishToFacebook,
+        bool publishToTikTok,
+        bool publishToYouTube);
 }
 
 public class SocialPlatformService : ISocialPlatformService
@@ -143,13 +156,29 @@ public class SocialPlatformService : ISocialPlatformService
     {
         var response = new PublishSocialContentResponse();
         var message = request.Message.Trim();
+        var mediaType = ResolveMediaType(request);
 
         if (request.PublishToFacebook)
         {
-            response.Results.Add(await PublishToFacebookAsync(message, request.LinkUrl));
+            response.Results.Add(mediaType switch
+            {
+                SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl),
+                SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl),
+                _ => await PublishToFacebookAsync(message, request.LinkUrl, null)
+            });
         }
 
-        if (request.PublishToTikTok)
+        if (request.PublishToTikTok && mediaType == SocialMediaType.Photo)
+        {
+            // TikTok only accepts video; surface a clear result instead of silently dropping the photo.
+            response.Results.Add(new SocialPublishResultDto
+            {
+                Platform = "tiktok",
+                Success = false,
+                Error = "TikTok does not support photo posts. Share photos to Facebook or YouTube instead."
+            });
+        }
+        else if (request.PublishToTikTok)
         {
             response.Results.Add(await PublishToTikTokAsync(message, request.VideoUrl));
         }
@@ -160,16 +189,64 @@ public class SocialPlatformService : ISocialPlatformService
         }
 
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}, MediaType={MediaType}",
             userId,
             request.PublishToFacebook,
             request.PublishToTikTok,
-            request.PublishToYouTube);
+            request.PublishToYouTube,
+            mediaType);
 
         return response;
     }
 
-    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl)
+    public async Task<PublishSocialContentResponse> PublishMediaUploadAsync(
+        Guid userId,
+        string message,
+        string publicMediaUrl,
+        string mediaType,
+        bool publishToFacebook,
+        bool publishToTikTok,
+        bool publishToYouTube)
+    {
+        var request = new PublishSocialContentRequest
+        {
+            Message = string.IsNullOrWhiteSpace(message) ? "New upload from Wiseravenshare" : message.Trim(),
+            VideoUrl = mediaType == SocialMediaType.Video ? publicMediaUrl : null,
+            PhotoUrl = mediaType == SocialMediaType.Photo ? publicMediaUrl : null,
+            LinkUrl = publicMediaUrl,
+            MediaType = mediaType,
+            PublishToFacebook = publishToFacebook,
+            PublishToTikTok = publishToTikTok,
+            PublishToYouTube = publishToYouTube
+        };
+
+        return await PublishAsync(userId, request);
+    }
+
+    private static string ResolveMediaType(PublishSocialContentRequest request)
+    {
+        var raw = (request.MediaType ?? SocialMediaType.Auto).Trim().ToLowerInvariant();
+
+        if (raw is SocialMediaType.Text or SocialMediaType.Photo or SocialMediaType.Video)
+        {
+            return raw;
+        }
+
+        // Auto-detect from whichever media URL was supplied.
+        if (!string.IsNullOrWhiteSpace(request.VideoUrl))
+        {
+            return SocialMediaType.Video;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PhotoUrl))
+        {
+            return SocialMediaType.Photo;
+        }
+
+        return SocialMediaType.Text;
+    }
+
+    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl, string? videoUrl = null)
     {
         var pageId = _configuration["Social:Facebook:PageId"];
         var pageToken = _configuration["Social:Facebook:PageAccessToken"];
@@ -184,41 +261,194 @@ public class SocialPlatformService : ISocialPlatformService
             };
         }
 
+        // Real video posts must go through the /videos edge; the /feed edge only accepts text, links and photos.
+        if (!string.IsNullOrWhiteSpace(videoUrl))
+        {
+            return await PublishVideoToFacebookAsync(pageId, pageToken, message, videoUrl);
+        }
+
+        return await PublishToFacebookFeedAsync(pageId, pageToken, message, linkUrl);
+    }
+
+    private async Task<SocialPublishResultDto> PublishVideoToFacebookAsync(string pageId, string pageToken, string message, string videoUrl)
+    {
+        // Reel-style video post via the Graph API /videos edge (PULL_FROM_URL keeps the upload server-side).
         var form = new Dictionary<string, string>
         {
-            ["message"] = message,
+            ["description"] = message,
+            ["file_url"] = videoUrl,
             ["access_token"] = pageToken
         };
 
-        if (!string.IsNullOrWhiteSpace(linkUrl))
+        try
         {
-            form["link"] = linkUrl;
+            using var content = new FormUrlEncodedContent(form);
+            using var httpResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{pageId}/videos", content);
+
+            var body = await httpResponse.Content.ReadAsStringAsync();
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Facebook /videos publish failed ({Status}): {Body}. Falling back to a feed link post.",
+                    (int)httpResponse.StatusCode,
+                    TrimError(body));
+
+                // The /videos edge requires extra app review (video_upload) and a publicly reachable file_url.
+                // When it is unavailable, still land the share on the Page as a link post instead of dropping it.
+                return await PublishToFacebookFeedAsync(pageId, pageToken, message, videoUrl);
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var postId = document.RootElement.TryGetProperty("id", out var id) ? id.GetString() : null;
+
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = true,
+                ExternalPostId = postId,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.facebook.com/{postId}"
+            };
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Facebook video publish threw for video URL {VideoUrl}", videoUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = $"Facebook video publish failed: {ex.Message}"
+            };
+        }
+    }
 
-        using var content = new FormUrlEncodedContent(form);
-        using var httpResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{pageId}/feed", content);
+    private async Task<SocialPublishResultDto> PublishToFacebookFeedAsync(string pageId, string pageToken, string message, string? linkUrl)
+    {
+        try
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["message"] = message,
+                ["access_token"] = pageToken
+            };
 
-        var body = await httpResponse.Content.ReadAsStringAsync();
-        if (!httpResponse.IsSuccessStatusCode)
+            if (!string.IsNullOrWhiteSpace(linkUrl))
+            {
+                form["link"] = linkUrl;
+            }
+
+            using var content = new FormUrlEncodedContent(form);
+            using var httpResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{pageId}/feed", content);
+
+            var body = await httpResponse.Content.ReadAsStringAsync();
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "facebook",
+                    Success = false,
+                    Error = $"Facebook publish failed ({(int)httpResponse.StatusCode}): {TrimError(body)}"
+                };
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var postId = document.RootElement.TryGetProperty("id", out var id) ? id.GetString() : null;
+
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = true,
+                ExternalPostId = postId,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.facebook.com/{postId}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Facebook feed fallback publish threw for URL {LinkUrl}", linkUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = $"Facebook publish failed: {ex.Message}"
+            };
+        }
+    }
+
+    private async Task<SocialPublishResultDto> PublishPhotoToFacebookAsync(string message, string? linkUrl, string? photoUrl)
+    {
+        var pageId = _configuration["Social:Facebook:PageId"];
+        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
+
+        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(pageToken))
         {
             return new SocialPublishResultDto
             {
                 Platform = "facebook",
                 Success = false,
-                Error = $"Facebook publish failed ({(int)httpResponse.StatusCode}): {TrimError(body)}"
+                Error = "Facebook is not configured. Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
             };
         }
 
-        using var document = JsonDocument.Parse(body);
-        var postId = document.RootElement.TryGetProperty("id", out var id) ? id.GetString() : null;
+        return await PublishPhotoToFacebookConfiguredAsync(pageId, pageToken, message, linkUrl, photoUrl);
+    }
 
-        return new SocialPublishResultDto
+    private async Task<SocialPublishResultDto> PublishPhotoToFacebookConfiguredAsync(string pageId, string pageToken, string message, string? linkUrl, string? photoUrl)
+    {
+        if (string.IsNullOrWhiteSpace(photoUrl))
         {
-            Platform = "facebook",
-            Success = true,
-            ExternalPostId = postId,
-            ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.facebook.com/{postId}"
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = "Facebook photo publish requires a public photoUrl."
+            };
+        }
+
+        var form = new Dictionary<string, string>
+        {
+            ["caption"] = message,
+            ["url"] = photoUrl,
+            ["access_token"] = pageToken
         };
+
+        try
+        {
+            using var content = new FormUrlEncodedContent(form);
+            using var httpResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{pageId}/photos", content);
+
+            var body = await httpResponse.Content.ReadAsStringAsync();
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "facebook",
+                    Success = false,
+                    Error = $"Facebook photo publish failed ({(int)httpResponse.StatusCode}): {TrimError(body)}"
+                };
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var postId = document.RootElement.TryGetProperty("post_id", out var pid)
+                ? pid.GetString()
+                : (document.RootElement.TryGetProperty("id", out var altId) ? altId.GetString() : null);
+
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = true,
+                ExternalPostId = postId,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.facebook.com/{postId}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Facebook photo publish threw for photo URL {PhotoUrl}", photoUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = $"Facebook photo publish failed: {ex.Message}"
+            };
+        }
     }
 
     private async Task<SocialPublishResultDto> PublishToTikTokAsync(string message, string? videoUrl)
@@ -369,7 +599,31 @@ public class SocialPlatformService : ISocialPlatformService
     {
         if (string.IsNullOrWhiteSpace(body))
         {
-            return "Unknown error";
+            return "Unknown error (non-200 HTTP status returned by upstream platform API).";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var errNode))
+            {
+                if (errNode.ValueKind == JsonValueKind.Object && errNode.TryGetProperty("message", out var msgNode))
+                {
+                    return msgNode.GetString() ?? body;
+                }
+                if (errNode.ValueKind == JsonValueKind.String)
+                {
+                    return errNode.GetString() ?? body;
+                }
+            }
+            if (doc.RootElement.TryGetProperty("error_description", out var descNode))
+            {
+                return descNode.GetString() ?? body;
+            }
+        }
+        catch
+        {
+            // Fallback for non-JSON error bodies
         }
 
         return body.Length <= 400 ? body : body[..400];

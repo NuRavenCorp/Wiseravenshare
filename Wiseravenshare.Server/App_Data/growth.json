@@ -455,11 +455,522 @@
       "EventName": "login_success",
       "CreatedAtUtc": "2026-08-19T09:26:14.5484745Z",
       "Metadata": {}
+    },
+    {
+      "Id": "11ad3dd8e7234800802245eb62ef8355",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T14:15:56.901Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "832cc2e1e1e9437c9efaedaa5b3723be",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "profile_updated",
+      "CreatedAtUtc": "2026-08-19T14:16:31.3918471Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "e0e23c115e564f37a177e7ee55f6e8ae",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T14:16:37.3261475Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "41a03ff30d414063b5a5b676f54838dc",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-08-19T14:23:27.3082029Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "f28c40fabbef4e8996efc5c2c1261312",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-19T14:24:01.8429829Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "2a615c24e5dc45dfbcf63533a39b895c",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-19T14:28:42.9142726Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "f05a15e994c34bc7818f35b388f70b70",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-19T14:28:56.9679083Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "6d64bee1d0084e939d8b32b62d2907d5",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-19T14:29:35.4590967Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "008b83626bbc4f328ff01e9338a74961",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "first_post_created",
+      "CreatedAtUtc": "2026-08-19T14:30:30.1127206Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],
   "Reports": [],
-  "RevenueAgents": [],
+  "RevenueAgents": [
+    {
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "Name": "Revenue Agent",
+      "Objective": "Generate $10,000 per week within 8 weeks using verifiable increments.",
+      "TargetWeeklyRevenue": 10000,
+      "DeadlineWeeks": 8,
+      "CreatedAtUtc": "2026-08-19T14:33:35.2069246Z",
+      "CycleStartAtUtc": "2026-08-19T00:00:00Z",
+      "IsActive": true,
+      "Milestones": [
+        {
+          "WeekNumber": 1,
+          "TargetRevenue": 1000,
+          "MinLeads": 20,
+          "MinOffers": 5,
+          "MinConversions": 1,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 2,
+          "TargetRevenue": 2000,
+          "MinLeads": 30,
+          "MinOffers": 8,
+          "MinConversions": 2,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 3,
+          "TargetRevenue": 3000,
+          "MinLeads": 40,
+          "MinOffers": 10,
+          "MinConversions": 3,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 4,
+          "TargetRevenue": 4500,
+          "MinLeads": 55,
+          "MinOffers": 14,
+          "MinConversions": 4,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 5,
+          "TargetRevenue": 6000,
+          "MinLeads": 70,
+          "MinOffers": 18,
+          "MinConversions": 5,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 6,
+          "TargetRevenue": 7500,
+          "MinLeads": 85,
+          "MinOffers": 22,
+          "MinConversions": 6,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 7,
+          "TargetRevenue": 9000,
+          "MinLeads": 100,
+          "MinOffers": 26,
+          "MinConversions": 7,
+          "RequiresVerification": true
+        },
+        {
+          "WeekNumber": 8,
+          "TargetRevenue": 10000,
+          "MinLeads": 120,
+          "MinOffers": 30,
+          "MinConversions": 8,
+          "RequiresVerification": true
+        }
+      ],
+      "Functions": [
+        {
+          "Code": "offer_design",
+          "Name": "Offer Design",
+          "Description": "Create and price productized offers.",
+          "VerificationMetric": "Offers published per week"
+        },
+        {
+          "Code": "lead_generation",
+          "Name": "Lead Generation",
+          "Description": "Generate qualified leads from outbound, inbound, and referrals.",
+          "VerificationMetric": "Qualified leads logged"
+        },
+        {
+          "Code": "sales_execution",
+          "Name": "Sales Execution",
+          "Description": "Run discovery, demos, and closing workflow.",
+          "VerificationMetric": "Deals closed and conversion rate"
+        },
+        {
+          "Code": "delivery_system",
+          "Name": "Delivery System",
+          "Description": "Deliver value fast with repeatable fulfillment.",
+          "VerificationMetric": "Delivery cycle time and CSAT"
+        },
+        {
+          "Code": "retention_expansion",
+          "Name": "Retention and Expansion",
+          "Description": "Upsell, renew, and expand account value.",
+          "VerificationMetric": "Expansion revenue and renewals"
+        },
+        {
+          "Code": "financial_verification",
+          "Name": "Financial Verification",
+          "Description": "Record and verify revenue with source evidence.",
+          "VerificationMetric": "Verified revenue entries"
+        }
+      ],
+      "ActionItems": [
+        {
+          "Id": "e08fb5789c7e4791988259c4373e4574",
+          "WeekNumber": 1,
+          "FunctionCode": "offer_design",
+          "Title": "Week 1: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-08-20T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "da89bdbdc3a04062986a2d0836784fee",
+          "WeekNumber": 1,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 1: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-08-22T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "aeb61199e51d4af79ae173055b8a7f21",
+          "WeekNumber": 1,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 1: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-08-24T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "ecead3c70a3b417aa059ddd0decb3112",
+          "WeekNumber": 1,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 1: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-08-25T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "d57f601078bb43e78a5237ef5e5211bf",
+          "WeekNumber": 2,
+          "FunctionCode": "offer_design",
+          "Title": "Week 2: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-08-27T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "73dd6af187ad40c691098f60c14cf97c",
+          "WeekNumber": 2,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 2: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-08-29T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "90b525f2fcfd4ad88ed1631585067c22",
+          "WeekNumber": 2,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 2: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-08-31T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "356160dabefb442da93acacebab687c2",
+          "WeekNumber": 2,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 2: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-09-01T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "3d0c95a368a946f2bf5f667d9a152d53",
+          "WeekNumber": 3,
+          "FunctionCode": "offer_design",
+          "Title": "Week 3: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-09-03T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "87292850f5cd4886a28c106f0ef28899",
+          "WeekNumber": 3,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 3: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-09-05T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "a66f4dc4a63e4c6c8adb4cba38052fe3",
+          "WeekNumber": 3,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 3: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-09-07T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "e4ded7d3b9184319b15c5d6a6daeba3f",
+          "WeekNumber": 3,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 3: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-09-08T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "b5927612787d430caa5d6566e63cf808",
+          "WeekNumber": 4,
+          "FunctionCode": "offer_design",
+          "Title": "Week 4: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-09-10T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "70bb08cf5c0f474cb7a0be619c032c0e",
+          "WeekNumber": 4,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 4: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-09-12T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "befdd250c5824c33ac8c3beff9648310",
+          "WeekNumber": 4,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 4: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-09-14T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "adbe9b735c4c46c8bb340251e5e068a5",
+          "WeekNumber": 4,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 4: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-09-15T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "bcf57d8144084362990f16c7be429afd",
+          "WeekNumber": 5,
+          "FunctionCode": "offer_design",
+          "Title": "Week 5: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-09-17T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "c60222744e0d499580adfd173dc08338",
+          "WeekNumber": 5,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 5: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-09-19T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "ac32045b84fc483e8230bae8152178df",
+          "WeekNumber": 5,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 5: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-09-21T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "a44cc49284324399b5c09e6b8593fdaf",
+          "WeekNumber": 5,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 5: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-09-22T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "496d7461e3524939bee30b8f872c73f6",
+          "WeekNumber": 6,
+          "FunctionCode": "offer_design",
+          "Title": "Week 6: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-09-24T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "653224858ffc4da0b2a33f2485e0e358",
+          "WeekNumber": 6,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 6: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-09-26T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "3bf67b375bfc4668843153ef50bfd309",
+          "WeekNumber": 6,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 6: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-09-28T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "fa10950955304f3e968fb840a1fecb80",
+          "WeekNumber": 6,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 6: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-09-29T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "e5a64f235e2f4d19830204026c738bc8",
+          "WeekNumber": 7,
+          "FunctionCode": "offer_design",
+          "Title": "Week 7: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-10-01T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "72ccebf1bdcd4f868157dc3cc5298365",
+          "WeekNumber": 7,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 7: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-10-03T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "19d2c290d2884452b49d99e21eba4e29",
+          "WeekNumber": 7,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 7: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-10-05T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "889fb74d1f3f45bb8c00d5d43eb17728",
+          "WeekNumber": 7,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 7: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-10-06T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "e518cb13f0874261a9ca402eda9a14d0",
+          "WeekNumber": 8,
+          "FunctionCode": "offer_design",
+          "Title": "Week 8: Publish offer update",
+          "Description": "Publish one priced offer revision with positioning and guarantee.",
+          "DueAtUtc": "2026-10-08T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "508ac8dfed024012ba36c46b345d0ac1",
+          "WeekNumber": 8,
+          "FunctionCode": "lead_generation",
+          "Title": "Week 8: Execute lead sprint",
+          "Description": "Run daily lead generation sprint and log qualified prospects.",
+          "DueAtUtc": "2026-10-10T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "f24d5c0cbfa24de689555e311dce5730",
+          "WeekNumber": 8,
+          "FunctionCode": "sales_execution",
+          "Title": "Week 8: Run closing pipeline",
+          "Description": "Move prospects through discovery, proposal, and close stages.",
+          "DueAtUtc": "2026-10-12T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        },
+        {
+          "Id": "6c916b34918949b5b59de957b8838362",
+          "WeekNumber": 8,
+          "FunctionCode": "financial_verification",
+          "Title": "Week 8: Submit revenue proof",
+          "Description": "Submit source references for all revenue captured this week.",
+          "DueAtUtc": "2026-10-13T00:00:00Z",
+          "Status": "open",
+          "CompletedAtUtc": null
+        }
+      ],
+      "Evidence": []
+    }
+  ],
   "PolicyHistory": [
     {
       "Id": "a2729becc378448ab3494afc5b6cfeab",

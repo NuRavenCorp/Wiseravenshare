@@ -22,6 +22,19 @@ public class PublishSocialContentRequest
     [MaxLength(500)]
     public string? VideoUrl { get; set; }
 
+    /// <summary>
+    /// Optional publicly reachable photo/image URL to attach when the share is a photo post.
+    /// </summary>
+    [MaxLength(500)]
+    public string? PhotoUrl { get; set; }
+
+    /// <summary>
+    /// Optional hint describing the shared media. Defaults to "auto" which infers the type from the URLs.
+    /// Supported values: auto, text, photo, video.
+    /// </summary>
+    [MaxLength(20)]
+    public string MediaType { get; set; } = "auto";
+
     public bool PublishToFacebook { get; set; } = true;
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; } = false;
@@ -34,6 +47,19 @@ public class SocialPublishResultDto
     public string? ExternalPostId { get; set; }
     public string? ExternalPostUrl { get; set; }
     public string? Error { get; set; }
+}
+
+public static class SocialMediaType
+{
+    public const string Auto = "auto";
+    public const string Text = "text";
+    public const string Photo = "photo";
+    public const string Video = "video";
+
+    public static bool IsVideo(string? mediaType) =>
+        string.Equals(mediaType, Video, StringComparison.OrdinalIgnoreCase)
+        || (string.Equals(mediaType, Auto, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(mediaType));
 }
 
 public class PublishSocialContentResponse

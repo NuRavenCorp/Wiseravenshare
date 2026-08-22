@@ -21,10 +21,14 @@ export type SocialFeedItem = {
   createdAt?: string;
 };
 
+export type SocialMediaType = 'auto' | 'text' | 'photo' | 'video';
+
 export type PublishSocialContentRequest = {
   message: string;
   linkUrl?: string;
   videoUrl?: string;
+  photoUrl?: string;
+  mediaType?: SocialMediaType;
   publishToFacebook: boolean;
   publishToTikTok: boolean;
   publishToYouTube?: boolean;
@@ -102,3 +106,37 @@ export const socialService = {
   getCombinedFeed,
   publishContent,
 };
+
+/**
+ * Builds a share payload for a media item, inferring the media type from the URL
+ * so photo and video shares hit the right platform endpoints server-side.
+ */
+export function buildMediaSharePayload(options: {
+  message: string;
+  mediaUrl?: string;
+  linkUrl?: string;
+  publishToFacebook?: boolean;
+  publishToTikTok?: boolean;
+  publishToYouTube?: boolean;
+}): PublishSocialContentRequest {
+  const mediaUrl = String(options.mediaUrl || '').trim();
+  const isVideo = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl)
+    || mediaUrl.includes('videostreaming')
+    || /^data:video\//i.test(mediaUrl);
+  const isPhoto = !isVideo && (
+    /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaUrl)
+    || /^data:image\//i.test(mediaUrl)
+  );
+
+  return {
+    message: options.message,
+    linkUrl: options.linkUrl?.trim() || undefined,
+    videoUrl: isVideo ? mediaUrl : undefined,
+    photoUrl: isPhoto ? mediaUrl : undefined,
+    mediaType: isVideo ? 'video' : isPhoto ? 'photo' : 'text',
+    publishToFacebook: Boolean(options.publishToFacebook),
+    // TikTok/YouTube only accept video; the backend rejects photo posts there.
+    publishToTikTok: Boolean(options.publishToTikTok) && isVideo,
+    publishToYouTube: Boolean(options.publishToYouTube) && isVideo,
+  };
+}

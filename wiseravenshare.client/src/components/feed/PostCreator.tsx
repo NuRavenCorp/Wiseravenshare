@@ -1,4 +1,4 @@
-﻿// src/components/feed/PostCreator.tsx
+// src/components/feed/PostCreator.tsx
 import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -111,8 +111,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
         >
             <div className="flex gap-3">
                 <Avatar
-                    src={user?.avatarUrl}
-                    alt={user?.displayName || 'User'}
+                    src={user?.avatarUrl || user?.avatar}
+                    alt={user?.displayName || user?.name || 'User'}
                     size="md"
                 />
                 <div className="flex-1 space-y-3">
