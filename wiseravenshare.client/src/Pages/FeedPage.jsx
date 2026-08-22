@@ -13,7 +13,7 @@ import ShortFormFeed from '../Components/Feed/ShortFormFeed';
 import { apiService } from '../Services/api';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
 
-const FeedPage = ({ addTruthAlert, onNavigate }) => {
+const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
@@ -404,7 +404,7 @@ const FeedPage = ({ addTruthAlert, onNavigate }) => {
                 <OnboardingCard onNavigate={onNavigate} />
                 <ShortFormFeed posts={rankedFeedPosts} />
                 <VideoFeedMini posts={rankedFeedPosts} />
-                <SocialFeedsTimeline user={currentUser} />
+                <SocialFeedsTimeline user={currentUser} initialPlatform={initialPlatform} />
             </div>
         </div>
     );

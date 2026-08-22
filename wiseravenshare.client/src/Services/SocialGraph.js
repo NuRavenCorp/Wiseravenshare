@@ -15,7 +15,11 @@ const readJson = (key, fallback) => {
 };
 
 const writeJson = (key, value) => {
-    localStorage.setItem(key, JSON.stringify(value));
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+        console.warn(`SocialGraph writeJson failed for ${key}:`, err);
+    }
 };
 
 const loadGraph = () => readJson(GRAPH_KEY, defaultGraph);
@@ -34,12 +38,18 @@ const toTimestamp = (value) => {
     return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
-const profileFromUser = (user) => ({
-    id: user.id,
-    name: user.name || 'User',
-    handle: user.handle || user.username || 'user',
-    avatar: user.avatar || (user.name?.[0] || 'U').toUpperCase()
-});
+const profileFromUser = (user) => {
+    let avatarVal = user.avatar || user.avatarUrl || ((user.name || user.displayName)?.[0] || 'U').toUpperCase();
+    if (typeof avatarVal === 'string' && avatarVal.length > 80000 && avatarVal.startsWith('data:image/')) {
+        avatarVal = avatarVal.slice(0, 60000);
+    }
+    return {
+        id: user.id,
+        name: user.name || user.displayName || 'User',
+        handle: user.handle || user.username || 'user',
+        avatar: avatarVal
+    };
+};
 
 const applyProfileToPost = (post, profile) => {
     if (!post || post.userId !== profile.id) {

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Compartment from '../Components/Common/Compartment';
 import VideoRecorder from '../Components/Ravensight/VideoRecorder';
 import { queueRavensightTab, savePodcastHandoffDraft } from '../Services/podcastStudioBridge';
 
@@ -66,6 +67,7 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
     };
 
     return (
+        <Compartment badge="Newsroom Video" title="Newsroom Capture Deck">
         <div style={{ display: 'grid', gap: '16px' }}>
             <section
                 style={{
@@ -195,6 +197,7 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
                 subscriptionPriceMonthly={19}
             />
         </div>
+        </Compartment>
     );
 };
 

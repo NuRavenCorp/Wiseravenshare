@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using Npgsql;
+using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -14,16 +15,18 @@ public class MediaController : ControllerBase
 {
     private readonly IWebHostEnvironment _environment;
     private readonly IYouTubeService _youTubeService;
+    private readonly ISocialPlatformService _socialPlatformService;
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly ILogger<MediaController> _logger;
     private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation)
+    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
+        _socialPlatformService = socialPlatformService;
         _videoLibraryStore = videoLibraryStore;
         _logger = logger;
         _cacheInvalidation = cacheInvalidation;
@@ -101,20 +104,58 @@ public class MediaController : ControllerBase
         string? youtubeUrl = null;
         string? tiktokUrl = null;
         string? facebookUrl = null;
+        PublishSocialContentResponse? socialShare = null;
 
-        if (upload.PublishToYouTube && isVideo)
-        {
-            youtubeUrl = await _youTubeService.UploadVideoAsync(upload.File, upload.Title, upload.Description);
-        }
+        var isPhoto = extension is ".jpg" or ".png";
+        var mediaType = isPhoto ? SocialMediaType.Photo : SocialMediaType.Video;
+        var wantsSocialCrossPost = upload.PublishToYouTube || upload.PublishToTikTok || upload.PublishToFacebook;
 
-        if (upload.PublishToTikTok && isVideo)
+        if (wantsSocialCrossPost)
         {
-            tiktokUrl = await _youTubeService.UploadTikTokVideoAsync(upload.File, upload.Title, upload.Description);
-        }
+            var mediaUrlForShare = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+            var shareUserId = Guid.TryParse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? User.FindFirstValue("id"),
+                out var parsedShareUserId)
+                ? parsedShareUserId
+                : Guid.Empty;
 
-        if (upload.PublishToFacebook && isVideo)
-        {
-            facebookUrl = await _youTubeService.UploadFacebookVideoAsync(upload.File, upload.Title, upload.Description);
+            // Route uploads through the real social share pipeline (photos go to Facebook, videos to FB/TikTok/YouTube).
+            socialShare = await _socialPlatformService.PublishMediaUploadAsync(
+                shareUserId,
+                string.IsNullOrWhiteSpace(upload.Title) ? "New upload from Wiseravenshare" : upload.Title.Trim(),
+                mediaUrlForShare,
+                mediaType,
+                upload.PublishToFacebook,
+                upload.PublishToTikTok && !isPhoto,
+                upload.PublishToYouTube && !isPhoto);
+
+            foreach (var result in socialShare.Results)
+            {
+                if (!result.Success)
+                {
+                    _logger.LogWarning(
+                        "Social cross-post failed for upload {FileName} on {Platform}: {Error}",
+                        uniqueFileName,
+                        result.Platform,
+                        result.Error);
+                    continue;
+                }
+
+                if (string.Equals(result.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+                {
+                    facebookUrl = result.ExternalPostUrl;
+                }
+                else if (string.Equals(result.Platform, "tiktok", StringComparison.OrdinalIgnoreCase))
+                {
+                    tiktokUrl = result.ExternalPostUrl;
+                }
+                else if (string.Equals(result.Platform, "youtube", StringComparison.OrdinalIgnoreCase))
+                {
+                    youtubeUrl = result.ExternalPostUrl;
+                }
+            }
         }
 
         VideoLibraryVideo? video = null;
@@ -168,6 +209,7 @@ public class MediaController : ControllerBase
             youtubeUrl,
             tiktokUrl,
             facebookUrl,
+            socialShare = socialShare?.Results,
             video
         });
     }

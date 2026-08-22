@@ -34,7 +34,7 @@ const getAbsoluteHost = (value = '') => {
 };
 
 const resolveApiBaseUrl = () => {
-    const configured = ensureApiBase(import.meta.env.VITE_API_URL || '');
+    const configured = ensureApiBase(import.meta?.env?.VITE_API_URL || '');
     const localhostApi = 'http://localhost:5242/api';
     const productionApi = 'https://wise-ravens.com/api';
 
@@ -116,12 +116,12 @@ const buildMediaUploadUrls = (type = '') => {
     const bases = new Set();
     bases.add(API_BASE_URL.replace(/\/+$/, ''));
 
-    const configured = (import.meta.env.VITE_API_URL || '').trim();
+    const configured = (import.meta?.env?.VITE_API_URL || '').trim();
     if (configured) {
         bases.add(toApiBase(configured));
     }
 
-    const ravensightApi = (import.meta.env.VITE_RAVENSIGHT_API_URL || '').trim();
+    const ravensightApi = (import.meta?.env?.VITE_RAVENSIGHT_API_URL || '').trim();
     if (ravensightApi) {
         const trimmed = ravensightApi.replace(/\/+$/, '');
         bases.add(trimmed.replace(/\/api\/ravensight$/i, '/api'));
@@ -202,6 +202,30 @@ const normalizeRequestPath = (url = '', baseUrl = '') => {
 const normalizeApiError = (error, fallbackMessage) => {
     const status = error?.response?.status;
     const data = error?.response?.data;
+
+    if (status === 400) {
+        if (typeof data?.message === 'string' && data.message.trim().length > 0) {
+            const normalized = new Error(data.message.trim());
+            normalized.status = 400;
+            normalized.response = error.response;
+            return normalized;
+        }
+        if (data?.errors && typeof data.errors === 'object') {
+            const parts = Object.values(data.errors)
+                .flatMap((val) => (Array.isArray(val) ? val : [val]))
+                .filter((val) => typeof val === 'string' && val.trim().length > 0);
+            if (parts.length > 0) {
+                const normalized = new Error(parts[0].trim());
+                normalized.status = 400;
+                normalized.response = error.response;
+                return normalized;
+            }
+        }
+        const normalized = new Error('Invalid request payload. Please check input parameters and try again.');
+        normalized.status = 400;
+        normalized.response = error.response;
+        return normalized;
+    }
 
     if (status === 401 || status === 403) {
         const authError = new Error('Your session expired. Please sign in again and retry.');
@@ -828,7 +852,10 @@ export const apiService = {
         const requestConfig = {
             headers: { 'Content-Type': 'multipart/form-data' },
             onUploadProgress: (progressEvent) => {
-                Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                if (typeof options.onProgress === 'function') {
+                    const total = progressEvent.total || progressEvent.loaded || 1;
+                    options.onProgress(Math.round((progressEvent.loaded * 100) / total));
+                }
             }
         };
 
@@ -995,7 +1022,18 @@ export const apiService = {
         });
     },
     resolveModerationReport: (reportId, outcome, notes = '') =>
-        api.post(`/growth/moderation/reports/${encodeURIComponent(reportId)}/resolve`, { outcome, notes })
+        api.post(`/growth/moderation/reports/${encodeURIComponent(reportId)}/resolve`, { outcome, notes }),
+
+    // Truth Engine endpoints
+    verifyTruthClaim: (claim, depth = 'deep') => api.post('/truthengine/verify', { claim, depth }),
+    verifyTruthBatch: (claims) => api.post('/truthengine/verify-batch', { claims }),
+    getTruthEngineScore: (content) => api.post('/truthengine/score', { content }),
+    findTruthSources: (claim) => api.post('/truthengine/sources', { claim }),
+    getTruthConsensus: (claimId) => api.get(`/truthengine/consensus/${encodeURIComponent(claimId)}`),
+    voteTruthClaim: (claimId, vote, confidence = 5) => api.post('/truthengine/vote', { claimId, vote, confidence }),
+    detectTruthContradictions: (claim) => api.post('/truthengine/contradictions', { claim }),
+    analyzeTruthTemporal: (claim) => api.post('/truthengine/temporal', { claim }),
+    getTruthEngineStats: () => api.get('/truthengine/stats')
 };
 
 export default api;

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { resolveMediaUrl } from '../../utils/mediaUtils';
 
 const sampleVideo = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 
@@ -188,7 +189,7 @@ const ShortFormFeed = ({ posts = [] }) => {
                             >
                                 {slide.mediaType === 'video' ? (
                                     <video
-                                        src={slide.mediaUrl}
+                                        src={resolveMediaUrl(slide.mediaUrl)}
                                         muted
                                         autoPlay={isActive}
                                         playsInline

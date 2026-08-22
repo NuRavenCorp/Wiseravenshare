@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/DTOs/User/UserDto.cs
+// Wiseravenshare.Server/DTOs/User/UserDto.cs
 using System.ComponentModel.DataAnnotations;
 
 namespace Wiseravenshare.Server.DTOs.User
@@ -45,10 +45,10 @@ namespace Wiseravenshare.Server.DTOs.User
 
         public bool? IsPrivate { get; set; }
 
-        [MaxLength(500)]
+        [MaxLength(2000000)]
         public string? AvatarUrl { get; set; }
 
-        [MaxLength(500)]
+        [MaxLength(2000000)]
         public string? CoverPhotoUrl { get; set; }
     }
 

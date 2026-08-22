@@ -39,8 +39,8 @@ public class AppDbContext : DbContext
             entity.Property(u => u.Username).HasMaxLength(100);
             entity.Property(u => u.DisplayName).HasMaxLength(200);
             entity.Property(u => u.Bio).HasColumnType("text");
-            entity.Property(u => u.AvatarUrl).HasMaxLength(2048);
-            entity.Property(u => u.CoverPhotoUrl).HasMaxLength(2048);
+            entity.Property(u => u.AvatarUrl).HasColumnType("text");
+            entity.Property(u => u.CoverPhotoUrl).HasColumnType("text");
             entity.Property(u => u.Location).HasMaxLength(200);
             entity.Property(u => u.Website).HasMaxLength(2048);
             entity.Property(u => u.RefreshToken).HasMaxLength(512);

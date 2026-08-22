@@ -1,9 +1,11 @@
 import React from 'react';
+import { resolveMediaUrl } from '../../utils/mediaUtils';
 
 const VideoFeedMini = ({ posts = [] }) => {
-    const videoPosts = posts.filter((post) =>
-        post.mediaType === 'video' && (post.mediaUrl || post.youtubeUrl || post.tiktokUrl || post.facebookUrl)
-    );
+    const videoPosts = posts.filter((post) => {
+        const isVid = post.type === 'Video' || post.mediaType === 'video' || (post.mediaUrl && /\.(mp4|webm|mov|avi|mkv)$/i.test(post.mediaUrl));
+        return isVid && (post.mediaUrl || post.youtubeUrl || post.tiktokUrl || post.facebookUrl);
+    });
 
     return (
         <section
@@ -42,8 +44,9 @@ const VideoFeedMini = ({ posts = [] }) => {
                     </div>
                     {post.mediaUrl && (
                         <video
-                            src={post.mediaUrl}
+                            src={resolveMediaUrl(post.mediaUrl)}
                             controls
+                            playsInline
                             style={{ width: '100%', maxHeight: '180px', borderRadius: '8px', background: '#000' }}
                         />
                     )}

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Compartment from '../Components/Common/Compartment';
 import { plannerState } from '../Services/PlannerState';
 import PlannerDialog from '../Components/Modal/PlannerDialog.jsx';
 
@@ -25,6 +26,7 @@ const PlannerPage = () => {
     };
 
     return (
+        <Compartment badge="Planner" title="Content & Workflow Planner">
         <div>
             <div
                 style={{
@@ -111,6 +113,7 @@ const PlannerPage = () => {
                 state={state}
             />
         </div>
+        </Compartment>
     );
 };
 

@@ -1,4 +1,4 @@
-﻿// src/components/layout/Header.tsx
+// src/components/layout/Header.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -89,12 +89,12 @@ export const Header: React.FC = () => {
                                 className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5"
                             >
                                 <Avatar
-                                    src={user?.avatarUrl}
-                                    alt={user?.displayName || 'User'}
+                                    src={user?.avatarUrl || user?.avatar}
+                                    alt={user?.displayName || user?.name || 'User'}
                                     size="sm"
                                 />
                                 <span className="hidden sm:inline text-sm font-medium">
-                                    {user?.displayName}
+                                    {user?.displayName || user?.name || 'User'}
                                 </span>
                             </button>
 
@@ -105,8 +105,8 @@ export const Header: React.FC = () => {
                                     className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-card shadow-xl py-2"
                                 >
                                     <div className="px-4 py-3 border-b border-border">
-                                        <p className="font-medium">{user?.displayName}</p>
-                                        <p className="text-sm text-gray-400">@{user?.username}</p>
+                                        <p className="font-medium">{user?.displayName || user?.name || 'User'}</p>
+                                        <p className="text-sm text-gray-400">@{user?.username || user?.handle || 'user'}</p>
                                     </div>
                                     <div className="py-1">
                                         <Link

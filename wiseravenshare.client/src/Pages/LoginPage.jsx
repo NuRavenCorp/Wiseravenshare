@@ -162,9 +162,9 @@ const LoginPage = ({ onAuth }) => {
             return;
         }
         try {
-            const dataUrl = await readFileAsDataUrl(file);
+            const compressed = await compressAvatarImage(file, 180, 60000);
             setAvatarFile(file);
-            setAvatarPreview(dataUrl);
+            setAvatarPreview(compressed);
             setCameraError('');
         } catch (err) {
             setError(err.message || 'Unable to load photo.');
@@ -186,7 +186,7 @@ const LoginPage = ({ onAuth }) => {
         setCameraStream(null); setCameraOpen(false);
     };
 
-    const capturePhoto = () => {
+    const capturePhoto = async () => {
         if (!videoRef.current || !canvasRef.current) return;
         const canvas = canvasRef.current;
         const video = videoRef.current;
@@ -194,8 +194,15 @@ const LoginPage = ({ onAuth }) => {
         canvas.height = video.videoHeight || 240;
         const context = canvas.getContext('2d');
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-        setAvatarPreview(dataUrl); setAvatarFile(null); stopCamera();
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        try {
+            const compressed = await compressAvatarImage(dataUrl, 180, 60000);
+            setAvatarPreview(compressed);
+        } catch {
+            setAvatarPreview(dataUrl);
+        }
+        setAvatarFile(null);
+        stopCamera();
     };
 
     const submit = async () => {

@@ -1,4 +1,6 @@
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.External.DeepSeekService;
+using Wiseravenshare.Server.Services.Truth;
 using Npgsql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -672,7 +674,7 @@ if (!builder.Environment.IsDevelopment())
 // ── Services ─────────────────────────────────────────────────────────────────
 builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
                                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
                                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
     // Clearing networks automatically trusts the nearest proxy (e.g. docker network or cloud provider proxy)
@@ -768,6 +770,10 @@ builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
+builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
+builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
+builder.Services.AddScoped<IConsensusService, ConsensusService>();
+builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
 

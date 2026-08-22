@@ -21,7 +21,9 @@ import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
+import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
+import CanvasPage from './Pages/CanvasPage';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
@@ -334,14 +336,26 @@ const App = () => {
                 return isAdminUser
                     ? <TeamAccessAdminPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'facebook-feed':
+            case 'tiktok-feed':
+            case 'instagram-feed':
+            case 'youtube-feed':
+            case 'twitter-feed':
+            case 'linkedin-feed':
+            case 'social-feeds':
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />;
             case 'ravensight':
                 return <RavensightVideo />;
             case 'newsroom-video':
                 return <NewsroomRecorderPage onSendToPodcastControlRoom={() => openRavensightWithTab('podcast')} />;
             case 'amateur-journalist':
                 return <AmateurJournalistPage onNavigate={setCurrentPage} />;
+            case 'canvas':
+                return <CanvasPage onNavigate={setCurrentPage} />;
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
+            case 'terms':
+                return <TermsOfServicePage onBack={() => setCurrentPage('feed')} />;
             default:
                 return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
         }
@@ -364,6 +378,7 @@ const App = () => {
         { id: 'planner', label: 'Planner' },
         { id: 'newsroom-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', label: 'Amateur Journalist' },
+        { id: 'canvas', label: 'Canvas Studio' },
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'profile', label: 'Profile' }
@@ -459,6 +474,13 @@ const App = () => {
                     style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
                 >
                     Privacy Policy
+                </button>
+                &nbsp;·&nbsp;
+                <button
+                    onClick={() => setCurrentPage('terms')}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                >
+                    Terms of Service
                 </button>
                 &nbsp;·&nbsp;© {new Date().getFullYear()} NuRaven Corp
             </footer>

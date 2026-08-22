@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { authService } from '../Services/Auth.jsx';
 import { socialGraphService } from '../Services/SocialGraph';
+import { compressAvatarImage } from '../utils/avatarUtils';
 
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
@@ -34,8 +35,17 @@ const normalizeUser = (user) => {
         return user;
     }
 
+    const avatar = user.avatar || user.avatarUrl || user.photoURL || '';
+    const avatarUrl = user.avatarUrl || user.avatar || user.photoURL || '';
+    const name = user.name || user.displayName || user.username || '';
+    const displayName = user.displayName || user.name || user.username || '';
+
     return {
         ...user,
+        name,
+        displayName,
+        avatar,
+        avatarUrl,
         socialFeeds: normalizeSocialFeeds(user.socialFeeds)
     };
 };
@@ -198,10 +208,48 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         setError(null);
         try {
-            const updatedUser = normalizeUser(await authService.updateProfile(user.id, updates));
+            let avatarVal = updates?.avatar || updates?.avatarUrl || user?.avatar || user?.avatarUrl || '';
+            if (avatarVal && typeof avatarVal === 'string' && avatarVal.startsWith('data:image/')) {
+                try {
+                    avatarVal = await compressAvatarImage(avatarVal, 180, 60000);
+                } catch {
+                    /* fallback if compression fails */
+                }
+            }
+
+            const payload = {
+                ...updates,
+                avatar: avatarVal,
+                avatarUrl: avatarVal
+            };
+
+            let updatedUser = null;
+            try {
+                const apiResult = await authService.updateProfile(user.id, payload);
+                updatedUser = normalizeUser(apiResult);
+            } catch (apiErr) {
+                console.warn('Backend updateProfile endpoint call failed, updating profile locally:', apiErr);
+                updatedUser = normalizeUser({
+                    ...user,
+                    ...payload,
+                    avatar: avatarVal,
+                    avatarUrl: avatarVal
+                });
+                authService.setUser(updatedUser);
+            }
+
             setUser(updatedUser);
-            localStorage.setItem('user_data', JSON.stringify(updatedUser));
-            localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedUser?.socialFeeds || {}));
+            try {
+                localStorage.setItem('user_data', JSON.stringify(updatedUser));
+            } catch (err) {
+                console.warn('Failed to save user_data to localStorage:', err);
+            }
+            try {
+                localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedUser?.socialFeeds || {}));
+            } catch (err) {
+                console.warn('Failed to save wiseSocialFeeds to localStorage:', err);
+            }
+
             socialGraphService.syncProfileAcrossStorage(updatedUser);
             window.dispatchEvent(new Event('wiseraven:social-updated'));
             return updatedUser;
