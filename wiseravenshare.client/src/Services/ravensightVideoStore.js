@@ -37,6 +37,42 @@ const safeWriteJson = (key, value) => {
     }
 };
 
+const buildInitialsAvatar = (name) => {
+    const initials = String(name || 'WR')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('') || 'WR';
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" rx="20" fill="#374151"/><text x="50%" y="50%" dy="0.35em" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#e5e7eb">${initials}</text></svg>`;
+
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+// Blob object URLs are bound to the document that created them. Any blob URL
+// restored from localStorage belongs to a previous page load and can never
+// play again, so those entries are dead placeholders. Purge them once at
+// module load; entries created during the current session stay playable.
+function purgeStaleSessionVideos() {
+    const isDeadBlobEntry = (item) => {
+        const url = String(item?.videoUrl || item?.mediaUrl || '');
+        return url.startsWith('blob:');
+    };
+
+    const primary = safeReadJson(VIDEO_CACHE_KEY, []);
+    if (Array.isArray(primary) && primary.some(isDeadBlobEntry)) {
+        safeWriteJson(VIDEO_CACHE_KEY, primary.filter((item) => !isDeadBlobEntry(item)));
+    }
+
+    const library = safeReadJson(VIDEO_LIBRARY_KEY, []);
+    if (Array.isArray(library) && library.some(isDeadBlobEntry)) {
+        safeWriteJson(VIDEO_LIBRARY_KEY, library.filter((item) => !isDeadBlobEntry(item)));
+    }
+}
+
+purgeStaleSessionVideos();
+
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
         return fallback;
@@ -84,8 +120,8 @@ export const normalizeVideoRecord = (video, index = 0) => {
         videoUrl,
         mediaUrl,
         thumbnailUrl: normalizeMediaSource(video?.thumbnailUrl || '', ''),
-        duration: video?.duration || '00:30',
-        channelAvatar: normalizeMediaSource(video?.channelAvatar || video?.avatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR'),
+        duration: typeof video?.duration === 'string' && video.duration.trim() ? video.duration.trim() : '',
+        channelAvatar: normalizeMediaSource(video?.channelAvatar || video?.avatar || buildInitialsAvatar(video?.channelName || video?.user?.name), ''),
         channelName: video?.channelName || video?.user?.name || 'WiseRaven Creator',
         title: video?.title || 'Uploaded Video',
         description: video?.description || '',

@@ -1,8 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 
-const sampleVideo = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-
 const sanitizeFeedText = (value, fallback = '') => {
     const text = String(value ?? '')
         .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
@@ -20,8 +18,6 @@ const sanitizeFeedText = (value, fallback = '') => {
     return text;
 };
 
-const friends = ['AL', 'MJ', 'SK', 'NT', 'RV'];
-
 const ShortFormFeed = ({ posts = [] }) => {
     const [activeIndex, setActiveIndex] = useState(0);
     const [likedIds, setLikedIds] = useState([]);
@@ -29,34 +25,23 @@ const ShortFormFeed = ({ posts = [] }) => {
     const touchStartY = useRef(null);
 
     const slides = useMemo(() => {
-        if (!posts.length) {
-            return [
-                {
-                    id: 'demo-1',
-                    user: { name: 'Nova Lane', handle: '@novalane' },
-                    content: 'Crushing the next scroll drop with a full-spectrum live loop.',
-                    likes: 4821,
-                    mediaUrl: sampleVideo,
-                    mediaType: 'video',
-                    caption: 'Original audio • midnight echo'
-                }
-            ];
-        }
-
-        return posts.slice(0, 5).map((post, index) => ({
-            id: post.id || `${post.userId || 'clip'}-${index}`,
-            user: {
-                ...(post.user || { name: 'Raven User', handle: '@ravenuser' }),
-                name: sanitizeFeedText(post.user?.name || 'Raven User', 'Raven User'),
-                handle: sanitizeFeedText(post.user?.handle || '@ravenuser', '@ravenuser')
-            },
-            content: sanitizeFeedText(post.content || 'Fresh clip from the feed', 'Fresh clip from the feed').slice(0, 150),
-            likes: Number(post.likes || 0) + 180 + index * 32,
-            mediaUrl: post.mediaUrl || sampleVideo,
-            mediaType: post.mediaType || 'video',
-            caption: sanitizeFeedText(post.caption || 'Original audio • viral loop', 'Original audio • viral loop'),
-            accent: ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ec4899'][index % 5]
-        }));
+        return posts
+            .filter((post) => post?.mediaType === 'video' && (post?.mediaUrl || post?.videoUrl))
+            .slice(0, 5)
+            .map((post, index) => ({
+                id: post.id || `${post.userId || 'clip'}-${index}`,
+                user: {
+                    ...(post.user || {}),
+                    name: sanitizeFeedText(post.user?.name || '', ''),
+                    handle: sanitizeFeedText(post.user?.handle || '', '')
+                },
+                content: sanitizeFeedText(post.content || '', '').slice(0, 150),
+                likes: Number(post.likes || 0),
+                mediaUrl: post.mediaUrl || post.videoUrl,
+                mediaType: 'video',
+                caption: sanitizeFeedText(post.caption || '', ''),
+                accent: ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ec4899'][index % 5]
+            }));
     }, [posts]);
 
     const activeSlide = slides[activeIndex] || slides[0];
@@ -116,6 +101,28 @@ const ShortFormFeed = ({ posts = [] }) => {
 
         touchStartY.current = null;
     };
+
+    if (!slides.length) {
+        return (
+            <section style={{ marginBottom: '20px' }}>
+                <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#cbd5e1', fontWeight: 700 }}>Short-form feed</div>
+                    <h3 style={{ margin: '6px 0 0', fontSize: '24px' }}>Swipe, heart, and keep the loop alive</h3>
+                </div>
+                <div style={{
+                    border: '1px solid rgba(148,163,184,0.18)',
+                    borderRadius: '20px',
+                    background: 'rgba(15,23,42,0.46)',
+                    padding: '48px 24px',
+                    textAlign: 'center',
+                    color: '#cbd5e1',
+                    fontSize: '14px'
+                }}>
+                    No videos yet. Record or upload a video and it will appear here.
+                </div>
+            </section>
+        );
+    }
 
     return (
         <section style={{ marginBottom: '20px' }}>
@@ -216,12 +223,16 @@ const ShortFormFeed = ({ posts = [] }) => {
                                 ))}
 
                                 <div style={{ position: 'absolute', left: '18px', top: '18px', zIndex: 2, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(148,163,184,0.26)', borderRadius: '999px', padding: '8px 10px', fontSize: '11px', color: '#e2e8f0' }}>
-                                        {slide.user?.handle || '@raven'}
-                                    </div>
-                                    <div style={{ background: 'rgba(15,23,42,0.72)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '12px', padding: '8px 10px', fontSize: '11px', color: '#e2e8f0', maxWidth: '240px' }}>
-                                        {slide.caption}
-                                    </div>
+                                    {slide.user?.handle && (
+                                        <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(148,163,184,0.26)', borderRadius: '999px', padding: '8px 10px', fontSize: '11px', color: '#e2e8f0' }}>
+                                            {slide.user.handle}
+                                        </div>
+                                    )}
+                                    {slide.caption && (
+                                        <div style={{ background: 'rgba(15,23,42,0.72)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '12px', padding: '8px 10px', fontSize: '11px', color: '#e2e8f0', maxWidth: '240px' }}>
+                                            {slide.caption}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div style={{ position: 'absolute', right: '14px', bottom: '18px', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
@@ -234,40 +245,26 @@ const ShortFormFeed = ({ posts = [] }) => {
 
                                 <div style={{ position: 'relative', zIndex: 2, width: 'min(68%, 500px)', paddingBottom: '8px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', display: 'grid', placeItems: 'center', background: slide.accent, fontWeight: 800, color: '#fff', fontSize: '12px' }}>
-                                            {String(slide.user?.name || 'R').charAt(0).toUpperCase()}
-                                        </div>
+                                        {slide.user?.name && (
+                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', display: 'grid', placeItems: 'center', background: slide.accent, fontWeight: 800, color: '#fff', fontSize: '12px' }}>
+                                                {slide.user.name.charAt(0).toUpperCase()}
+                                            </div>
+                                        )}
                                         <div>
-                                            <div style={{ fontWeight: 700, color: '#fff' }}>{slide.user?.name || 'Raven'}</div>
-                                            <div style={{ fontSize: '11px', color: '#dbeafe' }}>{slide.user?.handle || '@raven'}</div>
+                                            {slide.user?.name && (
+                                                <div style={{ fontWeight: 700, color: '#fff' }}>{slide.user.name}</div>
+                                            )}
+                                            {slide.user?.handle && (
+                                                <div style={{ fontSize: '11px', color: '#dbeafe' }}>{slide.user.handle}</div>
+                                            )}
                                         </div>
                                     </div>
 
-                                    <p style={{ margin: 0, fontSize: '18px', lineHeight: 1.4, color: '#fff', maxWidth: '520px' }}>
-                                        {slide.content}
-                                    </p>
-
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
-                                        {['#viral', '#storytime', '#ravenloop', '#watchparty'].map((tag) => (
-                                            <span key={tag} style={{ background: 'rgba(15,23,42,0.66)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '999px', padding: '6px 8px', fontSize: '11px', color: '#e2e8f0' }}>
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '14px', flexWrap: 'wrap' }}>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                            <button style={{ border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(15,23,42,0.62)', color: '#fff', borderRadius: '999px', padding: '8px 10px', cursor: 'pointer' }}>Remix</button>
-                                            <button style={{ border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(15,23,42,0.62)', color: '#fff', borderRadius: '999px', padding: '8px 10px', cursor: 'pointer' }}>Watch party</button>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            {friends.map((friend, friendIndex) => (
-                                                <div key={friend} style={{ width: '22px', height: '22px', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: '9px', fontWeight: 700, background: ['#8b5cf6', '#0ea5e9', '#22c55e', '#f59e0b', '#ec4899'][friendIndex], border: '1px solid rgba(255,255,255,0.3)', marginLeft: friendIndex === 0 ? 0 : '-6px' }}>
-                                                    {friend}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
+                                    {slide.content && (
+                                        <p style={{ margin: 0, fontSize: '18px', lineHeight: 1.4, color: '#fff', maxWidth: '520px' }}>
+                                            {slide.content}
+                                        </p>
+                                    )}
                                 </div>
                             </article>
                         );
@@ -282,7 +279,7 @@ const ShortFormFeed = ({ posts = [] }) => {
                                 <div style={{ position: 'absolute', inset: '8px', borderRadius: '8px', background: 'rgba(255,255,255,0.1)' }} />
                             </div>
                             <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontSize: '12px', color: '#fff', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeSlide.user?.name || 'Raven'}</div>
+                                <div style={{ fontSize: '12px', color: '#fff', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeSlide.user?.name}</div>
                                 <div style={{ fontSize: '10px', color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeSlide.caption}</div>
                             </div>
                         </div>

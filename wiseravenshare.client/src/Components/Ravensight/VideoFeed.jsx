@@ -31,7 +31,7 @@ const normalizeVideo = (video, index = 0) => {
         ...normalized,
         videoUrl: normalizeMediaSource(normalized.videoUrl || normalized.mediaUrl || '', ''),
         thumbnailUrl: normalizeMediaSource(normalized.thumbnailUrl || '', ''),
-        channelAvatar: normalizeMediaSource(normalized.channelAvatar || 'https://via.placeholder.com/40?text=WR', 'https://via.placeholder.com/40?text=WR')
+        channelAvatar: normalizeMediaSource(normalized.channelAvatar || '', '')
     };
 };
 
@@ -429,17 +429,19 @@ const VideoFeed = ({ onNotification }) => {
                         />
 
                         {/* Duration Badge */}
-                        <div style={{
-                            position: 'absolute',
-                            bottom: '10px',
-                            right: '10px',
-                            background: 'rgba(0,0,0,0.8)',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '12px'
-                        }}>
-                            {video.duration}
-                        </div>
+                        {video.duration && (
+                            <div style={{
+                                position: 'absolute',
+                                bottom: '10px',
+                                right: '10px',
+                                background: 'rgba(0,0,0,0.8)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '12px'
+                            }}>
+                                {video.duration}
+                            </div>
+                        )}
 
                         {/* Play Button Overlay */}
                         {!isPlaying && (
@@ -467,16 +469,32 @@ const VideoFeed = ({ onNotification }) => {
 
                     <div style={{ padding: '15px' }}>
                     <div style={{ display: 'flex', gap: '12px' }}>
-                        <img
-                            src={video.channelAvatar}
-                            alt={video.channelName}
-                            style={{
+                        {video.channelAvatar ? (
+                            <img
+                                src={video.channelAvatar}
+                                alt={video.channelName}
+                                style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    borderRadius: '50%',
+                                    objectFit: 'cover'
+                                }}
+                            />
+                        ) : (
+                            <div style={{
                                 width: '40px',
                                 height: '40px',
                                 borderRadius: '50%',
-                                objectFit: 'cover'
-                            }}
-                        />
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'var(--secondary-color)',
+                                fontWeight: 700,
+                                fontSize: '14px'
+                            }}>
+                                {String(video.channelName || 'W').charAt(0).toUpperCase()}
+                            </div>
+                        )}
                         <div style={{ flex: 1 }}>
                             <h4 style={{
                                 fontSize: '16px',

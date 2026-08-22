@@ -308,15 +308,18 @@ const VideoLibrary = ({ onNotification }) => {
                             }}
                         />
                     ) : (
-                        <img
-                            src={video.thumbnailUrl || 'https://via.placeholder.com/160x90?text=Video'}
-                            alt={video.title}
-                            style={{
-                                width: '160px',
-                                height: '90px',
-                                objectFit: 'cover'
-                            }}
-                        />
+                        <div style={{
+                            width: '160px',
+                            height: '90px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(255,255,255,0.04)',
+                            color: 'var(--light-color)',
+                            fontSize: '12px'
+                        }}>
+                            No preview
+                        </div>
                     )}
                     <div style={{ flex: 1, padding: '10px 10px 10px 0' }}>
                         {isEditing ? (
