@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Compartment from '../Components/Common/Compartment';
 import { useAuth } from '../Contexts/AuthContext';
-import { upsertLocalVideo } from '../Services/ravensightVideoStore';
 import { readStoredFeedPosts, writeStoredFeedPosts, normalizeFeedPost } from '../Services/postFeedPayload';
 
 const COLORS = [
@@ -303,27 +302,6 @@ const CanvasPage = ({ onNavigate }) => {
         link.click();
         setStatusMsg('Design downloaded as PNG');
         setTimeout(() => setStatusMsg(''), 2500);
-    };
-
-    const saveToLibrary = () => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const dataUrl = canvas.toDataURL('image/png');
-
-        upsertLocalVideo({
-            id: `canvas-design-${Date.now()}`,
-            title: textInput || 'Canvas Design Artwork',
-            description: 'Created in WiseRaven Canvas Studio',
-            mediaUrl: dataUrl,
-            videoUrl: dataUrl,
-            thumbnailUrl: dataUrl,
-            userId: currentUser.id,
-            channelName: currentUser.name || 'WiseRaven Creator',
-            createdAt: new Date().toISOString()
-        });
-
-        setStatusMsg('Artwork saved to Ravensight Library!');
-        setTimeout(() => setStatusMsg(''), 3000);
     };
 
     const postToFeed = () => {
@@ -640,22 +618,6 @@ const CanvasPage = ({ onNavigate }) => {
                             }}
                         >
                             ⬇ Export PNG
-                        </button>
-                        <button
-                            type="button"
-                            onClick={saveToLibrary}
-                            style={{
-                                border: '1px solid var(--highlight-color)',
-                                background: 'rgba(56, 189, 248, 0.1)',
-                                color: '#38bdf8',
-                                borderRadius: '10px',
-                                padding: '10px 18px',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                                fontSize: '13px'
-                            }}
-                        >
-                            💾 Save to Library
                         </button>
                         <button
                             type="button"
