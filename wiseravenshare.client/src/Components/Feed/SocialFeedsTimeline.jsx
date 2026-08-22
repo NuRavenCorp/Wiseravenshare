@@ -883,7 +883,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <div style={{ border: '1px solid rgba(147, 197, 253, 0.3)', borderRadius: '8px', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
                             <div style={{ fontWeight: 700, color: '#93c5fd', fontSize: '13px' }}>📘 1) Meta Graph API (Facebook & Instagram)</div>
                             <ul style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.6 }}>
-                                <li><strong>Base URL:</strong> <code>https://graph.facebook.com/v20.0/</code></li>
+                                <li><strong>Base URL:</strong> <code>https://graph.facebook.com/v26.0/</code></li>
                                 <li><strong>Required OAuth Scopes:</strong> <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>pages_show_list</code>, <code>instagram_basic</code>, <code>instagram_content_publish</code></li>
                                 <li><strong>Endpoints:</strong> <code>POST /{page-id}/feed</code> (Publish), <code>GET /{page-id}/posts</code> (Read Feed)</li>
                                 <li><strong>Server Configuration:</strong> <code>Social:Facebook:PageId</code>, <code>Social:Facebook:PageAccessToken</code>, <code>Social:Facebook:AppId</code>, <code>Social:Facebook:AppSecret</code></li>

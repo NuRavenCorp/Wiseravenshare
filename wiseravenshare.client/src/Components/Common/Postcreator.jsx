@@ -203,13 +203,14 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             });
         }, 200);
 
-        // Analyze content for truth
-        const analysis = truthEngine.analyzeContent(content);
-        const truthScoreResult = await truthService.getTruthScore(content);
-        const truthScore = truthScoreResult?.score ?? 100;
+        // Analyze content for truth — questions are open inquiries and get no integrity check or score.
+        const isQuestionPost = truthEngine.isQuestion(content);
+        const analysis = isQuestionPost ? [] : truthEngine.analyzeContent(content);
+        const truthScoreResult = isQuestionPost ? null : await truthService.getTruthScore(content);
+        const truthScore = truthScoreResult?.score ?? null;
         let correction = null;
 
-        if (analysis.length > 0 && analysis[0].isTrue === false && analysis[0].confidence > 0.9) {
+        if (!isQuestionPost && analysis.length > 0 && analysis[0].isTrue === false && analysis[0].confidence > 0.9) {
             correction = analysis[0].correction;
             addTruthAlert('correction', `Truth correction applied to your post.`, correction);
         }
@@ -345,7 +346,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                     sharesCount: 0,
                     bookmarksCount: 0,
                     viewsCount: 0,
-                    truthScore: truthScore ?? 70
+                    truthScore: truthScore ?? null
                 }, currentUser);
 
                 appendStoredFeedPost(fallbackPost, currentUser);
@@ -371,8 +372,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             setUploadProgress(0);
             setIsUploading(false);
 
-            const isQ = truthEngine.isQuestion(content);
-            const isOp = truthEngine.isOpinion(content);
+            const isQ = isQuestionPost || truthEngine.isQuestion(content);
+            const isOp = !isQ && truthEngine.isOpinion(content);
             const isInt = truthEngine.isIntent(content);
             const falseClaims = analysis.filter((f) => f.isTrue === false);
 
@@ -382,10 +383,10 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 addTruthAlert('info', 'Post published! (Personal Opinion)', null);
             } else if (isInt) {
                 addTruthAlert('success', 'Post published! 100% Personal Truth (Authentic Intention)', null);
-            } else if (falseClaims.length > 0 && truthScore < 70) {
+            } else if (falseClaims.length > 0 && (truthScore ?? 100) < 70) {
                 addTruthAlert('warning', `Your post has a truth score of ${truthScore}%. Consider verifying your claims.`, null);
             } else {
-                addTruthAlert('success', `Post published! Truth score: ${truthScore}%`, null);
+                addTruthAlert('success', `Post published! Truth score: ${truthScore ?? 100}%`, null);
             }
         }, 1000);
     };

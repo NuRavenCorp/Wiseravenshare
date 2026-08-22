@@ -1789,7 +1789,7 @@ public class AuthController : ControllerBase
 
     private static async Task<SocialProfile> ResolveFacebookProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
     {
-        var tokenUrl = BuildUrl("https://graph.facebook.com/v19.0/oauth/access_token", new Dictionary<string, string?>
+        var tokenUrl = BuildUrl("https://graph.facebook.com/v26.0/oauth/access_token", new Dictionary<string, string?>
         {
             ["client_id"] = config.ClientId,
             ["client_secret"] = config.ClientSecret,

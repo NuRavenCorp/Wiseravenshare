@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Services/PostService.cs
+// Wiseravenshare.Server/Services/PostService.cs
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.Post;
@@ -49,16 +49,18 @@ public class PostService : IPostService
     private static bool IsOpinionOrQuestion(string content)
     {
         if (string.IsNullOrWhiteSpace(content)) return false;
-        
+
         var trimmed = content.Trim();
         if (trimmed.EndsWith('?')) return true;
 
         var lower = trimmed.ToLowerInvariant();
-        string[] questionWords = { "who ", "what ", "where ", "when ", "why ", "how " };
+        string[] questionWords = { "who ", "what ", "where ", "when ", "why ", "how ", "if " };
         foreach (var word in questionWords)
         {
             if (lower.StartsWith(word)) return true;
         }
+
+        if (lower.StartsWith("if,")) return true;
 
         string[] opinionPhrases = { "i think", "i believe", "my opinion", "in my opinion", "i feel", "seems to me", "i guess", "to me", "in my view" };
         foreach (var phrase in opinionPhrases)
