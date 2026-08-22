@@ -1,0 +1,34 @@
+{
+  "cycle": "c1787427510",
+  "started_at": "2026-08-22T19:38:30+00:00",
+  "finished_at": "2026-08-22T19:47:21+00:00",
+  "goal": "Increase affiliate sales on wise-ravens.com by 10% this month",
+  "model": "gemma-4-E4B-it",
+  "results": {
+    "opportunities": 0,
+    "content_plans": 0,
+    "posts_drafted": 0,
+    "guardrail_rejections": 0
+  },
+  "artifacts": {
+    "intel_top_opportunity": null,
+    "content_titles": [],
+    "drafts": []
+  },
+  "next_cycle": {
+    "strategy_notes": [
+      "The current cycle yielded zero activity across all metrics, indicating a complete lack of direction or execution. A major overhaul is required.",
+      "Focus intensely on generating initial opportunities. The system needs a clear starting point.",
+      "Prioritize creating high-value, conversion-focused content immediately, rather than planning for it."
+    ],
+    "channel_weights": {
+      "twitter": 0.7
+    },
+    "prompt_tweaks": [
+      "Revise the initial prompt to explicitly mandate the generation of 5 distinct, high-intent affiliate promotion opportunities for wise-ravens.com, tied to specific product benefits.",
+      "Instruct the agent to use a strong AIDA (Attention, Interest, Desire, Action) framework in the first draft of the content, aiming directly at a known pain point solved by wise-ravens.com.",
+      "Set a hard requirement for at least 3 draft posts to be ready for review in the next cycle."
+    ],
+    "source": "gemma"
+  }
+}

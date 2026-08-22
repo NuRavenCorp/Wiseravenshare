@@ -37,7 +37,14 @@ const PostCard = ({
     }, [post.user, post.userId, currentUser]);
 
     const truthBadge = useMemo(() => {
-        const score = post.truthScore ?? truthEngine.getTruthScore(post.content || '');
+        const content = String(post.content || '').trim();
+
+        // Questions are open inquiries — show the inquiry badge, never a truth score.
+        if (content && truthEngine.isQuestion(content)) {
+            return truthEngine.getTruthBadge(0, { isQuestion: true });
+        }
+
+        const score = post.truthScore ?? truthEngine.getTruthScore(content);
         return truthEngine.getTruthBadge(score);
     }, [post.truthScore, post.content]);
 

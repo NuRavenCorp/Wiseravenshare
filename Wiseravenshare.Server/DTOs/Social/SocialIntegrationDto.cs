@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Wiseravenshare.Server.DTOs.Social;
 
 public class SocialFeedItemDto
@@ -66,4 +68,51 @@ public class PublishSocialContentResponse
 {
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<SocialPublishResultDto> Results { get; set; } = [];
+}
+
+public class FacebookClientCodeRequest
+{
+    /// <summary>
+    /// Long-lived user access token obtained via the standard OAuth flow.
+    /// </summary>
+    [Required]
+    public string AccessToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Redirect URI that exactly matches the one used when the access token was issued.
+    /// Defaults to App:PublicBaseUrl when omitted.
+    /// </summary>
+    [MaxLength(500)]
+    public string? RedirectUri { get; set; }
+}
+
+public class FacebookClientCodeResultDto
+{
+    public bool Success { get; set; }
+    public string? Code { get; set; }
+    public string? Error { get; set; }
+}
+
+public class FacebookLongLivedTokenRequest
+{
+    /// <summary>
+    /// Code returned by the /oauth/client_code endpoint. Single-use and valid for a short window.
+    /// </summary>
+    [Required]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Redirect URI that exactly matches the one used for the client_code request.
+    /// </summary>
+    [MaxLength(500)]
+    public string? RedirectUri { get; set; }
+}
+
+public class FacebookLongLivedTokenResultDto
+{
+    public bool Success { get; set; }
+    public string? AccessToken { get; set; }
+    public string? TokenType { get; set; }
+    public long? ExpiresIn { get; set; }
+    public string? Error { get; set; }
 }
