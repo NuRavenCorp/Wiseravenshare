@@ -462,7 +462,7 @@ class TruthEngine {
         if (str.endsWith('?')) return true;
 
         const normalized = this.normalizeClaim(str);
-        const questionPrefixes = /^(where|what|when|why|how|who|whom|whose|which|is\s+it|why\s+dont|why\s+don\s*t|why\s+not|why\s+cant|why\s+can\s*t|is|are|was|were|can|could|would|should|do|does|did|has|have|had|will|shall)\b/i;
+        const questionPrefixes = /^(where|what|when|why|how|who|whom|whose|which|if|is\s+it|why\s+dont|why\s+don\s*t|why\s+not|why\s+cant|why\s+can\s*t|is|are|was|were|can|could|would|should|do|does|did|has|have|had|will|shall)\b/i;
         return questionPrefixes.test(normalized);
     }
 

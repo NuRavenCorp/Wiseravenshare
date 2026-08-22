@@ -38,3 +38,7 @@ __.ENV__*
 # OS
 .DS_Store
 Thumbs.db
+
+# Python caches
+__pycache__/
+*.pyc

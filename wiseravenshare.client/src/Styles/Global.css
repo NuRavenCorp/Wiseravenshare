@@ -93,6 +93,28 @@ img, svg, video {
     gap: 20px;
 }
 
+/* Allow the middle grid track to shrink below its content's min-content width.
+   Without this, wide feed content (e.g. the social platform tab bar) forces the
+   1fr track wide and pushes the right sidebar off-screen on smaller desktops. */
+.middle-column {
+    min-width: 0;
+}
+
+/* Keep the main feed column symmetric with the rest of the site: cap its width
+   and center it inside its grid track so oversized content cannot stretch it
+   toward one edge of the screen. */
+.middle-column > * {
+    max-width: 100%;
+}
+
+@media (min-width: 1201px) {
+    .middle-column {
+        max-width: 640px;
+        justify-self: center;
+        width: 100%;
+    }
+}
+
 @keyframes warningPulse {
     0% {
         box-shadow: 0 0 0 rgba(255, 176, 77, 0), 0 0 0 rgba(255, 86, 86, 0);

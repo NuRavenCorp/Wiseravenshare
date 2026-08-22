@@ -45,8 +45,27 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             || normalizedUserRegion.includes(normalizedPostRegion);
     };
 
+    const isQuestionPost = (post) => {
+        const content = String(post?.content || '').trim();
+        return Boolean(content) && truthEngine.isQuestion(content);
+    };
+
     const buildIntegrityReport = (post, mode = 'manual') => {
         const content = String(post?.content || '').trim();
+
+        // Questions are open inquiries and do not warrant an integrity/truth check or score.
+        if (content && truthEngine.isQuestion(content)) {
+            return {
+                score: null,
+                badge: truthEngine.getTruthBadge(0, { isQuestion: true }),
+                findings: [],
+                criticalFindings: [],
+                mode,
+                isQuestion: true,
+                checkedAt: new Date().toISOString()
+            };
+        }
+
         const findings = content ? truthEngine.analyzeContent(content) : [];
         const score = content ? truthEngine.getTruthScore(content) : 72;
         const badge = truthEngine.getTruthBadge(score);
@@ -217,6 +236,16 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         const content = String(post?.content || '').trim();
         if (!content) {
             addTruthAlert('info', 'This post has no text content to verify.', null);
+            return;
+        }
+
+        // Questions are open inquiries — no integrity check or score applies.
+        if (isQuestionPost(post)) {
+            setIntegrityReports((prev) => ({
+                ...prev,
+                [post.id]: buildIntegrityReport(post, 'manual')
+            }));
+            addTruthAlert('info', 'This post is a question, so no integrity check or score applies.', null);
             return;
         }
 

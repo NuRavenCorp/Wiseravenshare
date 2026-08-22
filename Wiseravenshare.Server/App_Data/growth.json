@@ -527,6 +527,14 @@
       "EventName": "first_post_created",
       "CreatedAtUtc": "2026-08-19T14:30:30.1127206Z",
       "Metadata": {}
+    },
+    {
+      "Id": "d3a3bd82194b47dc80b411d20ce4f926",
+      "UserId": "7b80521bb96049efa8621339312b412f",
+      "Email": "qa.sidebar.probe@example.com",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-08-22T00:56:25.5223809Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],

@@ -28,7 +28,7 @@ public interface ISocialPlatformService
 
 public class SocialPlatformService : ISocialPlatformService
 {
-    private const string FacebookGraphBase = "https://graph.facebook.com/v20.0";
+    private const string FacebookGraphBase = "https://graph.facebook.com/v26.0";
     private const string TikTokApiBase = "https://open.tiktokapis.com/v2";
 
     private readonly HttpClient _httpClient;
