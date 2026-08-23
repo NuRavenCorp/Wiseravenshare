@@ -31,8 +31,38 @@ services:
       # We tell ASP.NET that it is running behind a proxy, enabling ForwardedHeaders automatically
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=CHANGE_ME;SSL Mode=Disable;Trust Server Certificate=true
+      # AI assistant backend: inside this compose network we talk to the ai container directly.
+      # On DigitalOcean (or any split deployment) override with e.g. http://<droplet-ip>:3000
+      Ollama__BaseUrl: http://ai:11434
+      Ollama__DefaultModel: llama3.2
     ports:
       - "10000:10000"
+    depends_on:
+      db:
+        condition: service_healthy
+      ai:
+        condition: service_started
+
+  # AI container (Ollama). Published on host port 3000 as requested.
+  # When deployed to DigitalOcean, open port 3000 in the droplet firewall
+  # (doctl compute firewall add-rules ... --port 3000) or keep it internal.
+  ai:
+    image: ollama/ollama:latest
+    container_name: wiseravenshare-ai
+    restart: unless-stopped
+    volumes:
+      - wiseravenshare-ollama-models:/root/.ollama
+    ports:
+      - "3000:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
 volumes:
   wiseravenshare-postgres-data:
+  wiseravenshare-ollama-models:

@@ -22,12 +22,23 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const scrollRef = useRef(null);
 
     useEffect(() => {
-        aiAssistantService.getModels().then((list) => {
-            setModels(list);
-            if (list.length > 0) {
-                setSelectedModel((prev) => (prev && list.includes(prev) ? prev : list[0]));
-            }
-        });
+        let cancelled = false;
+        aiAssistantService.getModels()
+            .then((list) => {
+                if (cancelled) return;
+                setModels(list);
+                if (list.length > 0) {
+                    setSelectedModel((prev) => (prev && list.includes(prev) ? prev : list[0]));
+                }
+            })
+            .catch(() => {
+                if (!cancelled && addTruthAlert) {
+                    addTruthAlert('error', 'Could not load AI models.', null);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     useEffect(() => {

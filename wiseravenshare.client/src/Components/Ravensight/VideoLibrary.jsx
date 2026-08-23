@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { FaTrash, FaEdit, FaYoutube, FaEye, FaThumbsUp, FaComment, FaCalendar, FaSearch, FaVideo } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
+import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { normalizeVideoRecord, getMergedLocalVideos, mergeVideoRecords, removeLocalVideo, upsertLocalVideo, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 
 const getVideoIdentity = (video) => String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
