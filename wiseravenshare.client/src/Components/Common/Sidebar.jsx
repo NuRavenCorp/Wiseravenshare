@@ -30,7 +30,13 @@ const normalizeConnection = (connection, platform) => {
         ? (username ? `https://www.facebook.com/${username}` : '')
         : platform === 'instagram'
             ? (username ? `https://www.instagram.com/${username}` : '')
-            : (username ? `https://www.tiktok.com/@${username}` : '');
+            : platform === 'youtube'
+                ? (username ? `https://www.youtube.com/@${username}` : '')
+                : platform === 'twitter'
+                    ? (username ? `https://twitter.com/${username}` : '')
+                    : platform === 'linkedin'
+                        ? (username ? `https://www.linkedin.com/in/${username}` : '')
+                        : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(connection?.enabled),
@@ -53,7 +59,10 @@ const hasConfiguredFeeds = (feeds) => {
     const entries = [
         getConnection(source, 'facebook', 'Facebook'),
         getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
-        getConnection(source, 'instagram', 'Instagram')
+        getConnection(source, 'instagram', 'Instagram'),
+        getConnection(source, 'youtube', 'YouTube'),
+        getConnection(source, 'twitter', 'Twitter'),
+        getConnection(source, 'linkedin', 'LinkedIn')
     ];
 
     return entries.some((connection) => {
