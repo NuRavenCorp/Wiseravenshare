@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
+    public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -231,5 +232,20 @@ public class AppDbContext : DbContext
         });
 
         modelBuilder.Entity<AgentEvolution>();
+
+        modelBuilder.Entity<SocialCrossPost>(entity =>
+        {
+            entity.ToTable("SocialCrossPosts");
+            entity.Property(c => c.Platform).HasMaxLength(30);
+            entity.Property(c => c.Status).HasMaxLength(20);
+            entity.Property(c => c.ErrorMessage).HasColumnType("text");
+            entity.HasIndex(c => new { c.PostId, c.Platform }).IsUnique();
+            entity.HasIndex(c => c.UserId);
+
+            entity.HasOne(c => c.Post)
+                .WithMany()
+                .HasForeignKey(c => c.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

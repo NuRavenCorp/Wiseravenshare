@@ -1,4 +1,4 @@
-﻿// Wiseravenshare.Server/Infrastructure/Data/Repositories/IRepository.cs
+// Wiseravenshare.Server/Infrastructure/Data/Repositories/IRepository.cs
 using System.Linq.Expressions;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Services.Truth;
@@ -98,4 +98,13 @@ public interface IAgentRepository : IRepository<AIAgent>
     Task<decimal> GetAveragePerformanceScoreAsync();
     Task<IEnumerable<AgentEvolution>> GetAllEvolutionsAsync();
     Task AddEvolutionAsync(AgentEvolution evolution);
+}
+
+// Wiseravenshare.Core/Interfaces/Repositories/ISocialCrossPostRepository.cs
+public interface ISocialCrossPostRepository : IRepository<SocialCrossPost>
+{
+    Task<IEnumerable<SocialCrossPost>> GetByPostIdAsync(Guid postId);
+    Task<IEnumerable<SocialCrossPost>> GetByUserIdAsync(Guid userId, int page = 1, int pageSize = 50);
+    Task<SocialCrossPost?> GetByPostAndPlatformAsync(Guid postId, string platform);
+    Task UpsertAsync(SocialCrossPost crossPost);
 }

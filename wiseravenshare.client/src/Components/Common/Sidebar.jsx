@@ -119,6 +119,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
         { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
+        { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
         { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
         { id: 'profile', icon: 'fas fa-user', label: 'Profile' }

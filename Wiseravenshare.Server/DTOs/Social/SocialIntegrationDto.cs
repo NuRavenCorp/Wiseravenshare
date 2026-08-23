@@ -116,3 +116,25 @@ public class FacebookLongLivedTokenResultDto
     public long? ExpiresIn { get; set; }
     public string? Error { get; set; }
 }
+/// <summary>
+/// DTO used when creating a new post/tweet on X.
+/// </summary>
+public class XPostCreationRequestDto
+{
+    public string TweetText { get; set; }
+
+
+    /// <summary>
+    /// Optional URL to attach to the tweet.
+    /// </summary>
+    public string MediaUrl { get; set; }
+
+    /// <summary>
+    /// The ID of the user associated with the tweet (if posting on behalf of another).
+    /// </summary>
+    public string UserId { get; set; }
+    public string Profile { get; set; }
+    public string AccessToken { get; set; }
+    public string Posts { get; set; } 
+    public string Notifications { get; set; }
+}

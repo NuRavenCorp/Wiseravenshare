@@ -4,6 +4,7 @@ import Sidebar from './Components/Common/Sidebar';
 import RightSidebar from './Components/Common/RightSidebar';
 import TruthAlert from './Components/Common/TruthAlert';
 import FeedPage from './Pages/FeedPage';
+import AiAssistantPage from './Pages/AiAssistantPage';
 import DiscoverPage from './Pages/DiscoverPage';
 import BookmarksPage from './Pages/BookmarksPage';
 import MessagesPage from './Pages/MessagesPage';
@@ -311,6 +312,8 @@ const App = () => {
                 return <PlannerPage />;
             case 'truthseeker':
                 return <TruthSeeker />;
+            case 'ai-assistant':
+                return <AiAssistantPage addTruthAlert={addTruthAlert} />;
             case 'ainews':
                 return <AINews onOpenArticle={(article) => openArticle(article, 'ainews')} />;
             case 'breakingnews':
