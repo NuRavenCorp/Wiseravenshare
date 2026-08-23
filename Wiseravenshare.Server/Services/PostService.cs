@@ -6,6 +6,9 @@ using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.DTOs.User;
+using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.DTOs.Social;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -33,6 +36,7 @@ public class PostService : IPostService
     private readonly IUserRepository _userRepository;
     private readonly ITruthService _truthService;
     private readonly ISocialPublishDispatcher _socialPublishDispatcher;
+    private readonly ICrossPlatformPublishService _crossPlatformPublishService;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -40,12 +44,14 @@ public class PostService : IPostService
         IUserRepository userRepository,
         ITruthService truthService,
         ISocialPublishDispatcher socialPublishDispatcher,
+        ICrossPlatformPublishService crossPlatformPublishService,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
         _userRepository = userRepository;
         _truthService = truthService;
         _socialPublishDispatcher = socialPublishDispatcher;
+        _crossPlatformPublishService = crossPlatformPublishService;
         _logger = logger;
     }
 
@@ -151,6 +157,7 @@ public class PostService : IPostService
             persisted = true;
             _logger.LogInformation("Post created by user {UserId}", userId);
             DispatchSocialPublish(post);
+            DispatchCrossPlatformPublish(post);
         }
         catch (Exception ex)
         {
@@ -190,6 +197,41 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Post could not be reloaded after creation for user {UserId}; returning the local fallback DTO.", userId);
             return BuildPostDto(post, user);
         }
+    }
+
+    /// <summary>
+    /// Fire-and-forget fan-out of a new post to all configured external
+    /// platforms via the cross-platform publisher adapters. Never blocks or
+    /// fails post creation.
+    /// </summary>
+    private void DispatchCrossPlatformPublish(Post post)
+    {
+        var mediaUrl = ResolveMediaUrl(post);
+        var mediaType = post.Type switch
+        {
+            PostType.Video => "video",
+            PostType.Image => "photo",
+            _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
+        };
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _crossPlatformPublishService.PublishAsync(post.UserId, new CrossPlatformPublishRequest
+                {
+                    PostId = post.Id,
+                    Message = post.Content ?? string.Empty,
+                    MediaUrl = string.IsNullOrWhiteSpace(mediaUrl) ? null : mediaUrl,
+                    MediaType = mediaType
+                    // Platforms omitted -> fans out to every configured platform.
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cross-platform publish task failed for post {PostId}.", post.Id);
+            }
+        });
     }
 
     private void DispatchSocialPublish(Post post)
@@ -615,3 +657,5 @@ public class PostService : IPostService
         };
     }
 }
+
+

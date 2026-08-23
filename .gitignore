@@ -42,3 +42,6 @@ Thumbs.db
 # Python caches
 __pycache__/
 *.pyc
+
+# Local scratch / review files
+gemma_review*.txt
