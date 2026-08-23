@@ -666,6 +666,62 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.ToTable("PostReposts", "app_data");
                 });
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.SocialCrossPost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalPostId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalPostUrl")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("PostId", "Platform")
+                        .IsUnique();
+
+                    b.ToTable("SocialCrossPosts", "app_data");
+                });
+
             modelBuilder.Entity("Wiseravenshare.Server.Entities.TruthClaim", b =>
                 {
                     b.Property<Guid>("Id")
@@ -837,15 +893,13 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("AvatarUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
+                        .HasColumnType("text");
 
                     b.Property<string>("Bio")
                         .HasColumnType("text");
 
                     b.Property<string>("CoverPhotoUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1396,6 +1450,17 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                         .HasForeignKey("PostId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.SocialCrossPost", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.Post", "Post")
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Post");
                 });
 
             modelBuilder.Entity("Wiseravenshare.Server.Entities.TruthClaim", b =>

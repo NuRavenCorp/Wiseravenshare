@@ -32,17 +32,20 @@ public class PostService : IPostService
     private readonly IPostRepository _postRepository;
     private readonly IUserRepository _userRepository;
     private readonly ITruthService _truthService;
+    private readonly ISocialPublishDispatcher _socialPublishDispatcher;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
         IPostRepository postRepository,
         IUserRepository userRepository,
         ITruthService truthService,
+        ISocialPublishDispatcher socialPublishDispatcher,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
         _userRepository = userRepository;
         _truthService = truthService;
+        _socialPublishDispatcher = socialPublishDispatcher;
         _logger = logger;
     }
 
@@ -147,6 +150,7 @@ public class PostService : IPostService
             await _postRepository.AddAsync(post);
             persisted = true;
             _logger.LogInformation("Post created by user {UserId}", userId);
+            DispatchSocialPublish(post);
         }
         catch (Exception ex)
         {
@@ -186,6 +190,31 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Post could not be reloaded after creation for user {UserId}; returning the local fallback DTO.", userId);
             return BuildPostDto(post, user);
         }
+    }
+
+    private void DispatchSocialPublish(Post post)
+    {
+        // Trigger (checklist step 1): notify the middleware asynchronously so
+        // it can download -> optimize -> publish to Facebook without blocking.
+        var mediaUrl = ResolveMediaUrl(post);
+        var mediaType = post.Type switch
+        {
+            PostType.Video => "video",
+            PostType.Image => "photo",
+            _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
+        };
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _socialPublishDispatcher.DispatchAsync(post.Id, post.Content ?? string.Empty, mediaUrl, mediaType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Social publish dispatch task failed for post {PostId}.", post.Id);
+            }
+        });
     }
 
     public async Task<PostDto> UpdatePostAsync(Guid userId, Guid postId, UpdatePostDto dto)

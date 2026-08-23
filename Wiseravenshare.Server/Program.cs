@@ -7,6 +7,8 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.AiAssistant;
 using Wiseravenshare.Server.Infrastructure.Data.Repositories;
 using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
@@ -759,6 +761,19 @@ builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
+builder.Services.AddHttpClient("SocialPublish");
+builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();
+// Cross-platform publishing: one publisher per platform + orchestrator + repository.
+builder.Services.AddHttpClient<ICrossPlatformPublisher, FacebookPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, InstagramPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, TikTokPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, TwitterPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
+builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
+builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
+builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
+// AI assistant (local Ollama backend).
+builder.Services.AddHttpClient<IOllamaChatService, OllamaChatService>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
@@ -1214,3 +1229,5 @@ ORDER BY ""MigrationId"";";
 });
 
 app.Run();
+
+
