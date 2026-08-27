@@ -14,6 +14,8 @@ using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Hubs;
+using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.CrossPlatform;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -646,6 +648,90 @@ FOR EACH ROW EXECUTE FUNCTION app_data.set_updated_at_timestamp();";
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureCrossPlatformTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.bridge_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL UNIQUE,
+    platform VARCHAR(50) NOT NULL,
+    external_user_id VARCHAR(255) NOT NULL,
+    session_data JSONB,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_activity TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE,
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.collaboration_rooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id VARCHAR(255) NOT NULL UNIQUE,
+    room_name VARCHAR(255) NOT NULL,
+    owner_id UUID NULL,
+    platform VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.room_participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id VARCHAR(255) NOT NULL,
+    user_id UUID NULL,
+    external_user_id VARCHAR(255),
+    platform VARCHAR(50),
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    left_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE,
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.bridge_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    source VARCHAR(50) NOT NULL,
+    target VARCHAR(50) NOT NULL,
+    message_type VARCHAR(50) NOT NULL,
+    content TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    processed_at TIMESTAMPTZ,
+    is_processed BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS app_data.file_transfers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transfer_id VARCHAR(255) NOT NULL UNIQUE,
+    room_id VARCHAR(255) NOT NULL,
+    user_id UUID NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    file_type VARCHAR(100) NOT NULL,
+    file_url TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    chunk_count INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_bridge_sessions_platform_user
+    ON app_data.bridge_sessions (platform, external_user_id);
+CREATE INDEX IF NOT EXISTS idx_room_participants_room
+    ON app_data.room_participants (room_id, is_active);";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 // ── Configuration ────────────────────────────────────────────────────────────
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
@@ -738,6 +824,8 @@ builder.Services.AddOutputCache(options =>
 });
 
 builder.Services.AddSignalR();
+// Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
+builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
         npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
@@ -788,6 +876,11 @@ builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>(
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
+// Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IBadgeService, Wiseravenshare.Server.Services.Currency.BadgeService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService, Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>() as Wiseravenshare.Server.Services.Currency.CurrencyAgentService ?? throw new InvalidOperationException("CurrencyAgentService must be registered as the concrete hosted service"));
 builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
@@ -914,6 +1007,26 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogError(ex, "Bucket registry table verification failed during startup.");
+    }
+
+    try
+    {
+        await EnsureCrossPlatformTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Cross-platform collaboration tables bootstrap failed during startup.");
+    }
+
+    // Seed default badge catalog (badge-first currency system)
+    try
+    {
+        var badgeService = scope.ServiceProvider.GetRequiredService<Wiseravenshare.Server.Services.Currency.IBadgeService>();
+        await badgeService.SeedDefaultBadgesAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Badge catalog seeding failed during startup.");
     }
 
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
@@ -1053,6 +1166,7 @@ app.MapControllers();
 app.MapHub<EvolutionHub>("/api/hubs/evolution");
 app.MapHub<NotificationHub>("/api/hubs/notifications");
 app.MapHub<MessageHub>("/api/hubs/messages");
+app.MapHub<CrossPlatformCollaborationHub>("/api/hubs/collaboration");
 
 if (frontendDistExists)
 {

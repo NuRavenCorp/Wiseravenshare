@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Entities.Currency;
 
 namespace Wiseravenshare.Server.Infrastructure.Data;
 
@@ -24,10 +25,20 @@ public class AppDbContext : DbContext
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
     public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
+    public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
+    public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
+    public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
+    public DbSet<Badge> Badges => Set<Badge>();
+    public DbSet<UserBadge> UserBadges => Set<UserBadge>();
+    public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();
+    public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
+    public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.ConfigureCurrency();
 
         modelBuilder.HasDefaultSchema("app_data");
 

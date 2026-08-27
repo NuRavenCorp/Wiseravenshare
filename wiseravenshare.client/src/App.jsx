@@ -25,6 +25,8 @@ import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
 import CanvasPage from './Pages/CanvasPage';
+import CollaborationPage from './Pages/CollaborationPage';
+import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
@@ -355,6 +357,12 @@ const App = () => {
                 return <AmateurJournalistPage onNavigate={setCurrentPage} />;
             case 'canvas':
                 return <CanvasPage onNavigate={setCurrentPage} />;
+            case 'collaboration':
+                return (
+                    <ErrorBoundary>
+                        <CollaborationPage />
+                    </ErrorBoundary>
+                );
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             case 'terms':
@@ -382,6 +390,7 @@ const App = () => {
         { id: 'newsroom-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', label: 'Amateur Journalist' },
         { id: 'canvas', label: 'Canvas Studio' },
+        { id: 'collaboration', label: 'Collaborate' },
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'profile', label: 'Profile' }

@@ -147,7 +147,7 @@ public class CrossPlatformPublishService : ICrossPlatformPublishService
     }
 
     private  SocialCrossPostDto Map(SocialCrossPost c) => new()
-    {static
+    {
         Id = c.Id,
         Platform = c.Platform,
         Status = c.Status,
