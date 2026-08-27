@@ -250,5 +250,3 @@ public class InstagramPublisher : FacebookPublisher
 }
 
 
-
-
