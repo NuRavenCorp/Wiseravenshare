@@ -15,12 +15,14 @@ public class WiseCoinController : ControllerBase
 {
     private readonly IWiseCoinService _wiseCoinService;
     private readonly IBadgeService _badgeService;
+    private readonly ILedgerHashService _ledger;
     private readonly ILogger<WiseCoinController> _logger;
 
-    public WiseCoinController(IWiseCoinService wiseCoinService, IBadgeService badgeService, ILogger<WiseCoinController> logger)
+    public WiseCoinController(IWiseCoinService wiseCoinService, IBadgeService badgeService, ILedgerHashService ledger, ILogger<WiseCoinController> logger)
     {
         _wiseCoinService = wiseCoinService;
         _badgeService = badgeService;
+        _ledger = ledger;
         _logger = logger;
     }
 
@@ -73,6 +75,47 @@ public class WiseCoinController : ControllerBase
     [HttpGet("valuation")]
     [AllowAnonymous]
     public async Task<IActionResult> GetValuation() => Ok(await _wiseCoinService.GetCurrentValuationAsync());
+
+    // === Ledger integrity (tamper-evident hash chain) ===
+
+    /// <summary>Verifies the hash chain over the most recent transactions.
+    /// Returns whether the ledger is intact and, if not, the first broken row.</summary>
+    [HttpGet("ledger/verify")]
+    public async Task<IActionResult> VerifyLedger([FromQuery] int count = 500)
+    {
+        var result = await _ledger.VerifyRecentAsync(Math.Clamp(count, 10, 5000));
+        var anchor = await _ledger.GetLatestAnchorAsync();
+        return Ok(new
+        {
+            result.IsValid,
+            result.TransactionsChecked,
+            result.BrokenAtTransactionId,
+            result.Detail,
+            latestAnchor = anchor is null ? null : new { anchor.ChainHeadHash, anchor.AnchoredUtc, anchor.Note }
+        });
+    }
+
+    /// <summary>Returns the current chain head hash and the latest stored anchor.</summary>
+    [HttpGet("ledger/head")]
+    public async Task<IActionResult> GetLedgerHead()
+    {
+        var head = await _ledger.GetChainHeadAsync();
+        var anchor = await _ledger.GetLatestAnchorAsync();
+        return Ok(new
+        {
+            head,
+            anchored = anchor is not null && anchor.ChainHeadHash == head,
+            latestAnchor = anchor is null ? null : new { anchor.ChainHeadHash, anchor.AnchoredUtc, anchor.Note }
+        });
+    }
+
+    /// <summary>Stores the current chain head as an anchor snapshot (admin/integrity tool).</summary>
+    [HttpPost("ledger/anchor")]
+    public async Task<IActionResult> AnchorLedger([FromBody] AnchorRequest request)
+    {
+        var anchor = await _ledger.AnchorAsync(request.Note ?? "Manual anchor");
+        return Ok(new { anchor.Id, anchor.ChainHeadHash, anchor.AnchoredUtc, anchor.Note });
+    }
 
     /// <summary>Transfer WSC to another user.</summary>
     [HttpPost("transfer")]
@@ -204,4 +247,9 @@ public class EvolveBadgeRequest
 {
     public Guid SourceBadgeId { get; set; }
     public Guid TargetBadgeId { get; set; }
+}
+
+public class AnchorRequest
+{
+    public string? Note { get; set; }
 }
