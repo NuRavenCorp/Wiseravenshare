@@ -55,6 +55,63 @@ export const aiAssistantService = {
             }
             return { success: false, reply: '', error: 'The AI assistant is unavailable right now.' };
         }
+    },
+
+    /**
+     * Streams a chat reply via SSE. Calls onToken(fragment) for each delta.
+     * Returns the full concatenated reply, or throws on failure.
+     */
+    chatStream: async (message, history = [], model = null, onToken = () => {}, signal = null) => {
+        const base = resolveBase();
+        const token = getAuthToken();
+        const response = await fetch(`${base}/aiassistant/chat/stream`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ message, history, ...(model ? { model } : {}) }),
+            signal: signal || undefined
+        });
+
+        if (!response.ok || !response.body) {
+            if (response.status === 401 || response.status === 403) {
+                throw new Error('Please sign in to use the AI assistant.');
+            }
+            throw new Error('The AI assistant is unavailable right now.');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let full = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const events = buffer.split('\n\n');
+            buffer = events.pop() ?? '';
+
+            for (const evt of events) {
+                const line = evt.split('\n').find((l) => l.startsWith('data:'));
+                if (!line) continue;
+                const data = line.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                    const fragment = JSON.parse(data);
+                    if (fragment) {
+                        full += fragment;
+                        onToken(fragment);
+                    }
+                } catch {
+                    // Ignore malformed frames.
+                }
+            }
+        }
+
+        return full;
     }
 };
 

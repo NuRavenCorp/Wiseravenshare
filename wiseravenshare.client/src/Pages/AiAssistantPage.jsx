@@ -17,9 +17,11 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     ]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const [streaming, setStreaming] = useState(false);
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState('');
     const scrollRef = useRef(null);
+    const abortRef = useRef(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -59,26 +61,71 @@ const AiAssistantPage = ({ addTruthAlert }) => {
         setMessages((prev) => [...prev, { role: 'user', content: message }]);
         setInput('');
         setLoading(true);
+        setStreaming(true);
+
+        const controller = new AbortController();
+        abortRef.current = controller;
 
         try {
-            const result = await aiAssistantService.chat(message, history, selectedModel || null);
-            if (result?.success) {
-                setMessages((prev) => [...prev, { role: 'assistant', content: result.reply }]);
-            } else {
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    content: result?.error || 'Sorry, something went wrong. Please try again.'
-                }]);
+            let acc = '';
+            setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+            await aiAssistantService.chatStream(
+                message,
+                history,
+                selectedModel || null,
+                (fragment) => {
+                    acc += fragment;
+                    setMessages((prev) => {
+                        const next = [...prev];
+                        next[next.length - 1] = { role: 'assistant', content: acc };
+                        return next;
+                    });
+                },
+                controller.signal
+            );
+            if (!acc.trim()) {
+                setMessages((prev) => {
+                    const next = [...prev];
+                    next[next.length - 1] = {
+                        role: 'assistant',
+                        content: 'Sorry, the assistant returned an empty reply. Please try again.'
+                    };
+                    return next;
+                });
             }
-        } catch {
-            setMessages((prev) => [...prev, {
-                role: 'assistant',
-                content: 'Sorry, the assistant is unavailable right now.'
-            }]);
-            if (addTruthAlert) addTruthAlert('error', 'AI assistant request failed.', null);
+        } catch (err) {
+            const aborted = err?.name === 'AbortError';
+            setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === 'assistant' && !last.content) {
+                    next[next.length - 1] = {
+                        role: 'assistant',
+                        content: aborted
+                            ? '(stopped)'
+                            : err?.message || 'Sorry, the assistant is unavailable right now.'
+                    };
+                }
+                return next;
+            });
+            if (!aborted && addTruthAlert) addTruthAlert('error', 'AI assistant request failed.', null);
         } finally {
             setLoading(false);
+            setStreaming(false);
+            abortRef.current = null;
         }
+    };
+
+    const stop = () => abortRef.current?.abort();
+
+    const clearConversation = () => {
+        if (loading) return;
+        setMessages([
+            {
+                role: 'assistant',
+                content: "Hi! I'm the Wiseravenshare Assistant. Ask me anything about posting, cross-sharing, or using the platform."
+            }
+        ]);
     };
 
     const handleKeyDown = (event) => {
@@ -97,25 +144,61 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         Your in-app AI helper for platform questions and support.
                     </div>
                 </div>
-                {models.length > 0 && (
-                    <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        style={{
-                            background: 'rgba(17,24,39,0.7)',
-                            color: 'var(--text-color)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '8px',
-                            padding: '6px 10px',
-                            fontSize: '12px'
-                        }}
-                        aria-label="AI model"
-                    >
-                        {models.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                        ))}
-                    </select>
-                )}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {models.length > 0 && (
+                        <select
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value)}
+                            style={{
+                                background: 'rgba(17,24,39,0.7)',
+                                color: 'var(--text-color)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '8px',
+                                padding: '6px 10px',
+                                fontSize: '12px'
+                            }}
+                            aria-label="AI model"
+                        >
+                            {models.map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                            ))}
+                        </select>
+                    )}
+                    {streaming && (
+                        <button
+                            type="button"
+                            onClick={stop}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(220,38,38,0.15)',
+                                color: '#f87171',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            ■ Stop
+                        </button>
+                    )}
+                    {!streaming && messages.length > 1 && (
+                        <button
+                            type="button"
+                            onClick={clearConversation}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(17,24,39,0.7)',
+                                color: 'var(--text-color)',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            ⟲ New chat
+                        </button>
+                    )}
+                </div>
             </div>
 
             <div
@@ -150,12 +233,13 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         {msg.content}
                     </div>
                 ))}
-                {loading && (
+                {streaming && (
                     <div style={{ alignSelf: 'flex-start', fontSize: '13px', color: 'var(--light-color)' }}>
-                        Raven Assistant is thinking…
+                        <span style={{ display: 'inline-block', animation: 'wr-blink 1s steps(1) infinite' }}>▍</span>
                     </div>
                 )}
             </div>
+            <style>{'@keyframes wr-blink { 50% { opacity: 0; } }'}</style>
 
             {messages.length <= 1 && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>

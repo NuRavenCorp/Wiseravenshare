@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Wiseravenshare.Server.DTOs.Collaboration;
+using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Enums;

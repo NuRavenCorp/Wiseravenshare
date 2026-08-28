@@ -1,5 +1,5 @@
-// Wiseravenshare.Server/Entities/Collaboration/ProjectContent.cs
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using Wiseravenshare.Server.Enums;
 using System.Text.Json;
 using Wiseravenshare.Server.Entities;
 

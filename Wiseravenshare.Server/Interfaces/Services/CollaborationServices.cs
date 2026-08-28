@@ -1,6 +1,8 @@
-// Wiseravenshare.Server/Interfaces/Services/CollaborationServices.cs
+﻿// Wiseravenshare.Server/Interfaces/Services/CollaborationServices.cs
 using Wiseravenshare.Server.DTOs.Collaboration;
 using Wiseravenshare.Server.Entities.Collaboration;
+using Wiseravenshare.Server.Enums;
+using Wiseravenshare.Server.Services.Publishing;
 
 namespace Wiseravenshare.Server.Interfaces.Services;
 

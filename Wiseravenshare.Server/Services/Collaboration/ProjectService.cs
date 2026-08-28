@@ -1,6 +1,7 @@
 // Wiseravenshare.Server/Services/Collaboration/ProjectService.cs
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.DTOs.Collaboration;
+using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Enums;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Interfaces.Repositories;
@@ -398,7 +399,7 @@ public class ProjectService : IProjectService
             throw new UnauthorizedException("You don't have permission to update this content");
 
         // Snapshot previous version for history
-        await _contentRepository.AddAsync(new ProjectContentVersion
+        await _contentRepository.AddVersionAsync(new ProjectContentVersion
         {
             ContentId = content.Id,
             VersionNumber = content.Version,
