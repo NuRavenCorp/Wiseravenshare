@@ -32,6 +32,7 @@ public class AppDbContext : DbContext
     public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
     public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
     public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
+    public DbSet<Wiseravenshare.Server.Services.Currency.LedgerAnchor> LedgerAnchors => Set<Wiseravenshare.Server.Services.Currency.LedgerAnchor>();
     public DbSet<Badge> Badges => Set<Badge>();
     public DbSet<UserBadge> UserBadges => Set<UserBadge>();
     public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();

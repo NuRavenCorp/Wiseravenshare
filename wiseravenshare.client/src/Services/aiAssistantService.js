@@ -112,6 +112,59 @@ export const aiAssistantService = {
         }
 
         return full;
+    },
+
+    /**
+     * Runs a fire-and-poll AI generation through the background job queue
+     * (captions, hashtags, drafts — bursty creator features).
+     * Returns { success, reply, model, error? } when the job completes.
+     * pollMs: poll interval, timeoutMs: give up point.
+     */
+    generate: async (message, history = [], model = null, { pollMs = 1200, timeoutMs = 120000 } = {}) => {
+        try {
+            const enqueue = await client.post('/aiassistant/jobs', {
+                message,
+                history,
+                ...(model ? { model } : {})
+            });
+
+            const job = enqueue?.data;
+            // Cached jobs come back already Succeeded with the reply inline.
+            if (job?.status === 'Succeeded') {
+                return { success: true, reply: job.reply ?? '', model: job.model ?? model };
+            }
+            if (job?.status === 'Failed') {
+                return { success: false, reply: '', error: job.error || 'AI generation failed.' };
+            }
+
+            const jobId = job?.jobId;
+            if (!jobId) {
+                return { success: false, reply: '', error: 'Could not start AI generation.' };
+            }
+
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, pollMs));
+                const poll = await client.get(`/aiassistant/jobs/${jobId}`);
+                const snap = poll?.data;
+                if (snap?.status === 'Succeeded') {
+                    return { success: true, reply: snap.reply ?? '', model: snap.model ?? model };
+                }
+                if (snap?.status === 'Failed') {
+                    return { success: false, reply: '', error: snap.error || 'AI generation failed.' };
+                }
+            }
+            return { success: false, reply: '', error: 'AI generation timed out — please try again.' };
+        } catch (error) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                return { success: false, reply: '', error: 'Please sign in to use AI features.' };
+            }
+            if (status === 404) {
+                return { success: false, reply: '', error: 'AI generation expired — please try again.' };
+            }
+            return { success: false, reply: '', error: 'AI features are unavailable right now.' };
+        }
     }
 };
 

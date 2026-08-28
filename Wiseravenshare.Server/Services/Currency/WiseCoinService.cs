@@ -46,6 +46,7 @@ public class WiseCoinService : IWiseCoinService
     private readonly IBadgeService _badgeService;
     private readonly IMemoryCache _cache;
     private readonly ILogger<WiseCoinService> _logger;
+    private readonly ILedgerHashService _ledger;
 
     private const decimal INITIAL_WSC_PER_HOUR = 10m;
     private const decimal MINIMUM_WAGE_REFERENCE = 15.00m;
@@ -60,7 +61,8 @@ public class WiseCoinService : IWiseCoinService
         IRepository<WorkHourValuation> valuationRepository,
         IBadgeService badgeService,
         IMemoryCache cache,
-        ILogger<WiseCoinService> logger)
+        ILogger<WiseCoinService> logger,
+        ILedgerHashService ledgerHashService)
     {
         _walletRepository = walletRepository;
         _transactionRepository = transactionRepository;
@@ -69,6 +71,7 @@ public class WiseCoinService : IWiseCoinService
         _badgeService = badgeService;
         _cache = cache;
         _logger = logger;
+        _ledger = ledgerHashService;
     }
 
     public async Task<WiseCoin> GetOrCreateWalletAsync(Guid userId)
@@ -116,10 +119,10 @@ public class WiseCoinService : IWiseCoinService
         wallet.Balance += rewardAmount;
         wallet.TotalEarned += rewardAmount;
 
+        // Badge-first: check milestone badges after every earn
+        await _ledger.StampChainAsync(transaction);
         await _transactionRepository.AddAsync(transaction);
         await _walletRepository.UpdateAsync(wallet);
-
-        // Badge-first: check milestone badges after every earn
         await _badgeService.CheckAndAwardMilestoneBadgesAsync(userId);
 
         _cache.Remove($"wallet_balance_{userId}");
@@ -152,10 +155,10 @@ public class WiseCoinService : IWiseCoinService
         wallet.Balance -= amount;
         wallet.TotalSpent += amount;
 
+        // Deflationary burn of the fee
+        await _ledger.StampChainAsync(transaction);
         await _transactionRepository.AddAsync(transaction);
         await _walletRepository.UpdateAsync(wallet);
-
-        // Deflationary burn of the fee
         if (fee > 0)
             await BurnWSCAsync(null, fee, "Transaction fee burn");
 
@@ -182,22 +185,27 @@ public class WiseCoinService : IWiseCoinService
         fromWallet.Balance -= amount;
         toWallet.Balance += netAmount;
 
+        var transferFrom = new CoinTransaction
+        {
+            UserId = fromUserId, TargetUserId = toUserId, Type = TransactionType.Transfer,
+            Amount = amount, Fee = fee, NetAmount = netAmount,
+            Description = message ?? "Transfer", Status = TransactionStatus.Completed,
+            CompletedAt = DateTime.UtcNow, WorkHourRate = fromWallet.CurrentValuePerHour
+        };
+        var transferTo = new CoinTransaction
+        {
+            UserId = toUserId, TargetUserId = fromUserId, Type = TransactionType.Transfer,
+            Amount = netAmount, Fee = 0, NetAmount = netAmount,
+            Description = "Received transfer", Status = TransactionStatus.Completed,
+            CompletedAt = DateTime.UtcNow, WorkHourRate = toWallet.CurrentValuePerHour
+        };
+
+        await _ledger.StampChainAsync(transferFrom);
+        await _ledger.StampChainAsync(transferTo);
         await _transactionRepository.AddRangeAsync(new[]
         {
-            new CoinTransaction
-            {
-                UserId = fromUserId, TargetUserId = toUserId, Type = TransactionType.Transfer,
-                Amount = amount, Fee = fee, NetAmount = netAmount,
-                Description = message ?? "Transfer", Status = TransactionStatus.Completed,
-                CompletedAt = DateTime.UtcNow, WorkHourRate = fromWallet.CurrentValuePerHour
-            },
-            new CoinTransaction
-            {
-                UserId = toUserId, TargetUserId = fromUserId, Type = TransactionType.Transfer,
-                Amount = netAmount, Fee = 0, NetAmount = netAmount,
-                Description = $"Received transfer", Status = TransactionStatus.Completed,
-                CompletedAt = DateTime.UtcNow, WorkHourRate = toWallet.CurrentValuePerHour
-            }
+            transferFrom,
+            transferTo
         });
         await _walletRepository.UpdateAsync(fromWallet);
         await _walletRepository.UpdateAsync(toWallet);
@@ -386,6 +394,7 @@ public class WiseCoinService : IWiseCoinService
             _cache.Remove($"wallet_balance_{userId}");
         }
 
+        await _ledger.StampChainAsync(transaction);
         await _transactionRepository.AddAsync(transaction);
         _logger.LogInformation("Burned {Amount} WSC: {Reason}", amount, reason);
         return true;

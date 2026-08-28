@@ -24,36 +24,32 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      ai:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:10000
-      CLIENT_ORIGIN: http://localhost:5173
+      CLIENT_ORIGIN: http://localhost:5173,http://localhost:4188,http://localhost:4173
       # We tell ASP.NET that it is running behind a proxy, enabling ForwardedHeaders automatically
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=wiseravenshare-db;Username=wiseravenshare_user;Password=CHANGE_ME;SSL Mode=Disable;Trust Server Certificate=true
-      # AI assistant backend: inside this compose network we talk to the ai container directly.
-      # On DigitalOcean (or any split deployment) override with e.g. http://<droplet-ip>:3000
+      # AI assistant backend: Ollama container inside the compose network only.
+      # No host port is published — UIs reach it exclusively through the API.
       Ollama__BaseUrl: http://ai:11434
       Ollama__DefaultModel: llama3.2
     ports:
       - "10000:10000"
-    depends_on:
-      db:
-        condition: service_healthy
-      ai:
-        condition: service_started
 
-  # AI container (Ollama). Published on host port 3000 as requested.
-  # When deployed to DigitalOcean, open port 3000 in the droplet firewall
-  # (doctl compute firewall add-rules ... --port 3000) or keep it internal.
+  # AI container (Ollama). Internal-only: no host port published, so the only
+  # way to reach it is from inside this compose network (the api container).
+  # Front-end UIs talk to Ollama indirectly via the api's /api/aiassistant/*
+  # endpoints. To expose it on a host port, add e.g. ports: ["11435:11434"].
   ai:
     image: ollama/ollama:latest
     container_name: wiseravenshare-ai
     restart: unless-stopped
     volumes:
       - wiseravenshare-ollama-models:/root/.ollama
-    ports:
-      - "3000:11434"
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
     healthcheck:

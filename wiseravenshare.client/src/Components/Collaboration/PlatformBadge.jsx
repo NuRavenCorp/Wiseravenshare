@@ -3,8 +3,9 @@
 // Uses FaTiktok etc. from react-icons/fa — already part of the react-icons dependency.
 
 import React from 'react';
-import { FiGlobe, FiVideo } from 'react-icons/fi';
+import { FiGlobe, FiVideo, FiExternalLink } from 'react-icons/fi';
 import { FaTiktok, FaFacebook, FaInstagram, FaTwitter } from 'react-icons/fa';
+import { getPlatformSpecificUrl } from '../../utils/platformDetector.js';
 
 const PLATFORM_CONFIGS = {
     tiktok: { Icon: FaTiktok, color: '#000', label: 'TikTok' },
@@ -27,8 +28,38 @@ export const PlatformBadge = ({ platform = 'web', size = 'sm', showLabel = true,
     const config = PLATFORM_CONFIGS[String(platform || 'web').toLowerCase()] || PLATFORM_CONFIGS.web;
     const sizes = SIZE_STYLES[size] || SIZE_STYLES.sm;
 
+    // In a social-media webview the badge becomes an "open full site" button:
+    // webviews block popups, clipboard and storage — the real browser works.
+    const isWebview = typeof navigator !== 'undefined'
+        && /webview|wv;|FBAN|FB_IAB|FBAV|Instagram|TikTok/i.test(navigator.userAgent);
+    const openFullSite = () => {
+        if (typeof window === 'undefined') return;
+        const url = getPlatformSpecificUrl(platform, '/?openInBrowser=1');
+        try { window.open(url, '_blank'); } catch { /* webview popup blocked */ }
+    };
+
+    if (isWebview && platform !== 'web') {
+        return (
+            <button
+                type="button"
+                onClick={openFullSite}
+                title={`Open the full site in your browser (${config.label} webviews block some features)`}
+                style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    borderRadius: '999px', background: config.color, color: '#fff',
+                    border: 'none', cursor: 'pointer', ...sizes, ...style
+                }}
+            >
+                <config.Icon size={sizes.iconSize} />
+                {showLabel && <span>{config.label}</span>}
+                <FiExternalLink size={sizes.iconSize} />
+            </button>
+        );
+    }
+
     return (
         <span
+            title={`Platform: ${config.label}`}
             style={{
                 display: 'inline-flex',
                 alignItems: 'center',

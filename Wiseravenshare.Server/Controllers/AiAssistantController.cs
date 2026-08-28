@@ -12,11 +12,13 @@ namespace Wiseravenshare.Server.Controllers;
 public class AiAssistantController : ControllerBase
 {
     private readonly IOllamaChatService _chatService;
+    private readonly IAiJobQueue _jobQueue;
     private readonly ILogger<AiAssistantController> _logger;
 
-    public AiAssistantController(IOllamaChatService chatService, ILogger<AiAssistantController> logger)
+    public AiAssistantController(IOllamaChatService chatService, IAiJobQueue jobQueue, ILogger<AiAssistantController> logger)
     {
         _chatService = chatService;
+        _jobQueue = jobQueue;
         _logger = logger;
     }
 
@@ -70,5 +72,42 @@ public class AiAssistantController : ControllerBase
         }
 
         await Response.WriteAsync("data: [DONE]\n\n", ct);
+    }
+
+    // ---- Background AI jobs (queue + poll) — for bursty creator features ----
+
+    /// <summary>Enqueues a background AI generation and returns the job id to poll.</summary>
+    [Authorize]
+    [HttpPost("jobs")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status202Accepted)]
+    public IActionResult EnqueueJob([FromBody] AiChatRequest request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Message))
+        {
+            return BadRequest(new { message = "Message is required." });
+        }
+
+        try
+        {
+            var jobId = _jobQueue.Enqueue(request);
+            var snapshot = _jobQueue.Get(jobId)!;
+            // 202 Accepted; cached jobs are already Succeeded and carry their reply.
+            return AcceptedAtAction(nameof(GetJob), new { jobId }, snapshot);
+        }
+        catch (ArgumentException)
+        {
+            return BadRequest(new { message = "Message is required." });
+        }
+    }
+
+    /// <summary>Polls the status/result of a background AI job.</summary>
+    [Authorize]
+    [HttpGet("jobs/{jobId:guid}")]
+    [ProducesResponseType(typeof(AiJobSnapshot), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetJob(Guid jobId)
+    {
+        var snapshot = _jobQueue.Get(jobId);
+        return snapshot is null ? NotFound() : Ok(snapshot);
     }
 }

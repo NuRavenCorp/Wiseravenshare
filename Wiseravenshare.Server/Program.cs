@@ -872,6 +872,9 @@ else
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
+// Background AI job queue (queue + poll + prompt cache) for bursty creator features.
+builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
+builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
@@ -888,6 +891,9 @@ builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
+// Daily ledger anchor + integrity check (hash chain tamper-evidence).
+builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LedgerAnchorBackgroundService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IBadgeService, Wiseravenshare.Server.Services.Currency.BadgeService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService, Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>() as Wiseravenshare.Server.Services.Currency.CurrencyAgentService ?? throw new InvalidOperationException("CurrencyAgentService must be registered as the concrete hosted service"));
@@ -918,7 +924,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/hubs")))
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/hubs")))
                 {
                     context.Token = accessToken;
                 }

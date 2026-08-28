@@ -51,6 +51,15 @@ public class CoinTransaction : BaseEntity
     public decimal WorkHoursValue { get; set; }
     public decimal WorkHourRate { get; set; }
 
+    // ---- Tamper-evident ledger chain ----
+    // Hash = SHA256(PreviousHash + this transaction's fields), hex string.
+    // PreviousHash links to the prior transaction, forming a chain: editing ANY
+    // historical row changes its hash and breaks every hash after it.
+    [MaxLength(64)]
+    public string Hash { get; set; } = string.Empty;
+    [MaxLength(64)]
+    public string PreviousHash { get; set; } = string.Empty;
+
     public virtual User User { get; set; } = null!;
     public virtual User? TargetUser { get; set; }
 }
