@@ -271,7 +271,7 @@ const LoginPage = ({ onAuth }) => {
             <div style={{ background: 'var(--card-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', padding: '40px', width: '100%', maxWidth: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
                 <div style={{ textAlign: 'center', marginBottom: '30px' }}>
                     <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-                        <div style={{ width: '60px', height: '60px' }}><WiseRavenLogo /></div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><WiseRavenLogo size="compact" showTagline={false} /></div>
                     </div>
                     {error && <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>}
                     {info && <p style={{ color: '#93c5fd', marginBottom: '12px' }}>{info}</p>}
