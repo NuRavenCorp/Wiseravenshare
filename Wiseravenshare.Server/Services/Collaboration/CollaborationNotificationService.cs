@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Enums;
 using Wiseravenshare.Server.Hubs;
+using Hub = Wiseravenshare.Server.Hubs.ProjectCollaborationHub;
 using Wiseravenshare.Server.Interfaces.Services;
 
 namespace Wiseravenshare.Server.Services.Collaboration;
@@ -13,10 +14,10 @@ namespace Wiseravenshare.Server.Services.Collaboration;
 /// </summary>
 public class CollaborationNotificationService : ICollaborationNotificationService
 {
-    private readonly IHubContext<CollaborationHub> _hubContext;
+    private readonly IHubContext<Hub> _hubContext;
     private readonly ILogger<CollaborationNotificationService> _logger;
 
-    public CollaborationNotificationService(IHubContext<CollaborationHub> hubContext, ILogger<CollaborationNotificationService> logger)
+    public CollaborationNotificationService(IHubContext<Hub> hubContext, ILogger<CollaborationNotificationService> logger)
     {
         _hubContext = hubContext;
         _logger = logger;

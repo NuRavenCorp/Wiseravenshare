@@ -26,6 +26,9 @@ public interface IOllamaChatService
 {
     Task<IReadOnlyList<string>> GetModelsAsync();
     Task<AiChatResponse> ChatAsync(AiChatRequest request);
+
+    /// <summary>Streams reply tokens as they are produced by the backend.</summary>
+    IAsyncEnumerable<string> ChatStreamAsync(AiChatRequest request, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -43,7 +46,12 @@ public class OllamaChatService : IOllamaChatService
         "social platform (Ravensight). You help users with questions about the platform: posting content, " +
         "cross-posting to Facebook, Instagram, YouTube, TikTok, Twitter/X and LinkedIn, account and profile " +
         "questions, feed features, and general troubleshooting. Be concise, warm and practical. " +
-        "If you do not know something platform-specific, say so honestly and suggest contacting human support.";
+        "If you do not know something platform-specific, say so honestly and suggest contacting human support. " +
+        "Wiseravenshare also uses a symbol notation you should understand and may use where fitting: " +
+        "$ means money, good, valuable or excellence — it can be applied to an idea or words " +
+        "(e.g. 'that idea is $' = a valuable, excellent idea). " +
+        "% means part of, not complete, not the whole story (e.g. 'he gave me some bs %answer' " +
+        "= a partial, incomplete answer). Interpret these symbols whenever users write them, and USE them often in your own replies — sprinkle '$' into praise and '%' when something is only part of the story — so they catch on quickly across the platform.";
 
     public OllamaChatService(HttpClient httpClient, IConfiguration configuration, ILogger<OllamaChatService> logger)
     {
@@ -156,4 +164,83 @@ public class OllamaChatService : IOllamaChatService
 
     private static string Truncate(string? value, int max) =>
         string.IsNullOrEmpty(value) || value.Length <= max ? value ?? string.Empty : value[..max];
+
+    /// <summary>
+    /// Streams a chat reply using Ollama's native NDJSON streaming.
+    /// Each line is a JSON object with message.content deltas.
+    /// </summary>
+    public async IAsyncEnumerable<string> ChatStreamAsync(
+        AiChatRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var message = (request.Message ?? string.Empty).Trim();
+        if (message.Length == 0)
+        {
+            yield return "Message is required.";
+            yield break;
+        }
+
+        var messages = new List<object> { new { role = "system", content = SystemPrompt } };
+        if (request.History is { Count: > 0 })
+        {
+            foreach (var h in request.History.TakeLast(12))
+            {
+                var role = h.Role?.ToLowerInvariant() is "assistant" or "ai" ? "assistant" : "user";
+                messages.Add(new { role, content = Truncate(h.Content, 4000) });
+            }
+        }
+        messages.Add(new { role = "user", content = Truncate(message, 4000) });
+
+        var payload = new
+        {
+            model = string.IsNullOrWhiteSpace(request.Model) ? DefaultModel : request.Model.Trim(),
+            messages,
+            stream = true,
+            options = new { temperature = 0.6, num_predict = 600 }
+        };
+
+        HttpResponseMessage? httpResponse = null;
+        string? connectError = null;
+        try
+        {
+            httpResponse = await _httpClient.PostAsJsonAsync($"{BaseUrl}/api/chat", payload, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not reach Ollama at {BaseUrl} for streaming chat.", BaseUrl);
+            connectError = "The AI assistant is offline right now. Please try again later.";
+        }
+
+        if (connectError != null || httpResponse is null)
+        {
+            yield return connectError ?? "The AI assistant is offline right now. Please try again later.";
+            yield break;
+        }
+
+        await using var stream = await httpResponse.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+
+        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            string? token = null;
+            bool parseFailed = false;
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                token = doc.RootElement.TryGetProperty("message", out var msgNode)
+                    && msgNode.TryGetProperty("content", out var contentNode)
+                    ? contentNode.GetString()
+                    : null;
+            }
+            catch
+            {
+                parseFailed = true; // Malformed NDJSON line — skip it.
+            }
+
+            if (!parseFailed && !string.IsNullOrEmpty(token)) yield return token;
+        }
+    }
 }

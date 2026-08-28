@@ -192,6 +192,7 @@ public class UpdateContentDto
 
 public class AddCommentDto
 {
+    public Guid ProjectId { get; set; }
     [Required, MaxLength(5000)]
     public string Text { get; set; } = string.Empty;
     public Guid? ContentId { get; set; }

@@ -1,7 +1,9 @@
 // Wiseravenshare.Server/Infrastructure/Data/Repositories/CollaborationRepositories.cs
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities.Collaboration;
+using Wiseravenshare.Server.Entities.Roles;
 using Wiseravenshare.Server.Enums;
+using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 using Wiseravenshare.Server.Interfaces.Repositories;
 
 namespace Wiseravenshare.Server.Infrastructure.Data.Repositories;
@@ -79,6 +81,22 @@ public class ProjectContentRepository : Repository<ProjectContent>, IProjectCont
             .MaxAsync();
         return (max ?? 0) + 1;
     }
+
+    public async Task<IEnumerable<ProjectContentVersion>> GetVersionsAsync(Guid contentId)
+        => await _context.ProjectContentVersions
+            .AsNoTracking()
+            .Where(v => v.ContentId == contentId)
+            .OrderByDescending(v => v.VersionNumber)
+            .ToListAsync();
+
+    public async Task<ProjectContentVersion> AddVersionAsync(ProjectContentVersion version)
+    {
+        version.CreatedAt = DateTime.UtcNow;
+        version.UpdatedAt = DateTime.UtcNow;
+        _context.ProjectContentVersions.Add(version);
+        await _context.SaveChangesAsync();
+        return version;
+    }
 }
 
 public class CollaborationInviteRepository : Repository<CollaborationInvite>, ICollaborationInviteRepository
@@ -145,7 +163,7 @@ public class UserRoleRepository : Repository<UserRole>, IUserRoleRepository
     public async Task<bool> UserHasPermissionAsync(Guid userId, string resourceType, PermissionAction action, Guid? projectId = null)
     {
         var roles = await GetRolesForUserAsync(userId, projectId);
-        if (roles.Count == 0) return false;
+        if (!roles.Any()) return false;
 
         var roleIds = roles.Select(r => r.Id).ToList();
         return await _context.RolePermissions

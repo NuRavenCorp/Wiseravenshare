@@ -17,8 +17,8 @@ namespace Wiseravenshare.Server.Hubs;
 [Authorize]
 public class CrossPlatformCollaborationHub : Hub
 {
-    private static readonly ConcurrentDictionary<string, Guid> UserConnections = new();
-    private static readonly ConcurrentDictionary<Guid, HashSet<string>> RoomUsers = new();
+    private static readonly ConcurrentDictionary<string, string> UserConnections = new();
+    private static readonly ConcurrentDictionary<string, HashSet<string>> RoomUsers = new();
     private static readonly ConcurrentDictionary<string, string> TransferRooms = new();
 
     private readonly IPlatformBridgeService _bridgeService;
@@ -47,7 +47,7 @@ public class CrossPlatformCollaborationHub : Hub
     {
         var userId = UserId;
         var platform = GetPlatform();
-        UserConnections[userId] = Context.ConnectionId;
+        UserConnections[userId.ToString()] = Context.ConnectionId;
 
         _logger.LogInformation("User {UserId} connected from {Platform} ({ConnectionId})",
             userId, platform, Context.ConnectionId);
@@ -68,10 +68,10 @@ public class CrossPlatformCollaborationHub : Hub
         var userId = Context.User?.GetUserId() ?? Guid.Empty;
         if (userId != Guid.Empty)
         {
-            UserConnections.TryRemove(userId, out _);
+            UserConnections.TryRemove(userId.ToString(), out _);
 
             foreach (var roomId in RoomUsers.Keys.Where(r =>
-                RoomUsers[r].Contains(userId)).ToList())
+                RoomUsers[r].Contains(userId.ToString())).ToList())
             {
                 await LeaveRoom(roomId);
             }
@@ -91,7 +91,7 @@ public class CrossPlatformCollaborationHub : Hub
         var userId = UserId;
         var roomId = Guid.NewGuid().ToString();
 
-        RoomUsers[roomId] = new HashSet<string> { userId };
+        RoomUsers[roomId] = new HashSet<string> { userId.ToString() };
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
 
         await _bridgeService.CreateBridgeSessionAsync(
@@ -109,7 +109,7 @@ public class CrossPlatformCollaborationHub : Hub
 
         lock (users)
         {
-            if (!users.Add(userId)) return true;
+            if (!users.Add(userId.ToString())) return true;
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
@@ -136,7 +136,7 @@ public class CrossPlatformCollaborationHub : Hub
         {
             lock (users)
             {
-                users.Remove(userId);
+                users.Remove(userId.ToString());
                 if (users.Count == 0) RoomUsers.TryRemove(roomId, out _);
             }
         }
@@ -220,7 +220,7 @@ public class CrossPlatformCollaborationHub : Hub
     }
 
     public async Task<bool> IsUserOnline(string userId)
-        => Guid.TryParse(userId, out var id) && UserConnections.ContainsKey(id);
+        => Guid.TryParse(userId, out var id) && UserConnections.ContainsKey(id.ToString());
 
     public async Task<IEnumerable<string>> GetOnlineUsers()
         => UserConnections.Keys.Select(k => k.ToString());
@@ -234,7 +234,7 @@ public class CrossPlatformCollaborationHub : Hub
 
         // Forward to the target web user when they have an active connection.
         if (Guid.TryParse(targetUserId, out var targetId)
-            && UserConnections.TryGetValue(targetId, out var connectionId))
+            && UserConnections.TryGetValue(targetUserId, out var connectionId))
         {
             await Clients.Client(connectionId).SendAsync("ExternalBridge", new
             {

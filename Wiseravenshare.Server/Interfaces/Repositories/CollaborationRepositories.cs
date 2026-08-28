@@ -1,5 +1,9 @@
-// Wiseravenshare.Server/Interfaces/Repositories/CollaborationRepositories.cs
+﻿// Wiseravenshare.Server/Interfaces/Repositories/CollaborationRepositories.cs
 using Wiseravenshare.Server.Entities.Collaboration;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Roles;
+using Wiseravenshare.Server.Enums;
+using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
 namespace Wiseravenshare.Server.Interfaces.Repositories;
 
@@ -21,6 +25,8 @@ public interface IProjectContentRepository : IRepository<ProjectContent>
 {
     Task<IEnumerable<ProjectContent>> GetProjectContentAsync(Guid projectId, bool includeDeleted = false);
     Task<int> GetNextVersionNumberAsync(Guid contentId);
+    Task<IEnumerable<ProjectContentVersion>> GetVersionsAsync(Guid contentId);
+    Task<ProjectContentVersion> AddVersionAsync(ProjectContentVersion version);
 }
 
 public interface ICollaborationInviteRepository : IRepository<CollaborationInvite>

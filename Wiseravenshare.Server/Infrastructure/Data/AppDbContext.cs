@@ -1,5 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Entities.Currency;
+using Wiseravenshare.Server.Entities.Roles;
+using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
 namespace Wiseravenshare.Server.Infrastructure.Data;
 
@@ -33,6 +37,21 @@ public class AppDbContext : DbContext
     public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();
     public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
     public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
+
+    // Collaboration
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectContent> ProjectContents => Set<ProjectContent>();
+    public DbSet<ProjectContentVersion> ProjectContentVersions => Set<ProjectContentVersion>();
+    public DbSet<CollaborationInvite> CollaborationInvites => Set<CollaborationInvite>();
+    public DbSet<ProjectComment> ProjectComments => Set<ProjectComment>();
+    public DbSet<ProjectActivity> ProjectActivities => Set<ProjectActivity>();
+    public DbSet<PlatformPublish> PlatformPublishes => Set<PlatformPublish>();
+
+    // Roles
+    public DbSet<Wiseravenshare.Server.Entities.Roles.UserRole> UserRoles => Set<Wiseravenshare.Server.Entities.Roles.UserRole>();
+    public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -257,6 +276,137 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(c => c.PostId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Collaboration ──
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasIndex(p => p.OwnerId);
+            entity.HasOne(p => p.Owner)
+                .WithMany()
+                .HasForeignKey(p => p.OwnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectMember>(entity =>
+        {
+            entity.HasIndex(m => new { m.ProjectId, m.UserId });
+            entity.HasOne(m => m.Project)
+                .WithMany(p => p.Members)
+                .HasForeignKey(m => m.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(m => m.User)
+                .WithMany()
+                .HasForeignKey(m => m.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectContent>(entity =>
+        {
+            entity.HasIndex(c => c.ProjectId);
+            entity.HasOne(c => c.Project)
+                .WithMany(p => p.Content)
+                .HasForeignKey(c => c.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectContentVersion>(entity =>
+        {
+            entity.HasIndex(v => v.ContentId);
+        });
+
+        modelBuilder.Entity<CollaborationInvite>(entity =>
+        {
+            entity.HasIndex(i => new { i.ProjectId, i.InviteeEmail });
+            entity.HasOne(i => i.Project)
+                .WithMany(p => p.Invites)
+                .HasForeignKey(i => i.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectComment>(entity =>
+        {
+            entity.HasIndex(c => c.ProjectId);
+            entity.HasOne(c => c.Project)
+                .WithMany(p => p.Comments)
+                .HasForeignKey(c => c.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectActivity>(entity =>
+        {
+            entity.HasIndex(a => a.ProjectId);
+            entity.HasOne(a => a.Project)
+                .WithMany(p => p.Activities)
+                .HasForeignKey(a => a.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformPublish>(entity =>
+        {
+            entity.HasIndex(p => p.ContentId);
+            entity.HasOne(p => p.Project)
+                .WithMany(p => p.Publications)
+                .HasForeignKey(p => p.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(p => p.Content)
+                .WithMany()
+                .HasForeignKey(p => p.ContentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Roles ──
+        modelBuilder.Entity<Entities.Roles.UserRole>(entity =>
+        {
+            entity.HasIndex(r => r.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<UserRoleAssignment>(entity =>
+        {
+            entity.HasIndex(a => a.UserId);
+            entity.HasOne(a => a.User)
+                .WithMany()
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(a => a.Role)
+                .WithMany(r => r.Assignments)
+                .HasForeignKey(a => a.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasIndex(p => p.RoleId);
+            entity.HasOne(p => p.Role)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(p => p.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Composite index for permission checks (UserId → RoleIds → ResourceType/Action)
+            entity.HasIndex(p => new { p.RoleId, p.ResourceType, p.Action });
+        });
+
+        // Role hierarchy (ParentRole self-reference)
+        modelBuilder.Entity<UserRole>(entity =>
+        {
+            entity.HasOne(r => r.ParentRole)
+                .WithMany(r => r.ChildRoles)
+                .HasForeignKey("ParentRoleId")
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Role assignments scoped per project (null = global)
+        modelBuilder.Entity<UserRoleAssignment>(entity =>
+        {
+            entity.HasIndex(a => new { a.UserId, a.RoleId, a.ProjectId });
+            entity.HasOne(a => a.AssignedBy)
+                .WithMany()
+                .HasForeignKey(a => a.AssignedById)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

@@ -393,6 +393,7 @@ const App = () => {
         { id: 'collaboration', label: 'Collaborate' },
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
+        { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'profile', label: 'Profile' }
     ];
 

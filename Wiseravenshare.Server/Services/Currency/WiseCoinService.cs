@@ -295,8 +295,9 @@ public class WiseCoinService : IWiseCoinService
             return cached;
 
         var latest = (await _valuationRepository.FindAsync(
-            v => !v.IsDeleted,
-            orderBy: q => q.OrderByDescending(v => v.Date))).FirstOrDefault();
+            v => !v.IsDeleted))
+            .OrderByDescending(v => v.Date)
+            .FirstOrDefault();
 
         if (latest != null && latest.Date >= DateTime.UtcNow.AddHours(-24))
         {

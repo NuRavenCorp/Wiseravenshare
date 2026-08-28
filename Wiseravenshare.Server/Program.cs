@@ -860,8 +860,18 @@ builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
 builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
-// AI assistant (local Ollama backend).
-builder.Services.AddHttpClient<IOllamaChatService, OllamaChatService>();
+// AI assistant (local llama.cpp llama-server, OpenAI-compatible API).
+// It stays inside the compose network; front-end UIs reach it only
+// through the api's endpoints. Set AiProvider=ollama to use the old client.
+var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
+if (aiProvider == "ollama")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, OllamaChatService>();
+}
+else
+{
+    builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
+}
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
@@ -937,6 +947,11 @@ builder.Services.AddRequestTimeouts(options =>
     {
         Timeout = TimeSpan.FromSeconds(60)
     };
+    // Streaming endpoints (e.g. AI chat SSE) must not be killed by the default timeout.
+    options.Policies.Add("StreamingPolicy", new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    });
 });
 
 // CORS — explicit origin when set, locked-down in production
