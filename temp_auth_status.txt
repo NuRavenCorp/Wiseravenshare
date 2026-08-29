@@ -1,1 +1,0 @@
-{"selfRegistrationEnabled":true,"adminOnlyLogin":false,"teamInviteLoginEnabled":true,"jwt":{"issuerConfigured":true,"audienceConfigured":true,"keyConfigured":true}}
