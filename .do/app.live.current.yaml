@@ -7,9 +7,9 @@ databases:
   production: true
   version: "16"
 domains:
-- domain: wise-ravens.com
+- domain: wiseravenshare.com
   type: PRIMARY
-- domain: www.wise-ravens.com
+- domain: www.wiseravenshare.com
   type: ALIAS
 features:
 - buildpack-stack=ubuntu-22

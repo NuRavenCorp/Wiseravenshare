@@ -3,9 +3,9 @@ databases:
   name: wiseravenshare-db
   version: "16"
 domains:
-- domain: wise-ravens.com
+- domain: wiseravenshare.com
   type: PRIMARY
-- domain: www.wise-ravens.com
+- domain: www.wiseravenshare.com
   type: ALIAS
 envs:
 - key: Restricted

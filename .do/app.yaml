@@ -11,7 +11,7 @@ services:
     dockerfile_path: Wiseravenshare.Server/Dockerfile
     source_dir: /
     http_port: 10000
-    instance_size_slug: basic-xs
+    instance_size_slug: basic-s
     instance_count: 1
     health_check:
       http_path: /health
@@ -179,8 +179,8 @@ databases:
     production: true
 
 domains:
-  - domain: wise-ravens.com
+  - domain: wiseravenshare.com
     type: PRIMARY
-  - domain: www.wise-ravens.com
+  - domain: www.wiseravenshare.com
     type: ALIAS
 

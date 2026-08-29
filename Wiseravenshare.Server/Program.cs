@@ -830,6 +830,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
         npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+// Generic repository open registration (currency/badge subsystems resolve IRepository<TEntity>).
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.Infrastructure.Data.Repositories.Repository<>));
 builder.Services.AddScoped<IPostRepository, PostRepository>();
 builder.Services.AddScoped<ITruthRepository, TruthRepository>();
 builder.Services.AddScoped<IAgentRepository, AgentRepository>();
