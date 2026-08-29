@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using Wiseravenshare.Server.Services;
@@ -13,18 +13,21 @@ public sealed class PersistenceController : ControllerBase
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly PersistenceDiagnosticsCache _diagnosticsCache;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<PersistenceController> _logger;
     private static readonly SemaphoreSlim RefreshLock = new(1, 1);
 
     public PersistenceController(
         UserStore userStore,
         VideoLibraryStore videoLibraryStore,
         PersistenceDiagnosticsCache diagnosticsCache,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<PersistenceController> logger)
     {
         _userStore = userStore;
         _videoLibraryStore = videoLibraryStore;
         _diagnosticsCache = diagnosticsCache;
         _configuration = configuration;
+        _logger = logger;
     }
 
     [Authorize]
@@ -171,25 +174,66 @@ public sealed class PersistenceController : ControllerBase
 
     private bool IsAdminRequest()
     {
-        var email = User.FindFirstValue(ClaimTypes.Email)
-            ?? User.FindFirstValue("email")
+        // 1. Admin role / scope claims minted by AuthController.GenerateToken.
+        var role = User.FindFirstValue(ClaimTypes.Role)
+            ?? User.FindFirstValue("role")
+            ?? string.Empty;
+        var accessScope = User.FindFirstValue("access_scope")
             ?? string.Empty;
 
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            return false;
-        }
-
-        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
-        if (configuredAdminEmails.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
+        if (string.Equals(role, "owner", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
+        // 2. Configured admin emails (works for both JSON arrays in appsettings
+        //    and scalar env vars like Admin__Emails=...).
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(email) && IsConfiguredAdminEmail(email))
+        {
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Persistence status denied. Resolved email: {Email}",
+            string.IsNullOrWhiteSpace(email) ? "<none>" : email);
+
+        return false;
+    }
+
+    private bool IsConfiguredAdminEmail(string email)
+    {
+        var section = _configuration.GetSection("Admin:Emails");
+
+        // JSON array form (appsettings.json).
+        var asArray = section.Get<string[]>();
+        if (asArray is { Length: > 0 } && asArray.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Scalar / comma-separated form (Admin__Emails env var).
+        var scalar = section.Value;
+        if (!string.IsNullOrWhiteSpace(scalar))
+        {
+            var matches = scalar.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
+            if (matches)
+            {
+                return true;
+            }
+        }
+
+        // Configured auth users (Authentication:Users__N__Email).
         var configuredAuthUsers = _configuration.GetSection("Authentication:Users").GetChildren()
-            .Select(section => section["Email"]?.Trim())
+            .Select(child => child["Email"] ?? child.Value)
             .Where(value => !string.IsNullOrWhiteSpace(value));
 
-        return configuredAuthUsers.Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
+        return configuredAuthUsers.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase));
     }
 }
