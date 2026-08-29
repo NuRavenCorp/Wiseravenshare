@@ -38,14 +38,14 @@ const PrivacyPolicyPage = ({ onBack }) => (
             Privacy Policy
         </h1>
         <p style={{ color: 'var(--light-color)', fontSize: '13px', marginBottom: '28px' }}>
-            Effective date: August 4, 2026 &nbsp;·&nbsp; wise-ravens.com
+            Effective date: February 1, 2026 &nbsp;·&nbsp; wiseravenshare.com
         </p>
 
         <Section title="1. Who We Are">
-            Wise-Ravens.com ("we", "us", or "our") is a social media and news intelligence platform operated by
+            Wiseravenshare.com ("we", "us", or "our") is a social media and news intelligence platform operated by
             NuRaven Corp. You can reach our privacy team at{' '}
-            <a href="mailto:privacy@wise-ravens.com" style={{ color: 'var(--highlight-color)' }}>
-                privacy@wise-ravens.com
+            <a href="mailto:privacy@wiseravenshare.com" style={{ color: 'var(--highlight-color)' }}>
+                privacy@wiseravenshare.com
             </a>.
         </Section>
 
@@ -53,6 +53,7 @@ const PrivacyPolicyPage = ({ onBack }) => (
             <p style={{ marginBottom: '8px' }}>We collect information you provide directly and information generated through your use of the platform:</p>
             <ul style={{ paddingLeft: '20px', marginBottom: '0' }}>
                 <li style={{ marginBottom: '6px' }}><strong>Account data</strong> — name, email address, password (stored as a secure hash), optional profile photo, bio, and location.</li>
+                <li style={{ marginBottom: '6px' }}><strong>Linked social account data</strong> — when you connect a third-party account (TikTok, Facebook, Instagram, YouTube, X/Twitter), we receive and store only the platform's account identifier (e.g. TikTok <em>open_id</em> and <em>union_id</em>), display name, and avatar URL. See Section 4a.</li>
                 <li style={{ marginBottom: '6px' }}><strong>Content you create</strong> — posts, comments, messages, bookmarks, media uploads, and planner entries.</li>
                 <li style={{ marginBottom: '6px' }}><strong>Usage data</strong> — pages visited, features used, search queries, clicks, and session duration.</li>
                 <li style={{ marginBottom: '6px' }}><strong>Device &amp; connection data</strong> — IP address, browser type, operating system, and time zone.</li>
@@ -82,6 +83,22 @@ const PrivacyPolicyPage = ({ onBack }) => (
             </ul>
         </Section>
 
+        <Section title="4a. Third-Party Login &amp; TikTok">
+            <p style={{ marginBottom: '8px' }}>
+                Wiseravenshare integrates with TikTok for Developers (Login Kit) so you can link your TikTok account
+                for identity verification and content attribution. When you connect TikTok we request only the
+                <strong> user.info.basic</strong> scope and receive only your <em>open_id</em>, <em>union_id</em>,
+                and <em>avatar_url</em>. We do not access your TikTok videos, likes, comments, followers, direct
+                messages, or any other TikTok content, and we never post to TikTok without an explicit action by you.
+            </p>
+            <ul style={{ paddingLeft: '20px', marginBottom: '0' }}>
+                <li style={{ marginBottom: '6px' }}>TikTok identifiers are used solely to identify your connected account inside Wiseravenshare.</li>
+                <li style={{ marginBottom: '6px' }}>Access tokens are stored encrypted and used only to verify the linked account.</li>
+                <li style={{ marginBottom: '6px' }}>You may unlink your TikTok account at any time from Settings; doing so deletes all stored TikTok identifiers immediately.</li>
+                <li>TikTok's own handling of your data is governed by the <a href="https://www.tiktok.com/legal/page/row/privacy-policy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--highlight-color)' }}>TikTok Privacy Policy</a>.</li>
+            </ul>
+        </Section>
+
         <Section title="5. Cookies and Tracking">
             We use browser local storage and session cookies to keep you signed in and remember your preferences.
             Google AdSense and analytics services may also set third-party cookies on your device.
@@ -105,8 +122,8 @@ const PrivacyPolicyPage = ({ onBack }) => (
             </ul>
             <p style={{ marginTop: '8px' }}>
                 To exercise any of these rights, email{' '}
-                <a href="mailto:privacy@wise-ravens.com" style={{ color: 'var(--highlight-color)' }}>
-                    privacy@wise-ravens.com
+                <a href="mailto:privacy@wiseravenshare.com" style={{ color: 'var(--highlight-color)' }}>
+                    privacy@wiseravenshare.com
                 </a>.
                 We will respond within 30 days.
             </p>
@@ -137,14 +154,14 @@ const PrivacyPolicyPage = ({ onBack }) => (
 
         <Section title="12. Contact Us">
             For privacy questions or concerns, contact us at{' '}
-            <a href="mailto:privacy@wise-ravens.com" style={{ color: 'var(--highlight-color)' }}>
-                privacy@wise-ravens.com
+            <a href="mailto:privacy@wiseravenshare.com" style={{ color: 'var(--highlight-color)' }}>
+                privacy@wiseravenshare.com
             </a>{' '}
-            or write to NuRaven Corp, wise-ravens.com.
+            or write to NuRaven Corp, wiseravenshare.com.
         </Section>
 
         <p style={{ fontSize: '12px', color: 'var(--light-color)', borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '8px' }}>
-            © {new Date().getFullYear()} NuRaven Corp · wise-ravens.com
+            © {new Date().getFullYear()} NuRaven Corp · wiseravenshare.com
         </p>
     </div>
 );

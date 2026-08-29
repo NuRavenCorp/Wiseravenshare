@@ -13,13 +13,13 @@ namespace Wiseravenshare.Server.HostedServices;
 /// </summary>
 public class LedgerAnchorBackgroundService : BackgroundService
 {
-    private readonly ILedgerHashService _ledger;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<LedgerAnchorBackgroundService> _logger;
     private static readonly TimeSpan Interval = TimeSpan.FromHours(24);
 
-    public LedgerAnchorBackgroundService(ILedgerHashService ledger, ILogger<LedgerAnchorBackgroundService> logger)
+    public LedgerAnchorBackgroundService(IServiceScopeFactory scopeFactory, ILogger<LedgerAnchorBackgroundService> logger)
     {
-        _ledger = ledger;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -51,8 +51,13 @@ public class LedgerAnchorBackgroundService : BackgroundService
 
     private async Task RunCycleAsync()
     {
+        // ILedgerHashService is scoped (it depends on the DbContext), so the
+        // singleton background service resolves a fresh scope per cycle.
+        using var scope = _scopeFactory.CreateScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<ILedgerHashService>();
+
         // 1. Verify recent history — loud alert on any tamper indication.
-        var verify = await _ledger.VerifyRecentAsync(1000);
+        var verify = await ledger.VerifyRecentAsync(1000);
         if (verify.IsValid)
         {
             _logger.LogInformation("Ledger integrity OK ({Count} tx verified).", verify.TransactionsChecked);
@@ -65,15 +70,15 @@ public class LedgerAnchorBackgroundService : BackgroundService
         }
 
         // 2. Anchor the current head, but only if it moved since the last anchor.
-        var head = await _ledger.GetChainHeadAsync();
-        var latest = await _ledger.GetLatestAnchorAsync();
+        var head = await ledger.GetChainHeadAsync();
+        var latest = await ledger.GetLatestAnchorAsync();
         if (latest is not null && latest.ChainHeadHash == head)
         {
             _logger.LogDebug("Ledger head unchanged since last anchor; skipping.");
             return;
         }
 
-        var anchor = await _ledger.AnchorAsync(
+        var anchor = await ledger.AnchorAsync(
             $"Automatic daily anchor — head {head[..Math.Min(12, head.Length)]}…, integrity {(verify.IsValid ? "OK" : "FAILED")}");
         _logger.LogInformation("Ledger anchored: {AnchorId} at head {Head}.",
             anchor.Id, anchor.ChainHeadHash[..Math.Min(12, anchor.ChainHeadHash.Length)]);
