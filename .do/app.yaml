@@ -36,6 +36,11 @@ services:
         value: admin@wise-ravens.com
       - key: Authentication__Users__0__Password
         value: 1@Chinchin234
+      - key: Authentication__Jwt__Key
+        value: WRS_prod_jwt_7f3Kp9xQm2Vn8Ls4Td1Ry6Bh0Jc5EaZg_wiseravenshare_2026
+        type: SECRET
+      - key: Authentication__Jwt__ExpiresMinutes
+        value: "1440"
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET

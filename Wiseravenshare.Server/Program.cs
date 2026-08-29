@@ -1,4 +1,4 @@
-using Wiseravenshare.Server.Services;
+﻿using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.External.DeepSeekService;
 using Wiseravenshare.Server.Services.Truth;
 using Npgsql;
@@ -732,7 +732,7 @@ CREATE INDEX IF NOT EXISTS idx_room_participants_room
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
-// ── Configuration ────────────────────────────────────────────────────────────
+// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -751,7 +751,7 @@ if (requireDatabase && string.IsNullOrWhiteSpace(defaultConnectionString))
     throw new InvalidOperationException("Persistence:RequireDatabase is true but no database connection string was configured. Set DATABASE_URL or ConnectionStrings:DefaultConnection.");
 }
 
-// ── Logging ──────────────────────────────────────────────────────────────────
+// â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 if (!builder.Environment.IsDevelopment())
@@ -759,7 +759,7 @@ if (!builder.Environment.IsDevelopment())
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
 }
 
-// ── Services ─────────────────────────────────────────────────────────────────
+// â”€â”€ Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
@@ -838,6 +838,8 @@ builder.Services.AddScoped<IAgentRepository, AgentRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+// Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
+builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
@@ -962,7 +964,7 @@ builder.Services.AddRequestTimeouts(options =>
     });
 });
 
-// CORS — explicit origin when set, locked-down in production
+// CORS â€” explicit origin when set, locked-down in production
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ClientPolicy", policy =>
@@ -1093,7 +1095,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// ── Middleware pipeline ───────────────────────────────────────────────────────
+// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -1199,7 +1201,7 @@ if (frontendDistExists)
     });
 }
 
-// ── Health endpoints ──────────────────────────────────────────────────────────
+// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/health/db", async () =>
 {

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken, getAdminPassToken, setAuthToken, clearAuthToken } from './authStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './authStorage.js';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
@@ -389,6 +389,61 @@ const buildLocalComment = (postId, content) => {
 
 const isMissingEndpointStatus = (status) => status === 404 || status === 405 || status === 501;
 
+// -- Access-token auto-refresh (single-flight) -------------------------------
+let refreshInFlight = null;
+
+const REFRESH_TOKEN_KEY = 'auth_refresh_token';
+
+const readRefreshToken = () => {
+    try {
+        return localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+    } catch {
+        return '';
+    }
+};
+
+const writeStoredToken = (token) => {
+    setAuthToken(token);
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+};
+
+async function refreshAccessToken() {
+    const refreshToken = readRefreshToken();
+    if (!refreshToken) {
+        return '';
+    }
+
+    if (!refreshInFlight) {
+        refreshInFlight = (async () => {
+            try {
+                const response = await axios.post(
+                    `${API_BASE_URL.replace(/\/+$/, '')}/auth/refresh-token`,
+                    { refreshToken },
+                    { timeout: 20000 }
+                );
+                const payload = response?.data || {};
+                const newToken = payload.token || payload.accessToken || payload.AccessToken || '';
+                if (!newToken) {
+                    return '';
+                }
+                writeStoredToken(newToken);
+                try {
+                    const newRefresh = payload.refreshToken || payload.RefreshToken || '';
+                    if (newRefresh) localStorage.setItem(REFRESH_TOKEN_KEY, newRefresh);
+                } catch { /* ignore storage failures */ }
+                const adminPass = payload.adminPassToken || payload.AdminPassToken || '';
+                if (adminPass) setAdminPassToken(adminPass);
+                return newToken;
+            } catch {
+                return '';
+            } finally {
+                refreshInFlight = null;
+            }
+        })();
+    }
+
+    return refreshInFlight;
+}
 // Request interceptor
 api.interceptors.request.use(
     (config) => {
@@ -423,7 +478,20 @@ api.interceptors.response.use(
         const status = error?.response?.status;
         const requestUrl = String(error?.config?.url || '');
         const hasToken = Boolean(getAuthToken());
-        if ((status === 401 || status === 403) && hasToken && !isAuthEndpoint(requestUrl)) {
+
+        // Access token expired: refresh once, then retry the original request.
+        if (status === 401 && !isAuthEndpoint(requestUrl) && error?.config && !error.config.__retryAfterRefresh) {
+            const newToken = await refreshAccessToken();
+            if (newToken) {
+                error.config.__retryAfterRefresh = true;
+                error.config.headers = error.config.headers || {};
+                error.config.headers.Authorization = `Bearer ${newToken}`;
+                return api.request(error.config);
+            }
+        }
+
+        // Only a hard 401 after a failed refresh logs the user out.
+        if (status === 401 && hasToken && !isAuthEndpoint(requestUrl)) {
             handleUnauthorized();
         }
         return Promise.reject(error);
