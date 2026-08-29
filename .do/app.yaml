@@ -183,4 +183,8 @@ domains:
     type: PRIMARY
   - domain: www.wiseravenshare.com
     type: ALIAS
+  - domain: wise-ravens.com
+    type: ALIAS
+  - domain: www.wise-ravens.com
+    type: ALIAS
 
