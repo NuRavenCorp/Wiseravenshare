@@ -45,6 +45,10 @@ public class LedgerHashService : ILedgerHashService
     private readonly IRepository<LedgerAnchor> _anchorRepository;
     private readonly ILogger<LedgerHashService> _logger;
 
+    // Serializes chain stamping: two concurrent writes must never read the same
+    // chain head, or the chain forks and verification fails permanently.
+    private static readonly SemaphoreSlim _chainLock = new(1, 1);
+
     public LedgerHashService(
         IRepository<CoinTransaction> transactionRepository,
         IRepository<LedgerAnchor> anchorRepository,
@@ -92,9 +96,17 @@ public class LedgerHashService : ILedgerHashService
     /// Call BEFORE saving the transaction.</summary>
     public async Task StampChainAsync(CoinTransaction tx)
     {
-        var previousHash = await GetChainHeadAsync();
-        tx.PreviousHash = previousHash;
-        tx.Hash = ComputeHash(tx, previousHash);
+        await _chainLock.WaitAsync();
+        try
+        {
+            var previousHash = await GetChainHeadAsync();
+            tx.PreviousHash = previousHash;
+            tx.Hash = ComputeHash(tx, previousHash);
+        }
+        finally
+        {
+            _chainLock.Release();
+        }
     }
 
     /// <summary>
