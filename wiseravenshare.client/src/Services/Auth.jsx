@@ -1,6 +1,5 @@
 import api from './api';
 import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken, clearAdminPassToken } from './authStorage.js';
-import { firebaseAuth } from './firebaseAuth.js';
 
 const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 30000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
@@ -87,18 +86,6 @@ class AuthService {
 
     async login(email, password) {
         try {
-            if (firebaseAuth.isConfigured()) {
-                try {
-                    const normalizedLogin = String(email || '').trim();
-                    const session = await firebaseAuth.signInWithEmail(normalizedLogin, password);
-                    return await this.exchangeFirebaseSession(session.idToken);
-                } catch (error) {
-                    if (!this.shouldFallbackToLegacyAuth(error)) {
-                        throw error;
-                    }
-                }
-            }
-
             return await this.legacyLogin(email, password);
         } catch (error) {
             if ((!error?.response && error?.message?.includes('Network')) || (error?.code === 'ERR_NETWORK' && !error?.response)) {
@@ -114,22 +101,6 @@ class AuthService {
 
     async register(userData) {
         try {
-            if (firebaseAuth.isConfigured()) {
-                try {
-                    const session = await firebaseAuth.registerWithEmail({
-                        email: String(userData?.email || '').trim(),
-                        password: userData?.password,
-                        displayName: String(userData?.name || '').trim(),
-                        photoURL: String(userData?.avatar || '').trim() || undefined
-                    });
-                    return await this.exchangeFirebaseSession(session.idToken);
-                } catch (error) {
-                    if (!this.shouldFallbackToLegacyAuth(error)) {
-                        throw error;
-                    }
-                }
-            }
-
             return await this.legacyRegister(userData);
         } catch (error) {
             throw this.handleError(error);
@@ -318,7 +289,6 @@ class AuthService {
 
     async logout() {
         try {
-            await firebaseAuth.signOut();
             await this.postAuth('/logout', {}, { withAuth: true });
         } finally {
             this.clearToken();
@@ -383,21 +353,6 @@ class AuthService {
         }
     }
 
-    async exchangeFirebaseSession(idToken) {
-        const response = this.normalizeAuthResponse(await this.postAuth('/firebase/exchange', { idToken }));
-        if (!response.token) {
-            const err = new Error('Firebase authentication did not return an application token.');
-            err.status = 500;
-            throw err;
-        }
-
-        this.setToken(response.token);
-        this.setRefreshToken(response.refreshToken);
-        this.setAdminPassToken(response.adminPassToken);
-        this.setUser(response.user);
-        return response;
-    }
-
     async legacyLogin(email, password) {
         const normalizedLogin = String(email || '').trim();
         const response = this.normalizeAuthResponse(await this.postAuth('/login', {
@@ -430,22 +385,6 @@ class AuthService {
         return response;
     }
 
-    shouldFallbackToLegacyAuth(error) {
-        if (!error) {
-            return true;
-        }
-        const code = String(error?.code || error?.error?.code || '').toLowerCase();
-        return [
-            'auth/user-not-found',
-            'auth/wrong-password',
-            'auth/invalid-credential',
-            'auth/operation-not-allowed',
-            'auth/api-key-not-valid',
-            'auth/internal-error',
-            'auth/network-request-failed'
-        ].includes(code) || code.startsWith('auth/') || !code;
-    }
-
     getSocialLoginStartUrl(providerId, returnUrl) {
         const provider = String(providerId || '').trim().toLowerCase();
         const baseUrl = String(api?.defaults?.baseURL || '').trim();
@@ -475,39 +414,11 @@ class AuthService {
     async socialLogin(providerId, returnUrl) {
         const provider = String(providerId || '').trim().toLowerCase();
 
-        if (firebaseAuth.isConfigured()) {
-            try {
-                const session = await firebaseAuth.signInWithProvider(provider);
-                return await this.exchangeFirebaseSession(session.idToken);
-            } catch (error) {
-                throw this.handleError(this.normalizeFirebaseSocialError(error, provider));
-            }
-        }
-
         if (typeof window !== 'undefined') {
             window.location.assign(this.getSocialLoginStartUrl(provider, returnUrl));
         }
 
         return null;
-    }
-
-    normalizeFirebaseSocialError(error, provider) {
-        const code = String(error?.code || '').toLowerCase();
-        const providerLabel = provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Social';
-
-        if (code === 'auth/operation-not-allowed') {
-            const err = new Error(`${providerLabel} sign-in is disabled in Firebase. Enable the provider in Firebase Authentication.`);
-            err.status = 403;
-            return err;
-        }
-
-        if (code === 'auth/unauthorized-domain') {
-            const err = new Error('This domain is not authorized in Firebase Authentication. Add wise-ravens.com and www.wise-ravens.com to Authorized domains.');
-            err.status = 403;
-            return err;
-        }
-
-        return error;
     }
 
     setToken(token) {
