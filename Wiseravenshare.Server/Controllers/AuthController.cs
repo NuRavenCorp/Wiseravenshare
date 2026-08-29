@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
@@ -26,7 +26,6 @@ public class AuthController : ControllerBase
 {
     private static readonly ConcurrentDictionary<string, PasswordResetRecord> PasswordResetsByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, RefreshTokenRecord> RefreshTokensByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, AdminPassTokenRecord> AdminPassTokensByToken = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, OAuthStateRecord> OAuthStatesByToken = new(StringComparer.Ordinal);
     private static int _seededUsersLogWritten;
@@ -42,6 +41,7 @@ public class AuthController : ControllerBase
     private readonly TeamAccessService _teamAccessService;
     private readonly IEmailService _emailService;
     private readonly ILogger<AuthController> _logger;
+    private readonly RefreshTokenStore _refreshTokenStore;
 
     public AuthController(
         IConfiguration configuration,
@@ -50,7 +50,8 @@ public class AuthController : ControllerBase
         GrowthService growthService,
         TeamAccessService teamAccessService,
         IEmailService emailService,
-        ILogger<AuthController> logger)
+        ILogger<AuthController> logger,
+        RefreshTokenStore refreshTokenStore)
     {
         _configuration = configuration;
         _userStore = userStore;
@@ -59,6 +60,7 @@ public class AuthController : ControllerBase
         _teamAccessService = teamAccessService;
         _emailService = emailService;
         _logger = logger;
+        _refreshTokenStore = refreshTokenStore;
     }
 
     [HttpPost("register")]
@@ -235,25 +237,25 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Refresh token is required." });
         }
 
-        if (!RefreshTokensByToken.TryGetValue(request.RefreshToken, out var record) || record.ExpiresAtUtc < DateTime.UtcNow)
+        var storedRecord = _refreshTokenStore.Find(request.RefreshToken);
+        if (storedRecord is null || storedRecord.ExpiresAtUtc < DateTime.UtcNow)
         {
-            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            _refreshTokenStore.Remove(request.RefreshToken);
             return Unauthorized(new { message = "Refresh token is invalid or expired." });
         }
-
-        if (!_userStore.TryGetById(record.UserId, out var user) || user is null)
+        if (!_userStore.TryGetById(storedRecord.UserId, out var user) || user is null)
         {
-            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            _refreshTokenStore.Remove(request.RefreshToken);
             return Unauthorized(new { message = "User not found." });
         }
 
         if (!IsAuthenticationAllowed(user.Email))
         {
-            RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+            _refreshTokenStore.Remove(request.RefreshToken);
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
         }
 
-        RefreshTokensByToken.TryRemove(request.RefreshToken, out _);
+        _refreshTokenStore.Remove(request.RefreshToken);
 
         var domainUserId = await EnsureDomainUserAsync(user);
         var accessScope = ResolveAccessScope(user.Email);
@@ -341,11 +343,7 @@ public class AuthController : ControllerBase
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!string.IsNullOrWhiteSpace(userId))
         {
-            var tokensToRemove = RefreshTokensByToken.Where(pair => pair.Value.UserId == userId).ToList();
-            foreach (var pair in tokensToRemove)
-            {
-                RefreshTokensByToken.TryRemove(pair.Key, out _);
-            }
+            _refreshTokenStore.RemoveAllForUser(userId);
         }
 
         return Ok(new { success = true, message = "Logged out successfully" });
@@ -408,7 +406,6 @@ public class AuthController : ControllerBase
             selfRegistrationEnabled = allowSelfRegistration,
             adminOnlyLogin = false,
             teamInviteLoginEnabled = true,
-            firebaseConfigured = IsFirebaseConfigured(),
             jwt = new
             {
                 issuerConfigured = jwtIssuerConfigured,
@@ -416,80 +413,6 @@ public class AuthController : ControllerBase
                 keyConfigured = jwtKeyConfigured
             }
         });
-    }
-
-    [HttpPost("firebase/exchange")]
-    [AllowAnonymous]
-    public async Task<IActionResult> ExchangeFirebase([FromBody] FirebaseSignInRequest request)
-    {
-        EnsureConfiguredUsersSeeded();
-
-        if (!IsFirebaseConfigured())
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Firebase authentication is not configured." });
-        }
-
-        if (string.IsNullOrWhiteSpace(request.IdToken))
-        {
-            return BadRequest(new { message = "Firebase ID token is required." });
-        }
-
-        try
-        {
-            var projectId = (_configuration["Firebase:ProjectId"] ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(projectId))
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Firebase authentication is not configured." });
-            }
-
-            var decodedToken = await GoogleJsonWebSignature.ValidateAsync(
-                request.IdToken.Trim(),
-                new GoogleJsonWebSignature.ValidationSettings
-                {
-                    Audience = new[] { projectId }
-                });
-
-            var email = decodedToken.Email;
-            if (string.IsNullOrWhiteSpace(email))
-            {
-                return BadRequest(new { message = "Firebase account does not include an email address." });
-            }
-
-            var name = decodedToken.Name ?? string.Empty;
-            var picture = decodedToken.Picture ?? string.Empty;
-            var firebaseUserId = decodedToken.Subject;
-
-            var user = _userStore.UpsertFromExternalIdentity(firebaseUserId, email, name, picture);
-            if (!IsAuthenticationAllowed(user.Email))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
-            }
-
-            try
-            {
-                _growthService.TrackEvent(user.Id, user.Email, "login_success");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Growth tracking failed during Firebase sign-in for {Email}.", user.Email);
-            }
-
-            var domainUserId = await EnsureDomainUserAsync(user);
-            var accessScope = ResolveAccessScope(user.Email);
-            var teamRole = ResolveTeamRole(user.Email);
-            var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
-            var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
-            var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
-
-            var responseUser = UserStore.ToResponse(user);
-            responseUser.Id = domainUserId.ToString("N");
-            return Ok(new { token, refreshToken, adminPassToken, user = responseUser, provider = "firebase" });
-        }
-        catch (InvalidJwtException ex)
-        {
-            _logger.LogWarning(ex, "Firebase token verification failed.");
-            return Unauthorized(new { message = "Firebase sign-in failed. Please try again." });
-        }
     }
 
     [HttpGet("oauth/{provider}/start")]
@@ -1172,13 +1095,11 @@ public class AuthController : ControllerBase
     private string GenerateRefreshToken(string userId)
     {
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        var expiresAtUtc = DateTime.UtcNow.AddDays(7);
+        // 365 days: the session effectively persists until the user logs out
+        // (the client auto-refreshes the access token). 
+        var expiresAtUtc = DateTime.UtcNow.AddDays(365);
 
-        RefreshTokensByToken[token] = new RefreshTokenRecord
-        {
-            UserId = userId,
-            ExpiresAtUtc = expiresAtUtc
-        };
+        _refreshTokenStore.Save(token, userId, expiresAtUtc);
 
         return token;
     }
@@ -1631,8 +1552,6 @@ public class AuthController : ControllerBase
 
         return requestedUri.GetLeftPart(UriPartial.Path) + requestedUri.Query + requestedUri.Fragment;
     }
-
-    private bool IsFirebaseConfigured() => !string.IsNullOrWhiteSpace(_configuration["Firebase:ProjectId"]);
 
     private string ResolvePublicAppOrigin()
     {
@@ -2196,11 +2115,6 @@ public class AuthController : ControllerBase
         public DateTime? LockedOutUntilUtc { get; set; }
     }
 
-    private sealed class RefreshTokenRecord
-    {
-        public string UserId { get; set; } = string.Empty;
-        public DateTime ExpiresAtUtc { get; set; }
-    }
 
     private sealed class AdminPassTokenRecord
     {
@@ -2283,11 +2197,6 @@ public sealed class RegisterRequest
 public sealed class VerifyRequest
 {
     public string Token { get; set; } = string.Empty;
-}
-
-public sealed class FirebaseSignInRequest
-{
-    public string IdToken { get; set; } = string.Empty;
 }
 
 public sealed class ForgotPasswordRequest
