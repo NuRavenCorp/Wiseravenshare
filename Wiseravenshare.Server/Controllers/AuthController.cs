@@ -1695,7 +1695,10 @@ public class AuthController : ControllerBase
                 ["client_key"] = config.ClientId,
                 ["redirect_uri"] = callbackUrl,
                 ["response_type"] = "code",
-                ["scope"] = "user.info.basic,user.info.profile",
+                // TikTok Login Kit: only user.info.basic is currently approved for this
+                // client key. Requesting unapproved scopes causes a scope-mismatch error
+                // at the authorize endpoint and would fail the app review resubmission.
+                ["scope"] = "user.info.basic",
                 ["state"] = state
             }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
@@ -1846,7 +1849,10 @@ public class AuthController : ControllerBase
             throw new InvalidOperationException("TikTok access token was not returned.");
         }
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,username");
+        // Fields available under the user.info.basic scope only. user.info.profile
+        // fields (display_name, bio, username) are not requested because that scope
+        // is not yet approved for this client key.
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
         using var response = await httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
@@ -1858,12 +1864,12 @@ public class AuthController : ControllerBase
             : root;
 
         var displayName = userNode.TryGetProperty("display_name", out var displayNameNode) ? displayNameNode.GetString() ?? string.Empty : string.Empty;
-        var username = userNode.TryGetProperty("username", out var usernameNode) ? usernameNode.GetString() ?? string.Empty : string.Empty;
+        var avatarUrl = userNode.TryGetProperty("avatar_url", out var avatarUrlNode) ? avatarUrlNode.GetString() ?? string.Empty : string.Empty;
 
         return new SocialProfile
         {
             ProviderUserId = userNode.TryGetProperty("open_id", out var openIdNode) ? openIdNode.GetString() ?? string.Empty : string.Empty,
-            Name = !string.IsNullOrWhiteSpace(displayName) ? displayName : username,
+            Name = !string.IsNullOrWhiteSpace(displayName) ? displayName : "TikTok User",
             Email = string.Empty
         };
     }

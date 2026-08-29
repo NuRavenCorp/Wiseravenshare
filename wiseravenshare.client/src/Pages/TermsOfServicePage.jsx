@@ -38,11 +38,11 @@ const TermsOfServicePage = ({ onBack }) => (
             Terms of Service
         </h1>
         <p style={{ color: 'var(--light-color)', fontSize: '13px', marginBottom: '28px' }}>
-            Effective date: August 4, 2026 &nbsp;·&nbsp; wise-ravens.com/terms
+            Effective date: February 1, 2026 &nbsp;·&nbsp; wiseravenshare.com/terms
         </p>
 
         <Section title="1. Agreement to Terms">
-            By accessing or using Wise-Ravens.com ("WiseRaven Share", "Ravensight", "we", "us", or "our"), operated by NuRaven Corp, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the platform.
+            By accessing or using Wiseravenshare.com ("WiseRaven Share", "Ravensight", "we", "us", or "our"), operated by NuRaven Corp, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the platform.
         </Section>
 
         <Section title="2. Account Registration">
@@ -54,7 +54,15 @@ const TermsOfServicePage = ({ onBack }) => (
         </Section>
 
         <Section title="4. Third-Party Social Media Integrations">
-            WiseRaven Share provides integration with third-party social platforms including Facebook, Instagram, TikTok, YouTube, Twitter/X, and LinkedIn. Your use of these integrated features is subject to the respective terms and policies of each platform (e.g., Meta Terms of Service, YouTube Terms of Service).
+            Wiseravenshare provides integration with third-party social platforms including Facebook, Instagram, TikTok, YouTube, Twitter/X, and LinkedIn. Your use of these integrated features is subject to the respective terms and policies of each platform (e.g., Meta Terms of Service, YouTube Terms of Service, TikTok Terms of Service).
+        </Section>
+
+        <Section title="4a. TikTok Integration">
+            When you connect your TikTok account, we access only the information TikTok exposes through the
+            user.info.basic scope (your account identifier and avatar) for the purpose of verifying your identity
+            and attributing content you choose to cross-post. We never publish, upload, or delete content on your
+            TikTok account without your explicit instruction. You may revoke access at any time, either from your
+            Wiseravenshare settings or through your TikTok account's connected-apps settings.
         </Section>
 
         <Section title="5. Acceptable Use">
@@ -67,14 +75,14 @@ const TermsOfServicePage = ({ onBack }) => (
 
         <Section title="7. Contact & Legal Notices">
             For questions regarding these Terms of Service, contact us at{' '}
-            <a href="mailto:legal@wise-ravens.com" style={{ color: 'var(--highlight-color)' }}>
-                legal@wise-ravens.com
+            <a href="mailto:legal@wiseravenshare.com" style={{ color: 'var(--highlight-color)' }}>
+                legal@wiseravenshare.com
             </a>{' '}
-            or write to NuRaven Corp, wise-ravens.com.
+            or write to NuRaven Corp, wiseravenshare.com.
         </Section>
 
         <p style={{ fontSize: '12px', color: 'var(--light-color)', borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '8px' }}>
-            © {new Date().getFullYear()} NuRaven Corp · wise-ravens.com/terms
+            © {new Date().getFullYear()} NuRaven Corp · wiseravenshare.com/terms
         </p>
     </div>
 );
