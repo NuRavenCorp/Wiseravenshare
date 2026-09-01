@@ -42,7 +42,7 @@ Primary stack:
 ## 3. Monetary Specifications
 
 ### 3.1 Subscription catalog (fiat)
-Default public plan catalog (USD):
+Default public catalog amounts (USD, used as fallback/display defaults):
 - Creator Pro
   - Monthly: $19
   - Annual: $190
@@ -56,6 +56,7 @@ Default public plan catalog (USD):
 Implementation notes:
 - Stripe checkout is used with `mode=subscription`.
 - Price IDs are environment/config driven (`STRIPE_PRICE_*` and `Stripe:Price*` keys).
+- Final charged amount is determined by configured Stripe price IDs in the target environment.
 - Success/cancel subscription return handling is instrumented in product growth events.
 
 ### 3.2 Revenue instrumentation and verification
@@ -76,7 +77,7 @@ WSC is defined as a closed, work-hour-backed platform currency:
 - Baseline minting reference: 10 WSC per work hour
 - Baseline wage anchor: $15.00/hour reference
 - Transaction fee: 0.5% burn
-- Inflation cap target: 5%
+- Inflation cap target: 5% (policy target)
 
 Wallet structure:
 - Balance (spendable)
@@ -91,7 +92,7 @@ Staking framework:
 ### 3.4 Ledger integrity guarantees
 - WSC transactions are hash-chained using SHA-256 with previous-hash linkage.
 - Daily integrity verification/anchoring jobs detect tampering attempts.
-- Ledger verification endpoint exists for integrity checks.
+- Ledger verification endpoint is provided for integrity checks.
 
 ## 4. Feature Inventory
 
@@ -131,8 +132,11 @@ Staking framework:
 - Music library management UI (playback and track actions)
 - Multi-platform share entry points and message/URL composition helpers
 - Backend music media-type routing and DTO support
+- Platform-specific support limitations are enforced by publish handlers.
 
 ## 5. Provisions
+
+Provision intent: these are operating requirements and guardrails for release readiness, not legal contract language.
 
 ### 5.1 Service provisions
 - Health endpoints for general and database health must remain deploy-gate checks.
@@ -158,6 +162,10 @@ Staking framework:
 - Feature changes that alter monetization, security posture, or retention rules require release-note documentation.
 - Unsupported platform/media combinations should return explicit user-facing outcomes.
 - New paid or gated capabilities must include measurable funnel instrumentation.
+
+### 5.6 Documentation currency provision
+- This document represents implementation state as of the version date at the top of this file.
+- Material feature or policy changes should trigger a same-cycle update to this specification.
 
 ## 6. Canonical Source References
 This specification consolidates implementation-aligned details from:
