@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FaShare, FaBookmark, FaThumbsUp, FaComment, FaChartLine, FaShieldAlt, FaRobot } from 'react-icons/fa';
 import { newsAPI } from '../../services/newsAPI';
 import { useAuth } from '../../contexts/AuthContext';
+import { resolveArticleImage } from '../../utils/newsImageUtils';
 
 const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
     const [isSaved, setIsSaved] = useState(false);
@@ -59,6 +60,7 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
     };
 
     const truthBadge = getTruthBadge(factCheck);
+    const storyImage = resolveArticleImage(article || {});
 
     return (
         <div style={{
@@ -143,19 +145,28 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
                 </h3>
 
                 {/* Image */}
-                {article.imageUrl && (
-                    <img
-                        src={article.imageUrl}
-                        alt={article.title}
-                        style={{
-                            width: '100%',
-                            maxHeight: '400px',
-                            objectFit: 'cover',
-                            borderRadius: '8px',
-                            marginBottom: '15px'
-                        }}
-                    />
-                )}
+                <img
+                    src={storyImage}
+                    alt={article.title}
+                    onError={(event) => {
+                        event.currentTarget.src = resolveArticleImage({
+                            title: article?.title,
+                            source: article?.source,
+                            category: article?.category
+                        });
+                    }}
+                    style={{
+                        width: '100%',
+                        maxHeight: '400px',
+                        objectFit: 'cover',
+                        borderRadius: '8px',
+                        marginBottom: '15px',
+                        border: '1px solid var(--border-color)',
+                        background: 'rgba(255,255,255,0.04)'
+                    }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                />
 
                 {/* Content */}
                 <p style={{

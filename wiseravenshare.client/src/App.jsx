@@ -3,6 +3,7 @@ import Header from './Components/Common/Header';
 import Sidebar from './Components/Common/Sidebar';
 import RightSidebar from './Components/Common/RightSidebar';
 import TruthAlert from './Components/Common/TruthAlert';
+import RavenCommuniqueModal from './Components/Modal/RavenCommuniqueModal';
 import FeedPage from './Pages/FeedPage';
 import AiAssistantPage from './Pages/AiAssistantPage';
 import DiscoverPage from './Pages/DiscoverPage';
@@ -26,6 +27,9 @@ import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
 import CanvasPage from './Pages/CanvasPage';
 import CollaborationPage from './Pages/CollaborationPage';
+import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
+import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
+import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
@@ -55,6 +59,7 @@ const App = () => {
     );
     const [isRavensightMode, setIsRavensightMode] = useState(false);
     const [profileEditRequested, setProfileEditRequested] = useState(false);
+    const [communiqueOpen, setCommuniqueOpen] = useState(false);
     const [truthAlerts, setTruthAlerts] = useState([]);
     const [selectedArticle, setSelectedArticle] = useState(() => {
         try {
@@ -214,12 +219,15 @@ const App = () => {
         if (mode === 'teamInvite') {
             await acceptTeamInvite({ inviteToken, email, password, name });
             addToast('Team invite accepted. You are signed in.', 'success');
-            setCurrentPage('feed');
+            setCurrentPage('team-launchpad');
             return;
         }
 
-        await login(email, password);
+        const response = await login(email, password);
         addToast('Signed in successfully.', 'success');
+        if (response?.user?.teamRole) {
+            setCurrentPage('team-launchpad');
+        }
     };
 
     const handleLogout = async () => {
@@ -273,6 +281,16 @@ const App = () => {
         setIsRavensightMode(false);
         setCurrentPage('feed');
         addToast('Returned to main app.', 'info');
+    };
+
+    const navigateFromRavensight = (targetPage) => {
+        const next = String(targetPage || '').trim();
+        if (!next) {
+            return;
+        }
+
+        setIsRavensightMode(false);
+        setCurrentPage(next);
     };
 
     const renderPage = () => {
@@ -350,7 +368,7 @@ const App = () => {
             case 'social-feeds':
                 return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />;
             case 'ravensight':
-                return <RavensightVideo />;
+                return <RavensightVideo onNavigate={navigateFromRavensight} />;
             case 'newsroom-video':
                 return <NewsroomRecorderPage onSendToPodcastControlRoom={() => openRavensightWithTab('podcast')} />;
             case 'amateur-journalist':
@@ -363,6 +381,14 @@ const App = () => {
                         <CollaborationPage />
                     </ErrorBoundary>
                 );
+            case 'team-launchpad':
+                return <TeamLaunchpadPage user={user} onNavigate={setCurrentPage} isAdminUser={isAdminUser} />;
+            case 'music-rights-studio':
+                return isAdminUser
+                    ? <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'podcast-rights-studio':
+                return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             case 'terms':
@@ -390,6 +416,7 @@ const App = () => {
         { id: 'newsroom-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', label: 'Amateur Journalist' },
         { id: 'canvas', label: 'Canvas Studio' },
+        { id: 'team-launchpad', label: 'Team Launchpad' },
         { id: 'collaboration', label: 'Collaborate' },
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
@@ -401,7 +428,8 @@ const App = () => {
         navItems.splice(8, 0,
             { id: 'growth', label: 'Growth' },
             { id: 'revenue', label: 'Revenue' },
-            { id: 'team-access-admin', label: 'Team Access' }
+            { id: 'team-access-admin', label: 'Team Access' },
+            { id: 'music-rights-studio', label: 'Music Rights' }
         );
     }
 
@@ -426,7 +454,7 @@ const App = () => {
                     </button>
                 </div>
                 <div className="container" style={{ paddingTop: '12px' }}>
-                    <RavensightVideo />
+                    <RavensightVideo onNavigate={navigateFromRavensight} />
                 </div>
             </div>
         );
@@ -470,6 +498,21 @@ const App = () => {
                     >
                         Launch Ravensight
                     </button>
+                    <button
+                        onClick={() => setCommuniqueOpen(true)}
+                        style={{
+                            border: '1px solid rgba(139,92,246,0.5)',
+                            background: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
+                            color: 'white',
+                            padding: '8px 12px',
+                            borderRadius: '999px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        🪶 Communiqué
+                    </button>
                 </div>
             </div>
             <div className="container">
@@ -481,6 +524,7 @@ const App = () => {
                     <RightSidebar onNavigate={setCurrentPage} />
                 </div>
             </div>
+            <RavenCommuniqueModal isOpen={communiqueOpen} onClose={() => setCommuniqueOpen(false)} />
             <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: '12px', color: 'var(--light-color)' }}>
                 <button
                     onClick={() => setCurrentPage('privacy')}

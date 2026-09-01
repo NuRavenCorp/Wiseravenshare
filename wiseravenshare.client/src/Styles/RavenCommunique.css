@@ -1,0 +1,174 @@
+/* RavenCommuniqué Modal — wiseravenshare.client/src/Styles/RavenCommunique.css */
+
+/* ── Overlay ─────────────────────────────────────────── */
+.rc-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+}
+
+/* ── Modal box ────────────────────────────────────────── */
+.rc-modal {
+    background: #1a1a2e;
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 16px;
+    padding: 1.75rem;
+    width: 100%;
+    max-width: 440px;
+    color: #e2e8f0;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    animation: rc-slide-in 0.18s ease-out;
+}
+
+@keyframes rc-slide-in {
+    from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Header ───────────────────────────────────────────── */
+.rc-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1.25rem;
+}
+
+.rc-logo { font-size: 1.5rem; }
+
+.rc-title {
+    flex: 1;
+    font-size: 1.2rem;
+    font-weight: 700;
+    background: linear-gradient(90deg, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+}
+
+.rc-close {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    transition: color 0.15s;
+}
+.rc-close:hover { color: #e2e8f0; }
+
+/* ── Channel tabs ─────────────────────────────────────── */
+.rc-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.rc-tab {
+    flex: 1;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    color: #94a3b8;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.rc-tab:hover { background: rgba(139, 92, 246, 0.15); color: #e2e8f0; }
+.rc-tab--active {
+    background: rgba(139, 92, 246, 0.25);
+    border-color: #a78bfa;
+    color: #e2e8f0;
+}
+
+/* ── Form ─────────────────────────────────────────────── */
+.rc-form { display: flex; flex-direction: column; gap: 0.65rem; }
+
+.rc-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.rc-input,
+.rc-textarea {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    color: #e2e8f0;
+    font-size: 0.92rem;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+}
+.rc-input:focus,
+.rc-textarea:focus { border-color: #a78bfa; }
+.rc-input::placeholder,
+.rc-textarea::placeholder { color: #475569; }
+
+.rc-textarea { min-height: 90px; }
+
+.rc-char-count {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-align: right;
+    margin: 0;
+}
+.rc-char-count--warn { color: #f59e0b; }
+
+.rc-voice-hint {
+    font-size: 0.82rem;
+    color: #64748b;
+    margin: 0.25rem 0;
+    line-height: 1.5;
+}
+
+/* ── Feedback ─────────────────────────────────────────── */
+.rc-feedback {
+    padding: 0.55rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.rc-feedback--success { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+.rc-feedback--error   { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3);  }
+.rc-feedback--sending { background: rgba(96,165,250,0.1);  color: #93c5fd; border: 1px solid rgba(96,165,250,0.25); }
+
+/* ── Submit button ────────────────────────────────────── */
+.rc-submit {
+    padding: 0.7rem;
+    background: linear-gradient(135deg, #7c3aed, #3b82f6);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    margin-top: 0.25rem;
+}
+.rc-submit:hover:not(:disabled) { opacity: 0.88; }
+.rc-submit:active:not(:disabled) { transform: scale(0.98); }
+.rc-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Footer ───────────────────────────────────────────── */
+.rc-powered {
+    text-align: center;
+    font-size: 0.72rem;
+    color: #334155;
+    margin: 1rem 0 0;
+}
