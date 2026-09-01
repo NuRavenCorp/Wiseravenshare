@@ -21,13 +21,14 @@ export type SocialFeedItem = {
   createdAt?: string;
 };
 
-export type SocialMediaType = 'auto' | 'text' | 'photo' | 'video';
+export type SocialMediaType = 'auto' | 'text' | 'photo' | 'video' | 'music';
 
 export type PublishSocialContentRequest = {
   message: string;
   linkUrl?: string;
   videoUrl?: string;
   photoUrl?: string;
+  musicUrl?: string;
   mediaType?: SocialMediaType;
   publishToFacebook: boolean;
   publishToTikTok: boolean;
@@ -127,15 +128,20 @@ export function buildMediaSharePayload(options: {
     /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaUrl)
     || /^data:image\//i.test(mediaUrl)
   );
+  const isMusic = !isVideo && !isPhoto && (
+    /\.(mp3|wav|m4a|aac|flac|ogg)(\?|$)/i.test(mediaUrl)
+    || /^data:audio\//i.test(mediaUrl)
+  );
 
   return {
     message: options.message,
     linkUrl: options.linkUrl?.trim() || undefined,
     videoUrl: isVideo ? mediaUrl : undefined,
     photoUrl: isPhoto ? mediaUrl : undefined,
-    mediaType: isVideo ? 'video' : isPhoto ? 'photo' : 'text',
+    musicUrl: isMusic ? mediaUrl : undefined,
+    mediaType: isVideo ? 'video' : isPhoto ? 'photo' : isMusic ? 'music' : 'text',
     publishToFacebook: Boolean(options.publishToFacebook),
-    // TikTok/YouTube only accept video; the backend rejects photo posts there.
+    // TikTok/YouTube only accept video; music shares go to Facebook as audio posts
     publishToTikTok: Boolean(options.publishToTikTok) && isVideo,
     publishToYouTube: Boolean(options.publishToYouTube) && isVideo,
   };

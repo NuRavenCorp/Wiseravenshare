@@ -31,8 +31,14 @@ public class PublishSocialContentRequest
     public string? PhotoUrl { get; set; }
 
     /// <summary>
+    /// Optional publicly reachable audio/music URL to attach when the share is a music post.
+    /// </summary>
+    [MaxLength(500)]
+    public string? MusicUrl { get; set; }
+
+    /// <summary>
     /// Optional hint describing the shared media. Defaults to "auto" which infers the type from the URLs.
-    /// Supported values: auto, text, photo, video.
+    /// Supported values: auto, text, photo, video, music.
     /// </summary>
     [MaxLength(20)]
     public string MediaType { get; set; } = "auto";
@@ -57,6 +63,7 @@ public static class SocialMediaType
     public const string Text = "text";
     public const string Photo = "photo";
     public const string Video = "video";
+    public const string Music = "music";
 
     public static bool IsVideo(string? mediaType) =>
         string.Equals(mediaType, Video, StringComparison.OrdinalIgnoreCase)
