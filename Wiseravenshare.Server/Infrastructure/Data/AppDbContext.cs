@@ -39,6 +39,9 @@ public class AppDbContext : DbContext
     public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
     public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
 
+    // Communique
+    public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
+
     // Collaboration
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
@@ -277,6 +280,14 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(c => c.PostId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Communique ──
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.CallLog>(entity =>
+        {
+            entity.ToTable("CallLogs");
+            entity.HasIndex(c => c.UserId);
+            entity.HasIndex(c => c.Timestamp);
         });
 
         // ── Collaboration ──

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Compartment from '../Components/Common/Compartment';
 import { consumePodcastHandoffDraft } from '../Services/podcastStudioBridge';
+import { queueCollaborationHandoff } from '../Services/collaborationBridge';
 import { authService } from '../Services/Auth.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
@@ -150,7 +151,7 @@ const apiRoleToRoleLabel = {
     'script-lead': 'Script Lead'
 };
 
-const PodcastStudioPage = () => {
+const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const [title, setTitle] = useState('The Social Creator Teams Brief');
     const [format, setFormat] = useState('Interview');
@@ -164,6 +165,7 @@ const PodcastStudioPage = () => {
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
+    const [quickJoinInput, setQuickJoinInput] = useState('');
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
     const [permissions, setPermissions] = useState(rolePermissions.Owner);
@@ -658,6 +660,30 @@ const PodcastStudioPage = () => {
         setGuestConnected(true);
         broadcastTandemState({ teamMembersList: updatedList });
         setStatus(`Guest ${gName} connected to podcast studio!`);
+
+        queueCollaborationHandoff({
+            mode: 'create',
+            roomName: `${gName} Guest Room`
+        });
+    };
+
+    const handleQuickJoin = () => {
+        const value = quickJoinInput.trim();
+        if (!value) {
+            setStatus('Paste a room ID or invite link to quick join.');
+            return;
+        }
+
+        queueCollaborationHandoff({
+            mode: 'join',
+            roomIdOrLink: value
+        });
+
+        if (typeof onNavigate === 'function') {
+            onNavigate('collaboration');
+        }
+
+        setStatus('Opening Collaboration quick join...');
     };
 
     // Format buttons generate their namesake episode structure:
@@ -1464,6 +1490,34 @@ const PodcastStudioPage = () => {
                                     }}
                                 >
                                     ➕ Pair Guest Feed
+                                </button>
+                                <input
+                                    type="text"
+                                    value={quickJoinInput}
+                                    onChange={(e) => setQuickJoinInput(e.target.value)}
+                                    placeholder="Room ID or invite link for quick join"
+                                    style={{
+                                        padding: '10px 12px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-color)'
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleQuickJoin}
+                                    style={{
+                                        border: '1px solid rgba(56, 189, 248, 0.5)',
+                                        background: 'rgba(56, 189, 248, 0.15)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '8px',
+                                        padding: '10px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Quick Join Room
                                 </button>
                             </div>
                         </div>

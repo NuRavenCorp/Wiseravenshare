@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveArticleImage } from '../utils/newsImageUtils';
 
 const humanTime = (iso) => {
     const date = new Date(iso);
@@ -37,6 +38,7 @@ const ArticlePage = ({ article, onBack }) => {
         .split(/\n\s*\n/)
         .map((part) => part.trim())
         .filter(Boolean);
+    const heroImage = resolveArticleImage(article);
 
     return (
         <article style={{
@@ -61,6 +63,29 @@ const ArticlePage = ({ article, onBack }) => {
             <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '12px' }}>
                 {article.source} • {humanTime(article.publishedAt)} • {article.category}
             </div>
+
+            <img
+                src={heroImage}
+                alt={article.title || 'Article image'}
+                onError={(event) => {
+                    event.currentTarget.src = resolveArticleImage({
+                        title: article.title,
+                        source: article.source,
+                        category: article.category
+                    });
+                }}
+                style={{
+                    width: '100%',
+                    maxHeight: '380px',
+                    objectFit: 'cover',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-color)',
+                    marginBottom: '14px',
+                    background: 'rgba(255,255,255,0.04)'
+                }}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+            />
 
             {article.externalUrl && (
                 <a

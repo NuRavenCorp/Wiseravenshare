@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { resolveArticleImage } from '../../utils/newsImageUtils';
 
 interface NewsArticle {
     provider: string;
@@ -50,14 +51,33 @@ const NewsFeed: React.FC = () => {
                         <h3>{article.title}</h3>
                     </div>
 
+                    <img
+                        src={resolveArticleImage(article)}
+                        alt={article.title}
+                        onError={(event) => {
+                            event.currentTarget.src = resolveArticleImage({
+                                title: article.title,
+                                source: article.source ?? article.provider,
+                                category: 'General'
+                            });
+                        }}
+                        style={{
+                            width: '100%',
+                            maxHeight: '260px',
+                            objectFit: 'cover',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            marginBottom: '10px',
+                            background: 'rgba(255,255,255,0.04)'
+                        }}
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                    />
+
                     <p>{article.description ?? 'No summary available.'}</p>
                     <p>
                         <strong>Source:</strong> {article.source ?? article.provider}
                     </p>
-
-                    {article.imageUrl && (
-                        <img src={article.imageUrl} alt={article.title} />
-                    )}
 
                     {article.url && (
                         <a href={article.url} target="_blank" rel="noreferrer">

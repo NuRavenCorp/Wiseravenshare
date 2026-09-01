@@ -10,6 +10,7 @@ import { detectPlatform } from '../utils/platformDetector.js';
 import PlatformBadge from '../Components/Collaboration/PlatformBadge.jsx';
 import CollaborationRoom from '../Components/Collaboration/CollaborationRoom.jsx';
 import { ErrorBoundary } from '../Components/Common/ErrorBoundary.jsx';
+import { consumeCollaborationHandoff } from '../Services/collaborationBridge';
 
 const card = {
     background: 'var(--card-bg)', border: '1px solid var(--border-color)',
@@ -45,6 +46,22 @@ const CollaborationPage = ({ initialRoomId }) => {
 
     useEffect(() => {
         setPlatform(detectPlatform().platform);
+    }, []);
+
+    useEffect(() => {
+        const handoff = consumeCollaborationHandoff();
+        if (!handoff) {
+            return;
+        }
+
+        if (handoff.mode === 'join') {
+            setTab('join');
+            setJoinRoomId(String(handoff.roomIdOrLink || '').trim());
+            return;
+        }
+
+        setTab('create');
+        setRoomName(String(handoff.roomName || '').trim());
     }, []);
 
     // Support deep links like /?room=ROOMID

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Compartment from '../Common/Compartment';
+import { resolveArticleImage } from '../../utils/newsImageUtils';
 
 const aiFallbackNews = [
     {
@@ -259,6 +260,8 @@ const normalizeArticle = (article, index) => {
         normalized.content = buildExpandedContent(normalized);
     }
 
+    normalized.imageUrl = resolveArticleImage(normalized);
+
     return normalized;
 };
 
@@ -494,11 +497,36 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
                                     cursor: 'pointer'
                                 }}
                             >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '6px' }}>
-                                    <strong>{article.title}</strong>
-                                    <span style={{ fontSize: '12px', color: 'var(--highlight-color)', whiteSpace: 'nowrap' }}>{article.category}</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: '12px', alignItems: 'start' }}>
+                                    <div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '6px' }}>
+                                            <strong>{article.title}</strong>
+                                            <span style={{ fontSize: '12px', color: 'var(--highlight-color)', whiteSpace: 'nowrap' }}>{article.category}</span>
+                                        </div>
+                                        <p style={{ margin: '0 0 10px', fontSize: '14px', lineHeight: 1.45 }}>{article.summary}</p>
+                                    </div>
+                                    <img
+                                        src={article.imageUrl}
+                                        alt={article.title || 'News story image'}
+                                        onError={(event) => {
+                                            event.currentTarget.src = resolveArticleImage({
+                                                title: article.title,
+                                                source: article.source,
+                                                category: article.category
+                                            });
+                                        }}
+                                        style={{
+                                            width: '120px',
+                                            height: '84px',
+                                            objectFit: 'cover',
+                                            borderRadius: '8px',
+                                            border: '1px solid var(--border-color)',
+                                            background: 'rgba(255,255,255,0.05)'
+                                        }}
+                                        loading="lazy"
+                                        referrerPolicy="no-referrer"
+                                    />
                                 </div>
-                                <p style={{ margin: '0 0 10px', fontSize: '14px', lineHeight: 1.45 }}>{article.summary}</p>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--light-color)' }}>
                                     <span>{article.source} • {humanTime(article.publishedAt)}</span>
                                     <span>AI confidence {article.confidence}%</span>

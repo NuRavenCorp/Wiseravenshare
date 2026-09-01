@@ -190,7 +190,7 @@ const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
     };
 };
 
-const RavensightVideo = () => {
+const RavensightVideo = ({ onNavigate }) => {
     const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library, podcast, subscribe
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
@@ -809,7 +809,7 @@ const RavensightVideo = () => {
                         }}>
                             Podcast Studio now runs inside Ravensight so team recording and publishing stay in one production lane.
                         </div>
-                        <PodcastStudioPage />
+                        <PodcastStudioPage onNavigate={onNavigate} />
                     </div>
                 )}
                 {activeTab === 'subscribe' && (

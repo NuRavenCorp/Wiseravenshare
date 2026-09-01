@@ -905,6 +905,13 @@ builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
 
+// RavenCommuniqué — Twilio voice/SMS/WhatsApp + WebRTC call hub
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommuniqueCallService, Wiseravenshare.Server.Services.Communique.CommuniqueCallService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IExternalCallGateway, Wiseravenshare.Server.Services.Communique.TwilioExternalCallGateway>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ITwilioMessagingService, Wiseravenshare.Server.Services.Communique.TwilioMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
+
 var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
 {
@@ -928,7 +935,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/hubs")))
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs")))
                 {
                     context.Token = accessToken;
                 }
@@ -1192,6 +1199,7 @@ app.MapHub<EvolutionHub>("/api/hubs/evolution");
 app.MapHub<NotificationHub>("/api/hubs/notifications");
 app.MapHub<MessageHub>("/api/hubs/messages");
 app.MapHub<CrossPlatformCollaborationHub>("/api/hubs/collaboration");
+app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
 
 if (frontendDistExists)
 {
