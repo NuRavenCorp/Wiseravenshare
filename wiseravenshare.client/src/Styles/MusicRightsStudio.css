@@ -1,0 +1,382 @@
+/* Music Rights Studio Styles */
+
+:root {
+  --bg-color: #0f172a;
+  --card-bg: #1e293b;
+  --card-bg-hover: #334155;
+  --text-color: #e2e8f0;
+  --light-color: #94a3b8;
+  --border-color: #475569;
+  --highlight-color: #22c55e;
+  --input-bg: #1e293b;
+}
+
+.music-rights-studio {
+  padding: 20px;
+  background: var(--bg-color);
+  min-height: 100vh;
+  color: var(--text-color);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+.music-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.music-header h1 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 28px;
+}
+
+.music-header p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--light-color);
+}
+
+.upload-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--highlight-color);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: opacity 0.2s;
+}
+
+.upload-button:hover {
+  opacity: 0.9;
+}
+
+.upload-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.upload-form {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.upload-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.upload-form-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  color: var(--text-color);
+  transition: color 0.2s;
+}
+
+.close-button:hover {
+  color: #ef4444;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.form-input {
+  padding: 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-color);
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--highlight-color);
+}
+
+.form-input::placeholder {
+  color: var(--light-color);
+}
+
+.file-input-wrapper {
+  margin-bottom: 10px;
+}
+
+.file-input-wrapper input[type='file'] {
+  width: 100%;
+  padding: 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+.file-input-selected {
+  color: var(--highlight-color);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+
+.submit-button {
+  padding: 12px;
+  background: var(--highlight-color);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: opacity 0.2s;
+}
+
+.submit-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.submit-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.music-library {
+  margin-top: 30px;
+}
+
+.music-library h2 {
+  margin-bottom: 15px;
+  font-size: 20px;
+}
+
+.empty-library {
+  background: var(--card-bg);
+  border: 2px dashed var(--border-color);
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  color: var(--light-color);
+}
+
+.empty-library svg {
+  opacity: 0.5;
+  margin-bottom: 15px;
+}
+
+.track-list {
+  display: grid;
+  gap: 12px;
+}
+
+.track-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  transition: background 0.2s;
+}
+
+.track-item:hover {
+  background: var(--card-bg-hover);
+}
+
+.track-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-title {
+  margin: 0 0 4px;
+  color: var(--text-color);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-artist {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--light-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--border-color);
+}
+
+.track-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.control-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-color);
+  font-size: 20px;
+  transition: color 0.2s;
+  padding: 4px;
+}
+
+.control-button:hover {
+  color: var(--highlight-color);
+}
+
+.control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.share-menu {
+  position: relative;
+}
+
+.share-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-top: 8px;
+  z-index: 1000;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.share-menu-item {
+  width: 100%;
+  padding: 10px 15px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-color);
+  font-size: 14px;
+  transition: background 0.2s;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.share-menu-item:last-child {
+  border-bottom: none;
+}
+
+.share-menu-item:hover {
+  background: var(--card-bg-hover);
+}
+
+.delete-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #ef4444;
+  font-size: 20px;
+  transition: color 0.2s;
+  padding: 4px;
+}
+
+.delete-button:hover {
+  color: #dc2626;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .music-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .track-item {
+    flex-wrap: wrap;
+  }
+
+  .track-info {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .track-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .upload-form {
+    padding: 15px;
+  }
+
+  .form-group {
+    gap: 12px;
+  }
+}
+
+/* Loading and animations */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading {
+  animation: spin 1s linear infinite;
+}
+
+/* Print styles */
+@media print {
+  .upload-button,
+  .track-controls,
+  .upload-form {
+    display: none;
+  }
+
+  .music-rights-studio {
+    background: white;
+    color: black;
+  }
+
+  .track-item {
+    border: 1px solid #ccc;
+    background: white;
+    color: black;
+  }
+}

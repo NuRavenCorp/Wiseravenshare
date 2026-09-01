@@ -164,18 +164,20 @@ public class SocialPlatformService : ISocialPlatformService
             {
                 SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl),
                 SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl),
+                SocialMediaType.Music => await PublishMusicToFacebookAsync(message, request.LinkUrl, request.MusicUrl),
                 _ => await PublishToFacebookAsync(message, request.LinkUrl, null)
             });
         }
 
-        if (request.PublishToTikTok && mediaType == SocialMediaType.Photo)
+        if (request.PublishToTikTok && (mediaType == SocialMediaType.Photo || mediaType == SocialMediaType.Music))
         {
-            // TikTok only accepts video; surface a clear result instead of silently dropping the photo.
+            // TikTok only accepts video; surface a clear result instead of silently dropping photos/music.
+            var mediaName = mediaType == SocialMediaType.Music ? "music" : "photo";
             response.Results.Add(new SocialPublishResultDto
             {
                 Platform = "tiktok",
                 Success = false,
-                Error = "TikTok does not support photo posts. Share photos to Facebook or YouTube instead."
+                Error = $"TikTok does not support {mediaName} posts. Share to Facebook or YouTube instead."
             });
         }
         else if (request.PublishToTikTok)
@@ -183,7 +185,18 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToTikTokAsync(message, request.VideoUrl));
         }
 
-        if (request.PublishToYouTube)
+        if (request.PublishToYouTube && (mediaType == SocialMediaType.Photo || mediaType == SocialMediaType.Music))
+        {
+            // YouTube accepts video only via API; music and photos should go to Facebook.
+            var mediaName = mediaType == SocialMediaType.Music ? "music" : "photo";
+            response.Results.Add(new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = false,
+                Error = $"YouTube does not support {mediaName} posts via API. Share to Facebook instead."
+            });
+        }
+        else if (request.PublishToYouTube)
         {
             response.Results.Add(await PublishToYouTubeAsync(message, request.VideoUrl));
         }
@@ -227,7 +240,7 @@ public class SocialPlatformService : ISocialPlatformService
     {
         var raw = (request.MediaType ?? SocialMediaType.Auto).Trim().ToLowerInvariant();
 
-        if (raw is SocialMediaType.Text or SocialMediaType.Photo or SocialMediaType.Video)
+        if (raw is SocialMediaType.Text or SocialMediaType.Photo or SocialMediaType.Video or SocialMediaType.Music)
         {
             return raw;
         }
@@ -241,6 +254,11 @@ public class SocialPlatformService : ISocialPlatformService
         if (!string.IsNullOrWhiteSpace(request.PhotoUrl))
         {
             return SocialMediaType.Photo;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.MusicUrl))
+        {
+            return SocialMediaType.Music;
         }
 
         return SocialMediaType.Text;
@@ -447,6 +465,94 @@ public class SocialPlatformService : ISocialPlatformService
                 Platform = "facebook",
                 Success = false,
                 Error = $"Facebook photo publish failed: {ex.Message}"
+            };
+        }
+    }
+
+    private async Task<SocialPublishResultDto> PublishMusicToFacebookAsync(string message, string? linkUrl, string? musicUrl)
+    {
+        var pageId = _configuration["Social:Facebook:PageId"];
+        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
+
+        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(pageToken))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = "Facebook is not configured. Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
+            };
+        }
+
+        return await PublishMusicToFacebookConfiguredAsync(pageId, pageToken, message, linkUrl, musicUrl);
+    }
+
+    private async Task<SocialPublishResultDto> PublishMusicToFacebookConfiguredAsync(string pageId, string pageToken, string message, string? linkUrl, string? musicUrl)
+    {
+        if (string.IsNullOrWhiteSpace(musicUrl))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = "Facebook music publish requires a public musicUrl."
+            };
+        }
+
+        // Facebook accepts audio posts using the feed endpoint with music URL
+        var form = new Dictionary<string, string>
+        {
+            ["message"] = message,
+            ["access_token"] = pageToken
+        };
+
+        // Attach the music URL as a link or media source
+        if (!string.IsNullOrWhiteSpace(linkUrl))
+        {
+            form["link"] = linkUrl;
+        }
+
+        try
+        {
+            // Facebook audio posts typically use the standard feed endpoint with the audio URL in the message
+            var messageWithAudio = $"{message}\n\n🎵 Audio: {musicUrl}";
+            form["message"] = messageWithAudio;
+
+            using var content = new FormUrlEncodedContent(form);
+            using var httpResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{pageId}/feed", content);
+
+            var body = await httpResponse.Content.ReadAsStringAsync();
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "facebook",
+                    Success = false,
+                    Error = $"Facebook music publish failed ({(int)httpResponse.StatusCode}): {TrimError(body)}"
+                };
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var postId = document.RootElement.TryGetProperty("id", out var pid)
+                ? pid.GetString()
+                : null;
+
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = true,
+                ExternalPostId = postId,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.facebook.com/{postId}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Facebook music publish threw for music URL {MusicUrl}", musicUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "facebook",
+                Success = false,
+                Error = $"Facebook music publish failed: {ex.Message}"
             };
         }
     }
