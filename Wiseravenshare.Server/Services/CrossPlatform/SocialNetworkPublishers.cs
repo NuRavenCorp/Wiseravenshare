@@ -14,6 +14,8 @@ namespace Wiseravenshare.Server.Services.CrossPlatform;
 public class TwitterPublisher : ICrossPlatformPublisher
 {
     private const string ApiBase = "https://api.twitter.com/2";
+    private const string ZernioDefaultBaseUrl = "https://api.zernio.com";
+    private const string ZernioDefaultPublishPath = "/v1/twitter/publish";
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -28,22 +30,34 @@ public class TwitterPublisher : ICrossPlatformPublisher
 
     public string Platform => SocialPlatforms.Twitter;
 
-    public bool IsConfigured() =>
-        !string.IsNullOrWhiteSpace(_configuration["Social:Twitter:AccessToken"]);
+    public bool IsConfigured()
+    {
+        if (UseZernio())
+        {
+            return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return !string.IsNullOrWhiteSpace(_configuration["Social:Twitter:AccessToken"]);
+    }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
-        var accessToken = _configuration["Social:Twitter:AccessToken"];
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            return CrossPlatformErrors.NotConfigured(Platform, "Social:Twitter:AccessToken");
-        }
-
         // 280 chars hard limit; leave room for an appended link.
         var text = request.Message.Truncate(string.IsNullOrWhiteSpace(request.MediaUrl) ? 280 : 260);
         if (!string.IsNullOrWhiteSpace(request.MediaUrl))
         {
             text = $"{text} {request.MediaUrl}".Trim();
+        }
+
+        if (UseZernio())
+        {
+            return await PublishViaZernioAsync(request, text);
+        }
+
+        var accessToken = _configuration["Social:Twitter:AccessToken"];
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Twitter:AccessToken");
         }
 
         try
@@ -84,6 +98,99 @@ public class TwitterPublisher : ICrossPlatformPublisher
             return CrossPlatformErrors.Failed(Platform, $"Twitter publish failed: {ex.Message}");
         }
     }
+
+    private async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request, string text)
+    {
+        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
+        }
+
+        var baseUrl = (_configuration["Social:Zernio:BaseUrl"] ?? ZernioDefaultBaseUrl).TrimEnd('/');
+        var publishPath = _configuration["Social:Zernio:Twitter:PublishPath"] ?? ZernioDefaultPublishPath;
+        if (!Uri.TryCreate($"{baseUrl}{publishPath}", UriKind.Absolute, out var endpoint))
+        {
+            return CrossPlatformErrors.Failed(Platform, "Zernio Twitter endpoint is invalid.");
+        }
+
+        var payload = new
+        {
+            text,
+            mediaUrl = request.MediaUrl,
+            metadata = new
+            {
+                source = "wiseravenshare",
+                postId = request.PostId.ToString()
+            }
+        };
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            httpRequest.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Zernio Twitter publish failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return CrossPlatformErrors.Failed(Platform, $"Zernio Twitter publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var externalPostId = ReadJsonString(document.RootElement, "postId")
+                ?? ReadJsonString(document.RootElement, "id")
+                ?? (document.RootElement.TryGetProperty("data", out var data)
+                    ? ReadJsonString(data, "postId") ?? ReadJsonString(data, "id")
+                    : null);
+            var externalPostUrl = ReadJsonString(document.RootElement, "postUrl")
+                ?? ReadJsonString(document.RootElement, "url")
+                ?? (document.RootElement.TryGetProperty("data", out var urlData)
+                    ? ReadJsonString(urlData, "postUrl") ?? ReadJsonString(urlData, "url")
+                    : null);
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = externalPostId,
+                ExternalPostUrl = externalPostUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Zernio Twitter publish threw for post {PostId}", request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Zernio Twitter publish failed: {ex.Message}");
+        }
+    }
+
+    private bool UseZernio()
+    {
+        var provider = (_configuration["Social:Twitter:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        return provider == "zernio";
+    }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
+    }
 }
 
 /// <summary>
@@ -95,6 +202,8 @@ public class TwitterPublisher : ICrossPlatformPublisher
 public class LinkedInPublisher : ICrossPlatformPublisher
 {
     private const string ApiBase = "https://api.linkedin.com";
+    private const string ZernioDefaultBaseUrl = "https://api.zernio.com";
+    private const string ZernioDefaultPublishPath = "/v1/linkedin/publish";
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -109,11 +218,23 @@ public class LinkedInPublisher : ICrossPlatformPublisher
 
     public string Platform => SocialPlatforms.LinkedIn;
 
-    public bool IsConfigured() =>
-        !string.IsNullOrWhiteSpace(_configuration["Social:LinkedIn:AccessToken"]);
+    public bool IsConfigured()
+    {
+        if (UseZernio())
+        {
+            return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return !string.IsNullOrWhiteSpace(_configuration["Social:LinkedIn:AccessToken"]);
+    }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
+        if (UseZernio())
+        {
+            return await PublishViaZernioAsync(request);
+        }
+
         var accessToken = _configuration["Social:LinkedIn:AccessToken"];
         if (string.IsNullOrWhiteSpace(accessToken))
         {
@@ -165,6 +286,99 @@ public class LinkedInPublisher : ICrossPlatformPublisher
             _logger.LogWarning(ex, "LinkedIn publish threw for post {PostId}", request.PostId);
             return CrossPlatformErrors.Failed(Platform, $"LinkedIn publish failed: {ex.Message}");
         }
+    }
+
+    private async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
+    {
+        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
+        }
+
+        var baseUrl = (_configuration["Social:Zernio:BaseUrl"] ?? ZernioDefaultBaseUrl).TrimEnd('/');
+        var publishPath = _configuration["Social:Zernio:LinkedIn:PublishPath"] ?? ZernioDefaultPublishPath;
+        if (!Uri.TryCreate($"{baseUrl}{publishPath}", UriKind.Absolute, out var endpoint))
+        {
+            return CrossPlatformErrors.Failed(Platform, "Zernio LinkedIn endpoint is invalid.");
+        }
+
+        var payload = new
+        {
+            message = request.Message.Truncate(3000),
+            mediaUrl = request.MediaUrl,
+            metadata = new
+            {
+                source = "wiseravenshare",
+                postId = request.PostId.ToString()
+            }
+        };
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            httpRequest.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Zernio LinkedIn publish failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return CrossPlatformErrors.Failed(Platform, $"Zernio LinkedIn publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var externalPostId = ReadJsonString(document.RootElement, "postId")
+                ?? ReadJsonString(document.RootElement, "id")
+                ?? (document.RootElement.TryGetProperty("data", out var data)
+                    ? ReadJsonString(data, "postId") ?? ReadJsonString(data, "id")
+                    : null);
+            var externalPostUrl = ReadJsonString(document.RootElement, "postUrl")
+                ?? ReadJsonString(document.RootElement, "url")
+                ?? (document.RootElement.TryGetProperty("data", out var urlData)
+                    ? ReadJsonString(urlData, "postUrl") ?? ReadJsonString(urlData, "url")
+                    : null);
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = externalPostId,
+                ExternalPostUrl = externalPostUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Zernio LinkedIn publish threw for post {PostId}", request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Zernio LinkedIn publish failed: {ex.Message}");
+        }
+    }
+
+    private bool UseZernio()
+    {
+        var provider = (_configuration["Social:LinkedIn:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        return provider == "zernio";
+    }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
     }
 
     private async Task<string?> ResolveAuthorUrnAsync(string accessToken)
@@ -227,4 +441,3 @@ public class LinkedInPublisher : ICrossPlatformPublisher
         };
     }
 }
-
