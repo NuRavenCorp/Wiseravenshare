@@ -181,6 +181,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [isMuted, setIsMuted] = useState(false);
     const [videoTitle, setVideoTitle] = useState('');
     const [isSavingRecording, setIsSavingRecording] = useState(false);
+    const [hasSavedRecording, setHasSavedRecording] = useState(false);
 
     // Guest & Remote Controls State
     const [guestCamOn, setGuestCamOn] = useState(true);
@@ -474,6 +475,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             setRecordedChunks([]);
             setRecordedVideoUrl(null);
             setRecordedBlob(null);
+            setHasSavedRecording(false);
 
             let mimeType = 'video/webm';
             if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported('video/webm')) {
@@ -589,6 +591,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             } else {
                 throw new Error('Local store fallback');
             }
+            setHasSavedRecording(true);
             setStatus('Podcast recording successfully saved to Ravensight Library!');
         } catch {
             const fallback = buildLocalFallbackVideo({
@@ -600,10 +603,46 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 storageMode: 'permanent'
             });
             upsertLocalVideo(fallback);
+            setHasSavedRecording(true);
             setStatus('Podcast recording saved locally to Ravensight Library.');
         } finally {
             setIsSavingRecording(false);
         }
+    };
+
+    const handleApproveRunOrder = () => {
+        if (!permissions.canApproveSegments) {
+            setStatus(`${controlRole} cannot approve segment order. Switch to Owner, Producer or Editor.`);
+            return;
+        }
+
+        setRunOrderApproved(true);
+        broadcastTandemState({ runOrderApproved: true });
+        setStatus('Run order approved. You are ready to record.');
+    };
+
+    const handleStartRecordingFromFlow = () => {
+        if (!String(title || '').trim()) {
+            setStatus('Add a podcast title before starting recording.');
+            return;
+        }
+
+        if (!String(storyAngle || '').trim()) {
+            setStatus('Add a story angle before starting recording.');
+            return;
+        }
+
+        if (!String(scriptText || '').trim()) {
+            setStatus('Prepare a live script before starting recording.');
+            return;
+        }
+
+        if (!runOrderApproved) {
+            setStatus('Approve run order before going live.');
+            return;
+        }
+
+        startRecording();
     };
 
     // Tandem Member Sync Handler (Username or Email Pairing)
@@ -720,6 +759,61 @@ const PodcastStudioPage = ({ onNavigate }) => {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const hasCoreBrief = Boolean(String(title || '').trim()) && Boolean(String(storyAngle || '').trim());
+    const hasScript = String(scriptText || '').trim().length >= 40;
+    const hasTeamReady = teamMembersList.length > 0;
+    const hasRecording = Boolean(recordedVideoUrl);
+
+    const flowSteps = [
+        { id: 'brief', label: 'Set the episode plan', done: hasCoreBrief, hint: 'Add a clear title and story angle' },
+        { id: 'format', label: 'Choose show style and priority', done: Boolean(format && urgency), hint: 'Pick format and urgency level' },
+        { id: 'team', label: 'Confirm who is joining', done: hasTeamReady, hint: 'Add at least one teammate or guest' },
+        { id: 'script', label: 'Prepare the talking points', done: hasScript, hint: 'Load a template, then customize it' },
+        { id: 'approval', label: 'Lock the run order', done: runOrderApproved, hint: 'Approve segment order before recording' },
+        { id: 'publish', label: 'Save the recording', done: hasSavedRecording, hint: 'Record, review, and save to Ravensight Library' }
+    ];
+
+    const completedFlowCount = flowSteps.filter((step) => step.done).length;
+    const flowProgressPercent = Math.round((completedFlowCount / flowSteps.length) * 100);
+
+    const runNextStudioAction = async () => {
+        if (!hasCoreBrief) {
+            setStatus('Start by adding the episode title and story angle.');
+            return;
+        }
+
+        if (!hasScript) {
+            handleFormatChange(format);
+            return;
+        }
+
+        if (!runOrderApproved) {
+            handleApproveRunOrder();
+            return;
+        }
+
+        if (!isRecording && !hasRecording) {
+            handleStartRecordingFromFlow();
+            return;
+        }
+
+        if (hasRecording && !hasSavedRecording) {
+            await saveRecordingToLibrary();
+            return;
+        }
+
+        setStatus('All set. Recording is saved and ready to publish.');
+    };
+
+    const nextFlowActionLabel = (() => {
+        if (!hasCoreBrief) return 'Set episode plan';
+        if (!hasScript) return 'Load script template';
+        if (!runOrderApproved) return 'Lock run order';
+        if (!isRecording && !hasRecording) return 'Start recording';
+        if (hasRecording && !hasSavedRecording) return 'Save to library';
+        return 'Flow complete';
+    })();
+
     const audienceSummary = useMemo(() => ({
         segments: (formatDefinitions[format]?.segments || scriptBlocks).length,
         collaborators: teamMembersList.length,
@@ -734,7 +828,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     ];
 
     return (
-        <Compartment badge="Podcast Control Room" title="Podcast Studio & Tandem Hub">
+        <Compartment badge="Podcast Studio" title="Plan, Record, and Publish">
             <div style={{ display: 'grid', gap: '20px' }}>
                 {/* Hero / Action Header */}
                 <div
@@ -753,7 +847,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <span style={{ fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                                    Podcast Control Room
+                                    Podcast Studio
                                 </span>
                                 {isRecording && (
                                     <span style={{
@@ -796,7 +890,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             {!isRecording ? (
                                 <button
                                     type="button"
-                                    onClick={startRecording}
+                                    onClick={handleStartRecordingFromFlow}
                                     style={{
                                         border: 'none',
                                         background: 'linear-gradient(135deg, #ef4444, #dc2626)',
@@ -811,7 +905,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         gap: '8px'
                                     }}
                                 >
-                                    🔴 Start recording
+                                    🔴 Start Recording
                                 </button>
                             ) : (
                                 <>
@@ -888,7 +982,78 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     </div>
                 </div>
 
-                {/* Tandem Sync Connection Panel (Pairing by Username or Email) */}
+                <div style={{
+                    background: 'linear-gradient(160deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85))',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    borderRadius: '18px',
+                    padding: '20px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#34d399', fontWeight: 700 }}>
+                                Recording Checklist
+                            </div>
+                            <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                Follow this order: plan, script, approve, record, then save.
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--light-color)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                Progress
+                            </div>
+                            <div style={{ fontSize: '24px', fontWeight: 800 }}>{flowProgressPercent}%</div>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
+                        {flowSteps.map((step, index) => (
+                            <div
+                                key={step.id}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'auto 1fr auto',
+                                    alignItems: 'center',
+                                    gap: '10px',
+                                    padding: '10px 12px',
+                                    borderRadius: '12px',
+                                    border: step.done ? '1px solid rgba(52, 211, 153, 0.45)' : '1px solid var(--border-color)',
+                                    background: step.done ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255,255,255,0.02)'
+                                }}
+                            >
+                                <div style={{ fontSize: '12px', color: 'var(--light-color)', fontWeight: 700 }}>{index + 1}</div>
+                                <div>
+                                    <div style={{ fontWeight: 700 }}>{step.label}</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{step.hint}</div>
+                                </div>
+                                <div style={{ fontSize: '12px', color: step.done ? '#4ade80' : 'var(--light-color)', fontWeight: 700 }}>
+                                    {step.done ? 'Done' : 'Pending'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                            type="button"
+                            onClick={runNextStudioAction}
+                            disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
+                            style={{
+                                border: 'none',
+                                background: 'linear-gradient(135deg, #10b981, #059669)',
+                                color: '#fff',
+                                borderRadius: '10px',
+                                padding: '11px 16px',
+                                fontWeight: 700,
+                                cursor: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                opacity: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 0.65 : 1
+                            }}
+                        >
+                            {isSavingRecording ? 'Saving...' : `Next: ${nextFlowActionLabel}`}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Team Sync Panel (Pairing by Username or Email) */}
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(14, 116, 144, 0.15), rgba(15, 23, 42, 0.8))',
                     border: '1px solid rgba(56, 189, 248, 0.3)',
@@ -898,17 +1063,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
                         <div>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#38bdf8', fontWeight: 700 }}>
-                                Tandem Connection & Participant Pairing
+                                Team Sync
                             </div>
                             <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '4px' }}>
-                                Sync producers, scriptwriters, guests, and main event hosts together by username or email so everyone operates in live tandem.
+                                Connect producers, writers, hosts, and guests by username or email so everyone stays aligned.
                             </div>
                         </div>
                         <button
                             type="button"
                             onClick={() => {
                                 broadcastTandemState();
-                                setSyncMessage('Tandem sync forced across all paired connections.');
+                                setSyncMessage('Team sync updated for all connected members.');
                                 setTimeout(() => setSyncMessage(''), 3000);
                             }}
                             style={{
@@ -922,7 +1087,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 cursor: 'pointer'
                             }}
                         >
-                            🔄 Sync Now
+                            🔄 Sync Team
                         </button>
                     </div>
 
@@ -974,7 +1139,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 gap: '6px'
                             }}
                         >
-                            ⚡ Sync Connection
+                            ⚡ Sync Member
                         </button>
                     </form>
                     {syncMessage && (
@@ -1341,17 +1506,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </label>
 
                             <div style={{ display: 'grid', gap: '6px' }}>
-                                <span style={{ color: 'var(--light-color)' }}>Dispatch Urgency</span>
+                                <span style={{ color: 'var(--light-color)' }}>Publish Priority</span>
                                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                     {['Breaking', 'Standard', 'Feature'].map((value) => (
                                         <button
                                             key={value}
                                             type="button"
-                                            onClick={() => {
-                                                setUrgency(value);
-                                                setStatus(`Dispatch urgency set to ${value}.`);
-                                                broadcastTandemState({ urgency: value });
-                                            }}
+                                            onClick={() => handleUrgencyChange(value)}
                                             style={{
                                                 border: urgency === value ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
                                                 background: urgency === value ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
@@ -1434,11 +1595,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        setRunOrderApproved(true);
-                                        broadcastTandemState({ runOrderApproved: true });
-                                        setStatus('Segment run order approved and locked for live production.');
-                                    }}
+                                    onClick={handleApproveRunOrder}
+                                    disabled={!permissions.canApproveSegments}
                                     style={{
                                         border: runOrderApproved ? '1px solid #22c55e' : '1px solid var(--border-color)',
                                         background: runOrderApproved ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.03)',
@@ -1446,10 +1604,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         borderRadius: '10px',
                                         padding: '10px 14px',
                                         fontWeight: runOrderApproved ? 700 : 400,
-                                        cursor: 'pointer'
+                                        cursor: permissions.canApproveSegments ? 'pointer' : 'not-allowed',
+                                        opacity: permissions.canApproveSegments ? 1 : 0.65
                                     }}
                                 >
-                                    {runOrderApproved ? '✓ Run order approved' : 'Approve run order'}
+                                    {runOrderApproved ? '✓ Run order locked' : 'Lock run order'}
                                 </button>
                             </div>
                         </div>
@@ -1460,7 +1619,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         {/* Guest Quick Connect Box */}
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                                Guest Room & Quick Join
+                                Guest Room
                             </div>
                             <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
                                 <input
@@ -1489,7 +1648,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    ➕ Pair Guest Feed
+                                    ➕ Add Guest
                                 </button>
                                 <input
                                     type="text"
@@ -1517,7 +1676,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    Quick Join Room
+                                    Join Room
                                 </button>
                             </div>
                         </div>
@@ -1525,7 +1684,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         {/* Synced Tandem Team Roster */}
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                                Synced Tandem Team ({teamMembersList.length})
+                                Connected Team ({teamMembersList.length})
                             </div>
                             <div style={{ display: 'grid', gap: '10px', marginTop: '14px' }}>
                                 {teamMembersList.map((member, i) => (
