@@ -260,19 +260,12 @@ public sealed class ZernioMessagingService : ICommuniqueMessagingService
 
     private bool GetEnabled()
     {
-        var zernioEnabled = _configuration.GetValue<bool?>("Communique:Zernio:Enabled");
-        if (zernioEnabled.HasValue)
-        {
-            return zernioEnabled.Value;
-        }
-
-        return _configuration.GetValue("Communique:Zerio:Enabled", false);
+        return _configuration.GetValue("Communique:Zernio:Enabled", false);
     }
 
     private string? GetSetting(string key)
     {
-        return _configuration[$"Communique:Zernio:{key}"]
-            ?? _configuration[$"Communique:Zerio:{key}"];
+        return _configuration[$"Communique:Zernio:{key}"];
     }
 
     private static string ExtractMessageId(string responseText)
@@ -351,6 +344,6 @@ public sealed class RoutedCommuniqueMessagingService : ICommuniqueMessagingServi
         var provider = (_configuration["Communique:Messaging:Provider"] ?? "twilio")
             .Trim()
             .ToLowerInvariant();
-        return provider == "zernio" || provider == "zerio";
+        return provider == "zernio";
     }
 }
