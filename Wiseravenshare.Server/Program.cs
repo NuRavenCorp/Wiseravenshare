@@ -909,6 +909,8 @@ builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommuniqueCallService, Wiseravenshare.Server.Services.Communique.CommuniqueCallService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IExternalCallGateway, Wiseravenshare.Server.Services.Communique.TwilioExternalCallGateway>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ITwilioMessagingService, Wiseravenshare.Server.Services.Communique.TwilioMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ZerioMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommuniqueMessagingService, Wiseravenshare.Server.Services.Communique.RoutedCommuniqueMessagingService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
 builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
 
@@ -1376,5 +1378,4 @@ ORDER BY ""MigrationId"";";
 });
 
 app.Run();
-
 

@@ -12,12 +12,12 @@ namespace Wiseravenshare.Server.Controllers.Communique;
 [Authorize]
 public class RavenCommuniqueController : ControllerBase
 {
-    private readonly ITwilioMessagingService _messagingService;
+    private readonly ICommuniqueMessagingService _messagingService;
     private readonly ICommuniqueCallService _callService;
     private readonly ILogger<RavenCommuniqueController> _logger;
 
     public RavenCommuniqueController(
-        ITwilioMessagingService messagingService,
+        ICommuniqueMessagingService messagingService,
         ICommuniqueCallService callService,
         ILogger<RavenCommuniqueController> logger)
     {
@@ -26,7 +26,7 @@ public class RavenCommuniqueController : ControllerBase
         _logger = logger;
     }
 
-    /// <summary>Send an SMS message via Twilio.</summary>
+    /// <summary>Send an SMS message via configured communique provider.</summary>
     [HttpPost("sms")]
     public async Task<IActionResult> SendSms([FromBody] SmsRequest request)
     {
@@ -40,7 +40,7 @@ public class RavenCommuniqueController : ControllerBase
         return Ok(new { messageSid = result.MessageSid, channel = result.Channel });
     }
 
-    /// <summary>Send a WhatsApp message via Twilio.</summary>
+    /// <summary>Send a WhatsApp message via configured communique provider.</summary>
     [HttpPost("whatsapp")]
     public async Task<IActionResult> SendWhatsApp([FromBody] SmsRequest request)
     {
