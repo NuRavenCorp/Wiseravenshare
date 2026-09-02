@@ -19,7 +19,6 @@ public class EngagementMultiplierService : IEngagementMultiplierService
 {
     private readonly IRepository<Post> _postRepository;
     private readonly IRepository<User> _userRepository;
-    private readonly IPostInteractionRepository _interactionRepository;
     private readonly ILogger<EngagementMultiplierService> _logger;
 
     // Multiplier ranges: minimum 0.5x (poor engagement), maximum 2.0x (excellent engagement)
@@ -30,12 +29,10 @@ public class EngagementMultiplierService : IEngagementMultiplierService
     public EngagementMultiplierService(
         IRepository<Post> postRepository,
         IRepository<User> userRepository,
-        IPostInteractionRepository interactionRepository,
         ILogger<EngagementMultiplierService> logger)
     {
         _postRepository = postRepository;
         _userRepository = userRepository;
-        _interactionRepository = interactionRepository;
         _logger = logger;
     }
 
@@ -69,11 +66,11 @@ public class EngagementMultiplierService : IEngagementMultiplierService
 
     public async Task<decimal> CalculateEngagementScoreAsync(Post post, User user)
     {
-        if (post == null || post.CreatedAt == null)
+        if (post == null)
             return 0m;
 
         // Calculate age-normalized metrics (prevent spam from aging posts)
-        var postAgeHours = (DateTime.UtcNow - post.CreatedAt.Value).TotalHours;
+        var postAgeHours = (DateTime.UtcNow - post.CreatedAt).TotalHours;
         var ageNormalization = Math.Min(postAgeHours / 24.0, 1.0); // 0-1 scale, max at 24h
 
         if (ageNormalization < 0.1)
@@ -108,21 +105,18 @@ public class EngagementMultiplierService : IEngagementMultiplierService
 
     private decimal CalculateEngagementRatio(Post post, User user, double ageNormalization)
     {
-        if (string.IsNullOrEmpty(user.FollowersCount?.ToString()))
-            return 0m;
-
-        var followerCount = Math.Max(user.FollowersCount ?? 1, 1);
+        var followerCount = Math.Max(user.ReputationPoints, 1);
 
         // Total engagement: likes + reposts*2 (higher value) + replies*3 (most valuable)
-        var totalEngagement = (post.LikesCount ?? 0) 
-            + (post.RepostsCount ?? 0) * 2 
-            + (post.RepliesCount ?? 0) * 3;
+        var totalEngagement = post.LikesCount
+            + (post.RepostsCount * 2)
+            + (post.CommentsCount * 3);
 
         // Expected engagement: 5-10% of follower base per day
         var expectedEngagement = followerCount * 0.075m;
 
         // Engagement ratio: actual vs expected
-        var ratio = expectedEngagement > 0 ? totalEngagement / (decimal)expectedEngagement : 0m;
+        var ratio = expectedEngagement > 0 ? totalEngagement / expectedEngagement : 0m;
 
         // Decay with time (fresh posts are expected to have higher ratios)
         return Math.Min(ratio * (decimal)ageNormalization, 2.0m);
@@ -137,7 +131,7 @@ public class EngagementMultiplierService : IEngagementMultiplierService
         var normalizedTruthScore = (decimal)post.TruthScore / 100m;
 
         // Weight by user's truth score for authority
-        var userTruthAuthority = Math.Min((user.TruthScore ?? 50m) / 100m, 1.0m);
+        var userTruthAuthority = Math.Min(user.TruthScore / 100m, 1.0m);
 
         // Combined: post veracity * user authority
         return normalizedTruthScore * userTruthAuthority;
@@ -149,10 +143,10 @@ public class EngagementMultiplierService : IEngagementMultiplierService
             return 0.5m;
 
         // Truth score (0-100) -> normalized to 0-1
-        var truthScore = Math.Min((user.TruthScore ?? 50m) / 100m, 1.0m);
+        var truthScore = Math.Min(user.TruthScore / 100m, 1.0m);
 
         // Followers as reputation proxy (logarithmic scale)
-        var followerScore = Math.Log10(Math.Max(user.FollowersCount ?? 1, 1)) / 5.0m; // log base for 100K followers = 1.0
+        var followerScore = (decimal)Math.Log10(Math.Max(user.ReputationPoints, 1)) / 5.0m; // log scale of reputation points
         followerScore = Math.Min(followerScore, 1.0m);
 
         // Weighted average: truth score (60%), followers (40%)
@@ -173,7 +167,7 @@ public class EngagementMultiplierService : IEngagementMultiplierService
         else if (contentLength > 100) quality += 0.2m;
 
         // Engagement indicators (0.3 bonus): posts with replies/threads
-        if ((post.RepliesCount ?? 0) > 0)
+        if (post.CommentsCount > 0)
             quality += 0.3m;
 
         return Math.Min(quality, 1.0m);
