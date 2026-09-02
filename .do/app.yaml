@@ -184,12 +184,12 @@ databases:
     production: true
 
 domains:
-  - domain: wiseravenshare.com
-    type: PRIMARY
-  - domain: www.wiseravenshare.com
-    type: ALIAS
   - domain: wise-ravens.com
-    type: ALIAS
+    type: PRIMARY
   - domain: www.wise-ravens.com
+    type: ALIAS
+  - domain: wiseravenshare.com
+    type: ALIAS
+  - domain: www.wiseravenshare.com
     type: ALIAS
 
