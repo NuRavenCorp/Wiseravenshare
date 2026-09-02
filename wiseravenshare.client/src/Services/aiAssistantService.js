@@ -25,6 +25,39 @@ client.interceptors.request.use((config) => {
 });
 
 export const aiAssistantService = {
+    /** Health check - verifies Ollama is online and ready. Retries with backoff. */
+    healthCheck: async (maxRetries = 5, initialDelayMs = 1000) => {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await client.get('/aiassistant/health', { timeout: 5000 });
+                if (response.status === 200) {
+                    return { 
+                        online: true, 
+                        message: response.data.message || "Ollama is ready",
+                        models: response.data.models || [],
+                        modelCount: response.data.modelCount || 0
+                    };
+                }
+            } catch (error) {
+                const status = error?.response?.status;
+                if (status === 503) {
+                    // Service unavailable - Ollama is starting. Retry with backoff
+                    if (attempt < maxRetries - 1) {
+                        const delayMs = initialDelayMs * Math.pow(2, attempt); // exponential backoff
+                        await new Promise(r => setTimeout(r, delayMs));
+                        continue;
+                    }
+                }
+            }
+        }
+        return { 
+            online: false, 
+            message: "Ollama is offline. Please ensure Ollama is running on your system.",
+            models: [],
+            modelCount: 0
+        };
+    },
+
     /** Lists models available on the backend's Ollama instance. */
     getModels: async () => {
         try {

@@ -1,0 +1,3 @@
+Police scanner online + Docker
+
+docker run --rm -it --env TZ=Europe/Warsaw -p 8010:80 -v ./data:/app/data -v ./log:/var/log/sdr --device /dev/bus/usb:/dev/bus/usb shajen/sdr-hub

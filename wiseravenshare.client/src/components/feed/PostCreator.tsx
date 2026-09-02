@@ -37,7 +37,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
     const queryClient = useQueryClient();
 
-    const createPostMutation = useMutation({
+    const createMissiveMutation = useMutation({
         mutationFn: postService.createPost,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['feed'] });
@@ -45,11 +45,11 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
             setMedia([]);
             setTruthResult(null);
             setIsExpanded(false);
-            toast.success('Post created successfully!');
+            toast.success('Missive created successfully!');
             onPostCreated?.();
         },
         onError: (error: any) => {
-            toast.error(error.message || 'Failed to create post');
+            toast.error(error.message || 'Failed to create missive');
         }
     });
 
@@ -100,7 +100,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
             formData.append('media', file);
         });
 
-        createPostMutation.mutate(formData);
+        createMissiveMutation.mutate(formData);
     };
 
     return (
