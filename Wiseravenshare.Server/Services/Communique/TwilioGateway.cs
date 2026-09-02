@@ -179,16 +179,16 @@ public class TwilioMessagingService : ITwilioMessagingService, ICommuniqueMessag
     }
 }
 
-public sealed class ZerioMessagingService : ICommuniqueMessagingService
+public sealed class ZernioMessagingService : ICommuniqueMessagingService
 {
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<ZerioMessagingService> _logger;
+    private readonly ILogger<ZernioMessagingService> _logger;
 
-    public ZerioMessagingService(
+    public ZernioMessagingService(
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
-        ILogger<ZerioMessagingService> logger)
+        ILogger<ZernioMessagingService> logger)
     {
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
@@ -196,35 +196,35 @@ public sealed class ZerioMessagingService : ICommuniqueMessagingService
     }
 
     public Task<MessageSendResult> SendSmsAsync(string toNumber, string message) =>
-        SendZerioMessageAsync(toNumber, message, whatsApp: false);
+        SendZernioMessageAsync(toNumber, message, whatsApp: false);
 
     public Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message) =>
-        SendZerioMessageAsync(toNumber, message, whatsApp: true);
+        SendZernioMessageAsync(toNumber, message, whatsApp: true);
 
-    private async Task<MessageSendResult> SendZerioMessageAsync(string toNumber, string message, bool whatsApp)
+    private async Task<MessageSendResult> SendZernioMessageAsync(string toNumber, string message, bool whatsApp)
     {
         var channel = whatsApp ? "whatsapp" : "sms";
-        if (!_configuration.GetValue("Communique:Zerio:Enabled", false))
+        if (!GetEnabled())
         {
-            return MessageSendResult.Fail("Zerio is disabled.", channel);
+            return MessageSendResult.Fail("Zernio is disabled.", channel);
         }
 
-        var apiKey = _configuration["Communique:Zerio:ApiKey"];
-        var baseUrl = (_configuration["Communique:Zerio:BaseUrl"] ?? string.Empty).TrimEnd('/');
+        var apiKey = GetSetting("ApiKey");
+        var baseUrl = (GetSetting("BaseUrl") ?? string.Empty).TrimEnd('/');
         var path = whatsApp
-            ? (_configuration["Communique:Zerio:WhatsAppPath"] ?? "/v1/messages/whatsapp")
-            : (_configuration["Communique:Zerio:SmsPath"] ?? "/v1/messages/sms");
-        var fromNumber = _configuration["Communique:Zerio:FromNumber"];
+            ? (GetSetting("WhatsAppPath") ?? "/v1/messages/whatsapp")
+            : (GetSetting("SmsPath") ?? "/v1/messages/sms");
+        var fromNumber = GetSetting("FromNumber");
 
         if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl))
         {
-            _logger.LogWarning("Zerio configuration incomplete for {Channel}.", channel);
-            return MessageSendResult.Fail("Zerio configuration is incomplete.", channel);
+            _logger.LogWarning("Zernio configuration incomplete for {Channel}.", channel);
+            return MessageSendResult.Fail("Zernio configuration is incomplete.", channel);
         }
 
         if (!Uri.TryCreate($"{baseUrl}{path}", UriKind.Absolute, out var endpoint))
         {
-            return MessageSendResult.Fail("Zerio endpoint URL is invalid.", channel);
+            return MessageSendResult.Fail("Zernio endpoint URL is invalid.", channel);
         }
 
         var client = _httpClientFactory.CreateClient();
@@ -249,13 +249,30 @@ public sealed class ZerioMessagingService : ICommuniqueMessagingService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Zerio {Channel} failed ({StatusCode}). Response: {Response}",
+                "Zernio {Channel} failed ({StatusCode}). Response: {Response}",
                 channel, (int)response.StatusCode, responseText);
-            return MessageSendResult.Fail($"Zerio {channel} failed with HTTP {(int)response.StatusCode}.", channel);
+            return MessageSendResult.Fail($"Zernio {channel} failed with HTTP {(int)response.StatusCode}.", channel);
         }
 
         var messageId = ExtractMessageId(responseText);
         return MessageSendResult.Ok(messageId, channel);
+    }
+
+    private bool GetEnabled()
+    {
+        var zernioEnabled = _configuration.GetValue<bool?>("Communique:Zernio:Enabled");
+        if (zernioEnabled.HasValue)
+        {
+            return zernioEnabled.Value;
+        }
+
+        return _configuration.GetValue("Communique:Zerio:Enabled", false);
+    }
+
+    private string? GetSetting(string key)
+    {
+        return _configuration[$"Communique:Zernio:{key}"]
+            ?? _configuration[$"Communique:Zerio:{key}"];
     }
 
     private static string ExtractMessageId(string responseText)
@@ -303,37 +320,37 @@ public sealed class RoutedCommuniqueMessagingService : ICommuniqueMessagingServi
 {
     private readonly IConfiguration _configuration;
     private readonly ITwilioMessagingService _twilioMessagingService;
-    private readonly ZerioMessagingService _zerioMessagingService;
+    private readonly ZernioMessagingService _zernioMessagingService;
 
     public RoutedCommuniqueMessagingService(
         IConfiguration configuration,
         ITwilioMessagingService twilioMessagingService,
-        ZerioMessagingService zerioMessagingService)
+    ZernioMessagingService zernioMessagingService)
     {
         _configuration = configuration;
         _twilioMessagingService = twilioMessagingService;
-        _zerioMessagingService = zerioMessagingService;
+    _zernioMessagingService = zernioMessagingService;
     }
 
     public Task<MessageSendResult> SendSmsAsync(string toNumber, string message)
     {
-        return UseZerio()
-            ? _zerioMessagingService.SendSmsAsync(toNumber, message)
+        return UseZernio()
+            ? _zernioMessagingService.SendSmsAsync(toNumber, message)
             : _twilioMessagingService.SendSmsAsync(toNumber, message);
     }
 
     public Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message)
     {
-        return UseZerio()
-            ? _zerioMessagingService.SendWhatsAppAsync(toNumber, message)
+        return UseZernio()
+            ? _zernioMessagingService.SendWhatsAppAsync(toNumber, message)
             : _twilioMessagingService.SendWhatsAppAsync(toNumber, message);
     }
 
-    private bool UseZerio()
+    private bool UseZernio()
     {
         var provider = (_configuration["Communique:Messaging:Provider"] ?? "twilio")
             .Trim()
             .ToLowerInvariant();
-        return provider == "zerio";
+        return provider == "zernio" || provider == "zerio";
     }
 }
