@@ -1,6 +1,7 @@
 // Wiseravenshare.Server/Services/CrossPlatform/MetaPlatformPublishers.cs
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Net.Http.Headers;
 using Wiseravenshare.Server.DTOs.Social;
 
 namespace Wiseravenshare.Server.Services.CrossPlatform;
@@ -13,6 +14,7 @@ namespace Wiseravenshare.Server.Services.CrossPlatform;
 public class FacebookPublisher : ICrossPlatformPublisher
 {
     protected const string GraphBase = "https://graph.facebook.com/v26.0";
+    private const string ZernioDefaultBaseUrl = "https://api.zernio.com";
 
     protected readonly HttpClient _httpClient;
     protected readonly IConfiguration _configuration;
@@ -29,16 +31,31 @@ public class FacebookPublisher : ICrossPlatformPublisher
 
     protected virtual string PageId => _configuration["Social:Facebook:PageId"] ?? string.Empty;
     protected virtual string AccessToken => _configuration["Social:Facebook:PageAccessToken"] ?? string.Empty;
+    protected virtual string ProviderKey => "Social:Facebook:Provider";
+    protected virtual string ZernioPathKey => "Social:Zernio:Facebook:PublishPath";
+    protected virtual string ZernioDefaultPath => "/v1/facebook/publish";
 
     // Instagram shares the same Graph base and token shape but different config keys.
     protected virtual string IdKey => "Social:Facebook:PageId";
     protected virtual string TokenKey => "Social:Facebook:PageAccessToken";
 
-    public virtual bool IsConfigured() =>
-        !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
+    public virtual bool IsConfigured()
+    {
+        if (UseZernio())
+        {
+            return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
+    }
 
     public virtual async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
+        if (UseZernio())
+        {
+            return await PublishViaZernioAsync(request);
+        }
+
         if (!IsConfigured())
         {
             return CrossPlatformErrors.NotConfigured(Platform, $"{IdKey} and {TokenKey}");
@@ -73,6 +90,75 @@ public class FacebookPublisher : ICrossPlatformPublisher
         {
             _logger.LogWarning(ex, "{Platform} publish threw for post {PostId}", Platform, request.PostId);
             return CrossPlatformErrors.Failed(Platform, $"{Platform} publish failed: {ex.Message}");
+        }
+    }
+
+    protected virtual async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
+    {
+        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
+        }
+
+        var baseUrl = (_configuration["Social:Zernio:BaseUrl"] ?? ZernioDefaultBaseUrl).TrimEnd('/');
+        var publishPath = _configuration[ZernioPathKey] ?? ZernioDefaultPath;
+        if (!Uri.TryCreate($"{baseUrl}{publishPath}", UriKind.Absolute, out var endpoint))
+        {
+            return CrossPlatformErrors.Failed(Platform, $"Zernio {Platform} endpoint is invalid.");
+        }
+
+        var payload = new
+        {
+            message = request.Message.Truncate(2200),
+            mediaUrl = request.MediaUrl,
+            mediaType = request.MediaType,
+            metadata = new
+            {
+                source = "wiseravenshare",
+                postId = request.PostId.ToString()
+            }
+        };
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            httpRequest.Content = JsonContent.Create(payload);
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Zernio {Platform} publish failed ({Status}): {Body}", Platform, (int)response.StatusCode, body);
+                return CrossPlatformErrors.Failed(Platform, $"Zernio {Platform} publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var externalPostId = ReadJsonString(document.RootElement, "postId")
+                ?? ReadJsonString(document.RootElement, "id")
+                ?? (document.RootElement.TryGetProperty("data", out var data)
+                    ? ReadJsonString(data, "postId") ?? ReadJsonString(data, "id")
+                    : null);
+            var externalPostUrl = ReadJsonString(document.RootElement, "postUrl")
+                ?? ReadJsonString(document.RootElement, "url")
+                ?? (document.RootElement.TryGetProperty("data", out var urlData)
+                    ? ReadJsonString(urlData, "postUrl") ?? ReadJsonString(urlData, "url")
+                    : null);
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = externalPostId,
+                ExternalPostUrl = externalPostUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Zernio {Platform} publish threw for post {PostId}", Platform, request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Zernio {Platform} publish failed: {ex.Message}");
         }
     }
 
@@ -138,6 +224,31 @@ public class FacebookPublisher : ICrossPlatformPublisher
         }
         return body.Length <= 400 ? body : body[..400];
     }
+
+    protected bool UseZernio()
+    {
+        var provider = (_configuration[ProviderKey] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        return provider == "zernio";
+    }
+
+    protected static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
+    }
 }
 
 /// <summary>
@@ -157,6 +268,9 @@ public class InstagramPublisher : FacebookPublisher
 
     protected override string PageId => _configuration["Social:Instagram:BusinessAccountId"] ?? string.Empty;
     protected override string AccessToken => _configuration["Social:Instagram:AccessToken"] ?? string.Empty;
+    protected override string ProviderKey => "Social:Instagram:Provider";
+    protected override string ZernioPathKey => "Social:Zernio:Instagram:PublishPath";
+    protected override string ZernioDefaultPath => "/v1/instagram/publish";
     protected override string IdKey => "Social:Instagram:BusinessAccountId";
     protected override string TokenKey => "Social:Instagram:AccessToken";
 
@@ -248,5 +362,4 @@ public class InstagramPublisher : FacebookPublisher
         }
     }
 }
-
 

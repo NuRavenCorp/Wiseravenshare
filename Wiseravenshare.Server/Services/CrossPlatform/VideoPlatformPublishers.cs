@@ -249,18 +249,37 @@ public class TikTokPublisher : ICrossPlatformPublisher
 /// </summary>
 public class YouTubePublisher : ICrossPlatformPublisher
 {
+    private const string ZernioDefaultBaseUrl = "https://api.zernio.com";
+    private const string ZernioDefaultPublishPath = "/v1/youtube/publish";
+
     private readonly IYouTubeService _youTubeService;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<YouTubePublisher> _logger;
 
-    public YouTubePublisher(IYouTubeService youTubeService, ILogger<YouTubePublisher> logger)
+    public YouTubePublisher(
+        IYouTubeService youTubeService,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        ILogger<YouTubePublisher> logger)
     {
         _youTubeService = youTubeService;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
     public string Platform => SocialPlatforms.YouTube;
 
-    public bool IsConfigured() => true; // IYouTubeService reports its own errors at publish time.
+    public bool IsConfigured()
+    {
+        if (UseZernio())
+        {
+            return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return true; // IYouTubeService reports its own errors at publish time.
+    }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
@@ -276,6 +295,11 @@ public class YouTubePublisher : ICrossPlatformPublisher
 
         try
         {
+            if (UseZernio())
+            {
+                return await PublishViaZernioAsync(request);
+            }
+
             var title = request.Message.Truncate(100);
             var description = $"Shared from Ravensight feed. Source: {request.MediaUrl}";
             var publishedUrl = await _youTubeService.PublishVideoFromUrlAsync(request.MediaUrl, title, description);
@@ -292,5 +316,100 @@ public class YouTubePublisher : ICrossPlatformPublisher
             _logger.LogWarning(ex, "YouTube publish failed for post {PostId}", request.PostId);
             return CrossPlatformErrors.Failed(Platform, ex.Message);
         }
+    }
+
+    private async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
+    {
+        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
+        }
+
+        var baseUrl = (_configuration["Social:Zernio:BaseUrl"] ?? ZernioDefaultBaseUrl).TrimEnd('/');
+        var publishPath = _configuration["Social:Zernio:YouTube:PublishPath"] ?? ZernioDefaultPublishPath;
+        if (!Uri.TryCreate($"{baseUrl}{publishPath}", UriKind.Absolute, out var endpoint))
+        {
+            return CrossPlatformErrors.Failed(Platform, "Zernio YouTube endpoint is invalid.");
+        }
+
+        var payload = new
+        {
+            videoUrl = request.MediaUrl,
+            title = request.Message.Truncate(100),
+            description = request.Message.Truncate(5000),
+            metadata = new
+            {
+                source = "wiseravenshare",
+                postId = request.PostId.ToString()
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            httpRequest.Content = JsonContent.Create(payload);
+
+            using var response = await client.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Zernio YouTube publish failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return CrossPlatformErrors.Failed(Platform, $"Zernio YouTube publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var externalPostId = ReadJsonString(document.RootElement, "postId")
+                ?? ReadJsonString(document.RootElement, "id")
+                ?? (document.RootElement.TryGetProperty("data", out var data)
+                    ? ReadJsonString(data, "postId") ?? ReadJsonString(data, "id")
+                    : null);
+            var externalPostUrl = ReadJsonString(document.RootElement, "postUrl")
+                ?? ReadJsonString(document.RootElement, "url")
+                ?? (document.RootElement.TryGetProperty("data", out var urlData)
+                    ? ReadJsonString(urlData, "postUrl") ?? ReadJsonString(urlData, "url")
+                    : null);
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = externalPostId,
+                ExternalPostUrl = externalPostUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Zernio YouTube publish threw for post {PostId}", request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Zernio YouTube publish failed: {ex.Message}");
+        }
+    }
+
+    private bool UseZernio()
+    {
+        var provider = (_configuration["Social:YouTube:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        return provider == "zernio";
+    }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
     }
 }
