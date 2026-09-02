@@ -45,3 +45,14 @@ __pycache__/
 
 # Local scratch / review files
 gemma_review*.txt
+
+# Redundant Dockerfile variants and scratch docs
+Dockerfile.original
+Dockerfile.txt
+dockerfile.dockerfile
+*.md.txt
+MUSIC_SHARING_IMPLEMENTATION*
+
+# Android release artifacts (large binaries)
+*.aab
+release-artifacts/
