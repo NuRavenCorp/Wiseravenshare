@@ -22,6 +22,47 @@ public class AiAssistantController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Health check + initializes Ollama connection. Called when AI Assistant page loads.</summary>
+    [HttpGet("health")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Health()
+    {
+        try
+        {
+            var models = await _chatService.GetModelsAsync();
+            var isOnline = models.Count > 0;
+            
+            if (!isOnline)
+            {
+                _logger.LogWarning("Ollama health check: no models available");
+                return StatusCode(503, new 
+                { 
+                    online = false, 
+                    message = "Ollama is not ready yet. Please wait or ensure Ollama is running." 
+                });
+            }
+
+            return Ok(new 
+            { 
+                online = true, 
+                message = "Ollama is online and ready", 
+                modelCount = models.Count,
+                models = models
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ollama health check failed");
+            return StatusCode(503, new 
+            { 
+                online = false, 
+                message = "Ollama is offline. Please start Ollama and try again.",
+                error = ex.Message 
+            });
+        }
+    }
+
     /// <summary>Lists models available on the configured Ollama backend.</summary>
     [HttpGet("models")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]

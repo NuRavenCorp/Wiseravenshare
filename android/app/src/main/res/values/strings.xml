@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Wiseravenshare</string>
+    <string name="title_activity_main">Wiseravenshare</string>
+    <string name="package_name">com.nuravencorp.wiseravenshare</string>
+    <string name="custom_url_scheme">com.nuravencorp.wiseravenshare</string>
+</resources>

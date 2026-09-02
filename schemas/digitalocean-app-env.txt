@@ -1,0 +1,19 @@
+Storage__Blob__Enabled=true
+Storage__Blob__BucketName=bucket-wrs-01010
+Storage__Blob__Region=nyc3
+Storage__Blob__Endpoint=https://nyc3.digitaloceanspaces.com
+Storage__Blob__ProjectFolder=wiseravenshare/
+Storage__Blob__AccessKey=YOUR_SPACES_ACCESS_KEY
+Storage__Blob__SecretKey=YOUR_SPACES_SECRET_KEY
+Storage__Blob__PublicBaseUrl=https://bucket-wrs-01010.nyc3.digitaloceanspaces.com
+
+ConnectionStrings__DefaultConnection=YOUR_POSTGRES_CONNECTION_STRING
+Database__ExpectedName=defaultdb
+Persistence__RequireDatabase=true
+
+# Optional, if using a different bucket path or if your app is not on DigitalOcean only:
+# Storage__Blob__Enabled=true
+# Storage__Blob__BucketName=bucket-wrs-01010
+# Storage__Blob__Region=nyc3
+# Storage__Blob__Endpoint=https://nyc3.digitaloceanspaces.com
+# Storage__Blob__ProjectFolder=wiseravenshare/

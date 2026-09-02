@@ -46,7 +46,7 @@ export const usePosts = (initialFilters = {}) => {
         }
     }, [page, filters, addToast]);
 
-    const createPost = useCallback(async (postData) => {
+    const createMissive = useCallback(async (postData) => {
         setLoading(true);
         try {
             const response = await apiService.createPost(postData);
@@ -54,11 +54,11 @@ export const usePosts = (initialFilters = {}) => {
             if (newPost) {
                 setPosts(prev => [newPost, ...prev]);
             }
-            addToast('Post created successfully!', 'success');
+            addToast('Missive created successfully!', 'success');
             return newPost;
         } catch (err) {
             setError(err.message);
-            addToast('Failed to create post', 'error');
+            addToast('Failed to create missive', 'error');
             throw err;
         } finally {
             setLoading(false);
@@ -127,7 +127,7 @@ export const usePosts = (initialFilters = {}) => {
         loading,
         error,
         hasMore,
-        createPost,
+        createMissive,
         likePost,
         repostPost,
         deletePost,
