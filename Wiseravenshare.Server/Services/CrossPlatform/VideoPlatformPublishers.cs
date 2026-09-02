@@ -14,6 +14,8 @@ namespace Wiseravenshare.Server.Services.CrossPlatform;
 public class TikTokPublisher : ICrossPlatformPublisher
 {
     private const string ApiBase = "https://open.tiktokapis.com/v2";
+    private const string ZernioDefaultBaseUrl = "https://api.zernio.com";
+    private const string ZernioDefaultTikTokPath = "/v1/tiktok/publish";
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -28,17 +30,19 @@ public class TikTokPublisher : ICrossPlatformPublisher
 
     public string Platform => SocialPlatforms.TikTok;
 
-    public bool IsConfigured() =>
-        !string.IsNullOrWhiteSpace(_configuration["Social:TikTok:AccessToken"]);
+    public bool IsConfigured()
+    {
+        if (UseZernio())
+        {
+            var apiKey = _configuration["Social:Zernio:ApiKey"];
+            return !string.IsNullOrWhiteSpace(apiKey);
+        }
+
+        return !string.IsNullOrWhiteSpace(_configuration["Social:TikTok:AccessToken"]);
+    }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
-        var accessToken = _configuration["Social:TikTok:AccessToken"];
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            return CrossPlatformErrors.NotConfigured(Platform, "Social:TikTok:AccessToken");
-        }
-
         if (string.IsNullOrWhiteSpace(request.MediaUrl) || request.MediaType != SocialMediaType.Video)
         {
             return new CrossPlatformPublishResultDto
@@ -47,6 +51,17 @@ public class TikTokPublisher : ICrossPlatformPublisher
                 Success = false,
                 Error = "TikTok publish requires a public videoUrl; photo and text posts are not supported."
             };
+        }
+
+        if (UseZernio())
+        {
+            return await PublishViaZernioAsync(request);
+        }
+
+        var accessToken = _configuration["Social:TikTok:AccessToken"];
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:TikTok:AccessToken");
         }
 
         var publishRequest = new
@@ -102,6 +117,130 @@ public class TikTokPublisher : ICrossPlatformPublisher
             return CrossPlatformErrors.Failed(Platform, $"TikTok publish failed: {ex.Message}");
         }
     }
+
+    private async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
+    {
+        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
+        }
+
+        var baseUrl = (_configuration["Social:Zernio:BaseUrl"] ?? ZernioDefaultBaseUrl).TrimEnd('/');
+        var publishPath = _configuration["Social:Zernio:TikTok:PublishPath"] ?? ZernioDefaultTikTokPath;
+        var scheduleAtUtc = _configuration["Social:Zernio:TikTok:ScheduleAtUtc"];
+        var saveAsDraft = _configuration.GetValue("Social:Zernio:TikTok:SaveAsDraft", false);
+
+        if (!Uri.TryCreate($"{baseUrl}{publishPath}", UriKind.Absolute, out var endpoint))
+        {
+            return CrossPlatformErrors.Failed(Platform, "Zernio TikTok endpoint is invalid.");
+        }
+
+        var caption = request.Message.Truncate(2200);
+        var hashtags = ExtractHashtags(caption);
+
+        var payload = new
+        {
+            videoUrl = request.MediaUrl,
+            caption,
+            hashtags,
+            scheduleAtUtc = string.IsNullOrWhiteSpace(scheduleAtUtc) ? null : scheduleAtUtc,
+            saveAsDraft,
+            metadata = new
+            {
+                source = "wiseravenshare",
+                postId = request.PostId.ToString()
+            }
+        };
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            httpRequest.Content = JsonContent.Create(payload);
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Zernio TikTok publish failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return CrossPlatformErrors.Failed(Platform, $"Zernio TikTok publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var externalPostId = ReadJsonString(document.RootElement, "publishId")
+                ?? ReadJsonString(document.RootElement, "postId")
+                ?? ReadJsonString(document.RootElement, "id")
+                ?? (document.RootElement.TryGetProperty("data", out var data)
+                    ? ReadJsonString(data, "publishId")
+                        ?? ReadJsonString(data, "postId")
+                        ?? ReadJsonString(data, "id")
+                    : null);
+
+            var externalPostUrl = ReadJsonString(document.RootElement, "postUrl")
+                ?? ReadJsonString(document.RootElement, "url")
+                ?? (document.RootElement.TryGetProperty("data", out var postData)
+                    ? ReadJsonString(postData, "postUrl")
+                        ?? ReadJsonString(postData, "url")
+                    : null);
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = externalPostId,
+                ExternalPostUrl = externalPostUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Zernio TikTok publish threw for post {PostId}", request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Zernio TikTok publish failed: {ex.Message}");
+        }
+    }
+
+    private bool UseZernio()
+    {
+        var provider = (_configuration["Social:TikTok:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        return provider == "zernio";
+    }
+
+    private static List<string> ExtractHashtags(string caption)
+    {
+        if (string.IsNullOrWhiteSpace(caption))
+        {
+            return [];
+        }
+
+        return caption
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.StartsWith('#') && token.Length > 1)
+            .Select(token => token.Trim().TrimEnd('.', ',', ';', ':', '!', '?'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(30)
+            .ToList();
+    }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
+    }
 }
 
 /// <summary>
@@ -155,4 +294,3 @@ public class YouTubePublisher : ICrossPlatformPublisher
         }
     }
 }
-
