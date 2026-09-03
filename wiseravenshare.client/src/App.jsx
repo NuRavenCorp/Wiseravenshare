@@ -415,6 +415,7 @@ const App = () => {
     const navItems = [
         { id: 'feed', label: 'Feed' },
         { id: 'discover', label: 'Discover' },
+        { id: 'social-feeds', label: 'Social Feeds' },
         { id: 'bookmarks', label: 'Bookmarks' },
         { id: 'notifications', label: 'Notifications' },
         { id: 'messages', label: 'Messages' },
@@ -554,4 +555,3 @@ const App = () => {
 };
 
 export default App;
-
