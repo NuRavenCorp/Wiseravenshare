@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -15,12 +16,18 @@ public sealed class GrowthController : ControllerBase
 {
     private readonly UserStore _userStore;
     private readonly GrowthService _growthService;
+    private readonly IUserRepository _userRepository;
     private readonly IConfiguration _configuration;
 
-    public GrowthController(UserStore userStore, GrowthService growthService, IConfiguration configuration)
+    public GrowthController(
+        UserStore userStore,
+        GrowthService growthService,
+        IUserRepository userRepository,
+        IConfiguration configuration)
     {
         _userStore = userStore;
         _growthService = growthService;
+        _userRepository = userRepository;
         _configuration = configuration;
     }
 
@@ -439,6 +446,64 @@ public sealed class GrowthController : ControllerBase
 
         var record = _growthService.RecordAdminPolicyShift(user.Id, user.Email, request);
         return Ok(record);
+    }
+
+    [HttpGet("admin/users/accounting")]
+    public async Task<IActionResult> GetAdminUserAccounting()
+    {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
+        var users = _userStore.GetAllUsersSnapshot();
+        var now = DateTime.UtcNow;
+        var sevenDaysAgo = now.AddDays(-7);
+        var thirtyDaysAgo = now.AddDays(-30);
+
+        var completeProfiles = users.Count(u =>
+            !string.IsNullOrWhiteSpace(u.Bio)
+            && !string.IsNullOrWhiteSpace(u.Location)
+            && (!string.IsNullOrWhiteSpace(u.Avatar) || !string.IsNullOrWhiteSpace(u.Website)));
+
+        var connectedSocialAccounts = users.Count(u =>
+            (u.SocialFeeds?.TikTok?.Enabled ?? false)
+            || (u.SocialFeeds?.Facebook?.Enabled ?? false)
+            || (u.SocialFeeds?.Instagram?.Enabled ?? false));
+
+        var totalDomainUsers = await _userRepository.CountAsync(u => !u.IsDeleted);
+        var activeDomainUsers = await _userRepository.CountAsync(u => !u.IsDeleted && u.IsActive);
+
+        var recentUsers = users
+            .Take(25)
+            .Select(u => new
+            {
+                id = u.Id,
+                email = u.Email,
+                name = u.Name,
+                handle = u.Handle,
+                createdAtUtc = u.CreatedAtUtc,
+                updatedAtUtc = u.UpdatedAtUtc,
+                socialLinked = (u.SocialFeeds?.TikTok?.Enabled ?? false)
+                    || (u.SocialFeeds?.Facebook?.Enabled ?? false)
+                    || (u.SocialFeeds?.Instagram?.Enabled ?? false)
+            })
+            .ToList();
+
+        return Ok(new
+        {
+            totals = new
+            {
+                authUsers = users.Count,
+                domainUsers = totalDomainUsers,
+                activeDomainUsers,
+                createdLast7Days = users.Count(u => u.CreatedAtUtc >= sevenDaysAgo),
+                createdLast30Days = users.Count(u => u.CreatedAtUtc >= thirtyDaysAgo),
+                profileCompletionRate = users.Count == 0 ? 0 : Math.Round((decimal)completeProfiles / users.Count * 100m, 2),
+                socialConnectionRate = users.Count == 0 ? 0 : Math.Round((decimal)connectedSocialAccounts / users.Count * 100m, 2)
+            },
+            recentUsers
+        });
     }
 
     private bool TryGetCurrentUser([NotNullWhen(true)] out UserRecord? user)

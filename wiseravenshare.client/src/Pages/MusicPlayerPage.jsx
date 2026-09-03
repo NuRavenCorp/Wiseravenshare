@@ -54,11 +54,10 @@ const MusicPlayerPage = ({ onNavigate }) => {
           }
         }
       } else {
-        // Load from localStorage or start with empty library
+        // No auth token — load from localStorage or start with empty library
         const stored = localStorage.getItem('wiseMusic_library');
         const tracks = stored ? JSON.parse(stored) : [];
         setMusicLibrary(tracks);
-        
         if (tracks.length > 0) {
           setCurrentTrack(tracks[0]);
         }

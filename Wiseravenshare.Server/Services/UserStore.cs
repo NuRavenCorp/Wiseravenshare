@@ -311,6 +311,13 @@ public sealed class UserStore
         return user is not null;
     }
 
+    public IReadOnlyList<UserRecord> GetAllUsersSnapshot()
+    {
+        return _usersByEmail.Values
+            .OrderByDescending(u => u.CreatedAtUtc)
+            .ToList();
+    }
+
     public UserRecord UpdateProfile(string id, UpdateUserProfileRequest request)
     {
         if (!TryGetById(id, out var user) || user is null)

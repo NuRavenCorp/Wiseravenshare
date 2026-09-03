@@ -2,41 +2,6 @@ import React from 'react';
 
 export const SignIn = ({ email, setEmail, password, setPassword, setMode, submit, setError, setInfo }) => (
     <>
-        <div style={{ display: 'flex', borderRadius: '10px', background: 'rgba(255,255,255,0.05)', padding: '4px', marginBottom: '20px' }}>
-            <button
-                type="button"
-                onClick={() => { setMode('login'); setError(''); setInfo(''); }}
-                style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'var(--highlight-color)',
-                    color: 'var(--text-color)',
-                    fontWeight: 'bold',
-                    cursor: 'pointer'
-                }}
-            >
-                Sign In
-            </button>
-            <button
-                type="button"
-                onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
-                style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--light-color)',
-                    fontWeight: 'bold',
-                    cursor: 'pointer'
-                }}
-            >
-                Sign Up
-            </button>
-        </div>
-
         <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <div style={{ marginBottom: '14px', textAlign: 'left' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-color)', marginBottom: '6px' }}>
@@ -44,7 +9,7 @@ export const SignIn = ({ email, setEmail, password, setPassword, setMode, submit
                 </label>
                 <input
                     type="text"
-                    placeholder="Enter your email"
+                    placeholder="Email or username"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
@@ -79,7 +44,7 @@ export const SignIn = ({ email, setEmail, password, setPassword, setMode, submit
                             textDecoration: 'underline'
                         }}
                     >
-                        Forgot password?
+                    Need a password reset?
                     </button>
                 </div>
                 <input
@@ -100,6 +65,9 @@ export const SignIn = ({ email, setEmail, password, setPassword, setMode, submit
                         outline: 'none'
                     }}
                 />
+                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.4 }}>
+                    Use the email or username tied to your account.
+                </div>
             </div>
 
             <button
@@ -122,6 +90,24 @@ export const SignIn = ({ email, setEmail, password, setPassword, setMode, submit
         </form>
 
         <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--light-color)' }}>
+            New here?{' '}
+            <button
+                type="button"
+                onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
+                style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--text-color)',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    fontWeight: 600
+                }}
+            >
+                Create an account
+            </button>
+        </div>
+
+        <div style={{ marginTop: '10px', fontSize: '13px', color: 'var(--light-color)' }}>
             Have a team invite code?{' '}
             <button
                 type="button"

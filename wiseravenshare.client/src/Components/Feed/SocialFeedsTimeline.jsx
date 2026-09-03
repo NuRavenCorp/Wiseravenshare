@@ -16,6 +16,24 @@ const PLATFORMS = [
     { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' }
 ];
 
+const CURATED_TEMPLATES = [
+    { id: 'cards', label: 'Standard Cards' },
+    { id: 'list', label: 'Compact List' },
+    { id: 'signage', label: 'Digital Signage / Kiosk' }
+];
+
+const PROFANITY_PATTERNS = [
+    /\b(fuck|shit|bitch|asshole|bastard)\b/i
+];
+
+const hasProfanity = (text) => PROFANITY_PATTERNS.some((pattern) => pattern.test(String(text || '')));
+
+const normalizeFeedKey = (item) => [
+    String(item?.platform || '').toLowerCase().trim(),
+    String(item?.externalId || item?.id || '').toLowerCase().trim(),
+    String(item?.text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+].join('|');
+
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
     for (const key of keys) {
@@ -230,6 +248,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     });
 
     const [searchQuery, setSearchQuery] = useState('');
+    const [displayTemplate, setDisplayTemplate] = useState('cards');
+    const [hideDuplicates, setHideDuplicates] = useState(true);
+    const [hideProfanity, setHideProfanity] = useState(false);
 
     // Multi-Platform Publisher State
     const [postMessage, setPostMessage] = useState('');
@@ -457,19 +478,33 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, [snapshot, activePlatform]);
 
     const filteredFeedItems = useMemo(() => {
-        let items = feedItems;
-        if (activePlatform !== 'all') {
-            items = items.filter((item) => String(item.platform || '').toLowerCase() === activePlatform);
-        }
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
-            items = items.filter((item) =>
-                (item.text && item.text.toLowerCase().includes(q)) ||
-                (item.authorHandle && item.authorHandle.toLowerCase().includes(q))
-            );
-        }
-        return items;
-    }, [feedItems, activePlatform, searchQuery]);
+        const query = searchQuery.trim().toLowerCase();
+        const seen = new Set();
+
+        return feedItems.filter((item) => {
+            const platform = String(item.platform || '').toLowerCase();
+            const text = String(item.text || '').toLowerCase();
+            const author = String(item.authorHandle || '').toLowerCase();
+            const matchesPlatform = activePlatform === 'all' || platform === activePlatform;
+            const matchesSearch = !query || text.includes(query) || author.includes(query);
+            const duplicateKey = normalizeFeedKey(item);
+            const isDuplicate = seen.has(duplicateKey);
+            const isProfane = hasProfanity(item.text || '');
+
+            if (matchesPlatform && matchesSearch) {
+                if (hideDuplicates && isDuplicate) {
+                    return false;
+                }
+                if (hideProfanity && isProfane) {
+                    return false;
+                }
+                seen.add(duplicateKey);
+                return true;
+            }
+
+            return false;
+        });
+    }, [feedItems, activePlatform, searchQuery, hideDuplicates, hideProfanity]);
 
     const activeMeta = PLATFORMS.find((p) => p.id === activePlatform) || PLATFORMS[0];
 
@@ -563,43 +598,54 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </div>
             </div>
 
-            {/* Live Search & Filter Bar */}
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="🔍 Search all connected social feeds & RSS streams by keyword or author..."
-                        style={{
-                            width: '100%',
-                            padding: '10px 14px',
-                            borderRadius: '10px',
-                            border: '1px solid var(--border-color)',
-                            background: 'rgba(15,23,42,0.7)',
-                            color: '#fff',
-                            fontSize: '13px'
-                        }}
-                    />
-                    {searchQuery && (
-                        <button
-                            type="button"
-                            onClick={() => setSearchQuery('')}
-                            style={{
-                                position: 'absolute',
-                                right: '10px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#94a3b8',
-                                cursor: 'pointer',
-                                fontSize: '14px'
-                            }}
+            {/* Curator Controls */}
+            <div
+                style={{
+                    display: 'grid',
+                    gap: '10px',
+                    marginBottom: '18px',
+                    padding: '14px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(15,23,42,0.55)'
+                }}
+            >
+                <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
+                    🧭 Curator Controls & View Layouts
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Search posts</span>
+                        <input
+                            type="search"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Search by text or author"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Display template</span>
+                        <select
+                            value={displayTemplate}
+                            onChange={(e) => setDisplayTemplate(e.target.value)}
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                         >
-                            ✕
-                        </button>
-                    )}
+                            {CURATED_TEMPLATES.map((template) => (
+                                <option key={template.id} value={template.id}>{template.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '12px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideDuplicates} onChange={(e) => setHideDuplicates(e.target.checked)} />
+                        Hide duplicates
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideProfanity} onChange={(e) => setHideProfanity(e.target.checked)} />
+                        Hide profanity
+                    </label>
                 </div>
             </div>
 
@@ -947,7 +993,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     </div>
                 )}
 
-                <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{ display: 'grid', gap: displayTemplate === 'list' ? '8px' : '12px' }}>
                     {filteredFeedItems.map((item) => {
                         const platformColor =
                             item.platform === 'facebook' ? '#93c5fd' :
@@ -965,7 +1011,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                     borderLeft: `4px solid ${platformColor}`,
                                     borderRadius: '10px',
                                     padding: '14px',
-                                    background: 'rgba(15, 23, 42, 0.5)',
+                                    background: displayTemplate === 'signage' ? 'rgba(255,255,255,0.06)' : 'rgba(15, 23, 42, 0.5)',
+                                    display: displayTemplate === 'list' ? 'grid' : 'block',
+                                    gap: displayTemplate === 'list' ? '8px' : '0',
                                     transition: 'transform 0.15s ease'
                                 }}
                             >

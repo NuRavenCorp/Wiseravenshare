@@ -43,7 +43,7 @@ public class FacebookPublisher : ICrossPlatformPublisher
     {
         if (UseZernio())
         {
-            return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+            return !string.IsNullOrWhiteSpace(GetZernioApiKey());
         }
 
         return !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
@@ -95,7 +95,7 @@ public class FacebookPublisher : ICrossPlatformPublisher
 
     protected virtual async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
     {
-        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        var apiKey = GetZernioApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
@@ -249,6 +249,11 @@ public class FacebookPublisher : ICrossPlatformPublisher
         var serialized = property.ToString();
         return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
     }
+
+    protected string? GetZernioApiKey() =>
+        _configuration["Social:Zernio:ApiKey"]
+        ?? _configuration["Social_Zernio_APIKey"]
+        ?? _configuration["ZERNIO_API_KEY"];
 }
 
 /// <summary>
@@ -362,4 +367,3 @@ public class InstagramPublisher : FacebookPublisher
         }
     }
 }
-

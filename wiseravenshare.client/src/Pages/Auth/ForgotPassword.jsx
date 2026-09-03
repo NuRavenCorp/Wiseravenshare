@@ -2,10 +2,13 @@ import React from 'react';
 
 export const ForgotPassword = ({ email, setEmail, submit, setMode, setError, setInfo }) => (
     <>
-        <h2 style={{ marginBottom: '12px' }}>Forgot Password</h2>
+        <h2 style={{ marginBottom: '12px' }}>Reset your password</h2>
+        <div style={{ marginBottom: '14px', fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.4 }}>
+            Enter the email on your account and we&apos;ll prepare a reset token.
+        </div>
         <input
             type="email"
-            placeholder="Email"
+            placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             style={{

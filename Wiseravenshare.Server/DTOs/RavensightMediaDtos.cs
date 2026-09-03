@@ -28,6 +28,7 @@ public sealed class SaveRavensightMusicDto
     public string Album { get; set; } = string.Empty;
     public string Genre { get; set; } = string.Empty;
     public string DestinationFolder { get; set; } = string.Empty;
+    public string? Fingerprint { get; set; }
 }
 
 public sealed class RavensightSavedMediaDto
@@ -39,4 +40,18 @@ public sealed class RavensightSavedMediaDto
     public long SizeBytes { get; set; }
     public DateTime SavedAtUtc { get; set; }
     public string MediaUrl { get; set; } = string.Empty;
+}
+
+public sealed class UserMusicTrackDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Artist { get; set; } = string.Empty;
+    public string Album { get; set; } = string.Empty;
+    public string Genre { get; set; } = string.Empty;
+    public string? Fingerprint { get; set; }
+    public string MediaUrl { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string UploadedAt { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
 }
