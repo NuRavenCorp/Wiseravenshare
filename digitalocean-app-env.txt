@@ -11,9 +11,12 @@ ConnectionStrings__DefaultConnection=YOUR_POSTGRES_CONNECTION_STRING
 Database__ExpectedName=defaultdb
 Persistence__RequireDatabase=true
 
-# Optional, if using a different bucket path or if your app is not on DigitalOcean only:
-# Storage__Blob__Enabled=true
-# Storage__Blob__BucketName=bucket-wrs-01010
-# Storage__Blob__Region=nyc3
-# Storage__Blob__Endpoint=https://nyc3.digitaloceanspaces.com
-# Storage__Blob__ProjectFolder=wiseravenshare/
+# Social Media & Aggregator Feeds (DigitalOcean App Platform Environment Variables)
+Social__Facebook__PageId=YOUR_FACEBOOK_PAGE_ID
+Social__Facebook__PageAccessToken=YOUR_FACEBOOK_PAGE_ACCESS_TOKEN
+Social__TikTok__Username=YOUR_TIKTOK_USERNAME
+Social__TikTok__AccessToken=YOUR_TIKTOK_ACCESS_TOKEN
+Social__Bluesky__Handle=YOUR_BLUESKY_HANDLE_OR_BSKY_APP
+Social__Bluesky__AppPassword=YOUR_BLUESKY_APP_PASSWORD
+Social__Reddit__Subreddit=technology
+Social__YouTube__ChannelId=YOUR_YOUTUBE_CHANNEL_ID

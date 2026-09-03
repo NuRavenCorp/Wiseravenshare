@@ -46,6 +46,7 @@ public class PublishSocialContentRequest
     public bool PublishToFacebook { get; set; } = true;
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; } = false;
+    public bool PublishToBluesky { get; set; } = false;
 }
 
 public class SocialPublishResultDto

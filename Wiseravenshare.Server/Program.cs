@@ -1,4 +1,4 @@
-﻿using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.External.DeepSeekService;
 using Wiseravenshare.Server.Services.Truth;
 using Npgsql;
@@ -854,6 +854,7 @@ builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
+builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHttpClient("SocialPublish");
 builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();

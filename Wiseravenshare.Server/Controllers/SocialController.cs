@@ -39,24 +39,72 @@ public class SocialController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("feed/bluesky")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
+    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetBlueskyFeed([FromQuery] string? handle = null, [FromQuery] int limit = 15)
+    {
+        var result = await _socialPlatformService.GetBlueskyFeedAsync(handle, limit);
+        return Ok(result);
+    }
+
+    [HttpGet("feed/reddit")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
+    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRedditFeed([FromQuery] string? subreddit = null, [FromQuery] int limit = 15)
+    {
+        var result = await _socialPlatformService.GetRedditFeedAsync(subreddit, limit);
+        return Ok(result);
+    }
+
+    [HttpGet("feed/youtube")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
+    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetYouTubeFeed([FromQuery] string? channel = null, [FromQuery] int limit = 15)
+    {
+        var result = await _socialPlatformService.GetYouTubeFeedAsync(channel, limit);
+        return Ok(result);
+    }
+
+    [HttpGet("feed/rss")]
+    [OutputCache(PolicyName = "PublicFeedShort")]
+    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRssFeed([FromQuery] string feedUrl, [FromQuery] int limit = 20)
+    {
+        if (string.IsNullOrWhiteSpace(feedUrl))
+        {
+            return BadRequest(new ErrorResponse { Message = "feedUrl is required." });
+        }
+
+        var result = await _socialPlatformService.GetRssFeedAsync(feedUrl, limit);
+        return Ok(result);
+    }
+
     [HttpGet("feed")]
+    [HttpGet("feed/all")]
     [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCombinedFeed(
         [FromQuery] string? pageId = null,
         [FromQuery] string? username = null,
-        [FromQuery] int limit = 10)
+        [FromQuery] string? blueskyHandle = null,
+        [FromQuery] string? subreddit = null,
+        [FromQuery] string? youtubeChannel = null,
+        [FromQuery] string? rssFeedUrl = null,
+        [FromQuery] string? query = null,
+        [FromQuery] int limit = 20)
     {
-        var facebook = await _socialPlatformService.GetFacebookFeedAsync(pageId, limit);
-        var tiktok = await _socialPlatformService.GetTikTokFeedAsync(username, limit);
+        var unified = await _socialPlatformService.GetUnifiedFeedAsync(
+            pageId,
+            username,
+            blueskyHandle,
+            subreddit,
+            youtubeChannel,
+            rssFeedUrl,
+            query,
+            limit);
 
-        var combined = facebook
-            .Concat(tiktok)
-            .OrderByDescending(item => item.CreatedAt)
-            .Take(Math.Clamp(limit * 2, 1, 100))
-            .ToList();
-
-        return Ok(combined);
+        return Ok(unified);
     }
 
     [Authorize]
@@ -73,11 +121,11 @@ public class SocialController : ControllerBase
             });
         }
 
-        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube)
+        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube && !request.PublishToBluesky)
         {
             return BadRequest(new ErrorResponse
             {
-                Message = "Select at least one platform."
+                Message = "Select at least one destination platform."
             });
         }
 
@@ -85,7 +133,6 @@ public class SocialController : ControllerBase
         var isVideoShare = resolvedMediaType == "video"
             || (resolvedMediaType == "auto" && !string.IsNullOrWhiteSpace(request.VideoUrl));
 
-        // TikTok and YouTube only accept video payloads; keep the request valid when they are unchecked for photo/text shares.
         if (isVideoShare && request.PublishToTikTok && string.IsNullOrWhiteSpace(request.VideoUrl))
         {
             return BadRequest(new ErrorResponse

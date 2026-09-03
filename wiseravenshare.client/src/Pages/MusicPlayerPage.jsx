@@ -54,9 +54,9 @@ const MusicPlayerPage = ({ onNavigate }) => {
           }
         }
       } else {
-        // Load from localStorage for demo
+        // Load from localStorage or start with empty library
         const stored = localStorage.getItem('wiseMusic_library');
-        const tracks = stored ? JSON.parse(stored) : DEMO_TRACKS;
+        const tracks = stored ? JSON.parse(stored) : [];
         setMusicLibrary(tracks);
         
         if (tracks.length > 0) {
@@ -72,8 +72,8 @@ const MusicPlayerPage = ({ onNavigate }) => {
     } catch (error) {
       console.error('Failed to load music library:', error);
       addToast('Failed to load music library', 'error');
-      setMusicLibrary(DEMO_TRACKS);
-      setCurrentTrack(DEMO_TRACKS[0]);
+      setMusicLibrary([]);
+      setCurrentTrack(null);
     } finally {
       setIsLoading(false);
     }
@@ -468,31 +468,5 @@ const MusicPlayerPage = ({ onNavigate }) => {
     </div>
   );
 };
-
-// Demo tracks
-const DEMO_TRACKS = [
-  {
-    id: 'demo_1',
-    title: 'Digital Dreams',
-    artist: 'Alex Raven',
-    album: 'Future Sounds',
-    genre: 'Electronic',
-    mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    fileName: 'digital-dreams.mp3',
-    uploadedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    duration: '3:45'
-  },
-  {
-    id: 'demo_2',
-    title: 'Midnight Melodies',
-    artist: 'Luna Echo',
-    album: 'Night Tales',
-    genre: 'Ambient',
-    mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    fileName: 'midnight-melodies.mp3',
-    uploadedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    duration: '4:12'
-  }
-];
 
 export default MusicPlayerPage;
