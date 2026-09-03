@@ -29,7 +29,7 @@ import CanvasPage from './Pages/CanvasPage';
 import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
-import MusicPlayerPage from './Pages/MusicPlayerPage';
+import MusicStudioPage from './Pages/MusicStudioPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
@@ -389,7 +389,7 @@ const App = () => {
                     ? <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'music-player':
-                return <MusicPlayerPage onNavigate={setCurrentPage} />;
+                return <MusicStudioPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'privacy':
@@ -424,7 +424,7 @@ const App = () => {
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
-        { id: 'music-player', label: '🎵 Music Player' },
+        { id: 'music-player', label: '🎚️ Music Studio' },
         { id: 'profile', label: 'Profile' }
     ];
 
