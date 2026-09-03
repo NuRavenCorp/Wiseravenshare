@@ -15,6 +15,17 @@ const PLATFORMS = [
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
 
+const CURATED_TEMPLATES = [
+    { id: 'cards', label: 'Cards' },
+    { id: 'list', label: 'List' },
+    { id: 'signage', label: 'Digital Signage' }
+];
+
+const PROFANITY_PATTERNS = [
+    /\b(fuck|shit|bitch|asshole|bastard)\b/i,
+    /\b(whore|slut|cunt)\b/i
+];
+
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
     for (const key of keys) {
@@ -185,6 +196,14 @@ const getSnapshot = (user) => {
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
+
+    const hasProfanity = (text) => PROFANITY_PATTERNS.some((pattern) => pattern.test(String(text || '')));
+
+    const normalizeFeedKey = (item) => [
+        String(item?.platform || '').toLowerCase().trim(),
+        String(item?.externalId || item?.id || '').toLowerCase().trim(),
+        String(item?.text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+    ].join('|');
 };
 
 const normalizeFeedConnections = (feeds = {}) => ({
@@ -246,6 +265,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishLinkedIn, setPublishLinkedIn] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
+    const [displayTemplate, setDisplayTemplate] = useState('cards');
+    const [hideDuplicates, setHideDuplicates] = useState(true);
+    const [hideProfanity, setHideProfanity] = useState(true);
+    const [feedSearch, setFeedSearch] = useState('');
 
     // Account Handle Linking State
     const [showHandleConfig, setShowHandleConfig] = useState(false);
@@ -514,9 +537,32 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, [snapshot, activePlatform]);
 
     const filteredFeedItems = useMemo(() => {
-        if (activePlatform === 'all') return feedItems;
-        return feedItems.filter((item) => String(item.platform || '').toLowerCase() === activePlatform);
-    }, [feedItems, activePlatform]);
+        const query = feedSearch.trim().toLowerCase();
+        const seen = new Set();
+
+        return feedItems.filter((item) => {
+            const platform = String(item.platform || '').toLowerCase();
+            const text = String(item.text || '').toLowerCase();
+            const matchesPlatform = activePlatform === 'all' || platform === activePlatform;
+            const matchesSearch = !query || text.includes(query) || String(item.authorHandle || '').toLowerCase().includes(query);
+            const duplicateKey = normalizeFeedKey(item);
+            const isDuplicate = seen.has(duplicateKey);
+            const isProfane = hasProfanity(item.text || '');
+
+            if (matchesPlatform && matchesSearch) {
+                if (hideDuplicates && isDuplicate) {
+                    return false;
+                }
+                if (hideProfanity && isProfane) {
+                    return false;
+                }
+                seen.add(duplicateKey);
+                return true;
+            }
+
+            return false;
+        });
+    }, [feedItems, activePlatform, feedSearch, hideDuplicates, hideProfanity]);
 
     const activeMeta = PLATFORMS.find((p) => p.id === activePlatform) || PLATFORMS[0];
 
@@ -825,6 +871,60 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 )}
             </form>
 
+            {/* Curator Controls */}
+            <div
+                style={{
+                    display: 'grid',
+                    gap: '10px',
+                    marginBottom: '18px',
+                    padding: '14px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(15,23,42,0.55)'
+                }}
+            >
+                <div style={{ fontWeight: 700, fontSize: '14px' }}>
+                    🧭 Curator Controls
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Search posts</span>
+                        <input
+                            type="search"
+                            value={feedSearch}
+                            onChange={(e) => setFeedSearch(e.target.value)}
+                            placeholder="Search by text or author"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Display template</span>
+                        <select
+                            value={displayTemplate}
+                            onChange={(e) => setDisplayTemplate(e.target.value)}
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        >
+                            {CURATED_TEMPLATES.map((template) => (
+                                <option key={template.id} value={template.id}>{template.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '12px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideDuplicates} onChange={(e) => setHideDuplicates(e.target.checked)} />
+                        Hide duplicates
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideProfanity} onChange={(e) => setHideProfanity(e.target.checked)} />
+                        Hide profanity
+                    </label>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                    Showing {filteredFeedItems.length} curated item{filteredFeedItems.length === 1 ? '' : 's'}.
+                </div>
+            </div>
+
             {/* Platform Accounts & Feeds Stream */}
             <div style={{ display: 'grid', gap: '14px', marginBottom: '18px' }}>
                 <div style={{ fontWeight: 700, fontSize: '14px' }}>
@@ -870,7 +970,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 border: '1px solid var(--border-color)',
                                 borderRadius: '10px',
                                 padding: '12px',
-                                background: 'rgba(255,255,255,0.02)'
+                                background: displayTemplate === 'signage'
+                                    ? 'rgba(255,255,255,0.06)'
+                                    : 'rgba(255,255,255,0.02)',
+                                display: displayTemplate === 'list' ? 'grid' : 'block',
+                                gap: displayTemplate === 'list' ? '8px' : '0'
                             }}
                         >
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '11px', color: 'var(--light-color)' }}>
