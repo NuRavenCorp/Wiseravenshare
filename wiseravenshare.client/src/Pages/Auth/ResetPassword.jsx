@@ -2,10 +2,13 @@ import React from 'react';
 
 export const ResetPassword = ({ resetToken, setResetToken, password, setPassword, submit }) => (
     <>
-        <h2 style={{ marginBottom: '12px' }}>Reset Password</h2>
+        <h2 style={{ marginBottom: '12px' }}>Set a new password</h2>
+        <div style={{ marginBottom: '14px', fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.4 }}>
+            Paste the reset token from your email, then choose a new password.
+        </div>
         <input
             type="text"
-            placeholder="Reset token"
+            placeholder="Reset token from email"
             value={resetToken}
             onChange={(e) => setResetToken(e.target.value)}
             style={{
@@ -20,7 +23,7 @@ export const ResetPassword = ({ resetToken, setResetToken, password, setPassword
         />
         <input
             type="password"
-            placeholder="New password"
+            placeholder="Create a new password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{

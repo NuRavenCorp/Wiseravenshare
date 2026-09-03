@@ -55,53 +55,42 @@ const AudioPlayer = ({
     'audio/ogg': ['ogg', 'oga']
   };
 
-  // Initialize Web Audio API for visualizer and equalizer
-  useEffect(() => {
-    if (!audioRef.current || !showVisualizer) return;
+  // Initialize Web Audio API on first user interaction (required by browsers)
+  const initAudioContext = () => {
+    if (!audioRef.current || !showVisualizer || audioContextRef.current) return;
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioContextRef.current = new AudioContext();
 
-    const initAudioContext = () => {
-      try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!audioContextRef.current) {
-          audioContextRef.current = new AudioContext();
-          
-          // Create analyser for visualizer
-          const analyser = audioContextRef.current.createAnalyser();
-          analyser.fftSize = 256;
-          
-          // Create source from audio element
-          const source = audioContextRef.current.createMediaElementAudioSource(audioRef.current);
-          
-          // Create equalizer filters (simplified 3-band EQ)
-          const bassFilter = audioContextRef.current.createBiquadFilter();
-          bassFilter.type = 'lowshelf';
-          bassFilter.frequency.value = 200;
-          
-          const midFilter = audioContextRef.current.createBiquadFilter();
-          midFilter.type = 'peaking';
-          midFilter.frequency.value = 1000;
-          midFilter.Q.value = 0.5;
-          
-          const trebleFilter = audioContextRef.current.createBiquadFilter();
-          trebleFilter.type = 'highshelf';
-          trebleFilter.frequency.value = 3000;
-          
-          // Connect filters
-          source.connect(bassFilter);
-          bassFilter.connect(midFilter);
-          midFilter.connect(trebleFilter);
-          trebleFilter.connect(analyser);
-          analyser.connect(audioContextRef.current.destination);
-          
-          analyserRef.current = analyser;
-        }
-      } catch (error) {
-        console.warn('Web Audio API not available:', error);
-      }
-    };
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.fftSize = 256;
 
-    initAudioContext();
-  }, [showVisualizer]);
+      const source = audioContextRef.current.createMediaElementAudioSource(audioRef.current);
+
+      const bassFilter = audioContextRef.current.createBiquadFilter();
+      bassFilter.type = 'lowshelf';
+      bassFilter.frequency.value = 200;
+
+      const midFilter = audioContextRef.current.createBiquadFilter();
+      midFilter.type = 'peaking';
+      midFilter.frequency.value = 1000;
+      midFilter.Q.value = 0.5;
+
+      const trebleFilter = audioContextRef.current.createBiquadFilter();
+      trebleFilter.type = 'highshelf';
+      trebleFilter.frequency.value = 3000;
+
+      source.connect(bassFilter);
+      bassFilter.connect(midFilter);
+      midFilter.connect(trebleFilter);
+      trebleFilter.connect(analyser);
+      analyser.connect(audioContextRef.current.destination);
+
+      analyserRef.current = analyser;
+    } catch (error) {
+      console.warn('Web Audio API not available:', error);
+    }
+  };
 
   // Draw audio visualizer
   useEffect(() => {
@@ -157,9 +146,13 @@ const AudioPlayer = ({
   useEffect(() => {
     if (!track || !audioRef.current) return;
 
+    setIsPlaying(false);
     setIsLoading(true);
-    audioRef.current.src = track.mediaUrl || track.url;
-    
+    setCurrentTime(0);
+    setDuration(0);
+
+    audioRef.current.src = track.mediaUrl || track.url || '';
+
     const handleLoadedMetadata = () => {
       setDuration(audioRef.current.duration);
       setIsLoading(false);
@@ -168,34 +161,44 @@ const AudioPlayer = ({
       }
     };
 
-    const handleError = (error) => {
-      console.error('Audio loading error:', error);
+    const handleError = (e) => {
+      console.error('Audio loading error:', e);
       setIsLoading(false);
-      if (onError) {
-        onError(error);
+      if (onError) onError(e);
+    };
+
+    const handleEnd = () => {
+      if (repeatMode === 'one' && audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+      } else {
+        setIsPlaying(false);
+        if (onEnded) onEnded();
       }
     };
 
-    audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audioRef.current.addEventListener('error', handleError);
-    audioRef.current.addEventListener('ended', handleTrackEnd);
+    const el = audioRef.current;
+    el.addEventListener('loadedmetadata', handleLoadedMetadata);
+    el.addEventListener('error', handleError);
+    el.addEventListener('ended', handleEnd);
+    el.load();
 
     return () => {
-      audioRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audioRef.current?.removeEventListener('error', handleError);
-      audioRef.current?.removeEventListener('ended', handleTrackEnd);
+      el.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      el.removeEventListener('error', handleError);
+      el.removeEventListener('ended', handleEnd);
     };
-  }, [track, autoPlay, onError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track]);
 
   // Sync audio player with state
   useEffect(() => {
     if (!audioRef.current) return;
 
-    if (isPlaying && audioContextRef.current?.state === 'suspended') {
-      audioContextRef.current.resume();
-    }
-
     if (isPlaying) {
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
       audioRef.current.play().catch(error => {
         console.warn('Playback error:', error);
         setIsPlaying(false);
@@ -229,21 +232,12 @@ const AudioPlayer = ({
     }
   };
 
-  // Track end handler
-  const handleTrackEnd = () => {
-    if (repeatMode === 'one' && audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play();
-    } else {
-      setIsPlaying(false);
-      if (onEnded) {
-        onEnded();
-      }
-    }
-  };
+  // Track end handler is now inline inside the track useEffect above.
 
   // Control handlers
   const handlePlay = () => {
+    // AudioContext must be created/resumed inside a user gesture
+    initAudioContext();
     if (audioContextRef.current?.state === 'suspended') {
       audioContextRef.current.resume();
     }
@@ -348,7 +342,7 @@ const AudioPlayer = ({
 
   return (
     <div className="audio-player-full">
-      <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} crossOrigin="anonymous" />
+      <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} />
 
       {/* Track Info */}
       {track && (

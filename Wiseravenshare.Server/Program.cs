@@ -733,6 +733,54 @@ CREATE INDEX IF NOT EXISTS idx_room_participants_room
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureZernioWebhookTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.zernio_webhook_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id VARCHAR(100) NOT NULL UNIQUE,
+    event_type VARCHAR(120) NOT NULL,
+    account_id VARCHAR(120) NULL,
+    profile_id VARCHAR(120) NULL,
+    payload_json JSONB NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'accepted',
+    processing_error TEXT NULL,
+    received_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at_utc TIMESTAMPTZ NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_data.zernio_account_mappings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id VARCHAR(120) NOT NULL UNIQUE,
+    profile_id VARCHAR(120) NULL,
+    platform VARCHAR(40) NULL,
+    username VARCHAR(255) NULL,
+    customer_key VARCHAR(255) NULL,
+    is_connected BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_type_received
+    ON app_data.zernio_webhook_events (event_type, received_at_utc DESC);
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_account
+    ON app_data.zernio_webhook_events (account_id);
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_profile
+    ON app_data.zernio_webhook_events (profile_id);
+CREATE INDEX IF NOT EXISTS idx_zernio_account_mappings_profile_platform
+    ON app_data.zernio_account_mappings (profile_id, platform);
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 // â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
@@ -852,6 +900,7 @@ builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageSer
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
@@ -867,6 +916,7 @@ builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
 builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
+builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
 // AI assistant (local llama.cpp llama-server, OpenAI-compatible API).
 // It stays inside the compose network; front-end UIs reach it only
 // through the api's endpoints. Set AiProvider=ollama to use the old client.
@@ -1053,6 +1103,15 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Cross-platform collaboration tables bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureZernioWebhookTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Zernio webhook tables bootstrap failed during startup.");
     }
 
     // Seed default badge catalog (badge-first currency system)
