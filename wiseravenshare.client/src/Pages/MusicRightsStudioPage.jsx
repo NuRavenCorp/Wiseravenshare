@@ -29,8 +29,75 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
     genre: '',
     file: null
   });
+  const [detectedDuration, setDetectedDuration] = useState('0:00');
 
   const fileInputRef = useRef(null);
+
+  const getBaseFileName = (fileName = '') => fileName.replace(/\.[^/.]+$/, '').trim();
+
+  const normalizeText = (value = '') => value.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const inferTrackInfoFromFileName = (fileName = '') => {
+    const baseName = normalizeText(getBaseFileName(fileName));
+    if (!baseName) {
+      return { title: '', artist: '', album: '' };
+    }
+
+    const dashParts = baseName
+      .split(/\s*[-\u2013\u2014]\s*/)
+      .map((part) => normalizeText(part))
+      .filter(Boolean);
+
+    if (dashParts.length >= 2) {
+      return {
+        artist: dashParts[0],
+        title: dashParts[1],
+        album: dashParts.length > 2 ? dashParts.slice(2).join(' - ') : ''
+      };
+    }
+
+    return { title: baseName, artist: '', album: '' };
+  };
+
+  const formatDuration = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return '0:00';
+    }
+
+    const wholeSeconds = Math.floor(seconds);
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const remainderSeconds = wholeSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainderSeconds).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(remainderSeconds).padStart(2, '0')}`;
+  };
+
+  const readAudioDuration = async (file) => new Promise((resolve) => {
+    const audio = document.createElement('audio');
+    const objectUrl = URL.createObjectURL(file);
+
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      audio.removeAttribute('src');
+      audio.load();
+    };
+
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      cleanup();
+      resolve(formatDuration(Number(audio.duration)));
+    };
+    audio.onerror = () => {
+      cleanup();
+      resolve('0:00');
+    };
+
+    audio.src = objectUrl;
+  });
 
   // Load music library from localStorage (demo) or backend
   useEffect(() => {
@@ -55,8 +122,8 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
         }
       } catch (error) {
         console.warn('Failed to load music library:', error);
-        // Use demo data
-        setMusicLibrary(DEMO_TRACKS);
+        // Start with empty library instead of demo data
+        setMusicLibrary([]);
       }
     };
 
@@ -70,14 +137,30 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
     }
   }, [musicLibrary]);
 
-  const handleFileSelect = (event) => {
+  const handleFileSelect = async (event) => {
     const file = event.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('audio/')) {
         addToast('Please select an audio file', 'error');
         return;
       }
-      setUploadFormData({ ...uploadFormData, file });
+
+      const inferredInfo = inferTrackInfoFromFileName(file.name);
+      const duration = await readAudioDuration(file);
+
+      setUploadFormData((prev) => ({
+        ...prev,
+        file,
+        title: inferredInfo.title || '',
+        artist: inferredInfo.artist || '',
+        album: inferredInfo.album || '',
+        genre: prev.genre || ''
+      }));
+      setDetectedDuration(duration);
+
+      if (inferredInfo.title || inferredInfo.artist || inferredInfo.album) {
+        addToast('Track info autofilled from file name', 'info');
+      }
     }
   };
 
@@ -92,10 +175,10 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
     try {
       const formData = new FormData();
       formData.append('file', uploadFormData.file);
-      formData.append('title', uploadFormData.title || uploadFormData.file.name);
-      formData.append('artist', uploadFormData.artist || 'Unknown Artist');
-      formData.append('album', uploadFormData.album || 'Unknown Album');
-      formData.append('genre', uploadFormData.genre || 'General');
+      formData.append('title', uploadFormData.title || getBaseFileName(uploadFormData.file.name));
+      formData.append('artist', uploadFormData.artist || '');
+      formData.append('album', uploadFormData.album || '');
+      formData.append('genre', uploadFormData.genre || '');
       formData.append('destinationFolder', '/wiseravenshare/ravensight/music');
 
       const token = localStorage.getItem('authToken');
@@ -109,18 +192,19 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
         const result = await response.json();
         const newTrack = {
           id: `music_${Date.now()}`,
-          title: uploadFormData.title || uploadFormData.file.name,
-          artist: uploadFormData.artist || 'Unknown Artist',
-          album: uploadFormData.album || 'Unknown Album',
-          genre: uploadFormData.genre || 'General',
+          title: uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled Track',
+          artist: uploadFormData.artist || '',
+          album: uploadFormData.album || '',
+          genre: uploadFormData.genre || '',
           mediaUrl: result.file?.mediaUrl || URL.createObjectURL(uploadFormData.file),
           fileName: result.file?.fileName || uploadFormData.file.name,
           uploadedAt: new Date().toISOString(),
-          duration: '0:00'
+          duration: detectedDuration
         };
 
         setMusicLibrary([newTrack, ...musicLibrary]);
         setUploadFormData({ title: '', artist: '', album: '', genre: '', file: null });
+        setDetectedDuration('0:00');
         setShowUploadForm(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
         addToast('Music uploaded successfully!', 'success');
@@ -552,31 +636,5 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
     </div>
   );
 };
-
-// Demo tracks for development
-const DEMO_TRACKS = [
-  {
-    id: 'demo_1',
-    title: 'Digital Dreams',
-    artist: 'Alex Raven',
-    album: 'Future Sounds',
-    genre: 'Electronic',
-    mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    fileName: 'digital-dreams.mp3',
-    uploadedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    duration: '3:45'
-  },
-  {
-    id: 'demo_2',
-    title: 'Midnight Melodies',
-    artist: 'Luna Echo',
-    album: 'Night Tales',
-    genre: 'Ambient',
-    mediaUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    fileName: 'midnight-melodies.mp3',
-    uploadedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    duration: '4:12'
-  }
-];
 
 export default MusicRightsStudioPage;
