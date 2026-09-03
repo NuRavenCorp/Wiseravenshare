@@ -203,7 +203,24 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           const res = await fetch('/api/ravensight/media/music', {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (res.ok) setMusicLibrary(Array.isArray(await res.json()) ? await res.json() : []);
+          if (res.ok) {
+            const data = await res.json();
+            const tracks = Array.isArray(data) ? data.map(t => ({
+              id: t.id,
+              title: t.title || 'Untitled',
+              artist: t.artist || '',
+              album: t.album || '',
+              genre: t.genre || '',
+              mediaUrl: t.mediaUrl,
+              fileName: t.fileName,
+              uploadedAt: t.uploadedAt,
+              duration: '0:00',
+              fingerprint: t.fingerprint,
+              protected: true,
+            })) : [];
+            setMusicLibrary(tracks);
+            return;
+          }
         } else {
           const stored = localStorage.getItem('wiseMusic_library');
           if (stored) setMusicLibrary(JSON.parse(stored));
@@ -265,7 +282,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
       if (res.ok) {
         const result = await res.json();
         const newTrack = {
-          id:          `music_${Date.now()}`,
+          id:          result.mediaAssetId || `music_${Date.now()}`,
           title:       uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
           artist:      uploadFormData.artist || '',
           album:       uploadFormData.album  || '',

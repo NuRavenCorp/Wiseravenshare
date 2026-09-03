@@ -22,6 +22,38 @@ public sealed class RavensightMusicMediaController : ControllerBase
         _mediaCatalogStore = mediaCatalogStore;
     }
 
+    [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<UserMusicTrackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserMusic(CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var assets = await _mediaCatalogStore.GetUserAssetsByTypeAsync(userId, "music", cancellationToken);
+        
+        var tracks = assets.Select(asset => 
+        {
+            var metadata = ParseMetadata(asset.MetadataJson);
+            return new UserMusicTrackDto
+            {
+                Id = asset.Id,
+                Title = metadata?.TryGetProperty("title", out var titleEl) == true ? titleEl.GetString() ?? "Untitled" : "Untitled",
+                Artist = metadata?.TryGetProperty("artist", out var artistEl) == true ? artistEl.GetString() ?? "" : "",
+                Album = metadata?.TryGetProperty("album", out var albumEl) == true ? albumEl.GetString() ?? "" : "",
+                Genre = metadata?.TryGetProperty("genre", out var genreEl) == true ? genreEl.GetString() ?? "" : "",
+                Fingerprint = metadata?.TryGetProperty("fingerprint", out var fpEl) == true ? fpEl.GetString() : null,
+                MediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(asset.FileName)}",
+                FileName = asset.FileName,
+                UploadedAt = asset.SavedAtUtc.ToString("O"),
+                SizeBytes = asset.SizeBytes
+            };
+        }).ToList();
+
+        return Ok(tracks);
+    }
+
     [HttpPost("save")]
     [RequestSizeLimit(200_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
@@ -39,6 +71,21 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         var saved = await _musicService.SaveMusicAsync(dto.File, dto.DestinationFolder, cancellationToken);
         var preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
+        
+        // Include fingerprint in metadata
+        var metadataDict = new Dictionary<string, object?>
+        {
+            ["title"] = dto.Title,
+            ["artist"] = dto.Artist,
+            ["album"] = dto.Album,
+            ["genre"] = dto.Genre
+        };
+        
+        if (!string.IsNullOrWhiteSpace(dto.Fingerprint))
+        {
+            metadataDict["fingerprint"] = dto.Fingerprint;
+        }
+
         var mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
         {
             UserId = userId,
@@ -51,13 +98,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
             ContentType = saved.ContentType,
             SizeBytes = saved.SizeBytes,
             SavedAtUtc = saved.SavedAtUtc,
-            MetadataJson = JsonSerializer.Serialize(new
-            {
-                title = dto.Title,
-                artist = dto.Artist,
-                album = dto.Album,
-                genre = dto.Genre
-            })
+            MetadataJson = JsonSerializer.Serialize(metadataDict)
         }, cancellationToken);
 
         var response = new RavensightSavedMediaDto
@@ -100,5 +141,16 @@ public sealed class RavensightMusicMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
+    }
+
+    private static JsonElement? ParseMetadata(string metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson)) return null;
+        try
+        {
+            var doc = JsonDocument.Parse(metadataJson);
+            return doc.RootElement;
+        }
+        catch { return null; }
     }
 }
