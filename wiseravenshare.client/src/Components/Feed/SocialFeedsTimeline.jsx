@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { apiService } from '../../Services/api';
 import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
@@ -186,6 +187,45 @@ const getSnapshot = (user) => {
     };
 };
 
+const normalizeFeedConnections = (feeds = {}) => ({
+    facebook: {
+        enabled: Boolean(feeds.facebook?.enabled),
+        username: String(feeds.facebook?.username || '').trim(),
+        profileUrl: String(feeds.facebook?.profileUrl || '').trim(),
+        feedUrl: String(feeds.facebook?.feedUrl || '').trim()
+    },
+    tikTok: {
+        enabled: Boolean(feeds.tikTok?.enabled),
+        username: String(feeds.tikTok?.username || '').trim(),
+        profileUrl: String(feeds.tikTok?.profileUrl || '').trim(),
+        feedUrl: String(feeds.tikTok?.feedUrl || '').trim()
+    },
+    instagram: {
+        enabled: Boolean(feeds.instagram?.enabled),
+        username: String(feeds.instagram?.username || '').trim(),
+        profileUrl: String(feeds.instagram?.profileUrl || '').trim(),
+        feedUrl: String(feeds.instagram?.feedUrl || '').trim()
+    },
+    youtube: {
+        enabled: Boolean(feeds.youtube?.enabled),
+        username: String(feeds.youtube?.username || '').trim(),
+        profileUrl: String(feeds.youtube?.profileUrl || '').trim(),
+        feedUrl: String(feeds.youtube?.feedUrl || '').trim()
+    },
+    twitter: {
+        enabled: Boolean(feeds.twitter?.enabled),
+        username: String(feeds.twitter?.username || '').trim(),
+        profileUrl: String(feeds.twitter?.profileUrl || '').trim(),
+        feedUrl: String(feeds.twitter?.feedUrl || '').trim()
+    },
+    linkedin: {
+        enabled: Boolean(feeds.linkedin?.enabled),
+        username: String(feeds.linkedin?.username || '').trim(),
+        profileUrl: String(feeds.linkedin?.profileUrl || '').trim(),
+        feedUrl: String(feeds.linkedin?.feedUrl || '').trim()
+    }
+});
+
 const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' }) => {
     const [snapshot, setSnapshot] = useState(() => getSnapshot(user));
     const [feedItems, setFeedItems] = useState([]);
@@ -245,6 +285,58 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     useEffect(() => {
         let cancelled = false;
 
+        const loadSavedConnections = async () => {
+            const userId = user?.id;
+            if (!userId) {
+                return;
+            }
+
+            try {
+                const response = await apiService.getSocialFeeds(userId);
+                const loadedFeeds = normalizeFeedConnections(response?.data || response || {});
+                if (cancelled) return;
+
+                const cachedUser = readCachedUser() || {};
+                const nextUser = {
+                    ...cachedUser,
+                    ...user,
+                    socialFeeds: loadedFeeds
+                };
+
+                localStorage.setItem('wiseSocialFeeds', JSON.stringify(loadedFeeds));
+                localStorage.setItem('user_data', JSON.stringify(nextUser));
+                window.dispatchEvent(new Event('wiseraven:social-updated'));
+                setSnapshot(getSnapshot(nextUser));
+                setHandles({
+                    facebook: loadedFeeds.facebook.username,
+                    tiktok: loadedFeeds.tikTok.username,
+                    instagram: loadedFeeds.instagram.username,
+                    youtube: loadedFeeds.youtube.username,
+                    twitter: loadedFeeds.twitter.username,
+                    linkedin: loadedFeeds.linkedin.username
+                });
+            } catch {
+                if (cancelled) return;
+                setHandles({
+                    facebook: snapshot.facebook.username || '',
+                    tiktok: snapshot.tikTok.username || '',
+                    instagram: snapshot.instagram.username || '',
+                    youtube: snapshot.youtube.username || '',
+                    twitter: snapshot.twitter.username || '',
+                    linkedin: snapshot.linkedin.username || ''
+                });
+            }
+        };
+
+        loadSavedConnections();
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+
         const loadCombinedFeed = async () => {
             setIsLoadingFeed(true);
             try {
@@ -277,7 +369,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         };
     }, [compact, snapshot.facebook.username, snapshot.tikTok.username]);
 
-    const handleSaveHandles = (e) => {
+    const handleSaveHandles = async (e) => {
         e?.preventDefault();
         const updatedFeeds = {
             facebook: { username: handles.facebook.trim(), enabled: Boolean(handles.facebook.trim()) },
@@ -289,9 +381,18 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         };
 
         try {
+            const userId = user?.id;
+            if (userId) {
+                try {
+                    await apiService.updateSocialFeeds(userId, updatedFeeds);
+                } catch (err) {
+                    console.warn('Backend social feed save failed, using local cache fallback:', err);
+                }
+            }
+
             localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedFeeds));
             const cachedUser = readCachedUser() || {};
-            const nextUser = { ...cachedUser, socialFeeds: updatedFeeds };
+            const nextUser = { ...cachedUser, ...user, socialFeeds: updatedFeeds };
             localStorage.setItem('user_data', JSON.stringify(nextUser));
             window.dispatchEvent(new Event('wiseraven:social-updated'));
             setShowHandleConfig(false);
@@ -941,4 +1042,3 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 };
 
 export default SocialFeedsTimeline;
-
