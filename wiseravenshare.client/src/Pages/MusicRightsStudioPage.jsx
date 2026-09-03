@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  FiUpload, FiShare2, FiPlay, FiPause, FiTrash2, FiEdit2,
-  FiMusic, FiDownload, FiMoreVertical, FiX, FiCopy, FiCheck, FiArrowRight
+  FiUpload, FiShare2, FiPlay, FiPause, FiTrash2,
+  FiMusic, FiShield, FiCheck, FiX, FiAlertCircle,
+  FiLock, FiAward, FiFileText, FiExternalLink, FiInfo
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
@@ -9,625 +10,548 @@ import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/mus
 import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import '../Styles/MusicRightsStudio.css';
 
+// ─── IP Protection Plans ──────────────────────────────────────────────────────
+const PROTECTION_PLANS = [
+  {
+    id: 'basic',
+    name: 'Basic Protection',
+    price: '$4.99 / mo',
+    annualPrice: '$49.99 / yr',
+    badge: null,
+    color: '#22c55e',
+    features: [
+      'Timestamped upload proof of creation',
+      'SHA-256 cryptographic fingerprint stored per track',
+      'WiseRavenShare rights registration record',
+      'DMCA takedown request template & guidance',
+      'Permanent proof-of-creation certificate (PDF)',
+    ],
+    cta: 'Start Basic',
+  },
+  {
+    id: 'standard',
+    name: 'Standard Protection',
+    price: '$14.99 / mo',
+    annualPrice: '$149.99 / yr',
+    badge: 'Popular',
+    color: '#3b82f6',
+    features: [
+      'Everything in Basic',
+      'Cross-platform infringement monitoring (FB, TikTok, YouTube, IG)',
+      'Automated takedown filing support',
+      'Sync & mechanical licensing agreement templates',
+      'Revenue split tracking for collaborators',
+      'Streaming royalty registration guidance',
+    ],
+    cta: 'Start Standard',
+  },
+  {
+    id: 'pro',
+    name: 'Pro Protection',
+    price: '$29.99 / mo',
+    annualPrice: '$299.99 / yr',
+    badge: 'Best Value',
+    color: '#a855f7',
+    features: [
+      'Everything in Standard',
+      'PRO (ASCAP / BMI / SESAC) registration guidance',
+      'Master + publishing rights documentation',
+      'Priority DMCA legal escalation support',
+      'Custom licensing deal templates (sync, master, performance)',
+      'Dedicated IP advisor on-call',
+      'Monetization & licensing deal tracking dashboard',
+    ],
+    cta: 'Start Pro',
+  },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
 const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const { user } = useAuth();
   const { addToast } = useNotification();
   const currentUser = propUser || user;
 
-  const [musicLibrary, setMusicLibrary] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [editingTrack, setEditingTrack] = useState(null);
-  const [playingTrackId, setPlayingTrackId] = useState(null);
-  const [selectedTrackForPlayer, setSelectedTrackForPlayer] = useState(null);
-  const [sharingTrackId, setSharingTrackId] = useState(null);
-  const [shareMenuOpen, setShareMenuOpen] = useState(null);
-  const [showUploadForm, setShowUploadForm] = useState(false);
+  const [musicLibrary,   setMusicLibrary]  = useState([]);
+  const [uploading,      setUploading]     = useState(false);
+  const [showUploadForm, setShowUploadForm]= useState(false);
+  const [playingTrackId, setPlayingTrackId]= useState(null);
+  const [selectedTrack,  setSelectedTrack] = useState(null);
+  const [shareMenuOpen,  setShareMenuOpen] = useState(null);
+  const [sharingTrackId, setSharingTrackId]= useState(null);
+  const [showIPInfo,     setShowIPInfo]    = useState(false);
+
   const [uploadFormData, setUploadFormData] = useState({
-    title: '',
-    artist: '',
-    album: '',
-    genre: '',
-    file: null
+    title: '', artist: '', album: '', genre: '', file: null,
+    originalWorkConfirmed: false,
+    rightsOwnerConfirmed: false,
   });
   const [detectedDuration, setDetectedDuration] = useState('0:00');
 
   const fileInputRef = useRef(null);
 
-  const getBaseFileName = (fileName = '') => fileName.replace(/\.[^/.]+$/, '').trim();
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const getBaseFileName = (n = '') => n.replace(/\.[^/.]+$/, '').trim();
+  const normalizeText   = (v = '') => v.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-  const normalizeText = (value = '') => value.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
-
-  const inferTrackInfoFromFileName = (fileName = '') => {
-    const baseName = normalizeText(getBaseFileName(fileName));
-    if (!baseName) {
-      return { title: '', artist: '', album: '' };
-    }
-
-    const dashParts = baseName
-      .split(/\s*[-\u2013\u2014]\s*/)
-      .map((part) => normalizeText(part))
-      .filter(Boolean);
-
-    if (dashParts.length >= 2) {
-      return {
-        artist: dashParts[0],
-        title: dashParts[1],
-        album: dashParts.length > 2 ? dashParts.slice(2).join(' - ') : ''
-      };
-    }
-
-    return { title: baseName, artist: '', album: '' };
+  const inferFromFileName = (fileName = '') => {
+    const base  = normalizeText(getBaseFileName(fileName));
+    const parts = base.split(/\s*[-–—]\s*/).map(p => normalizeText(p)).filter(Boolean);
+    if (parts.length >= 2) return { artist: parts[0], title: parts[1], album: parts[2] || '' };
+    return { title: base, artist: '', album: '' };
   };
 
-  const formatDuration = (seconds) => {
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      return '0:00';
-    }
-
-    const wholeSeconds = Math.floor(seconds);
-    const hours = Math.floor(wholeSeconds / 3600);
-    const minutes = Math.floor((wholeSeconds % 3600) / 60);
-    const remainderSeconds = wholeSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainderSeconds).padStart(2, '0')}`;
-    }
-
-    return `${minutes}:${String(remainderSeconds).padStart(2, '0')}`;
+  const fmtDuration = (s) => {
+    if (!isFinite(s) || s <= 0) return '0:00';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return h > 0
+      ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+      : `${m}:${String(sec).padStart(2,'0')}`;
   };
 
-  const readAudioDuration = async (file) => new Promise((resolve) => {
-    const audio = document.createElement('audio');
-    const objectUrl = URL.createObjectURL(file);
-
-    const cleanup = () => {
-      URL.revokeObjectURL(objectUrl);
-      audio.removeAttribute('src');
-      audio.load();
-    };
-
-    audio.preload = 'metadata';
-    audio.onloadedmetadata = () => {
-      cleanup();
-      resolve(formatDuration(Number(audio.duration)));
-    };
-    audio.onerror = () => {
-      cleanup();
-      resolve('0:00');
-    };
-
-    audio.src = objectUrl;
+  const readDuration = (file) => new Promise(res => {
+    const a = document.createElement('audio');
+    const url = URL.createObjectURL(file);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => { URL.revokeObjectURL(url); a.src = ''; res(fmtDuration(a.duration)); };
+    a.onerror = () => { URL.revokeObjectURL(url); res('0:00'); };
+    a.src = url;
   });
 
-  // Load music library from localStorage (demo) or backend
-  useEffect(() => {
-    const loadMusicLibrary = async () => {
-      try {
-        // Try to fetch from backend if available
-        const token = localStorage.getItem('authToken');
-        if (token) {
-          const response = await fetch('/api/ravensight/media/music', {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (response.ok) {
-            const data = await response.json();
-            setMusicLibrary(Array.isArray(data) ? data : []);
-          }
-        } else {
-          // Load from localStorage for demo
-          const stored = localStorage.getItem('wiseMusic_library');
-          if (stored) {
-            setMusicLibrary(JSON.parse(stored));
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to load music library:', error);
-        // Start with empty library instead of demo data
-        setMusicLibrary([]);
-      }
-    };
-
-    loadMusicLibrary();
-  }, []);
-
-  // Save to localStorage on change
-  useEffect(() => {
-    if (musicLibrary.length > 0) {
-      localStorage.setItem('wiseMusic_library', JSON.stringify(musicLibrary));
-    }
-  }, [musicLibrary]);
-
-  const handleFileSelect = async (event) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith('audio/')) {
-        addToast('Please select an audio file', 'error');
-        return;
-      }
-
-      const inferredInfo = inferTrackInfoFromFileName(file.name);
-      const duration = await readAudioDuration(file);
-
-      setUploadFormData((prev) => ({
-        ...prev,
-        file,
-        title: inferredInfo.title || '',
-        artist: inferredInfo.artist || '',
-        album: inferredInfo.album || '',
-        genre: prev.genre || ''
-      }));
-      setDetectedDuration(duration);
-
-      if (inferredInfo.title || inferredInfo.artist || inferredInfo.album) {
-        addToast('Track info autofilled from file name', 'info');
-      }
-    }
+  // SHA-256 fingerprint of file bytes
+  const fingerprint = async (file) => {
+    try {
+      const buf  = await file.arrayBuffer();
+      const hash = await crypto.subtle.digest('SHA-256', buf);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+    } catch { return null; }
   };
 
-  const handleUploadMusic = async (event) => {
-    event.preventDefault();
-    if (!uploadFormData.file) {
-      addToast('Please select a file', 'warning');
+  // ── Load library ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('authToken');
+        if (token) {
+          const res = await fetch('/api/ravensight/media/music', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) setMusicLibrary(Array.isArray(await res.json()) ? await res.json() : []);
+        } else {
+          const stored = localStorage.getItem('wiseMusic_library');
+          if (stored) setMusicLibrary(JSON.parse(stored));
+        }
+      } catch { setMusicLibrary([]); }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (musicLibrary.length > 0)
+      localStorage.setItem('wiseMusic_library', JSON.stringify(musicLibrary));
+  }, [musicLibrary]);
+
+  // ── File select ────────────────────────────────────────────────────────────
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) {
+      addToast('Please select an audio file', 'error');
+      return;
+    }
+    const info     = inferFromFileName(file.name);
+    const duration = await readDuration(file);
+    setUploadFormData(p => ({ ...p, file, ...info, genre: p.genre }));
+    setDetectedDuration(duration);
+    if (info.title || info.artist) addToast('Track info autofilled from filename', 'info');
+  };
+
+  // ── Upload ─────────────────────────────────────────────────────────────────
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!uploadFormData.file) { addToast('Select a file first', 'warning'); return; }
+    if (!uploadFormData.originalWorkConfirmed || !uploadFormData.rightsOwnerConfirmed) {
+      addToast('You must confirm this is your original work before uploading', 'error');
       return;
     }
 
     setUploading(true);
     try {
+      // Compute fingerprint locally before upload
+      const fp = await fingerprint(uploadFormData.file);
+
       const formData = new FormData();
-      formData.append('file', uploadFormData.file);
-      formData.append('title', uploadFormData.title || getBaseFileName(uploadFormData.file.name));
-      formData.append('artist', uploadFormData.artist || '');
-      formData.append('album', uploadFormData.album || '');
-      formData.append('genre', uploadFormData.genre || '');
+      formData.append('file',              uploadFormData.file);
+      formData.append('title',             uploadFormData.title || getBaseFileName(uploadFormData.file.name));
+      formData.append('artist',            uploadFormData.artist || '');
+      formData.append('album',             uploadFormData.album  || '');
+      formData.append('genre',             uploadFormData.genre  || '');
       formData.append('destinationFolder', '/wiseravenshare/ravensight/music');
+      if (fp) formData.append('fingerprint', fp);
 
       const token = localStorage.getItem('authToken');
-      const response = await fetch('/api/ravensight/media/music/save', {
-        method: 'POST',
+      const res   = await fetch('/api/ravensight/media/music/save', {
+        method:  'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData
+        body:    formData,
       });
 
-      if (response.ok) {
-        const result = await response.json();
+      if (res.ok) {
+        const result = await res.json();
         const newTrack = {
-          id: `music_${Date.now()}`,
-          title: uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled Track',
-          artist: uploadFormData.artist || '',
-          album: uploadFormData.album || '',
-          genre: uploadFormData.genre || '',
-          mediaUrl: result.file?.mediaUrl || URL.createObjectURL(uploadFormData.file),
-          fileName: result.file?.fileName || uploadFormData.file.name,
-          uploadedAt: new Date().toISOString(),
-          duration: detectedDuration
+          id:          `music_${Date.now()}`,
+          title:       uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
+          artist:      uploadFormData.artist || '',
+          album:       uploadFormData.album  || '',
+          genre:       uploadFormData.genre  || '',
+          mediaUrl:    result.file?.mediaUrl || URL.createObjectURL(uploadFormData.file),
+          fileName:    result.file?.fileName || uploadFormData.file.name,
+          uploadedAt:  new Date().toISOString(),
+          duration:    detectedDuration,
+          fingerprint: fp,
+          protected:   true,
         };
-
-        setMusicLibrary([newTrack, ...musicLibrary]);
-        setUploadFormData({ title: '', artist: '', album: '', genre: '', file: null });
+        setMusicLibrary(lib => [newTrack, ...lib]);
+        setUploadFormData({ title:'', artist:'', album:'', genre:'', file:null,
+          originalWorkConfirmed: false, rightsOwnerConfirmed: false });
         setDetectedDuration('0:00');
         setShowUploadForm(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
-        addToast('Music uploaded successfully!', 'success');
+        addToast('✅ Track uploaded & protection record created', 'success');
       } else {
-        const error = await response.json();
-        addToast(error.message || 'Upload failed', 'error');
+        const err = await res.json().catch(() => ({}));
+        addToast(err.message || 'Upload failed', 'error');
       }
-    } catch (error) {
-      console.error('Upload error:', error);
-      addToast('Failed to upload music', 'error');
+    } catch (err) {
+      console.error(err);
+      addToast('Upload failed', 'error');
     } finally {
       setUploading(false);
     }
   };
 
-  const handleShareMusic = async (track, options = {}) => {
+  // ── Share ──────────────────────────────────────────────────────────────────
+  const handleShare = async (track, opts = {}) => {
     setSharingTrackId(track.id);
     try {
-      await shareMusic({
-        track,
-        currentUser,
-        crossPost: options.crossPost || false,
-        crossPostTargets: options.crossPostTargets || { facebook: true, tiktok: false, youtube: false },
-        onNotification: (message, type) => addToast(message, type)
-      });
+      await shareMusic({ track, currentUser, ...opts,
+        onNotification: (m, t) => addToast(m, t) });
       setShareMenuOpen(null);
-    } catch (error) {
-      console.error('Share error:', error);
-      addToast('Failed to share music', 'error');
-    } finally {
-      setSharingTrackId(null);
-    }
+    } catch { addToast('Share failed', 'error'); }
+    finally  { setSharingTrackId(null); }
   };
 
   const handlePlatformShare = (track, platform) => {
-    const shareUrl = buildMusicShareUrl(track, currentUser);
-    const message = `🎵 ${track.artist} — ${track.title}${track.album ? ` (${track.album})` : ''}`;
-
-    if (musicPlatformShare[platform]) {
-      musicPlatformShare[platform]({ message, url: shareUrl, track });
-    }
+    const url = buildMusicShareUrl(track, currentUser);
+    const msg = `🎵 ${track.artist} — ${track.title}${track.album ? ` (${track.album})` : ''}`;
+    if (musicPlatformShare[platform]) musicPlatformShare[platform]({ message: msg, url, track });
     setShareMenuOpen(null);
   };
 
-  const handleDeleteTrack = (trackId) => {
-    if (confirm('Delete this track?')) {
-      setMusicLibrary(musicLibrary.filter((t) => t.id !== trackId));
+  const handleDelete = (id) => {
+    if (confirm('Delete this track and its protection record?')) {
+      setMusicLibrary(lib => lib.filter(t => t.id !== id));
       addToast('Track deleted', 'success');
     }
   };
 
-  const handlePlayTrack = (track) => {
-    setSelectedTrackForPlayer(track);
-    setPlayingTrackId(track.id);
-  };
+  // ─────────────────────────────────────────────────────────────────────────────
+  const canUpload = uploadFormData.originalWorkConfirmed && uploadFormData.rightsOwnerConfirmed && uploadFormData.file;
 
   return (
-    <div style={{ padding: '20px', background: 'var(--bg-color)', minHeight: '100vh' }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '30px',
-        paddingBottom: '15px',
-        borderBottom: '1px solid var(--border-color)',
-        flexWrap: 'wrap',
-        gap: '15px'
-      }}>
-        <div>
-          <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <FiMusic /> Music Rights Studio
-          </h1>
-          <p style={{ margin: '5px 0 0', fontSize: '12px', color: 'var(--light-color)' }}>
-            Manage, share, and distribute your music
+    <div className="mrs-page">
+
+      {/* ── Page Header ── */}
+      <div className="mrs-header">
+        <div className="mrs-header-left">
+          <h1><FiShield /> Music Rights Studio</h1>
+          <p className="mrs-subtitle">
+            <FiLock size={12} /> For original creations only — upload, register, and protect your intellectual property
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => onNavigate('music-player')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 20px',
-              background: 'var(--highlight-color)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            <FiPlay /> Open Player
+        <div className="mrs-header-actions">
+          <button className="btn-outline" onClick={() => setShowIPInfo(!showIPInfo)}>
+            <FiInfo /> How IP Protection Works
           </button>
-          <button
-            onClick={() => setShowUploadForm(!showUploadForm)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 20px',
-              background: 'var(--highlight-color)',
-              color: '#000',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            <FiUpload /> Upload Music
+          <button className="btn-outline" onClick={() => onNavigate('music-player')}>
+            <FiPlay /> Open Studio Player
+          </button>
+          <button className="btn-primary" onClick={() => setShowUploadForm(!showUploadForm)}>
+            <FiUpload /> Register New Track
           </button>
         </div>
       </div>
 
-      {/* Audio Player */}
-      {selectedTrackForPlayer && (
-        <div style={{ marginBottom: '30px' }}>
-          <AudioPlayer
-            track={selectedTrackForPlayer}
-            showVisualizer={true}
-            onEnded={() => {
-              addToast('Track finished', 'info');
-            }}
+      {/* ── IP Info Accordion ── */}
+      {showIPInfo && (
+        <div className="mrs-ip-info">
+          <div className="ip-intro">
+            <h2>Your Music. Your Rights. Protected.</h2>
+            <p>
+              WiseRavenShare Music Rights Studio is exclusively for <strong>original compositions and recordings</strong>.
+              When you upload here, we create an immutable, timestamped record of your creation — a legal anchor that
+              establishes your ownership under the U.S. Copyright Act (17 U.S.C. § 102) and international Berne Convention.
+            </p>
+          </div>
+
+          <div className="ip-how-it-works">
+            <h3>How We Protect Your Work</h3>
+            <div className="ip-steps">
+              {[
+                {
+                  icon: <FiUpload />,
+                  title: 'Upload & Fingerprint',
+                  desc: 'Every file is hashed with SHA-256 on upload, creating a unique cryptographic fingerprint tied to your account and upload timestamp.',
+                },
+                {
+                  icon: <FiFileText />,
+                  title: 'Rights Record Created',
+                  desc: 'A rights registration record is created in the WiseRavenShare database logging your identity, upload time, and file fingerprint as proof of creation.',
+                },
+                {
+                  icon: <FiShield />,
+                  title: 'Monitoring & Enforcement',
+                  desc: 'Standard & Pro plans continuously scan Facebook, TikTok, YouTube, and Instagram for unauthorised use of your content and initiate DMCA takedowns on your behalf.',
+                },
+                {
+                  icon: <FiAward />,
+                  title: 'Licensing & Revenue',
+                  desc: 'Pro plan users receive licensing agreement templates, PRO registration guidance (ASCAP/BMI/SESAC), and a deal-tracking dashboard for sync and performance royalties.',
+                },
+              ].map(s => (
+                <div key={s.title} className="ip-step">
+                  <div className="ip-step-icon">{s.icon}</div>
+                  <div>
+                    <strong>{s.title}</strong>
+                    <p>{s.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="ip-disclaimer">
+            <FiAlertCircle />
+            <p>
+              <strong>Important:</strong> WiseRavenShare rights records supplement — but do not replace — formal copyright registration
+              with the U.S. Copyright Office (<a href="https://www.copyright.gov" target="_blank" rel="noopener noreferrer">copyright.gov <FiExternalLink size={10}/></a>).
+              For the strongest legal protection, we recommend filing formal registration for commercially released works.
+              Our protection services provide evidence of creation date and ownership — consult an IP attorney for legal disputes.
+            </p>
+          </div>
+
+          {/* ── Pricing ── */}
+          <h3 className="plans-title">IP Protection Plans</h3>
+          <div className="plans-grid">
+            {PROTECTION_PLANS.map(plan => (
+              <div key={plan.id} className={`plan-card ${plan.badge ? 'plan-featured' : ''}`}
+                style={{ '--plan-color': plan.color }}>
+                {plan.badge && <span className="plan-badge">{plan.badge}</span>}
+                <div className="plan-name">{plan.name}</div>
+                <div className="plan-price">{plan.price}</div>
+                <div className="plan-annual">or {plan.annualPrice} (save 17%)</div>
+                <ul className="plan-features">
+                  {plan.features.map(f => (
+                    <li key={f}><FiCheck className="check-icon" /> {f}</li>
+                  ))}
+                </ul>
+                <button className="plan-cta"
+                  onClick={() => { addToast(`${plan.name} — subscription flow coming soon`, 'info'); }}>
+                  {plan.cta}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Audio Preview Player ── */}
+      {selectedTrack && (
+        <div className="mrs-player-wrap">
+          <AudioPlayer track={selectedTrack} showVisualizer
+            onEnded={() => setSelectedTrack(null)}
+            onError={() => { addToast('Playback error', 'error'); setSelectedTrack(null); }}
           />
         </div>
       )}
 
-      {/* Upload Form */}
+      {/* ── Upload / Register Form ── */}
       {showUploadForm && (
-        <div style={{
-          background: 'var(--card-bg)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '30px'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h3 style={{ margin: 0 }}>Upload New Track</h3>
-            <button
-              onClick={() => setShowUploadForm(false)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px' }}
-            >
-              <FiX />
-            </button>
+        <div className="mrs-upload-card">
+          <div className="mrs-upload-header">
+            <h3><FiShield /> Register Original Track</h3>
+            <button className="icon-btn" onClick={() => setShowUploadForm(false)}><FiX /></button>
           </div>
 
-          <form onSubmit={handleUploadMusic} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          {/* Original Works Declaration */}
+          <div className="mrs-declaration">
+            <div className="declaration-icon"><FiLock size={20} /></div>
             <div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileSelect}
-                accept="audio/*"
-                style={{ marginBottom: '10px', width: '100%' }}
-              />
+              <strong>Original Works Only</strong>
+              <p>
+                This service is exclusively for tracks you created. Uploading music you do not own
+                violates copyright law and WiseRavenShare's Terms of Service, and may result in
+                immediate account suspension and DMCA counter-claims against you.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleUpload} className="mrs-upload-form">
+            {/* File picker */}
+            <div className="form-group">
+              <label>Audio File <span className="req">*</span></label>
+              <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="audio/*" />
               {uploadFormData.file && (
-                <p style={{ color: 'var(--highlight-color)', fontSize: '12px', margin: '5px 0 0' }}>
-                  Selected: {uploadFormData.file.name}
-                </p>
+                <span className="file-hint">
+                  <FiCheck size={12} /> {uploadFormData.file.name}
+                  {detectedDuration !== '0:00' && ` · ${detectedDuration}`}
+                </span>
               )}
             </div>
 
-            <input
-              type="text"
-              placeholder="Track Title"
-              value={uploadFormData.title}
-              onChange={(e) => setUploadFormData({ ...uploadFormData, title: e.target.value })}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-color)'
-              }}
-            />
+            <div className="form-row">
+              <div className="form-group">
+                <label>Track Title <span className="req">*</span></label>
+                <input type="text" placeholder="My Original Song"
+                  value={uploadFormData.title}
+                  onChange={e => setUploadFormData(p => ({ ...p, title: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label>Artist / Stage Name <span className="req">*</span></label>
+                <input type="text" placeholder="Your Name"
+                  value={uploadFormData.artist}
+                  onChange={e => setUploadFormData(p => ({ ...p, artist: e.target.value }))} />
+              </div>
+            </div>
 
-            <input
-              type="text"
-              placeholder="Artist Name"
-              value={uploadFormData.artist}
-              onChange={(e) => setUploadFormData({ ...uploadFormData, artist: e.target.value })}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-color)'
-              }}
-            />
+            <div className="form-row">
+              <div className="form-group">
+                <label>Album / Project</label>
+                <input type="text" placeholder="Album name (optional)"
+                  value={uploadFormData.album}
+                  onChange={e => setUploadFormData(p => ({ ...p, album: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label>Genre</label>
+                <input type="text" placeholder="Genre (optional)"
+                  value={uploadFormData.genre}
+                  onChange={e => setUploadFormData(p => ({ ...p, genre: e.target.value }))} />
+              </div>
+            </div>
 
-            <input
-              type="text"
-              placeholder="Album Name"
-              value={uploadFormData.album}
-              onChange={(e) => setUploadFormData({ ...uploadFormData, album: e.target.value })}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-color)'
-              }}
-            />
+            {/* Consent checkboxes */}
+            <div className="mrs-consents">
+              <label className="consent-check">
+                <input type="checkbox"
+                  checked={uploadFormData.originalWorkConfirmed}
+                  onChange={e => setUploadFormData(p => ({ ...p, originalWorkConfirmed: e.target.checked }))} />
+                <span>
+                  I confirm this track is my <strong>original creation</strong> and I hold the master and
+                  publishing rights. I am not uploading a cover, remix, or sample of another artist's work
+                  without the required licenses.
+                </span>
+              </label>
+              <label className="consent-check">
+                <input type="checkbox"
+                  checked={uploadFormData.rightsOwnerConfirmed}
+                  onChange={e => setUploadFormData(p => ({ ...p, rightsOwnerConfirmed: e.target.checked }))} />
+                <span>
+                  I authorise WiseRavenShare to create a timestamped rights registration record, compute
+                  a cryptographic fingerprint of this file, and use it to enforce my IP rights on my behalf.
+                </span>
+              </label>
+            </div>
 
-            <input
-              type="text"
-              placeholder="Genre"
-              value={uploadFormData.genre}
-              onChange={(e) => setUploadFormData({ ...uploadFormData, genre: e.target.value })}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                color: 'var(--text-color)'
-              }}
-            />
-
-            <button
-              type="submit"
-              disabled={uploading || !uploadFormData.file}
-              style={{
-                padding: '12px',
-                background: uploading ? 'rgba(100,100,100,0.5)' : 'var(--highlight-color)',
-                color: '#000',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: uploading ? 'wait' : 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              {uploading ? 'Uploading...' : 'Upload Track'}
+            <button type="submit" className={`btn-primary submit-btn ${!canUpload ? 'disabled' : ''}`}
+              disabled={!canUpload || uploading}>
+              {uploading
+                ? <><div className="btn-spinner" /> Uploading & registering…</>
+                : <><FiShield /> Upload & Register IP</>}
             </button>
           </form>
         </div>
       )}
 
-      {/* Music Library */}
-      <div>
-        <h2 style={{ marginBottom: '15px' }}>Your Music Library</h2>
+      {/* ── Track Library ── */}
+      <div className="mrs-library">
+        <h2>Your Protected Tracks</h2>
+
         {musicLibrary.length === 0 ? (
-          <div style={{
-            background: 'var(--card-bg)',
-            border: '2px dashed var(--border-color)',
-            borderRadius: '12px',
-            padding: '40px',
-            textAlign: 'center',
-            color: 'var(--light-color)'
-          }}>
-            <FiMusic size={48} style={{ opacity: 0.5, marginBottom: '15px' }} />
-            <p>No music uploaded yet. Start by uploading your first track!</p>
+          <div className="mrs-empty">
+            <FiMusic size={48} />
+            <p>No original tracks registered yet.</p>
+            <button className="btn-primary" onClick={() => setShowUploadForm(true)}>
+              <FiUpload /> Register Your First Track
+            </button>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '12px' }}>
-            {musicLibrary.map((track) => (
-              <div
-                key={track.id}
-                style={{
-                  background: 'var(--card-bg)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '12px',
-                  padding: '15px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '15px',
-                  transition: 'background 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--card-bg-hover)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--card-bg)'}
-              >
-                {/* Track Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h4 style={{ margin: '0 0 4px', color: 'var(--text-color)' }}>
-                    {track.title}
-                  </h4>
-                  <p style={{ margin: '0 0 4px', fontSize: '12px', color: 'var(--light-color)' }}>
-                    {track.artist} • {track.album}
-                  </p>
-                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--border-color)' }}>
-                    {track.genre} • Uploaded {new Date(track.uploadedAt).toLocaleDateString()}
-                  </p>
+          <div className="mrs-track-list">
+            {musicLibrary.map(track => (
+              <div key={track.id} className="mrs-track">
+                {/* Protection badge */}
+                <div className="track-shield" title="IP Protected">
+                  <FiShield size={14} />
                 </div>
 
-                {/* Play Button */}
-                <button
-                  onClick={() => handlePlayTrack(track)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: playingTrackId === track.id ? 'var(--highlight-color)' : 'var(--text-color)',
-                    fontSize: '20px',
-                    transition: 'color 0.2s'
-                  }}
-                  title={playingTrackId === track.id ? 'Pause' : 'Play'}
-                >
-                  {playingTrackId === track.id ? <FiPause /> : <FiPlay />}
-                </button>
+                <div className="track-info">
+                  <div className="track-title">{track.title}</div>
+                  <div className="track-meta">
+                    {track.artist && <span>{track.artist}</span>}
+                    {track.album  && <><span className="sep">·</span><span>{track.album}</span></>}
+                    {track.genre  && <><span className="sep">·</span><span>{track.genre}</span></>}
+                    <span className="sep">·</span>
+                    <span>{track.duration || '—'}</span>
+                  </div>
+                  <div className="track-fp">
+                    <FiLock size={10} />
+                    {track.fingerprint
+                      ? <span className="fp-hash" title={track.fingerprint}>
+                          SHA-256 · {track.fingerprint.slice(0, 12)}…
+                        </span>
+                      : <span className="fp-none">No fingerprint</span>}
+                    <span className="fp-date">
+                      Registered {new Date(track.uploadedAt).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })}
+                    </span>
+                  </div>
+                </div>
 
-                {/* Share Menu */}
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setShareMenuOpen(shareMenuOpen === track.id ? null : track.id)}
-                    disabled={sharingTrackId === track.id}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: sharingTrackId === track.id ? 'wait' : 'pointer',
-                      color: 'var(--text-color)',
-                      fontSize: '20px',
-                      transition: 'color 0.2s'
-                    }}
-                    title="Share"
-                  >
-                    {sharingTrackId === track.id ? '...' : <FiShare2 />}
+                <div className="track-actions">
+                  {/* Play */}
+                  <button className="action-btn"
+                    onClick={() => { setSelectedTrack(track); setPlayingTrackId(track.id); }}
+                    title="Preview">
+                    {playingTrackId === track.id && selectedTrack?.id === track.id
+                      ? <FiPause /> : <FiPlay />}
                   </button>
 
-                  {shareMenuOpen === track.id && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      background: 'var(--card-bg)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      marginTop: '8px',
-                      zIndex: 1000,
-                      minWidth: '180px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                    }}>
-                      <button
-                        onClick={() => handleShareMusic(track)}
-                        style={{
-                          width: '100%',
-                          padding: '10px 15px',
-                          background: 'none',
-                          border: 'none',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          color: 'var(--text-color)',
-                          borderBottom: '1px solid var(--border-color)'
-                        }}
-                      >
-                        Copy Link
-                      </button>
-                      <button
-                        onClick={() => handlePlatformShare(track, 'facebook')}
-                        style={{
-                          width: '100%',
-                          padding: '10px 15px',
-                          background: 'none',
-                          border: 'none',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          color: 'var(--text-color)',
-                          borderBottom: '1px solid var(--border-color)'
-                        }}
-                      >
-                        📘 Facebook
-                      </button>
-                      <button
-                        onClick={() => handlePlatformShare(track, 'twitter')}
-                        style={{
-                          width: '100%',
-                          padding: '10px 15px',
-                          background: 'none',
-                          border: 'none',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          color: 'var(--text-color)',
-                          borderBottom: '1px solid var(--border-color)'
-                        }}
-                      >
-                        𝕏 Twitter
-                      </button>
-                      <button
-                        onClick={() => handlePlatformShare(track, 'whatsapp')}
-                        style={{
-                          width: '100%',
-                          padding: '10px 15px',
-                          background: 'none',
-                          border: 'none',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          color: 'var(--text-color)',
-                          borderBottom: '1px solid var(--border-color)'
-                        }}
-                      >
-                        💬 WhatsApp
-                      </button>
-                      <button
-                        onClick={() => handlePlatformShare(track, 'email')}
-                        style={{
-                          width: '100%',
-                          padding: '10px 15px',
-                          background: 'none',
-                          border: 'none',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          color: 'var(--text-color)'
-                        }}
-                      >
-                        📧 Email
-                      </button>
-                    </div>
-                  )}
-                </div>
+                  {/* Share */}
+                  <div className="share-wrap">
+                    <button className="action-btn"
+                      onClick={() => setShareMenuOpen(shareMenuOpen === track.id ? null : track.id)}
+                      disabled={sharingTrackId === track.id}
+                      title="Share">
+                      <FiShare2 />
+                    </button>
+                    {shareMenuOpen === track.id && (
+                      <div className="share-menu">
+                        {[
+                          { label: 'Copy Link',  fn: () => handleShare(track) },
+                          { label: '📘 Facebook', fn: () => handlePlatformShare(track,'facebook') },
+                          { label: '𝕏 X / Twitter', fn: () => handlePlatformShare(track,'twitter') },
+                          { label: '💬 WhatsApp', fn: () => handlePlatformShare(track,'whatsapp') },
+                          { label: '📧 Email',   fn: () => handlePlatformShare(track,'email') },
+                        ].map(item => (
+                          <button key={item.label} className="share-item" onClick={item.fn}>
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-                {/* Delete Button */}
-                <button
-                  onClick={() => handleDeleteTrack(track.id)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#ef4444',
-                    fontSize: '20px'
-                  }}
-                  title="Delete"
-                >
-                  <FiTrash2 />
-                </button>
+                  {/* Delete */}
+                  <button className="action-btn danger" onClick={() => handleDelete(track.id)} title="Delete">
+                    <FiTrash2 />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
