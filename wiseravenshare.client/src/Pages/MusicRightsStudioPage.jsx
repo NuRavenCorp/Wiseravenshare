@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   FiUpload, FiShare2, FiPlay, FiPause, FiTrash2, FiEdit2,
-  FiMusic, FiDownload, FiMoreVertical, FiX, FiCopy, FiCheck
+  FiMusic, FiDownload, FiMoreVertical, FiX, FiCopy, FiCheck, FiArrowRight
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
+import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import '../Styles/MusicRightsStudio.css';
 
 const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
@@ -17,6 +18,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const [uploading, setUploading] = useState(false);
   const [editingTrack, setEditingTrack] = useState(null);
   const [playingTrackId, setPlayingTrackId] = useState(null);
+  const [selectedTrackForPlayer, setSelectedTrackForPlayer] = useState(null);
   const [sharingTrackId, setSharingTrackId] = useState(null);
   const [shareMenuOpen, setShareMenuOpen] = useState(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
@@ -29,7 +31,6 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   });
 
   const fileInputRef = useRef(null);
-  const audioPlayerRef = useRef(null);
 
   // Load music library from localStorage (demo) or backend
   useEffect(() => {
@@ -172,15 +173,8 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   };
 
   const handlePlayTrack = (track) => {
-    if (playingTrackId === track.id) {
-      setPlayingTrackId(null);
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-      }
-    } else {
-      setPlayingTrackId(track.id);
-      // Play audio would happen here with audioPlayerRef
-    }
+    setSelectedTrackForPlayer(track);
+    setPlayingTrackId(track.id);
   };
 
   return (
@@ -192,7 +186,9 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
         alignItems: 'center',
         marginBottom: '30px',
         paddingBottom: '15px',
-        borderBottom: '1px solid var(--border-color)'
+        borderBottom: '1px solid var(--border-color)',
+        flexWrap: 'wrap',
+        gap: '15px'
       }}>
         <div>
           <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -202,24 +198,56 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
             Manage, share, and distribute your music
           </p>
         </div>
-        <button
-          onClick={() => setShowUploadForm(!showUploadForm)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 20px',
-            background: 'var(--highlight-color)',
-            color: '#000',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          <FiUpload /> Upload Music
-        </button>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => onNavigate('music-player')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 20px',
+              background: 'var(--highlight-color)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            <FiPlay /> Open Player
+          </button>
+          <button
+            onClick={() => setShowUploadForm(!showUploadForm)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 20px',
+              background: 'var(--highlight-color)',
+              color: '#000',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            <FiUpload /> Upload Music
+          </button>
+        </div>
       </div>
+
+      {/* Audio Player */}
+      {selectedTrackForPlayer && (
+        <div style={{ marginBottom: '30px' }}>
+          <AudioPlayer
+            track={selectedTrackForPlayer}
+            showVisualizer={true}
+            onEnded={() => {
+              addToast('Track finished', 'info');
+            }}
+          />
+        </div>
+      )}
 
       {/* Upload Form */}
       {showUploadForm && (
@@ -521,9 +549,6 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           </div>
         )}
       </div>
-
-      {/* Hidden audio player */}
-      <audio ref={audioPlayerRef} />
     </div>
   );
 };
