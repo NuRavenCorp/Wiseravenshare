@@ -900,6 +900,7 @@ builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageSer
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();

@@ -954,6 +954,38 @@ export const apiService = {
 
         throw lastError || new Error('Media upload failed.');
     },
+    uploadMusicTrack: async (file, options = {}) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('title', options.title || file?.name || 'Untitled track');
+        formData.append('artist', options.artist || '');
+        formData.append('album', options.album || '');
+        formData.append('genre', options.genre || '');
+        formData.append('destinationFolder', options.destinationFolder || '');
+        if (options.fingerprint) {
+            formData.append('fingerprint', options.fingerprint);
+        }
+
+        try {
+            return await api.post('/ravensight/media/music/save', formData, {
+                headers: {}
+            });
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
+        }
+    },
+    getMusicLibrary: async () => {
+        try {
+            return await api.get('/ravensight/media/music');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load music library. Please try again.');
+            }
+
+            return { data: [] };
+        }
+    },
 
     // Search endpoints
     search: async (query, type) => {

@@ -1,9 +1,7 @@
 using System.Security.Claims;
-using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.DTOs;
-using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -13,13 +11,11 @@ namespace Wiseravenshare.Server.Controllers;
 [Route("api/ravensight/media/music")]
 public sealed class RavensightMusicMediaController : ControllerBase
 {
-    private readonly IRavensightMusicService _musicService;
-    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly IMusicLibraryStore _musicLibraryStore;
 
-    public RavensightMusicMediaController(IRavensightMusicService musicService, RavensightMediaCatalogStore mediaCatalogStore)
+    public RavensightMusicMediaController(IMusicLibraryStore musicLibraryStore)
     {
-        _musicService = musicService;
-        _mediaCatalogStore = mediaCatalogStore;
+        _musicLibraryStore = musicLibraryStore;
     }
 
     [HttpGet]
@@ -31,26 +27,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var assets = await _mediaCatalogStore.GetUserAssetsByTypeAsync(userId, "music", cancellationToken);
-        
-        var tracks = assets.Select(asset => 
-        {
-            var metadata = ParseMetadata(asset.MetadataJson);
-            return new UserMusicTrackDto
-            {
-                Id = asset.Id,
-                Title = metadata?.TryGetProperty("title", out var titleEl) == true ? titleEl.GetString() ?? "Untitled" : "Untitled",
-                Artist = metadata?.TryGetProperty("artist", out var artistEl) == true ? artistEl.GetString() ?? "" : "",
-                Album = metadata?.TryGetProperty("album", out var albumEl) == true ? albumEl.GetString() ?? "" : "",
-                Genre = metadata?.TryGetProperty("genre", out var genreEl) == true ? genreEl.GetString() ?? "" : "",
-                Fingerprint = metadata?.TryGetProperty("fingerprint", out var fpEl) == true ? fpEl.GetString() : null,
-                MediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(asset.FileName)}",
-                FileName = asset.FileName,
-                UploadedAt = asset.SavedAtUtc.ToString("O"),
-                SizeBytes = asset.SizeBytes
-            };
-        }).ToList();
-
+        var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
         return Ok(tracks);
     }
 
@@ -69,69 +46,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var saved = await _musicService.SaveMusicAsync(dto.File, dto.DestinationFolder, cancellationToken);
-        var preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
-        
-        // Include fingerprint in metadata
-        var metadataDict = new Dictionary<string, object?>
-        {
-            ["title"] = dto.Title,
-            ["artist"] = dto.Artist,
-            ["album"] = dto.Album,
-            ["genre"] = dto.Genre
-        };
-        
-        if (!string.IsNullOrWhiteSpace(dto.Fingerprint))
-        {
-            metadataDict["fingerprint"] = dto.Fingerprint;
-        }
-
-        var mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
-        {
-            UserId = userId,
-            MediaType = RavensightMediaType.Music,
-            FileName = saved.FileName,
-            RelativePath = saved.RelativePath,
-            PublicUrl = saved.PublicUrl,
-            AbsolutePath = saved.AbsolutePath,
-            DestinationFolder = saved.DestinationFolder,
-            ContentType = saved.ContentType,
-            SizeBytes = saved.SizeBytes,
-            SavedAtUtc = saved.SavedAtUtc,
-            MetadataJson = JsonSerializer.Serialize(metadataDict)
-        }, cancellationToken);
-
-        var response = new RavensightSavedMediaDto
-        {
-            FileName = saved.FileName,
-            RelativePath = saved.RelativePath,
-            DestinationFolder = saved.DestinationFolder,
-            ContentType = saved.ContentType,
-            SizeBytes = saved.SizeBytes,
-            SavedAtUtc = saved.SavedAtUtc,
-            MediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.FileName)}"
-        };
-
-        return Ok(new
-        {
-            file = response,
-            meta = new
-            {
-                title = dto.Title,
-                artist = dto.Artist,
-                album = dto.Album,
-                genre = dto.Genre
-            },
-            mediaAssetId = mediaRecord.Id,
-            retention = new
-            {
-                days = VideoRetentionPolicy.TemporaryRetentionDays,
-                expiresAtUtc = mediaRecord.ExpiresAtUtc,
-                warning = $"This Ravensight server copy will auto-delete in {VideoRetentionPolicy.TemporaryRetentionDays} days unless you save it to your local Ravensight folder.",
-                localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
-                localFolderIdentityKey = preference?.FolderIdentityKey
-            }
-        });
+        var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, cancellationToken);
+        return Ok(new { track });
     }
 
     private bool TryResolveUserId(out Guid userId)
@@ -141,16 +57,5 @@ public sealed class RavensightMusicMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
-    }
-
-    private static JsonElement? ParseMetadata(string metadataJson)
-    {
-        if (string.IsNullOrWhiteSpace(metadataJson)) return null;
-        try
-        {
-            var doc = JsonDocument.Parse(metadataJson);
-            return doc.RootElement;
-        }
-        catch { return null; }
     }
 }

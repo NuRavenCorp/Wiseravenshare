@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  FiPlay, FiPause, FiSquare, FiSkipBack, FiSkipForward,
+  FiPlay, FiPause, FiSquare, FiSkipBack, FiSkipForward, FiUpload,
   FiRepeat, FiShuffle, FiVolume2, FiVolumeX,
   FiMusic, FiSearch, FiX, FiList, FiSliders,
   FiRadio, FiMic, FiMicOff, FiActivity
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
+import { apiService } from '../Services/api';
 import '../Styles/MusicStudio.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -84,6 +85,12 @@ const MusicStudioPage = ({ onNavigate }) => {
   const [stereoWidth,   setStereoWidth]   = useState(1);
   const [vocalMode,     setVocalMode]     = useState('normal');
   const [vizData,       setVizData]       = useState(new Uint8Array(64));
+  const [uploadFile,    setUploadFile]    = useState(null);
+  const [uploadTitle,   setUploadTitle]   = useState('');
+  const [uploadArtist,  setUploadArtist]  = useState('');
+  const [uploadAlbum,   setUploadAlbum]   = useState('');
+  const [uploadGenre,   setUploadGenre]   = useState('');
+  const [isUploading,   setIsUploading]   = useState(false);
 
   // DOM / Audio refs
   const audioRef   = useRef(null);
@@ -98,11 +105,9 @@ const MusicStudioPage = ({ onNavigate }) => {
         setIsLoading(true);
         const token = localStorage.getItem('authToken');
         if (token) {
-          const res = await fetch('/api/ravensight/media/music', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const data = await res.json();
+          const res = await apiService.getMusicLibrary();
+          if (res?.data) {
+            const data = res.data;
             const tracks = Array.isArray(data) ? data : [];
             setLibrary(tracks);
             if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
@@ -442,6 +447,43 @@ const MusicStudioPage = ({ onNavigate }) => {
     setCurrentTime(t);
   };
 
+  const handleUploadTrack = async (e) => {
+    e?.preventDefault();
+    if (!uploadFile) {
+      addToast('Choose a music file first.', 'warning');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const response = await apiService.uploadMusicTrack(uploadFile, {
+        title: uploadTitle || uploadFile.name.replace(/\.[^/.]+$/, ''),
+        artist: uploadArtist,
+        album: uploadAlbum,
+        genre: uploadGenre,
+        destinationFolder: '/wiseravenshare/ravensight/music'
+      });
+
+      const uploadedTrack = response?.data?.track || response?.data?.file || response?.data || null;
+      if (uploadedTrack) {
+        setLibrary((prev) => [uploadedTrack, ...prev]);
+        setCurrentTrack(uploadedTrack);
+        setTrackIndex(0);
+      }
+
+      setUploadFile(null);
+      setUploadTitle('');
+      setUploadArtist('');
+      setUploadAlbum('');
+      setUploadGenre('');
+      addToast('Track uploaded to your music library.', 'success');
+    } catch (error) {
+      addToast(error?.message || 'Music upload failed.', 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const selectTrack = (track, idx) => {
     setCurrentTrack(track);
     setTrackIndex(idx);
@@ -576,6 +618,50 @@ const MusicStudioPage = ({ onNavigate }) => {
               {searchQuery && <button onClick={() => setSearchQuery('')}><FiX /></button>}
             </div>
           </div>
+
+          <form className="lib-upload" onSubmit={handleUploadTrack}>
+            <div className="lib-upload-title"><FiUpload /> Upload music to your library</div>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                setUploadFile(file);
+                if (file && !uploadTitle) {
+                  setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+                }
+              }}
+            />
+            <div className="lib-upload-grid">
+              <input
+                type="text"
+                placeholder="Title"
+                value={uploadTitle}
+                onChange={(e) => setUploadTitle(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Artist"
+                value={uploadArtist}
+                onChange={(e) => setUploadArtist(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Album"
+                value={uploadAlbum}
+                onChange={(e) => setUploadAlbum(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Genre"
+                value={uploadGenre}
+                onChange={(e) => setUploadGenre(e.target.value)}
+              />
+            </div>
+            <button className="upload-btn" type="submit" disabled={isUploading || !uploadFile}>
+              {isUploading ? 'Uploading…' : 'Save to Bucket Library'}
+            </button>
+          </form>
 
           {library.length === 0 ? (
             <div className="lib-empty">
