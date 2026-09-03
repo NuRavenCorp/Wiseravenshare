@@ -37,7 +37,8 @@ public class SocialPublishDispatcher : ISocialPublishDispatcher
 
     public async Task DispatchAsync(Guid postId, string content, string? mediaUrl, string mediaType)
     {
-        var baseUrl = _configuration["Social:Publish:MiddlewareWebhookUrl"];
+        var baseUrl = _configuration["Social:Publish:MiddlewareWebhookUrl"]
+            ?? _configuration["SOCIAL_PUBLISH_MIDDLEWARE_WEBHOOK_URL"];
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
             _logger.LogDebug("SocialPublish:MiddlewareWebhookUrl not configured; skipping dispatch for post {PostId}.", postId);
@@ -61,7 +62,9 @@ public class SocialPublishDispatcher : ISocialPublishDispatcher
                 Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
             };
 
-            var token = _configuration["Social:Publish:WebhookToken"];
+            var token = _configuration["Social:Publish:WebhookToken"]
+                ?? _configuration["WEBHOOK_TOKEN"]
+                ?? _configuration["SOCIAL_PUBLISH_WEBHOOK_TOKEN"];
             if (!string.IsNullOrWhiteSpace(token))
             {
                 request.Headers.Add("X-WR-Webhook-Token", token);

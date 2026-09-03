@@ -34,7 +34,7 @@ public class TikTokPublisher : ICrossPlatformPublisher
     {
         if (UseZernio())
         {
-            var apiKey = _configuration["Social:Zernio:ApiKey"];
+            var apiKey = GetZernioApiKey();
             return !string.IsNullOrWhiteSpace(apiKey);
         }
 
@@ -120,7 +120,7 @@ public class TikTokPublisher : ICrossPlatformPublisher
 
     private async Task<CrossPlatformPublishResultDto> PublishViaZernioAsync(CrossPlatformPublishRequest request)
     {
-        var apiKey = _configuration["Social:Zernio:ApiKey"];
+        var apiKey = GetZernioApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return CrossPlatformErrors.NotConfigured(Platform, "Social:Zernio:ApiKey");
@@ -241,6 +241,11 @@ public class TikTokPublisher : ICrossPlatformPublisher
         var serialized = property.ToString();
         return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
     }
+
+    private string? GetZernioApiKey() =>
+        _configuration["Social:Zernio:ApiKey"]
+        ?? _configuration["Social_Zernio_APIKey"]
+        ?? _configuration["ZERNIO_API_KEY"];
 }
 
 /// <summary>

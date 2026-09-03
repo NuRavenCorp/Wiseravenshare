@@ -45,7 +45,10 @@ public class ZernioWebhookController : ControllerBase
             ?? _configuration["ZERNIO_WEBHOOKS_SECRET"]
             ?? string.Empty).Trim();
 
-        if (!VerifySignatureIfConfigured(webhookSecret, rawBody, Request.Headers["X-Zernio-Signature"].ToString(), Request.Headers["X-Late-Signature"].ToString()))
+        if (!VerifySignatureIfConfigured(
+                webhookSecret,
+                rawBody,
+                Request.Headers["X-Zernio-Signature"].ToString()))
         {
             return Unauthorized(new { error = "Invalid webhook signature." });
         }
@@ -197,21 +200,20 @@ public class ZernioWebhookController : ControllerBase
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private bool VerifySignatureIfConfigured(string secret, string rawBody, string primaryHeader, string legacyHeader)
+    private bool VerifySignatureIfConfigured(string secret, string rawBody, string signatureHeader)
     {
-        var presented = !string.IsNullOrWhiteSpace(primaryHeader) ? primaryHeader : legacyHeader;
         if (string.IsNullOrWhiteSpace(secret))
         {
             return true;
         }
 
-        if (string.IsNullOrWhiteSpace(presented))
+        if (string.IsNullOrWhiteSpace(signatureHeader))
         {
             return false;
         }
 
         var expectedHex = ComputeHmacHex(secret, rawBody);
-        return FixedTimeEqualsHex(expectedHex, presented.Trim());
+        return FixedTimeEqualsHex(expectedHex, signatureHeader.Trim());
     }
 
     private static string ComputeHmacHex(string secret, string rawBody)
