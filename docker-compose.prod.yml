@@ -1,0 +1,45 @@
+version: '3.8'
+
+# Production environment configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # In production, use external managed database (DigitalOcean, AWS, etc)
+      # Set EXTERNAL_POSTGRES_CONNECTION environment variable
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  postgres:
+    # Disabled in production - use managed database service instead
+    profiles: ["never"]
+    restart: always
+
+  ollama:
+    # Disabled in production or run on separate compute
+    profiles: ["never"]
+
+  redis:
+    # Disabled in production - use managed Redis service
+    profiles: ["never"]
+    restart: always
+
+  minio:
+    # Disabled in production - use DO Spaces, AWS S3, etc.
+    profiles: ["never"]
+
+  minio-init:
+    profiles: ["never"]
+
+  stripe-cli:
+    # Disabled in production
+    profiles: ["never"]

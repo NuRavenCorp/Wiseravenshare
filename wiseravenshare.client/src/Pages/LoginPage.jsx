@@ -15,6 +15,37 @@ const SOCIAL_PROVIDERS = [
     { id: 'tiktok', label: 'Continue with TikTok' }
 ];
 
+const MODE_COPY = {
+    login: {
+        title: 'Sign in',
+        subtitle: 'Use your existing account to continue where you left off.'
+    },
+    signup: {
+        title: 'Create account',
+        subtitle: 'Join the community with a verified email and strong password.'
+    },
+    teamInvite: {
+        title: 'Team invite',
+        subtitle: 'Activate a teammate account with the invite token you received.'
+    },
+    forgot: {
+        title: 'Reset password',
+        subtitle: 'Request a reset link for the email on your account.'
+    },
+    reset: {
+        title: 'Set a new password',
+        subtitle: 'Use the reset token from your email to finish recovery.'
+    }
+};
+
+const MODE_PILLS = [
+    ['login', 'Sign in'],
+    ['signup', 'Create account'],
+    ['teamInvite', 'Team invite'],
+    ['forgot', 'Forgot'],
+    ['reset', 'Reset']
+];
+
 const readAuthDraft = () => {
     if (typeof window === 'undefined') return null;
     try {
@@ -45,10 +76,14 @@ const LoginPage = ({ onAuth }) => {
     const [error, setError] = useState('');
     const [info, setInfo] = useState(initialDraft?.info || '');
     const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(true);
-    const [loginRevealed, setLoginRevealed] = useState(false);
-    const [isAdminLoginVisible, setIsAdminLoginVisible] = useState(false);
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
+
+    const changeMode = (nextMode) => {
+        setMode(nextMode);
+        setError('');
+        setInfo('');
+    };
 
     useEffect(() => {
         let mounted = true;
@@ -245,7 +280,9 @@ const LoginPage = ({ onAuth }) => {
                 return;
             }
             await onAuth?.({ mode, name, email: loginValue, password, bio, location, website, avatar: avatarPreview, avatarFile, referralCode, inviteToken });
-            window.localStorage.removeItem(AUTH_DRAFT_KEY);
+            if (mode !== 'signup') {
+                window.localStorage.removeItem(AUTH_DRAFT_KEY);
+            }
         } catch (err) {
             setError(err.message || 'Authentication failed. Please check your credentials and try again.');
         }
@@ -266,44 +303,268 @@ const LoginPage = ({ onAuth }) => {
             });
     };
 
-    return (
-        <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', padding: '20px' }}>
-            <div style={{ background: 'var(--card-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', padding: '40px', width: '100%', maxWidth: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
-                <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><WiseRavenLogo size="compact" showTagline={false} /></div>
-                    </div>
-                    {error && <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>}
-                    {info && <p style={{ color: '#93c5fd', marginBottom: '12px' }}>{info}</p>}
+    const modeDetails = MODE_COPY[mode] || MODE_COPY.login;
 
-                    {mode === 'login' && <SignIn email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
-                    {mode === 'signup' && <SignUp name={name} setName={setName} email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
-                    {mode === 'teamInvite' && <TeamInvite name={name} setName={setName} email={email} setEmail={setEmail} inviteToken={inviteToken} setInviteToken={setInviteToken} password={password} setPassword={setPassword} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} isAdminLoginVisible={isAdminLoginVisible} setIsAdminLoginVisible={setIsAdminLoginVisible} />}
-                    {mode === 'forgot' && <ForgotPassword email={email} setEmail={setEmail} setMode={setMode} submit={submit} setError={setError} setInfo={setInfo} />}
-                    {mode === 'reset' && <ResetPassword resetToken={resetToken} setResetToken={setResetToken} password={password} setPassword={setPassword} submit={submit} />}
-                    {(mode === 'login' || mode === 'signup') && (
-                        <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {SOCIAL_PROVIDERS.map((provider) => (
-                                <button
-                                    key={provider.id}
-                                    type="button"
-                                    onClick={() => startSocialAuth(provider.id)}
-                                    style={{
-                                        width: '100%',
-                                        borderRadius: '10px',
-                                        border: '1px solid var(--border-color)',
-                                        background: 'transparent',
-                                        color: 'var(--text-color)',
-                                        padding: '10px 12px',
-                                        cursor: 'pointer',
-                                        fontWeight: 600
-                                    }}
-                                >
-                                    {provider.label}
-                                </button>
+    return (
+        <div style={{
+            minHeight: '100vh',
+            background: 'radial-gradient(circle at top left, rgba(255, 201, 94, 0.16), transparent 28%), radial-gradient(circle at top right, rgba(153, 102, 255, 0.16), transparent 24%), var(--bg-color)',
+            position: 'relative',
+            overflow: 'hidden'
+        }}>
+            <div style={{
+                position: 'absolute',
+                inset: 'auto -6% 64% auto',
+                width: '340px',
+                height: '340px',
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.04)',
+                filter: 'blur(18px)',
+                pointerEvents: 'none'
+            }} />
+            <div style={{
+                position: 'absolute',
+                inset: '16% auto auto -8%',
+                width: '260px',
+                height: '260px',
+                borderRadius: '50%',
+                background: 'rgba(255, 201, 94, 0.08)',
+                filter: 'blur(22px)',
+                pointerEvents: 'none'
+            }} />
+
+            <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', display: 'grid', gridTemplateRows: 'auto 1fr', gap: '24px', padding: '24px' }}>
+                <header style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                }}>
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '10px 16px',
+                        borderRadius: '999px',
+                        border: '1px solid var(--border-color)',
+                        background: 'rgba(255,255,255,0.04)',
+                        boxShadow: '0 12px 40px rgba(0,0,0,0.15)'
+                    }}>
+                        <WiseRavenLogo size="compact" showTagline={false} />
+                        <span style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
+                        <span style={{ color: 'var(--light-color)', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                            Trusted access for Wiseravenshare
+                        </span>
+                    </div>
+                </header>
+
+                <div style={{
+                    width: '100%',
+                    maxWidth: '1180px',
+                    margin: '0 auto',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                    gap: '24px',
+                    alignItems: 'stretch'
+                }}>
+                    <aside style={{
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '28px',
+                        padding: '32px',
+                        boxShadow: '0 24px 80px rgba(0,0,0,0.24)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '100%'
+                    }}>
+                        <div>
+                            <div style={{ marginBottom: '24px' }}>
+                                <WiseRavenLogo size="hero" showTagline />
+                            </div>
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '6px 12px',
+                                borderRadius: '999px',
+                                background: 'rgba(255, 201, 94, 0.12)',
+                                border: '1px solid rgba(255, 201, 94, 0.22)',
+                                color: 'var(--highlight-color)',
+                                fontSize: '12px',
+                                fontWeight: 800,
+                                letterSpacing: '0.08em',
+                                textTransform: 'uppercase'
+                            }}>
+                                Secure access
+                            </div>
+                            <h1 style={{ margin: '18px 0 12px', fontSize: '2.4rem', lineHeight: 1.05 }}>
+                                One place to sign in, join, or recover access.
+                            </h1>
+                            <p style={{ margin: 0, color: 'var(--light-color)', lineHeight: 1.7, fontSize: '15px' }}>
+                                Use your existing account, create a new one, or activate a team invite with a guided flow that keeps the next step obvious.
+                            </p>
+                        </div>
+
+                        <div style={{ display: 'grid', gap: '12px', marginTop: '28px' }}>
+                            {[
+                                'Fast sign in with clear recovery if you forget your password',
+                                'New account setup that keeps your draft saved on this device',
+                                'Team invite activation for approved members only'
+                            ].map((item) => (
+                                <div key={item} style={{
+                                    display: 'flex',
+                                    gap: '10px',
+                                    alignItems: 'flex-start',
+                                    padding: '12px 14px',
+                                    borderRadius: '16px',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    border: '1px solid rgba(255,255,255,0.06)',
+                                    color: 'var(--text-color)',
+                                    lineHeight: 1.5
+                                }}>
+                                    <span style={{ color: 'var(--highlight-color)', fontWeight: 900 }}>✓</span>
+                                    <span>{item}</span>
+                                </div>
                             ))}
                         </div>
-                    )}
+                    </aside>
+
+                    <main style={{
+                        background: 'rgba(9, 13, 25, 0.82)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '28px',
+                        padding: '28px',
+                        boxShadow: '0 24px 80px rgba(0,0,0,0.26)',
+                        backdropFilter: 'blur(18px)'
+                    }}>
+                        <div style={{ display: 'grid', gap: '18px' }}>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
+                                gap: '10px'
+                            }}>
+                                {MODE_PILLS.map(([value, label]) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        onClick={() => changeMode(value)}
+                                        style={{
+                                            borderRadius: '999px',
+                                            border: mode === value ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                                            background: mode === value ? 'linear-gradient(135deg, var(--highlight-color), rgba(255, 201, 94, 0.82))' : 'rgba(255,255,255,0.03)',
+                                            color: mode === value ? '#111827' : 'var(--text-color)',
+                                            padding: '10px 12px',
+                                            fontSize: '12px',
+                                            fontWeight: 800,
+                                            cursor: 'pointer',
+                                            boxShadow: mode === value ? '0 10px 24px rgba(255, 201, 94, 0.18)' : 'none'
+                                        }}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.8rem' }}>{modeDetails.title}</h2>
+                                <p style={{ margin: '10px 0 0', color: 'var(--light-color)', lineHeight: 1.6 }}>
+                                    {modeDetails.subtitle}
+                                </p>
+                            </div>
+
+                            {error && (
+                                <div style={{
+                                    borderRadius: '14px',
+                                    border: '1px solid rgba(248, 113, 113, 0.3)',
+                                    background: 'rgba(248, 113, 113, 0.1)',
+                                    color: '#fecaca',
+                                    padding: '12px 14px'
+                                }}>
+                                    {error}
+                                </div>
+                            )}
+                            {info && (
+                                <div style={{
+                                    borderRadius: '14px',
+                                    border: '1px solid rgba(96, 165, 250, 0.3)',
+                                    background: 'rgba(96, 165, 250, 0.1)',
+                                    color: '#bfdbfe',
+                                    padding: '12px 14px'
+                                }}>
+                                    {info}
+                                </div>
+                            )}
+                        </div>
+
+                        <div style={{ marginTop: '20px' }}>
+                            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <WiseRavenLogo size="compact" showTagline={false} />
+                                </div>
+                                {mode === 'signup' && (
+                                    <div style={{
+                                        marginTop: '14px',
+                                        borderRadius: '14px',
+                                        border: '1px solid rgba(255, 201, 94, 0.22)',
+                                        background: 'rgba(255, 201, 94, 0.08)',
+                                        color: 'var(--text-color)',
+                                        padding: '10px 12px',
+                                        fontSize: '12px',
+                                        lineHeight: 1.5,
+                                        textAlign: 'left'
+                                    }}>
+                                        Your signup draft stays saved on this device while you finish later.
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ maxWidth: '620px', margin: '0 auto' }}>
+                                {mode === 'login' && <SignIn email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={changeMode} submit={submit} setError={setError} setInfo={setInfo} />}
+                                {mode === 'signup' && <SignUp name={name} setName={setName} email={email} setEmail={setEmail} password={password} setPassword={setPassword} setMode={changeMode} submit={submit} setError={setError} setInfo={setInfo} />}
+                                {mode === 'teamInvite' && <TeamInvite name={name} setName={setName} email={email} setEmail={setEmail} inviteToken={inviteToken} setInviteToken={setInviteToken} password={password} setPassword={setPassword} setMode={changeMode} submit={submit} setError={setError} setInfo={setInfo} />}
+                                {mode === 'forgot' && <ForgotPassword email={email} setEmail={setEmail} setMode={changeMode} submit={submit} setError={setError} setInfo={setInfo} />}
+                                {mode === 'reset' && <ResetPassword resetToken={resetToken} setResetToken={setResetToken} password={password} setPassword={setPassword} submit={submit} />}
+                            </div>
+
+                            {(mode === 'login' || mode === 'signup') && (
+                                <div style={{ marginTop: '22px' }}>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '10px',
+                                        color: 'var(--light-color)',
+                                        marginBottom: '12px',
+                                        fontSize: '13px'
+                                    }}>
+                                        <span style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+                                        <span>Or continue with</span>
+                                        <span style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '10px' }}>
+                                        {SOCIAL_PROVIDERS.map((provider) => (
+                                            <button
+                                                key={provider.id}
+                                                type="button"
+                                                onClick={() => startSocialAuth(provider.id)}
+                                                style={{
+                                                    width: '100%',
+                                                    borderRadius: '14px',
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'rgba(255,255,255,0.03)',
+                                                    color: 'var(--text-color)',
+                                                    padding: '12px 14px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 700
+                                                }}
+                                            >
+                                                {provider.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
                 </div>
             </div>
         </div>

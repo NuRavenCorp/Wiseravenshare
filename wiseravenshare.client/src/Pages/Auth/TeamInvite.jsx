@@ -1,60 +1,9 @@
 import React from 'react';
 
-export const TeamInvite = ({ name, setName, email, setEmail, inviteToken, setInviteToken, password, setPassword, setMode, submit, setError, setInfo, isAdminLoginVisible, setIsAdminLoginVisible }) => (
+export const TeamInvite = ({ name, setName, email, setEmail, inviteToken, setInviteToken, password, setPassword, setMode, submit, setError, setInfo }) => (
     <>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-            <button
-                onClick={() => { setMode('login'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
-                style={{
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'transparent',
-                    color: 'var(--text-color)',
-                    cursor: 'pointer'
-                }}
-            >
-                Login
-            </button>
-            <button
-                onClick={() => { setMode('signup'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
-                style={{
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'transparent',
-                    color: 'var(--text-color)',
-                    cursor: 'pointer'
-                }}
-            >
-                Sign Up
-            </button>
-            <button
-                onClick={() => { setMode('teamInvite'); setError(''); setInfo(''); setIsAdminLoginVisible(false); }}
-                style={{
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'var(--highlight-color)',
-                    color: 'var(--text-color)',
-                    cursor: 'pointer'
-                }}
-            >
-                Team Invite
-            </button>
-            <button
-                onClick={() => { setMode('login'); setError(''); setInfo(''); setIsAdminLoginVisible(true); }}
-                style={{
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: isAdminLoginVisible ? 'var(--highlight-color)' : 'transparent',
-                    color: 'var(--text-color)',
-                    cursor: 'pointer'
-                }}
-            >
-                Admin login only
-            </button>
+        <div style={{ marginBottom: '14px', fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.4 }}>
+            Enter the invite token you received, then create your password to activate access.
         </div>
 
         <input
@@ -74,7 +23,7 @@ export const TeamInvite = ({ name, setName, email, setEmail, inviteToken, setInv
         />
         <input
             type="text"
-            placeholder="Team invite token"
+            placeholder="Paste your team invite token"
             value={inviteToken}
             onChange={(e) => setInviteToken(e.target.value)}
             style={{
@@ -104,7 +53,7 @@ export const TeamInvite = ({ name, setName, email, setEmail, inviteToken, setInv
         />
         <input
             type="password"
-            placeholder="Create pass key (password) to join"
+            placeholder="Create a password to join"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{
@@ -134,5 +83,22 @@ export const TeamInvite = ({ name, setName, email, setEmail, inviteToken, setInv
         >
             Activate Team Access
         </button>
+        <div style={{ fontSize: '13px', color: 'var(--light-color)' }}>
+            Need to sign in instead?{' '}
+            <button
+                type="button"
+                onClick={() => { setMode('login'); setError(''); setInfo(''); }}
+                style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--text-color)',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    fontWeight: 600
+                }}
+            >
+                Go to sign in
+            </button>
+        </div>
     </>
 );

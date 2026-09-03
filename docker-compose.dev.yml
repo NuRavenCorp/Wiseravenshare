@@ -1,0 +1,35 @@
+version: '3.8'
+
+# Local development environment with all optional services
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      CLIENT_ORIGIN: http://localhost:10000,http://localhost:3000,https://localhost:50513
+    ports:
+      - "10000:10000"
+
+  # Enable local database
+  postgres:
+    profiles: []  # Remove from optional, make it default
+    ports:
+      - "5432:5432"
+
+  # Enable AI assistant
+  ollama:
+    profiles: []  # Remove from optional, make it default
+    ports:
+      - "11434:11434"
+
+  # Enable caching
+  redis:
+    profiles: []  # Remove from optional, make it default
+
+  # Enable blob storage
+  minio:
+    profiles: []  # Remove from optional, make it default
+
+  minio-init:
+    profiles: []  # Remove from optional, make it default

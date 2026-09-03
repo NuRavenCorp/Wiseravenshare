@@ -42,6 +42,7 @@ const TeamAccessAdminPage = () => {
 
     const [snapshot, setSnapshot] = useState(null);
     const [auditHistory, setAuditHistory] = useState([]);
+    const [userAccounting, setUserAccounting] = useState(null);
     const [loading, setLoading] = useState(false);
 
     const [email, setEmail] = useState('');
@@ -55,18 +56,21 @@ const TeamAccessAdminPage = () => {
         if (!isAdminUser) {
             setSnapshot(null);
             setAuditHistory([]);
+            setUserAccounting(null);
             return;
         }
 
         setLoading(true);
         try {
-            const [teamSnapshot, policyResponse] = await Promise.all([
+            const [teamSnapshot, policyResponse, accountingResponse] = await Promise.all([
                 authService.getTeamAccessSnapshot(),
-                apiService.getAdminPolicyHistory()
+                apiService.getAdminPolicyHistory(),
+                apiService.getAdminUserAccounting()
             ]);
 
             setSnapshot(teamSnapshot || null);
             const allHistory = Array.isArray(policyResponse?.data?.history) ? policyResponse.data.history : [];
+            setUserAccounting(accountingResponse?.data || null);
             setAuditHistory(
                 allHistory
                     .filter((record) => String(record?.policyKey || '').toLowerCase().startsWith('team-access.'))
@@ -324,6 +328,65 @@ const TeamAccessAdminPage = () => {
                     </div>
                 ) : (
                     <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>No team members yet.</div>
+                )}
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
+                <h3 style={{ marginTop: 0 }}>User Accounting</h3>
+                {userAccounting?.totals ? (
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))', gap: '8px' }}>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>Auth users</div>
+                                <div style={{ fontSize: '18px', fontWeight: 700 }}>{Number(userAccounting.totals.authUsers || 0)}</div>
+                            </div>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>Domain users</div>
+                                <div style={{ fontSize: '18px', fontWeight: 700 }}>{Number(userAccounting.totals.domainUsers || 0)}</div>
+                            </div>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>Active domain users</div>
+                                <div style={{ fontSize: '18px', fontWeight: 700 }}>{Number(userAccounting.totals.activeDomainUsers || 0)}</div>
+                            </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: '8px' }}>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>New 7 days</div>
+                                <div style={{ fontSize: '16px', fontWeight: 700 }}>{Number(userAccounting.totals.createdLast7Days || 0)}</div>
+                            </div>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>New 30 days</div>
+                                <div style={{ fontSize: '16px', fontWeight: 700 }}>{Number(userAccounting.totals.createdLast30Days || 0)}</div>
+                            </div>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>Profile completion</div>
+                                <div style={{ fontSize: '16px', fontWeight: 700 }}>{Number(userAccounting.totals.profileCompletionRate || 0).toFixed(2)}%</div>
+                            </div>
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>Social connected</div>
+                                <div style={{ fontSize: '16px', fontWeight: 700 }}>{Number(userAccounting.totals.socialConnectionRate || 0).toFixed(2)}%</div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '6px' }}>Recent users</div>
+                            {Array.isArray(userAccounting.recentUsers) && userAccounting.recentUsers.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '6px' }}>
+                                    {userAccounting.recentUsers.slice(0, 10).map((account) => (
+                                        <div key={account.id} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px' }}>
+                                            <div style={{ fontSize: '13px' }}>{account.email || account.handle || account.id}</div>
+                                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '3px' }}>
+                                                Joined {new Date(account.createdAtUtc).toLocaleString()} · {account.socialLinked ? 'Social linked' : 'No social linked account'}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>No users available.</div>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>User accounting is unavailable.</div>
                 )}
             </div>
 
