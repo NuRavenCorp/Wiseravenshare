@@ -76,11 +76,35 @@ services:
       - key: Social__Facebook__PageAccessToken
         value: ${SOCIAL_FACEBOOK_PAGE_ACCESS_TOKEN}
         type: SECRET
+      - key: Social__Facebook__Provider
+        value: zernio
+      - key: Social__TikTok__Provider
+        value: zernio
       - key: Social__TikTok__Username
         value: ${SOCIAL_TIKTOK_USERNAME}
         type: SECRET
       - key: Social__TikTok__AccessToken
         value: ${SOCIAL_TIKTOK_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Zernio__ApiKey
+        value: ${ZERNIO_API_KEY}
+        type: SECRET
+      - key: Social_Zernio_APIKey
+        value: ${ZERNIO_API_KEY}
+        type: SECRET
+      - key: Social__Zernio__BaseUrl
+        value: https://api.zernio.com
+      - key: Social__Zernio__WebhookSecret
+        value: ${ZERNIO_WEBHOOK_SECRET}
+        type: SECRET
+      - key: ZERNIO_WEBHOOK_SECRET
+        value: ${ZERNIO_WEBHOOK_SECRET}
+        type: SECRET
+      - key: Social__Publish__MiddlewareWebhookUrl
+        value: ${SOCIAL_PUBLISH_MIDDLEWARE_WEBHOOK_URL}
+        type: SECRET
+      - key: Social__Publish__WebhookToken
+        value: ${SOCIAL_PUBLISH_WEBHOOK_TOKEN}
         type: SECRET
       - key: Social__Instagram__Username
         value: ${SOCIAL_INSTAGRAM_USERNAME}
@@ -192,4 +216,3 @@ domains:
     type: ALIAS
   - domain: www.wise-ravens.com
     type: ALIAS
-
