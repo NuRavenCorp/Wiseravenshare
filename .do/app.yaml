@@ -65,13 +65,13 @@ services:
         value: ${STRIPE_PRICE_ANNUAL_ID}
         type: SECRET
       - key: Stripe_WiseravenShare_MusicStudioRights_BasicProdId
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID}
+        value: prod_VC3xoP4UjLvOF2
         type: SECRET
       - key: Stripe_WiseravenShare_MusicStudioRights_StandardProdId
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID}
+        value: prod_VC3yeDSQcWcgqG
         type: SECRET
       - key: Stripe_WiseravenShare_MusicStudioRights_ProProdId
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID}
+        value: prod_VC3zXy445DbV0w
         type: SECRET
       - key: Authentication__OAuthProviders__Google__ClientId
         value: ${GOOGLE_OAUTH_CLIENT_ID}
@@ -172,11 +172,11 @@ static_sites:
       - key: VITE_STRIPE_PUBLISHABLE_KEY
         value: ${STRIPE_PUBLISHABLE_KEY}
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID}
+        value: prod_VC3xoP4UjLvOF2
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID}
+        value: prod_VC3yeDSQcWcgqG
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID
-        value: ${STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID}
+        value: prod_VC3zXy445DbV0w
       - key: VITE_ADMIN_EMAILS
         value: admin@wise-ravens.com
 
