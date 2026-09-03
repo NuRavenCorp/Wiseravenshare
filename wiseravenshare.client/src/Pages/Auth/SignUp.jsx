@@ -5,42 +5,10 @@ export const SignUp = ({
     setMode, submit, setError, setInfo
 }) => (
     <>
-        <div style={{ display: 'flex', borderRadius: '10px', background: 'rgba(255,255,255,0.05)', padding: '4px', marginBottom: '20px' }}>
-            <button
-                type="button"
-                onClick={() => { setMode('login'); setError(''); setInfo(''); }}
-                style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--light-color)',
-                    fontWeight: 'bold',
-                    cursor: 'pointer'
-                }}
-            >
-                Sign In
-            </button>
-            <button
-                type="button"
-                onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
-                style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'var(--highlight-color)',
-                    color: 'var(--text-color)',
-                    fontWeight: 'bold',
-                    cursor: 'pointer'
-                }}
-            >
-                Sign Up
-            </button>
-        </div>
-
         <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+            <div style={{ marginBottom: '14px', fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.4, textAlign: 'left' }}>
+                Pick a password with at least 8 characters, plus uppercase, lowercase, a number, and a symbol.
+            </div>
             <div style={{ marginBottom: '14px', textAlign: 'left' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-color)', marginBottom: '6px' }}>
                     Full Name
@@ -95,7 +63,7 @@ export const SignUp = ({
                 </label>
                 <input
                     type="password"
-                    placeholder="At least 8 characters with uppercase, lowercase, number, and symbol"
+                    placeholder="Create a strong password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="new-password"

@@ -1050,6 +1050,7 @@ export const apiService = {
     createReferralInvite: (inviteeEmail, message = '') => api.post('/growth/referrals/invite', { inviteeEmail, message }),
     getReferralStats: () => api.get('/growth/referrals'),
     getAdminPolicyHistory: () => api.get('/growth/policy'),
+    getAdminUserAccounting: () => api.get('/growth/admin/users/accounting'),
     recordAdminPolicyShift: (payload) => api.post('/growth/policy', payload),
     initializeRevenueAgent: () => api.post('/growth/revenue/initialize'),
     getRevenueAgent: () => api.get('/growth/revenue/agent'),
