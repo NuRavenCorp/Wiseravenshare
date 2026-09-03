@@ -10,6 +10,13 @@ import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/mus
 import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import '../Styles/MusicRightsStudio.css';
 
+// ─── Stripe Product IDs (from environment) ────────────────────────────────────
+const STRIPE_PRODUCT_IDS = {
+  basic: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID || 'prod_basic_fallback',
+  standard: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID || 'prod_standard_fallback',
+  pro: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID || 'prod_pro_fallback',
+};
+
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
 const PROTECTION_PLANS = [
   {
@@ -19,6 +26,7 @@ const PROTECTION_PLANS = [
     annualPrice: '$49.99 / yr',
     badge: null,
     color: '#22c55e',
+    stripeProductId: STRIPE_PRODUCT_IDS.basic,
     features: [
       'Timestamped upload proof of creation',
       'SHA-256 cryptographic fingerprint stored per track',
@@ -35,6 +43,7 @@ const PROTECTION_PLANS = [
     annualPrice: '$149.99 / yr',
     badge: 'Popular',
     color: '#3b82f6',
+    stripeProductId: STRIPE_PRODUCT_IDS.standard,
     features: [
       'Everything in Basic',
       'Cross-platform infringement monitoring (FB, TikTok, YouTube, IG)',
@@ -52,6 +61,7 @@ const PROTECTION_PLANS = [
     annualPrice: '$299.99 / yr',
     badge: 'Best Value',
     color: '#a855f7',
+    stripeProductId: STRIPE_PRODUCT_IDS.pro,
     features: [
       'Everything in Standard',
       'PRO (ASCAP / BMI / SESAC) registration guidance',
@@ -124,6 +134,64 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
       const hash = await crypto.subtle.digest('SHA-256', buf);
       return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
     } catch { return null; }
+  };
+
+  // ── Stripe Checkout Handler ────────────────────────────────────────
+  const handleStripeCheckout = async (plan) => {
+    try {
+      if (!currentUser) {
+        addToast('Please sign in to purchase a plan', 'error');
+        return;
+      }
+
+      const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+      if (!publishableKey) {
+        addToast('Stripe configuration unavailable', 'error');
+        console.error('VITE_STRIPE_PUBLISHABLE_KEY not set');
+        return;
+      }
+
+      if (!plan.stripeProductId || plan.stripeProductId.includes('fallback')) {
+        addToast(`Plan not yet available. Please check back soon.`, 'info');
+        return;
+      }
+
+      // Create Stripe Checkout Session via backend
+      const response = await fetch('/api/stripe/checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify({
+          planId: plan.id,
+          priceId: plan.stripeProductId,
+          productId: plan.stripeProductId,
+          userEmail: currentUser.email,
+          userName: currentUser.name,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        addToast(errorData.error || 'Failed to create checkout session', 'error');
+        return;
+      }
+
+      const { sessionId } = await response.json();
+
+      // Redirect to Stripe Checkout
+      const stripe = window.Stripe(publishableKey);
+      if (stripe) {
+        const { error } = await stripe.redirectToCheckout({ sessionId });
+        if (error) {
+          addToast(error.message, 'error');
+        }
+      }
+    } catch (error) {
+      console.error('Stripe checkout error:', error);
+      addToast('Checkout failed. Please try again.', 'error');
+    }
   };
 
   // ── Load library ───────────────────────────────────────────────────────────
@@ -354,7 +422,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
                   ))}
                 </ul>
                 <button className="plan-cta"
-                  onClick={() => { addToast(`${plan.name} — subscription flow coming soon`, 'info'); }}>
+                  onClick={() => { handleStripeCheckout(plan); }}>
                   {plan.cta}
                 </button>
               </div>
