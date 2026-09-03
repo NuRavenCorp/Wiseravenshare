@@ -14,6 +14,7 @@ using Wiseravenshare.Server.Infrastructure.External;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Hubs;
+using Wiseravenshare.Server.Middleware;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.CrossPlatform;
 using System.IO.Compression;
@@ -851,6 +852,7 @@ builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageSer
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHttpClient("SocialPublish");
@@ -1162,6 +1164,7 @@ app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<UploadMalwareScanMiddleware>();
 app.UseResponseCompression();
 app.UseOutputCache();
 
