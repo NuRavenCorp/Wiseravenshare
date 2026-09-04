@@ -150,6 +150,26 @@ const normalizeFeeds = (feeds) => {
     };
 };
 
+const buildConnectionFeedItem = (platform, connection, createdAt) => {
+    const resolvedUrl = String(connection?.resolvedUrl || '').trim();
+    if (!resolvedUrl) {
+        return null;
+    }
+
+    const safePlatform = String(platform || '').trim().toLowerCase();
+    const author = String(connection?.username || '').trim();
+    const handleLabel = author ? `@${author}` : `${safePlatform} profile`;
+
+    return {
+        platform: safePlatform,
+        externalId: `connection-${safePlatform}-${author || resolvedUrl}`,
+        text: `Connected ${safePlatform} feed link is wired to ${handleLabel}.`,
+        permalinkUrl: resolvedUrl,
+        authorHandle: author || safePlatform,
+        createdAt: createdAt || new Date().toISOString()
+    };
+};
+
 const FeedEmbedCard = ({ item, compact, previewItems = [] }) => {
     return (
         <article
@@ -504,7 +524,28 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }
                 }));
                 const rssItems = rssResults.flat();
-                const mergedItems = [...(Array.isArray(socialItems) ? socialItems : []), ...rssItems]
+                const apiSocialItems = Array.isArray(socialItems) ? socialItems : [];
+                const fallbackItems = [
+                    buildConnectionFeedItem('facebook', snapshot.facebook, snapshot.checkedAt),
+                    buildConnectionFeedItem('tiktok', snapshot.tikTok, snapshot.checkedAt),
+                    buildConnectionFeedItem('instagram', snapshot.instagram, snapshot.checkedAt),
+                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt),
+                    buildConnectionFeedItem('twitter', snapshot.twitter, snapshot.checkedAt),
+                    buildConnectionFeedItem('linkedin', snapshot.linkedin, snapshot.checkedAt),
+                    buildConnectionFeedItem('bluesky', snapshot.bluesky, snapshot.checkedAt)
+                ].filter(Boolean);
+
+                const mergedSocialItems = [...apiSocialItems];
+                for (const fallbackItem of fallbackItems) {
+                    const existsForPlatform = apiSocialItems.some((item) =>
+                        String(item?.platform || '').toLowerCase() === String(fallbackItem.platform || '').toLowerCase()
+                    );
+                    if (!existsForPlatform) {
+                        mergedSocialItems.push(fallbackItem);
+                    }
+                }
+
+                const mergedItems = [...mergedSocialItems, ...rssItems]
                     .sort((left, right) => {
                         const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
                         const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
@@ -536,14 +577,22 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
+        const keepConnectionMetadata = (existing, nextUsername) => ({
+            enabled: Boolean(nextUsername.trim() || existing?.enabled || existing?.profileUrl || existing?.feedUrl),
+            username: nextUsername.trim(),
+            profileUrl: String(existing?.profileUrl || '').trim(),
+            feedUrl: String(existing?.feedUrl || '').trim(),
+            designation: String(existing?.designation || '').trim()
+        });
+
         const updatedFeeds = {
-            facebook: { username: handles.facebook.trim(), enabled: Boolean(handles.facebook.trim()) },
-            tikTok: { username: handles.tiktok.trim(), enabled: Boolean(handles.tiktok.trim()) },
-            instagram: { username: handles.instagram.trim(), enabled: Boolean(handles.instagram.trim()) },
-            youtube: { username: handles.youtube.trim(), enabled: Boolean(handles.youtube.trim()) },
-            twitter: { username: handles.twitter.trim(), enabled: Boolean(handles.twitter.trim()) },
-            linkedin: { username: handles.linkedin.trim(), enabled: Boolean(handles.linkedin.trim()) },
-            bluesky: { username: handles.bluesky.trim(), enabled: Boolean(handles.bluesky.trim()) }
+            facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
+            tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
+            instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
+            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter),
+            linkedin: keepConnectionMetadata(snapshot.linkedin, handles.linkedin),
+            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky)
         };
 
         try {

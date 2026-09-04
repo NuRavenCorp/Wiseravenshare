@@ -56,9 +56,36 @@ const parseAdminEmails = () => {
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
 };
 
+const resolveInitialPublicPage = () => {
+    if (typeof window === 'undefined') {
+        return 'public-home';
+    }
+
+    const search = window.location.search || '';
+    if (/authToken=|socialAuthError=|refreshToken=|adminPassToken=/i.test(search)) {
+        return 'login';
+    }
+
+    const normalizedPath = String(window.location.pathname || '/').trim().toLowerCase();
+
+    if (normalizedPath === '/privacy' || normalizedPath.startsWith('/privacy/')) {
+        return 'privacy';
+    }
+
+    if (normalizedPath === '/terms' || normalizedPath.startsWith('/terms/')) {
+        return 'terms';
+    }
+
+    if (normalizedPath === '/login' || normalizedPath === '/social/access') {
+        return 'login';
+    }
+
+    return 'public-home';
+};
+
 const App = () => {
     const [currentPage, setCurrentPage] = useState(() =>
-        window.location.pathname === '/privacy' ? 'privacy' : 'feed'
+        resolveInitialPublicPage()
     );
     const [isRavensightMode, setIsRavensightMode] = useState(false);
     const [profileEditRequested, setProfileEditRequested] = useState(false);
@@ -432,12 +459,106 @@ const App = () => {
         }
     };
 
+    const renderPublicHome = () => (
+        <div className="container" style={{ paddingTop: '32px', paddingBottom: '40px' }}>
+            <div style={{
+                border: '1px solid var(--border-color)',
+                borderRadius: '18px',
+                padding: '28px',
+                background: 'linear-gradient(165deg, rgba(59,130,246,0.12) 0%, rgba(15,23,42,0.03) 100%)'
+            }}>
+                <h1 style={{ margin: 0, fontSize: '34px', lineHeight: 1.2 }}>WiseRavenShare</h1>
+                <p style={{ marginTop: '12px', color: 'var(--light-color)', fontSize: '16px', maxWidth: '880px' }}>
+                    WiseRavenShare is a media collaboration and publishing platform where creators can record podcast clips,
+                    upload music and video, verify facts with AI-assisted tools, and distribute content across social channels.
+                </p>
+                <p style={{ marginTop: '10px', color: 'var(--light-color)', fontSize: '15px', maxWidth: '880px' }}>
+                    Core features include the Ravensight production studio, collaborative newsroom workflows, social feed management,
+                    media libraries, messaging, and compliance-first upload security scanning.
+                </p>
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '16px' }}>
+                    <button
+                        onClick={() => setCurrentPage('login')}
+                        style={{
+                            border: '1px solid var(--highlight-color)',
+                            background: 'var(--highlight-color)',
+                            color: '#fff',
+                            padding: '10px 16px',
+                            borderRadius: '999px',
+                            cursor: 'pointer',
+                            fontWeight: 700
+                        }}
+                    >
+                        Sign In
+                    </button>
+                    <button
+                        onClick={() => setCurrentPage('privacy')}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--card-bg)',
+                            color: 'var(--text-color)',
+                            padding: '10px 16px',
+                            borderRadius: '999px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Privacy Policy
+                    </button>
+                    <button
+                        onClick={() => setCurrentPage('terms')}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--card-bg)',
+                            color: 'var(--text-color)',
+                            padding: '10px 16px',
+                            borderRadius: '999px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Terms of Service
+                    </button>
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '14px' }}>
+                {[
+                    { title: 'Ravensight Studio', body: 'Record podcast and newsroom segments, then move output directly into your content workflow.' },
+                    { title: 'Social Distribution', body: 'Prepare and route stories and media to connected social channels from one workspace.' },
+                    { title: 'Truth & Verification', body: 'Use truth scoring, contradiction checks, and verification alerts before publishing.' },
+                    { title: 'Secure Uploads', body: 'Global malware scanning and media-type validation are enforced on upload requests.' }
+                ].map((card) => (
+                    <div key={card.title} style={{ border: '1px solid var(--border-color)', borderRadius: '14px', padding: '16px', background: 'var(--card-bg)' }}>
+                        <h2 style={{ marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>{card.title}</h2>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>{card.body}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
+    const renderPublicPage = () => {
+        if (currentPage === 'privacy') {
+            return <PrivacyPolicyPage onBack={() => setCurrentPage('public-home')} />;
+        }
+
+        if (currentPage === 'terms') {
+            return <TermsOfServicePage onBack={() => setCurrentPage('public-home')} />;
+        }
+
+        if (currentPage === 'login') {
+            return <LoginPage onAuth={handleLogin} />;
+        }
+
+        return renderPublicHome();
+    };
+
     if (loading) {
         return <div style={{ padding: '40px', textAlign: 'center' }}>Loading...</div>;
     }
 
     if (!isAuthenticated) {
-        return <LoginPage onAuth={handleLogin} />;
+        return renderPublicPage();
     }
 
     const navItems = [

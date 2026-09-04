@@ -600,48 +600,18 @@
 
         // Social Logins (OAuth 2.0)
         function loginWithGoogle() {
-            // Redirect to Google OAuth endpoint
-            // In production, this would be your backend OAuth endpoint
-            const clientId = 'YOUR_GOOGLE_CLIENT_ID';
-            const redirectUri = encodeURIComponent(window.location.origin + '/auth/google/callback');
-            const scope = encodeURIComponent('profile email');
-            const state = generateState();
-
-            localStorage.setItem('oauth_state', state);
-
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-                `client_id=${clientId}&` +
-                `redirect_uri=${redirectUri}&` +
-                `response_type=code&` +
-                `scope=${scope}&` +
-                `state=${state}`;
-
-            window.location.href = authUrl;
+            const returnUrl = encodeURIComponent(window.location.origin + '/index.html');
+            window.location.href = `/api/auth/oauth/google/start?returnUrl=${returnUrl}`;
         }
 
         function loginWithFacebook() {
-            // Redirect to Facebook OAuth endpoint
-            const clientId = 'YOUR_FACEBOOK_APP_ID';
-            const redirectUri = encodeURIComponent(window.location.origin + '/auth/facebook/callback');
-            const scope = encodeURIComponent('email public_profile');
-            const state = generateState();
-
-            localStorage.setItem('oauth_state', state);
-
-            const authUrl = `https://www.facebook.com/v12.0/dialog/oauth?` +
-                `client_id=${clientId}&` +
-                `redirect_uri=${redirectUri}&` +
-                `response_type=code&` +
-                `scope=${scope}&` +
-                `state=${state}`;
-
-            window.location.href = authUrl;
+            const returnUrl = encodeURIComponent(window.location.origin + '/index.html');
+            window.location.href = `/api/auth/oauth/facebook/start?returnUrl=${returnUrl}`;
         }
 
         function loginWithTwitter() {
-            // Twitter uses OAuth 1.0a, so you need server-side implementation
-            // This would redirect to your backend endpoint
-            window.location.href = '/auth/twitter';
+            const returnUrl = encodeURIComponent(window.location.origin + '/index.html');
+            window.location.href = `/api/auth/oauth/tiktok/start?returnUrl=${returnUrl}`;
         }
 
         function generateState() {
