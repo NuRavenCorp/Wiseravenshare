@@ -9,6 +9,7 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
     const [dispatchAngle, setDispatchAngle] = useState('');
     const [producerNotes, setProducerNotes] = useState('');
     const [urgency, setUrgency] = useState('Standard');
+    const [selectedStorySoundtrack, setSelectedStorySoundtrack] = useState(null);
 
     const addNotification = (message, type = 'info') => {
         const id = Date.now();
@@ -56,7 +57,8 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
             title: dispatchTitle,
             angle: dispatchAngle,
             urgency,
-            notes: producerNotes
+            notes: producerNotes,
+            soundtrack: selectedStorySoundtrack
         });
         queueRavensightTab('podcast');
         addNotification('Dispatch handed to Podcast Control Room.', 'success');
@@ -171,6 +173,11 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
                 >
                     Send to Podcast Control Room
                 </button>
+                {selectedStorySoundtrack && (
+                    <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>
+                        Story soundtrack: {selectedStorySoundtrack.artist ? `${selectedStorySoundtrack.artist} — ` : ''}{selectedStorySoundtrack.title || 'Untitled track'}
+                    </div>
+                )}
             </section>
 
             {notifications.length > 0 && (
@@ -195,6 +202,7 @@ const NewsroomRecorderPage = ({ onSendToPodcastControlRoom }) => {
                 onNotification={addNotification}
                 canDirectUpload={true}
                 subscriptionPriceMonthly={19}
+                onSoundtrackSelected={setSelectedStorySoundtrack}
             />
         </div>
         </Compartment>

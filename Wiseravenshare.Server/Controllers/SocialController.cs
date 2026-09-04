@@ -39,72 +39,48 @@ public class SocialController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("providers/status")]
+    [ProducesResponseType(typeof(IReadOnlyList<SocialProviderStatusDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetProviderStatus()
+    {
+        var status = await _socialPlatformService.GetProviderStatusesAsync();
+        return Ok(status);
+    }
+
     [HttpGet("feed/bluesky")]
     [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetBlueskyFeed([FromQuery] string? handle = null, [FromQuery] int limit = 15)
+    public async Task<IActionResult> GetBlueskyFeed([FromQuery] string? handle = null, [FromQuery] int limit = 10)
     {
         var result = await _socialPlatformService.GetBlueskyFeedAsync(handle, limit);
         return Ok(result);
     }
 
-    [HttpGet("feed/reddit")]
-    [OutputCache(PolicyName = "PublicFeedShort")]
-    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetRedditFeed([FromQuery] string? subreddit = null, [FromQuery] int limit = 15)
-    {
-        var result = await _socialPlatformService.GetRedditFeedAsync(subreddit, limit);
-        return Ok(result);
-    }
-
-    [HttpGet("feed/youtube")]
-    [OutputCache(PolicyName = "PublicFeedShort")]
-    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetYouTubeFeed([FromQuery] string? channel = null, [FromQuery] int limit = 15)
-    {
-        var result = await _socialPlatformService.GetYouTubeFeedAsync(channel, limit);
-        return Ok(result);
-    }
-
-    [HttpGet("feed/rss")]
-    [OutputCache(PolicyName = "PublicFeedShort")]
-    [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetRssFeed([FromQuery] string feedUrl, [FromQuery] int limit = 20)
-    {
-        if (string.IsNullOrWhiteSpace(feedUrl))
-        {
-            return BadRequest(new ErrorResponse { Message = "feedUrl is required." });
-        }
-
-        var result = await _socialPlatformService.GetRssFeedAsync(feedUrl, limit);
-        return Ok(result);
-    }
-
     [HttpGet("feed")]
-    [HttpGet("feed/all")]
     [OutputCache(PolicyName = "PublicFeedShort")]
     [ProducesResponseType(typeof(IReadOnlyList<SocialFeedItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCombinedFeed(
         [FromQuery] string? pageId = null,
         [FromQuery] string? username = null,
         [FromQuery] string? blueskyHandle = null,
-        [FromQuery] string? subreddit = null,
-        [FromQuery] string? youtubeChannel = null,
-        [FromQuery] string? rssFeedUrl = null,
-        [FromQuery] string? query = null,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 10)
     {
-        var unified = await _socialPlatformService.GetUnifiedFeedAsync(
-            pageId,
-            username,
-            blueskyHandle,
-            subreddit,
-            youtubeChannel,
-            rssFeedUrl,
-            query,
-            limit);
+        var facebookTask = _socialPlatformService.GetFacebookFeedAsync(pageId, limit);
+        var tiktokTask = _socialPlatformService.GetTikTokFeedAsync(username, limit);
+        var blueskyTask = _socialPlatformService.GetBlueskyFeedAsync(blueskyHandle, limit);
+        await Task.WhenAll(facebookTask, tiktokTask, blueskyTask);
+        var facebook = facebookTask.Result;
+        var tiktok = tiktokTask.Result;
+        var bluesky = blueskyTask.Result;
 
-        return Ok(unified);
+        var combined = facebook
+            .Concat(tiktok)
+            .Concat(bluesky)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(Math.Clamp(limit * 3, 1, 150))
+            .ToList();
+
+        return Ok(combined);
     }
 
     [Authorize]
@@ -121,11 +97,11 @@ public class SocialController : ControllerBase
             });
         }
 
-        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube && !request.PublishToBluesky)
+        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube)
         {
             return BadRequest(new ErrorResponse
             {
-                Message = "Select at least one destination platform."
+                Message = "Select at least one platform."
             });
         }
 
@@ -133,6 +109,7 @@ public class SocialController : ControllerBase
         var isVideoShare = resolvedMediaType == "video"
             || (resolvedMediaType == "auto" && !string.IsNullOrWhiteSpace(request.VideoUrl));
 
+        // TikTok and YouTube only accept video payloads; keep the request valid when they are unchecked for photo/text shares.
         if (isVideoShare && request.PublishToTikTok && string.IsNullOrWhiteSpace(request.VideoUrl))
         {
             return BadRequest(new ErrorResponse

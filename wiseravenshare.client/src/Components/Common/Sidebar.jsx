@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 import WiseRavenLogo from './WiseRavenLogo';
 
@@ -36,6 +37,8 @@ const normalizeConnection = (connection, platform) => {
                     ? (username ? `https://twitter.com/${username}` : '')
                     : platform === 'linkedin'
                         ? (username ? `https://www.linkedin.com/in/${username}` : '')
+                        : platform === 'bluesky'
+                            ? (username ? `https://bsky.app/profile/${username}` : '')
                         : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
@@ -62,7 +65,8 @@ const hasConfiguredFeeds = (feeds) => {
         getConnection(source, 'instagram', 'Instagram'),
         getConnection(source, 'youtube', 'YouTube'),
         getConnection(source, 'twitter', 'Twitter'),
-        getConnection(source, 'linkedin', 'LinkedIn')
+        getConnection(source, 'linkedin', 'LinkedIn'),
+        getConnection(source, 'bluesky', 'Bluesky')
     ];
 
     return entries.some((connection) => {
@@ -89,6 +93,7 @@ const isImageSource = (value) => {
 
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
+    const { updateProfile } = useAuth();
     const adminEmails = parseAdminEmails();
     const isAdminUser = adminEmails.has(String(user?.email || '').trim().toLowerCase());
 
@@ -118,6 +123,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
         { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
+        { id: 'my-library', icon: 'fas fa-book-open', label: 'My Library' },
         { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
         { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
@@ -191,8 +197,80 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             icon: 'fab fa-linkedin',
             color: '#60a5fa',
             connection: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'), 'linkedin')
+        },
+        {
+            id: 'bluesky-feed',
+            label: 'Bluesky Feed',
+            icon: 'fas fa-cloud',
+            color: '#60a5fa',
+            connection: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'), 'bluesky')
         }
     ];
+
+    const openAggregator = (platformId) => {
+        if (!platformId) {
+            onNavigate('social-feeds');
+            return;
+        }
+
+        onNavigate(platformId);
+        window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
+            detail: { page: platformId, platform: platformId.replace('-feed', '') }
+        }));
+    };
+
+    const openConnectAccounts = (platformId) => {
+        const platform = String(platformId || '').replace('-feed', '');
+        onNavigate(platformId || 'social-feeds');
+        window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
+            detail: {
+                page: platformId || 'social-feeds',
+                platform,
+                openConfig: true
+            }
+        }));
+    };
+
+    const disconnectFeed = async (platformId) => {
+        const platformKeyMap = {
+            'facebook-feed': 'facebook',
+            'tiktok-feed': 'tikTok',
+            'instagram-feed': 'instagram',
+            'youtube-feed': 'youtube',
+            'twitter-feed': 'twitter',
+            'linkedin-feed': 'linkedin',
+            'bluesky-feed': 'bluesky'
+        };
+
+        const targetKey = platformKeyMap[platformId];
+        if (!targetKey) {
+            return;
+        }
+
+        if (typeof window !== 'undefined' && !window.confirm('Delete this connected social feed?')) {
+            return;
+        }
+
+        const currentFeeds = user?.socialFeeds || {};
+        const nextFeeds = {
+            ...currentFeeds,
+            [targetKey]: {
+                enabled: false,
+                username: '',
+                profileUrl: '',
+                feedUrl: ''
+            }
+        };
+
+        await updateProfile({ socialFeeds: nextFeeds });
+        try {
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(nextFeeds));
+        } catch {
+            /* ignore storage failures */
+        }
+
+        window.dispatchEvent(new Event('wiseraven:social-updated'));
+    };
 
     return (
         <aside className="left-column">
@@ -344,18 +422,40 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                     </div>
 
                                     {isActive ? (
-                                        <a
-                                            href={item.connection.resolvedUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            style={{ color: item.color, fontSize: '0.75rem', textDecoration: 'none' }}
-                                        >
-                                            Open
-                                        </a>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => openAggregator(item.id)}
+                                                style={{
+                                                    fontSize: '0.75rem',
+                                                    color: item.color,
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    padding: 0
+                                                }}
+                                            >
+                                                Connect
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => disconnectFeed(item.id)}
+                                                style={{
+                                                    fontSize: '0.75rem',
+                                                    color: '#fca5a5',
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    padding: 0
+                                                }}
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
                                     ) : (
                                         <button
                                             type="button"
-                                            onClick={() => onNavigate({ page: 'profile', editProfile: true })}
+                                            onClick={() => openConnectAccounts(item.id)}
                                             style={{
                                                 fontSize: '0.75rem',
                                                 color: 'var(--highlight-color)',
@@ -365,7 +465,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                                 padding: 0
                                             }}
                                         >
-                                            Set up
+                                            Connect
                                         </button>
                                     )}
                                 </div>

@@ -140,6 +140,12 @@ export const normalizeVideoRecord = (video, index = 0) => {
         youtubeUrl: video?.youtubeUrl || null,
         tiktokUrl: video?.tiktokUrl || null,
         facebookUrl: video?.facebookUrl || null,
+        musicTrackId: video?.musicTrackId || null,
+        musicTrackTitle: video?.musicTrackTitle || null,
+        musicTrackUrl: video?.musicTrackUrl || null,
+        musicTrackArtist: video?.musicTrackArtist || null,
+        musicTrackAlbum: video?.musicTrackAlbum || null,
+        musicTrackGenre: video?.musicTrackGenre || null,
         sourceType,
         accessProtocol
     };
@@ -276,7 +282,7 @@ export const removeLocalVideo = (videoIdentity) => {
     window.dispatchEvent(new Event(RAVENSIGHT_LIBRARY_PROTOCOL.events.postsUpdated));
 };
 
-export const buildLocalFallbackVideo = ({ file, user, title = '', description = '', privacyStatus = 'unlisted', storageMode = 'temporary' }) => {
+export const buildLocalFallbackVideo = ({ file, user, title = '', description = '', privacyStatus = 'unlisted', storageMode = 'temporary', musicTrackId = null, musicTrackTitle = null, musicTrackUrl = null, musicTrackArtist = null, musicTrackAlbum = null, musicTrackGenre = null }) => {
     const fallbackUrl = file ? URL.createObjectURL(file) : '';
 
     return normalizeVideoRecord({
@@ -290,6 +296,12 @@ export const buildLocalFallbackVideo = ({ file, user, title = '', description = 
         status: 'published',
         privacyStatus,
         storageMode,
+        musicTrackId,
+        musicTrackTitle,
+        musicTrackUrl,
+        musicTrackArtist,
+        musicTrackAlbum,
+        musicTrackGenre,
         retentionStatus: 'active',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

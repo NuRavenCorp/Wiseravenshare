@@ -11,6 +11,12 @@ public sealed class SaveRavensightVideoDto
     public string Privacy { get; set; } = "unlisted";
     public string StorageMode { get; set; } = "temporary";
     public bool IsPermanent { get; set; }
+    public string MusicTrackId { get; set; } = string.Empty;
+    public string MusicTrackTitle { get; set; } = string.Empty;
+    public string MusicTrackUrl { get; set; } = string.Empty;
+    public string MusicTrackArtist { get; set; } = string.Empty;
+    public string MusicTrackAlbum { get; set; } = string.Empty;
+    public string MusicTrackGenre { get; set; } = string.Empty;
 }
 
 public sealed class SaveRavensightPhotoDto

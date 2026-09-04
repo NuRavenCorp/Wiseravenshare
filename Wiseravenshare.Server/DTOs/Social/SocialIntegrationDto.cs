@@ -78,6 +78,15 @@ public class PublishSocialContentResponse
     public List<SocialPublishResultDto> Results { get; set; } = [];
 }
 
+public class SocialProviderStatusDto
+{
+    public string Platform { get; set; } = string.Empty;
+    public bool ReadConfigured { get; set; }
+    public bool PublishConfigured { get; set; }
+    public string ActiveMode { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
+}
+
 public class FacebookClientCodeRequest
 {
     /// <summary>

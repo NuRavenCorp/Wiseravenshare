@@ -1,38 +1,33 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { apiService } from '../../Services/api';
 import { socialService } from '../../Services/socialService';
 
-const REFRESH_MS = 20000;
+const REFRESH_MS = 15000;
+const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
 
 const PLATFORMS = [
     { id: 'all', label: 'All Feeds', icon: '🌐', color: '#a855f7' },
     { id: 'facebook', label: 'Facebook', icon: '📘', color: '#93c5fd' },
     { id: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9' },
-    { id: 'bluesky', label: 'Bluesky', icon: '🦋', color: '#38bdf8' },
-    { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' },
-    { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
-    { id: 'rss', label: 'RSS & News Reader', icon: '📡', color: '#eab308' },
     { id: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4' },
+    { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
     { id: 'twitter', label: 'Twitter / X', icon: '🐦', color: '#38bdf8' },
-    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' }
+    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' },
+    { id: 'bluesky', label: 'Bluesky', icon: '🦋', color: '#60a5fa' },
+    { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
+    { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
 
 const CURATED_TEMPLATES = [
-    { id: 'cards', label: 'Standard Cards' },
-    { id: 'list', label: 'Compact List' },
-    { id: 'signage', label: 'Digital Signage / Kiosk' }
+    { id: 'cards', label: 'Cards' },
+    { id: 'list', label: 'List' },
+    { id: 'signage', label: 'Digital Signage' }
 ];
 
 const PROFANITY_PATTERNS = [
-    /\b(fuck|shit|bitch|asshole|bastard)\b/i
+    /\b(fuck|shit|bitch|asshole|bastard)\b/i,
+    /\b(whore|slut|cunt)\b/i
 ];
-
-const hasProfanity = (text) => PROFANITY_PATTERNS.some((pattern) => pattern.test(String(text || '')));
-
-const normalizeFeedKey = (item) => [
-    String(item?.platform || '').toLowerCase().trim(),
-    String(item?.externalId || item?.id || '').toLowerCase().trim(),
-    String(item?.text || '').toLowerCase().replace(/\s+/g, ' ').trim()
-].join('|');
 
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
@@ -62,15 +57,14 @@ const normalizeConnection = (connection, platform) => {
                         ? (username ? `https://www.linkedin.com/in/${username}` : '')
                         : platform === 'bluesky'
                             ? (username ? `https://bsky.app/profile/${username}` : '')
-                            : platform === 'reddit'
-                                ? (username ? `https://www.reddit.com/r/${username}` : '')
-                                : (username ? `https://www.tiktok.com/@${username}` : '');
+                            : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(safeConnection.enabled || username || feedUrl || profileUrl),
         username,
         profileUrl,
         feedUrl,
+        designation: String(safeConnection.designation || '').trim(),
         resolvedUrl: feedUrl || profileUrl || fallbackProfileUrl
     };
 };
@@ -93,17 +87,55 @@ const readCachedSocialFeeds = () => {
     }
 };
 
-const readCachedRssSubscriptions = () => {
+const normalizeCustomFeed = (feed, index = 0) => ({
+    id: String(feed?.id || `rss-${index}`).trim() || `rss-${index}`,
+    source: String(feed?.source || '').trim() || `Custom Feed ${index + 1}`,
+    rssUrl: String(feed?.rssUrl || feed?.url || '').trim()
+});
+
+const readCustomRssFeeds = () => {
     try {
-        const raw = localStorage.getItem('wiseRssSubscriptions');
-        return raw ? JSON.parse(raw) : [
-            'https://techcrunch.com/feed/',
-            'https://news.ycombinator.com/rss'
-        ];
+        const parsed = JSON.parse(localStorage.getItem(CUSTOM_RSS_STORAGE_KEY) || '[]');
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((feed, index) => normalizeCustomFeed(feed, index))
+            .filter((feed) => feed.rssUrl.length > 0);
     } catch {
         return [];
     }
 };
+
+const isHttpUrl = (value) => {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+};
+
+const mapRssItemToFeedItem = (feed, item, index) => {
+    const text = String(item?.description || item?.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return {
+        platform: 'rss',
+        externalId: `${feed.id}-${item?.guid || item?.link || index}`,
+        text: item?.title ? `${item.title}${text ? ` — ${text.slice(0, 220)}` : ''}` : text || 'No text provided.',
+        mediaUrl: String(item?.thumbnail || item?.enclosure?.link || '').trim() || undefined,
+        permalinkUrl: String(item?.link || '').trim() || feed.rssUrl,
+        authorHandle: feed.source,
+        createdAt: item?.pubDate || item?.isoDate || new Date().toISOString()
+    };
+};
+
+const hasProfanity = (text) => PROFANITY_PATTERNS.some((pattern) => pattern.test(String(text || '')));
+
+const normalizeFeedKey = (item) => [
+    String(item?.platform || '').toLowerCase().trim(),
+    String(item?.externalId || item?.id || '').toLowerCase().trim(),
+    String(item?.text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+].join('|');
 
 const normalizeFeeds = (feeds) => {
     const source = feeds || {};
@@ -114,104 +146,72 @@ const normalizeFeeds = (feeds) => {
         youtube: getConnection(source, 'youtube', 'YouTube'),
         twitter: getConnection(source, 'twitter', 'Twitter'),
         linkedin: getConnection(source, 'linkedin', 'LinkedIn'),
-        bluesky: getConnection(source, 'bluesky', 'Bluesky'),
-        reddit: getConnection(source, 'reddit', 'Reddit')
+        bluesky: getConnection(source, 'bluesky', 'Bluesky')
     };
 };
 
-const getTikTokEmbedUrl = (url) => {
-    if (!url) return '';
-    const match = url.match(/\/video\/(\d+)/i);
-    if (!match?.[1]) return '';
-    return `https://www.tiktok.com/embed/v2/${match[1]}`;
-};
-
-const getInstagramEmbedUrl = (url) => {
-    if (!url) return '';
-    const match = url.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)/i);
-    if (!match?.[2]) return '';
-    return `https://www.instagram.com/${match[1]}/${match[2]}/embed`;
-};
-
-const getFacebookEmbedUrl = (url) => {
-    if (!url) return '';
-    const normalizedUrl = String(url).trim();
-    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
-        return '';
-    }
-
-    if (/\/posts\/|\/photos\/|\/videos\/|\/permalink\//i.test(normalizedUrl)) {
-        return `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(normalizedUrl)}&show_text=true&width=500`;
-    }
-
-    return `https://www.facebook.com/plugins/page.php?href=${encodeURIComponent(normalizedUrl)}&tabs=timeline&width=500&height=500&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true`;
-};
-
-const getYouTubeEmbedUrl = (url) => {
-    if (!url) return '';
-    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([A-Za-z0-9_-]{11})/i);
-    if (!match?.[1]) return '';
-    return `https://www.youtube.com/embed/${match[1]}`;
-};
-
-const FeedEmbedCard = ({ item, compact }) => {
-    const platformId = String(item.id || item.platform || '').toLowerCase();
-    const isTikTok = platformId === 'tiktok';
-    const isFacebook = platformId === 'facebook';
-    const isInstagram = platformId === 'instagram';
-    const isYouTube = platformId === 'youtube';
-
-    const embedUrl = isTikTok
-        ? getTikTokEmbedUrl(item.url)
-        : isFacebook
-            ? getFacebookEmbedUrl(item.url)
-            : isInstagram
-                ? getInstagramEmbedUrl(item.url)
-                : isYouTube
-                    ? getYouTubeEmbedUrl(item.url)
-                    : '';
-
+const FeedEmbedCard = ({ item, compact, previewItems = [] }) => {
     return (
         <article
             style={{
-                border: `1px solid ${item.color || 'var(--border-color)'}`,
-                borderRadius: '12px',
-                padding: compact ? '10px' : '14px',
-                background: 'rgba(15, 23, 42, 0.4)',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+                border: `1px solid ${item.color}`,
+                borderRadius: '10px',
+                padding: compact ? '10px' : '12px',
+                background: 'rgba(255,255,255,0.02)'
             }}
         >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <strong>
-                    <span style={{ marginRight: '6px' }}>{item.icon || '🌐'}</span>
-                    {item.platform}
-                </strong>
-                <a href={item.url} target="_blank" rel="noreferrer" style={{ color: item.color || '#38bdf8', fontSize: '12px', textDecoration: 'none' }}>
-                    Open External Feed ↗
+                <div>
+                    <strong>
+                        <span style={{ marginRight: '6px' }}>{item.icon}</span>
+                        {item.platform}
+                    </strong>
+                    {item.designation && (
+                        <div style={{ fontSize: '11px', color: 'var(--light-color)', marginTop: '2px' }}>
+                            Active as {item.designation.replace(/-/g, ' ')}
+                        </div>
+                    )}
+                </div>
+                <a href={item.url} target="_blank" rel="noreferrer" style={{ color: item.color, fontSize: '12px' }}>
+                    Open Feed Link ↗
                 </a>
             </div>
 
-            {embedUrl ? (
-                <iframe
-                    title={`${item.platform} feed embed`}
-                    src={embedUrl}
-                    style={{
-                        width: '100%',
-                        minHeight: isTikTok ? '480px' : isYouTube ? '320px' : '400px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#0b0f14'
-                    }}
-                    loading="lazy"
-                    allow="clipboard-write; encrypted-media; picture-in-picture; web-share"
-                    allowFullScreen
-                />
+            {previewItems.length > 0 ? (
+                <div style={{ display: 'grid', gap: '8px' }}>
+                    {previewItems.slice(0, compact ? 1 : 3).map((preview, index) => (
+                        <div
+                            key={`${item.id}-preview-${preview.externalId || preview.id || index}`}
+                            style={{
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                background: 'rgba(11, 15, 20, 0.75)',
+                                padding: '8px 10px'
+                            }}
+                        >
+                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '4px' }}>
+                                {preview.authorHandle || preview.authorName || 'Creator'}
+                                {preview.createdAt ? ` · ${new Date(preview.createdAt).toLocaleString()}` : ''}
+                            </div>
+                            <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                                {preview.text || 'No text provided.'}
+                            </div>
+                            {preview.permalinkUrl && (
+                                <a
+                                    href={preview.permalinkUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ display: 'inline-block', marginTop: '6px', fontSize: '12px', color: item.color }}
+                                >
+                                    Open post ↗
+                                </a>
+                            )}
+                        </div>
+                    ))}
+                </div>
             ) : (
                 <div style={{ fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.5 }}>
-                    Embedded feed channel active for <strong>{item.platform}</strong> ({item.username || item.url}).
-                    <div style={{ marginTop: '4px' }}>
-                        <a href={item.url} target="_blank" rel="noreferrer" style={{ color: item.color || '#38bdf8' }}>{item.url}</a>
-                    </div>
+                    No recent {item.platform} items yet. Feed will appear here once posts are available.
                 </div>
             )}
         </article>
@@ -232,10 +232,72 @@ const getSnapshot = (user) => {
         twitter: normalizeConnection(feeds.twitter, 'twitter'),
         linkedin: normalizeConnection(feeds.linkedin, 'linkedin'),
         bluesky: normalizeConnection(feeds.bluesky, 'bluesky'),
-        reddit: normalizeConnection(feeds.reddit, 'reddit'),
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
+};
+
+const normalizeFeedConnections = (feeds = {}) => ({
+    facebook: {
+        enabled: Boolean(feeds.facebook?.enabled),
+        username: String(feeds.facebook?.username || '').trim(),
+        profileUrl: String(feeds.facebook?.profileUrl || '').trim(),
+        feedUrl: String(feeds.facebook?.feedUrl || '').trim(),
+        designation: String(feeds.facebook?.designation || '').trim()
+    },
+    tikTok: {
+        enabled: Boolean(feeds.tikTok?.enabled),
+        username: String(feeds.tikTok?.username || '').trim(),
+        profileUrl: String(feeds.tikTok?.profileUrl || '').trim(),
+        feedUrl: String(feeds.tikTok?.feedUrl || '').trim(),
+        designation: String(feeds.tikTok?.designation || '').trim()
+    },
+    instagram: {
+        enabled: Boolean(feeds.instagram?.enabled),
+        username: String(feeds.instagram?.username || '').trim(),
+        profileUrl: String(feeds.instagram?.profileUrl || '').trim(),
+        feedUrl: String(feeds.instagram?.feedUrl || '').trim(),
+        designation: String(feeds.instagram?.designation || '').trim()
+    },
+    youtube: {
+        enabled: Boolean(feeds.youtube?.enabled),
+        username: String(feeds.youtube?.username || '').trim(),
+        profileUrl: String(feeds.youtube?.profileUrl || '').trim(),
+        feedUrl: String(feeds.youtube?.feedUrl || '').trim(),
+        designation: String(feeds.youtube?.designation || '').trim()
+    },
+    twitter: {
+        enabled: Boolean(feeds.twitter?.enabled),
+        username: String(feeds.twitter?.username || '').trim(),
+        profileUrl: String(feeds.twitter?.profileUrl || '').trim(),
+        feedUrl: String(feeds.twitter?.feedUrl || '').trim(),
+        designation: String(feeds.twitter?.designation || '').trim()
+    },
+    linkedin: {
+        enabled: Boolean(feeds.linkedin?.enabled),
+        username: String(feeds.linkedin?.username || '').trim(),
+        profileUrl: String(feeds.linkedin?.profileUrl || '').trim(),
+        feedUrl: String(feeds.linkedin?.feedUrl || '').trim(),
+        designation: String(feeds.linkedin?.designation || '').trim()
+    },
+    bluesky: {
+        enabled: Boolean(feeds.bluesky?.enabled),
+        username: String(feeds.bluesky?.username || '').trim(),
+        profileUrl: String(feeds.bluesky?.profileUrl || '').trim(),
+        feedUrl: String(feeds.bluesky?.feedUrl || '').trim(),
+        designation: String(feeds.bluesky?.designation || '').trim()
+    }
+});
+
+const getConnectedPlatforms = (snapshot) => {
+    const source = snapshot || {};
+    return PLATFORMS
+        .filter((platform) => platform.id !== 'all' && platform.id !== 'reddit')
+        .filter((platform) => {
+            const key = platform.id === 'tiktok' ? 'tikTok' : platform.id;
+            const connection = source[key] || {};
+            return Boolean(connection.enabled || connection.username || connection.profileUrl || connection.feedUrl || connection.resolvedUrl);
+        });
 };
 
 const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' }) => {
@@ -247,11 +309,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         return PLATFORMS.some((p) => p.id === cleaned) ? cleaned : 'all';
     });
 
-    const [searchQuery, setSearchQuery] = useState('');
-    const [displayTemplate, setDisplayTemplate] = useState('cards');
-    const [hideDuplicates, setHideDuplicates] = useState(true);
-    const [hideProfanity, setHideProfanity] = useState(false);
-
     // Multi-Platform Publisher State
     const [postMessage, setPostMessage] = useState('');
     const [mediaUrlInput, setMediaUrlInput] = useState('');
@@ -259,9 +316,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishFacebook, setPublishFacebook] = useState(true);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
-    const [publishBluesky, setPublishBluesky] = useState(true);
+    const [publishTwitter, setPublishTwitter] = useState(false);
+    const [publishLinkedIn, setPublishLinkedIn] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
+    const [displayTemplate, setDisplayTemplate] = useState('cards');
+    const [hideDuplicates, setHideDuplicates] = useState(true);
+    const [hideProfanity, setHideProfanity] = useState(true);
+    const [feedSearch, setFeedSearch] = useState('');
+    const [connectionNotice, setConnectionNotice] = useState('');
 
     // Account Handle Linking State
     const [showHandleConfig, setShowHandleConfig] = useState(false);
@@ -272,22 +335,49 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         youtube: snapshot.youtube.username || '',
         twitter: snapshot.twitter.username || '',
         linkedin: snapshot.linkedin.username || '',
-        bluesky: snapshot.bluesky.username || '',
-        reddit: snapshot.reddit.username || ''
+        bluesky: snapshot.bluesky.username || ''
     });
 
-    // Custom RSS Subscriptions Manager
-    const [showRssManager, setShowRssManager] = useState(false);
-    const [rssSubscriptions, setRssSubscriptions] = useState(() => readCachedRssSubscriptions());
-    const [newRssUrl, setNewRssUrl] = useState('');
-
-    // API Info & Demo Guide Expansion
-    const [showApiDoc, setShowApiDoc] = useState(false);
+    // Demo Guide Expansion
     const [showTikTokDemo, setShowTikTokDemo] = useState(false);
+    const [showCustomRssFeeds, setShowCustomRssFeeds] = useState(false);
+    const [customRssFeeds, setCustomRssFeeds] = useState(() => readCustomRssFeeds());
+    const [customFeedSource, setCustomFeedSource] = useState('');
+    const [customFeedUrl, setCustomFeedUrl] = useState('');
+    const [customFeedError, setCustomFeedError] = useState('');
+    const [showDeveloperApis, setShowDeveloperApis] = useState(false);
+    const [providerStatuses, setProviderStatuses] = useState([]);
+    const [providerStatusError, setProviderStatusError] = useState('');
 
     useEffect(() => {
         setSnapshot(getSnapshot(user));
     }, [user]);
+
+    useEffect(() => {
+        const cleaned = String(initialPlatform || 'all').toLowerCase().replace('-feed', '');
+        if (PLATFORMS.some((platform) => platform.id === cleaned)) {
+            setActivePlatform(cleaned);
+        }
+    }, [initialPlatform]);
+
+    useEffect(() => {
+        const handleOpenAggregator = (event) => {
+            const detail = event?.detail || {};
+            const platform = String(detail.platform || '').trim().toLowerCase().replace('-feed', '');
+            const hasKnownPlatform = platform && PLATFORMS.some((item) => item.id === platform);
+            if (hasKnownPlatform) {
+                setActivePlatform(platform);
+            }
+            if (detail.openConfig) {
+                setShowHandleConfig(true);
+            }
+        };
+
+        window.addEventListener('wiseraven:open-social-aggregator', handleOpenAggregator);
+        return () => {
+            window.removeEventListener('wiseraven:open-social-aggregator', handleOpenAggregator);
+        };
+    }, []);
 
     useEffect(() => {
         const refresh = () => setSnapshot(getSnapshot(user));
@@ -306,25 +396,123 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, [user]);
 
     useEffect(() => {
+        localStorage.setItem(CUSTOM_RSS_STORAGE_KEY, JSON.stringify(customRssFeeds));
+    }, [customRssFeeds]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadProviderStatuses = async () => {
+            try {
+                const statuses = await socialService.getProviderStatuses();
+                if (!cancelled) {
+                    setProviderStatuses(Array.isArray(statuses) ? statuses : []);
+                    setProviderStatusError('');
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    setProviderStatuses([]);
+                    setProviderStatusError(error?.message || 'Unable to load provider API status.');
+                }
+            }
+        };
+
+        loadProviderStatuses();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadSavedConnections = async () => {
+            const userId = user?.id;
+            if (!userId) {
+                return;
+            }
+
+            try {
+                const response = await apiService.getSocialFeeds(userId);
+                const loadedFeeds = normalizeFeedConnections(response?.data || response || {});
+                if (cancelled) return;
+
+                const cachedUser = readCachedUser() || {};
+                const nextUser = {
+                    ...cachedUser,
+                    ...user,
+                    socialFeeds: loadedFeeds
+                };
+
+                localStorage.setItem('wiseSocialFeeds', JSON.stringify(loadedFeeds));
+                localStorage.setItem('user_data', JSON.stringify(nextUser));
+                window.dispatchEvent(new Event('wiseraven:social-updated'));
+                setSnapshot(getSnapshot(nextUser));
+                setHandles({
+                    facebook: loadedFeeds.facebook.username,
+                    tiktok: loadedFeeds.tikTok.username,
+                    instagram: loadedFeeds.instagram.username,
+                    youtube: loadedFeeds.youtube.username,
+                    twitter: loadedFeeds.twitter.username,
+                    linkedin: loadedFeeds.linkedin.username,
+                    bluesky: loadedFeeds.bluesky.username
+                });
+            } catch {
+                if (cancelled) return;
+                setHandles({
+                    facebook: snapshot.facebook.username || '',
+                    tiktok: snapshot.tikTok.username || '',
+                    instagram: snapshot.instagram.username || '',
+                    youtube: snapshot.youtube.username || '',
+                    twitter: snapshot.twitter.username || '',
+                    linkedin: snapshot.linkedin.username || '',
+                    bluesky: snapshot.bluesky.username || ''
+                });
+            }
+        };
+
+        loadSavedConnections();
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id]);
+
+    useEffect(() => {
         let cancelled = false;
 
         const loadCombinedFeed = async () => {
             setIsLoadingFeed(true);
             try {
-                const primaryRss = rssSubscriptions.length > 0 ? rssSubscriptions[0] : undefined;
-                const items = await socialService.getCombinedFeed(
-                    compact ? 10 : 30,
+                const socialItems = await socialService.getCombinedFeed(
+                    compact ? 5 : 15,
                     snapshot.facebook.username || undefined,
                     snapshot.tikTok.username || undefined,
-                    snapshot.bluesky.username || undefined,
-                    snapshot.reddit.username || undefined,
-                    snapshot.youtube.username || undefined,
-                    primaryRss,
-                    searchQuery || undefined
+                    snapshot.bluesky.username || undefined
                 );
 
+                const rssResults = await Promise.all(customRssFeeds.map(async (feed) => {
+                    try {
+                        const rssToJsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rssUrl)}`;
+                        const response = await fetch(rssToJsonUrl);
+                        if (!response.ok) {
+                            return [];
+                        }
+                        const payload = await response.json();
+                        const items = Array.isArray(payload?.items) ? payload.items.slice(0, compact ? 4 : 8) : [];
+                        return items.map((item, index) => mapRssItemToFeedItem(feed, item, index));
+                    } catch {
+                        return [];
+                    }
+                }));
+                const rssItems = rssResults.flat();
+                const mergedItems = [...(Array.isArray(socialItems) ? socialItems : []), ...rssItems]
+                    .sort((left, right) => {
+                        const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
+                        const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
+                        return rightTime - leftTime;
+                    });
+
                 if (!cancelled) {
-                    setFeedItems(Array.isArray(items) ? items : []);
+                    setFeedItems(mergedItems);
                 }
             } catch {
                 if (!cancelled) {
@@ -344,18 +532,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [
-        compact,
-        snapshot.facebook.username,
-        snapshot.tikTok.username,
-        snapshot.bluesky.username,
-        snapshot.reddit.username,
-        snapshot.youtube.username,
-        rssSubscriptions,
-        searchQuery
-    ]);
+    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.bluesky.username, customRssFeeds]);
 
-    const handleSaveHandles = (e) => {
+    const handleSaveHandles = async (e) => {
         e?.preventDefault();
         const updatedFeeds = {
             facebook: { username: handles.facebook.trim(), enabled: Boolean(handles.facebook.trim()) },
@@ -364,44 +543,40 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             youtube: { username: handles.youtube.trim(), enabled: Boolean(handles.youtube.trim()) },
             twitter: { username: handles.twitter.trim(), enabled: Boolean(handles.twitter.trim()) },
             linkedin: { username: handles.linkedin.trim(), enabled: Boolean(handles.linkedin.trim()) },
-            bluesky: { username: handles.bluesky.trim(), enabled: Boolean(handles.bluesky.trim()) },
-            reddit: { username: handles.reddit.trim(), enabled: Boolean(handles.reddit.trim()) }
+            bluesky: { username: handles.bluesky.trim(), enabled: Boolean(handles.bluesky.trim()) }
         };
 
         try {
-            localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedFeeds));
+            const userId = user?.id;
+            let persistedFeeds = updatedFeeds;
+            if (userId) {
+                try {
+                    const response = await apiService.updateSocialFeeds(userId, updatedFeeds);
+                    persistedFeeds = normalizeFeedConnections(response?.data || response || updatedFeeds);
+                } catch (err) {
+                    console.warn('Backend social feed save failed, using local cache fallback:', err);
+                }
+            }
+
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(persistedFeeds));
             const cachedUser = readCachedUser() || {};
-            const nextUser = { ...cachedUser, socialFeeds: updatedFeeds };
+            const nextUser = { ...cachedUser, ...user, socialFeeds: persistedFeeds };
             localStorage.setItem('user_data', JSON.stringify(nextUser));
             window.dispatchEvent(new Event('wiseraven:social-updated'));
+            const nextSnapshot = getSnapshot(nextUser);
+            const connected = getConnectedPlatforms(nextSnapshot);
+            setConnectionNotice(
+                connected.length > 0
+                    ? `Connected ${connected.length} account${connected.length === 1 ? '' : 's'}: ${connected.map((item) => item.label).join(', ')}.`
+                    : 'No social accounts connected yet.'
+            );
+            if (connected.length > 0) {
+                setActivePlatform(connected[0].id);
+            }
             setShowHandleConfig(false);
         } catch (err) {
             console.warn('Failed to save handle settings:', err);
-        }
-    };
-
-    const handleAddRssFeed = (e) => {
-        e?.preventDefault();
-        const url = newRssUrl.trim();
-        if (!url || rssSubscriptions.includes(url)) return;
-
-        const updated = [...rssSubscriptions, url];
-        setRssSubscriptions(updated);
-        try {
-            localStorage.setItem('wiseRssSubscriptions', JSON.stringify(updated));
-        } catch (err) {
-            console.warn('Failed to save RSS subscriptions:', err);
-        }
-        setNewRssUrl('');
-    };
-
-    const handleRemoveRssFeed = (urlToRemove) => {
-        const updated = rssSubscriptions.filter((url) => url !== urlToRemove);
-        setRssSubscriptions(updated);
-        try {
-            localStorage.setItem('wiseRssSubscriptions', JSON.stringify(updated));
-        } catch (err) {
-            console.warn('Failed to update RSS subscriptions:', err);
+            setConnectionNotice('Unable to save account handles right now.');
         }
     };
 
@@ -430,8 +605,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
                 publishToTikTok: publishTikTok && isVideoUrl,
-                publishToYouTube: publishYouTube && isVideoUrl,
-                publishToBluesky: publishBluesky
+                publishToYouTube: publishYouTube && isVideoUrl
             });
 
             setPublishResults(response?.results || []);
@@ -445,48 +619,165 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         }
     };
 
+    const handleAddCustomFeed = (event) => {
+        event.preventDefault();
+        const source = String(customFeedSource || '').trim();
+        const rssUrl = String(customFeedUrl || '').trim();
+        setCustomFeedError('');
+
+        if (!rssUrl) {
+            setCustomFeedError('Feed URL is required.');
+            return;
+        }
+
+        if (!isHttpUrl(rssUrl)) {
+            setCustomFeedError('Feed URL must be a valid http:// or https:// address.');
+            return;
+        }
+
+        setCustomRssFeeds((prev) => {
+            const normalizedUrl = rssUrl.toLowerCase();
+            const duplicate = prev.some((item) => item.rssUrl.toLowerCase() === normalizedUrl);
+            if (duplicate) {
+                setCustomFeedError('That feed is already added.');
+                return prev;
+            }
+
+            return [
+                {
+                    id: `rss-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                    source: source || 'Custom RSS Feed',
+                    rssUrl
+                },
+                ...prev
+            ].slice(0, 20);
+        });
+
+        setCustomFeedSource('');
+        setCustomFeedUrl('');
+    };
+
+    const handleRemoveCustomFeed = (feedId) => {
+        setCustomRssFeeds((prev) => prev.filter((feed) => feed.id !== feedId));
+    };
+
     const timelineItems = useMemo(() => {
         const items = [];
 
         if (snapshot.facebook.enabled || snapshot.facebook.resolvedUrl) {
-            items.push({ id: 'facebook', platform: 'Facebook', icon: '📘', color: '#93c5fd', username: snapshot.facebook.username, url: snapshot.facebook.resolvedUrl });
+            items.push({
+                id: 'facebook',
+                platform: 'Facebook',
+                icon: '📘',
+                color: '#93c5fd',
+                username: snapshot.facebook.username,
+                designation: snapshot.facebook.designation,
+                url: snapshot.facebook.resolvedUrl
+            });
         }
+
         if (snapshot.tikTok.enabled || snapshot.tikTok.resolvedUrl) {
-            items.push({ id: 'tiktok', platform: 'TikTok', icon: '🎵', color: '#67e8f9', username: snapshot.tikTok.username, url: snapshot.tikTok.resolvedUrl });
+            items.push({
+                id: 'tiktok',
+                platform: 'TikTok',
+                icon: '🎵',
+                color: '#67e8f9',
+                username: snapshot.tikTok.username,
+                designation: snapshot.tikTok.designation,
+                url: snapshot.tikTok.resolvedUrl
+            });
         }
-        if (snapshot.bluesky.enabled || snapshot.bluesky.resolvedUrl) {
-            items.push({ id: 'bluesky', platform: 'Bluesky', icon: '🦋', color: '#38bdf8', username: snapshot.bluesky.username, url: snapshot.bluesky.resolvedUrl });
-        }
-        if (snapshot.reddit.enabled || snapshot.reddit.resolvedUrl) {
-            items.push({ id: 'reddit', platform: 'Reddit', icon: '🤖', color: '#f97316', username: snapshot.reddit.username, url: snapshot.reddit.resolvedUrl });
-        }
-        if (snapshot.youtube.enabled || snapshot.youtube.resolvedUrl) {
-            items.push({ id: 'youtube', platform: 'YouTube', icon: '▶️', color: '#f87171', username: snapshot.youtube.username, url: snapshot.youtube.resolvedUrl });
-        }
+
         if (snapshot.instagram.enabled || snapshot.instagram.resolvedUrl) {
-            items.push({ id: 'instagram', platform: 'Instagram', icon: '📸', color: '#f9a8d4', username: snapshot.instagram.username, url: snapshot.instagram.resolvedUrl });
+            items.push({
+                id: 'instagram',
+                platform: 'Instagram',
+                icon: '📸',
+                color: '#f9a8d4',
+                username: snapshot.instagram.username,
+                designation: snapshot.instagram.designation,
+                url: snapshot.instagram.resolvedUrl
+            });
         }
+
+        if (snapshot.youtube.enabled || snapshot.youtube.resolvedUrl) {
+            items.push({
+                id: 'youtube',
+                platform: 'YouTube',
+                icon: '▶️',
+                color: '#f87171',
+                username: snapshot.youtube.username,
+                designation: snapshot.youtube.designation,
+                url: snapshot.youtube.resolvedUrl
+            });
+        }
+
         if (snapshot.twitter.enabled || snapshot.twitter.resolvedUrl) {
-            items.push({ id: 'twitter', platform: 'Twitter / X', icon: '🐦', color: '#38bdf8', username: snapshot.twitter.username, url: snapshot.twitter.resolvedUrl });
+            items.push({
+                id: 'twitter',
+                platform: 'Twitter / X',
+                icon: '🐦',
+                color: '#38bdf8',
+                username: snapshot.twitter.username,
+                designation: snapshot.twitter.designation,
+                url: snapshot.twitter.resolvedUrl
+            });
         }
+
         if (snapshot.linkedin.enabled || snapshot.linkedin.resolvedUrl) {
-            items.push({ id: 'linkedin', platform: 'LinkedIn', icon: '💼', color: '#60a5fa', username: snapshot.linkedin.username, url: snapshot.linkedin.resolvedUrl });
+            items.push({
+                id: 'linkedin',
+                platform: 'LinkedIn',
+                icon: '💼',
+                color: '#60a5fa',
+                username: snapshot.linkedin.username,
+                designation: snapshot.linkedin.designation,
+                url: snapshot.linkedin.resolvedUrl
+            });
+        }
+
+        if (snapshot.bluesky.enabled || snapshot.bluesky.resolvedUrl) {
+            items.push({
+                id: 'bluesky',
+                platform: 'Bluesky',
+                icon: '🦋',
+                color: '#60a5fa',
+                username: snapshot.bluesky.username,
+                designation: snapshot.bluesky.designation,
+                url: snapshot.bluesky.resolvedUrl
+            });
+        }
+
+        if (customRssFeeds.length > 0) {
+            customRssFeeds.forEach((feed) => {
+                items.push({
+                    id: `rss-${feed.id}`,
+                    platform: `RSS · ${feed.source}`,
+                    icon: '📡',
+                    color: '#f97316',
+                    username: feed.source,
+                    designation: 'custom-rss-feed',
+                    url: feed.rssUrl
+                });
+            });
         }
 
         if (activePlatform === 'all') return items;
+        if (activePlatform === 'rss') {
+            return items.filter((item) => String(item.id || '').startsWith('rss-'));
+        }
         return items.filter((item) => item.id === activePlatform);
-    }, [snapshot, activePlatform]);
+    }, [snapshot, activePlatform, customRssFeeds]);
 
     const filteredFeedItems = useMemo(() => {
-        const query = searchQuery.trim().toLowerCase();
+        const query = feedSearch.trim().toLowerCase();
         const seen = new Set();
 
         return feedItems.filter((item) => {
             const platform = String(item.platform || '').toLowerCase();
             const text = String(item.text || '').toLowerCase();
-            const author = String(item.authorHandle || '').toLowerCase();
             const matchesPlatform = activePlatform === 'all' || platform === activePlatform;
-            const matchesSearch = !query || text.includes(query) || author.includes(query);
+            const matchesSearch = !query || text.includes(query) || String(item.authorHandle || '').toLowerCase().includes(query);
             const duplicateKey = normalizeFeedKey(item);
             const isDuplicate = seen.has(duplicateKey);
             const isProfane = hasProfanity(item.text || '');
@@ -504,49 +795,105 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
             return false;
         });
-    }, [feedItems, activePlatform, searchQuery, hideDuplicates, hideProfanity]);
+    }, [feedItems, activePlatform, feedSearch, hideDuplicates, hideProfanity]);
 
     const activeMeta = PLATFORMS.find((p) => p.id === activePlatform) || PLATFORMS[0];
+    const connectedPlatforms = getConnectedPlatforms(snapshot);
+    const connectablePlatformCount = PLATFORMS.filter((platform) => platform.id !== 'all' && platform.id !== 'reddit' && platform.id !== 'rss').length;
+    const previewItemsByPlatform = useMemo(() => {
+        const grouped = {};
+        for (const item of filteredFeedItems) {
+            const key = String(item?.platform || '').toLowerCase().trim();
+            if (!key) {
+                continue;
+            }
+            if (!grouped[key]) {
+                grouped[key] = [];
+            }
+            grouped[key].push(item);
+        }
+        return grouped;
+    }, [filteredFeedItems]);
 
     return (
         <section
             style={{
-                background: 'linear-gradient(160deg, rgba(15,23,42,0.85), rgba(15,23,42,0.95))',
-                backdropFilter: 'blur(12px)',
+                background: 'var(--card-bg)',
                 border: '1px solid var(--border-color)',
                 borderRadius: '16px',
-                padding: compact ? '14px' : '22px',
-                marginBottom: '24px',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+                padding: compact ? '14px' : '20px',
+                marginBottom: '20px'
             }}
         >
-            {/* Header with Title & Action Controls */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+            {/* Header with Title & Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
                 <div>
-                    <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <h3 style={{ margin: 0, fontSize: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>{activeMeta.icon}</span> Multi-Platform Social & Feed Aggregator
-                    </h2>
+                    </h3>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>
-                        Synced live for <strong>{snapshot.userName}</strong> · {filteredFeedItems.length} items loaded · Updated {new Date(snapshot.checkedAt).toLocaleTimeString()}
+                        Synced live for {snapshot.userName} · {feedItems.length} items loaded · Updated {new Date(snapshot.checkedAt).toLocaleTimeString()}
                     </div>
+                </div>
+
+                <div
+                    style={{
+                        marginBottom: '14px',
+                        borderRadius: '10px',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        background: 'rgba(56, 189, 248, 0.08)',
+                        padding: '10px 12px',
+                        display: 'grid',
+                        gap: '8px'
+                    }}
+                >
+                    <div style={{ fontSize: '12px', fontWeight: 700 }}>
+                        Connected Accounts: {connectedPlatforms.length}/{connectablePlatformCount}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {connectedPlatforms.length > 0 ? connectedPlatforms.map((platform) => (
+                            <span
+                                key={platform.id}
+                                style={{
+                                    fontSize: '11px',
+                                    borderRadius: '999px',
+                                    border: `1px solid ${platform.color}`,
+                                    color: platform.color,
+                                    padding: '3px 8px',
+                                    fontWeight: 600
+                                }}
+                            >
+                                {platform.icon} {platform.label} connected
+                            </span>
+                        )) : (
+                            <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                                No connected accounts yet. Use “⚙️ Connect Accounts” to link handles.
+                            </span>
+                        )}
+                    </div>
+                    {connectionNotice && (
+                        <div style={{ fontSize: '11px', color: '#bae6fd' }}>
+                            {connectionNotice}
+                        </div>
+                    )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button
                         type="button"
-                        onClick={() => setShowRssManager(!showRssManager)}
+                        onClick={() => setShowCustomRssFeeds(!showCustomRssFeeds)}
                         style={{
-                            border: '1px solid rgba(234, 179, 8, 0.4)',
-                            background: 'rgba(234, 179, 8, 0.1)',
-                            color: '#eab308',
+                            border: '1px solid rgba(249, 115, 22, 0.45)',
+                            background: 'rgba(249, 115, 22, 0.1)',
+                            color: '#fdba74',
                             borderRadius: '8px',
-                            padding: '6px 14px',
+                            padding: '6px 12px',
                             fontSize: '12px',
                             fontWeight: 600,
                             cursor: 'pointer'
                         }}
                     >
-                        📡 Custom RSS Feeds ({rssSubscriptions.length})
+                        📡 Custom RSS Feeds ({customRssFeeds.length})
                     </button>
                     <button
                         type="button"
@@ -569,7 +916,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         onClick={() => setShowHandleConfig(!showHandleConfig)}
                         style={{
                             border: '1px solid var(--border-color)',
-                            background: 'rgba(255,255,255,0.06)',
+                            background: 'rgba(255,255,255,0.05)',
                             color: 'var(--text-color)',
                             borderRadius: '8px',
                             padding: '6px 12px',
@@ -581,11 +928,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     </button>
                     <button
                         type="button"
-                        onClick={() => setShowApiDoc(!showApiDoc)}
+                        onClick={() => setShowDeveloperApis(!showDeveloperApis)}
                         style={{
-                            border: '1px solid rgba(168, 85, 247, 0.4)',
-                            background: 'rgba(168, 85, 247, 0.1)',
-                            color: '#c084fc',
+                            border: '1px solid rgba(148, 163, 184, 0.45)',
+                            background: 'rgba(148, 163, 184, 0.08)',
+                            color: '#cbd5e1',
                             borderRadius: '8px',
                             padding: '6px 12px',
                             fontSize: '12px',
@@ -598,59 +945,111 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </div>
             </div>
 
-            {/* Curator Controls */}
-            <div
-                style={{
-                    display: 'grid',
-                    gap: '10px',
-                    marginBottom: '18px',
-                    padding: '14px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-color)',
-                    background: 'rgba(15,23,42,0.55)'
-                }}
-            >
-                <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
-                    🧭 Curator Controls & View Layouts
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                        <span>Search posts</span>
+            {showCustomRssFeeds && (
+                <form
+                    onSubmit={handleAddCustomFeed}
+                    style={{
+                        display: 'grid',
+                        gap: '10px',
+                        marginBottom: '16px',
+                        padding: '12px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '12px',
+                        background: 'rgba(249, 115, 22, 0.06)'
+                    }}
+                >
+                    <div style={{ fontSize: '13px', fontWeight: 700 }}>Custom RSS & Atom Feed Subscription Manager</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(260px,2fr) auto', gap: '8px' }}>
                         <input
-                            type="search"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by text or author"
-                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                            type="text"
+                            value={customFeedSource}
+                            onChange={(event) => setCustomFeedSource(event.target.value)}
+                            placeholder="Source name (optional)"
+                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                         />
-                    </label>
-                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                        <span>Display template</span>
-                        <select
-                            value={displayTemplate}
-                            onChange={(e) => setDisplayTemplate(e.target.value)}
-                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        <input
+                            type="url"
+                            value={customFeedUrl}
+                            onChange={(event) => setCustomFeedUrl(event.target.value)}
+                            placeholder="https://example.com/rss.xml or atom.xml"
+                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        />
+                        <button
+                            type="submit"
+                            style={{ border: 'none', background: '#f97316', color: '#111827', borderRadius: '6px', padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}
                         >
-                            {CURATED_TEMPLATES.map((template) => (
-                                <option key={template.id} value={template.id}>{template.label}</option>
-                            ))}
-                        </select>
-                    </label>
+                            Add feed
+                        </button>
+                    </div>
+                    {customFeedError && <div style={{ fontSize: '12px', color: '#fca5a5' }}>{customFeedError}</div>}
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {customRssFeeds.length === 0 ? (
+                            <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>No custom feeds connected yet.</span>
+                        ) : customRssFeeds.map((feed) => (
+                            <span
+                                key={feed.id}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '4px 10px', fontSize: '12px' }}
+                            >
+                                {feed.source}
+                                <button
+                                    type="button"
+                                    onClick={() => handleRemoveCustomFeed(feed.id)}
+                                    style={{ border: 'none', background: 'transparent', color: '#fca5a5', cursor: 'pointer', padding: 0 }}
+                                >
+                                    Remove
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                </form>
+            )}
+
+            {showDeveloperApis && (
+                <div
+                    style={{
+                        marginBottom: '16px',
+                        padding: '12px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '12px',
+                        background: 'rgba(148, 163, 184, 0.07)',
+                        display: 'grid',
+                        gap: '8px'
+                    }}
+                >
+                    <div style={{ fontSize: '13px', fontWeight: 700 }}>Developer API Connection Status</div>
+                    {providerStatusError && (
+                        <div style={{ fontSize: '12px', color: '#fca5a5' }}>{providerStatusError}</div>
+                    )}
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                        {providerStatuses.map((provider) => (
+                            <div
+                                key={provider.platform}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '10px',
+                                    padding: '8px 10px',
+                                    background: 'rgba(0,0,0,0.2)',
+                                    fontSize: '12px'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '3px' }}>
+                                    <strong style={{ textTransform: 'capitalize' }}>{provider.platform}</strong>
+                                    <span style={{ color: provider.readConfigured || provider.publishConfigured ? '#86efac' : '#fca5a5' }}>
+                                        {provider.activeMode}
+                                    </span>
+                                </div>
+                                <div style={{ color: 'var(--light-color)' }}>
+                                    Read: {provider.readConfigured ? 'configured' : 'not configured'} · Publish: {provider.publishConfigured ? 'configured' : 'not configured'}
+                                </div>
+                                <div style={{ color: '#cbd5e1', marginTop: '2px' }}>{provider.detail}</div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '12px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={hideDuplicates} onChange={(e) => setHideDuplicates(e.target.checked)} />
-                        Hide duplicates
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={hideProfanity} onChange={(e) => setHideProfanity(e.target.checked)} />
-                        Hide profanity
-                    </label>
-                </div>
-            </div>
+            )}
 
             {/* Platform Selector Tabs */}
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '16px' }}>
                 {PLATFORMS.map((platform) => (
                     <button
                         key={platform.id}
@@ -658,18 +1057,17 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         onClick={() => setActivePlatform(platform.id)}
                         style={{
                             border: activePlatform === platform.id ? `1px solid ${platform.color}` : '1px solid var(--border-color)',
-                            background: activePlatform === platform.id ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.4)',
+                            background: activePlatform === platform.id ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.4)',
                             color: 'var(--text-color)',
                             borderRadius: '999px',
-                            padding: '8px 16px',
+                            padding: '8px 14px',
                             fontSize: '12px',
                             fontWeight: activePlatform === platform.id ? 700 : 400,
                             cursor: 'pointer',
                             whiteSpace: 'nowrap',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '6px',
-                            transition: 'all 0.2s ease'
+                            gap: '6px'
                         }}
                     >
                         <span>{platform.icon}</span> {platform.label}
@@ -677,87 +1075,34 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 ))}
             </div>
 
-            {/* Custom RSS Manager Drawer */}
-            {showRssManager && (
-                <div
-                    style={{
-                        background: 'rgba(15, 23, 42, 0.8)',
-                        border: '1px solid rgba(234, 179, 8, 0.4)',
-                        borderRadius: '12px',
-                        padding: '16px',
-                        marginBottom: '18px',
-                        display: 'grid',
-                        gap: '12px'
-                    }}
-                >
-                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#eab308', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        📡 Custom RSS & Atom Feed Subscription Manager
-                    </div>
-
-                    <form onSubmit={handleAddRssFeed} style={{ display: 'flex', gap: '8px' }}>
-                        <input
-                            type="url"
-                            value={newRssUrl}
-                            onChange={(e) => setNewRssUrl(e.target.value)}
-                            placeholder="Enter RSS/Atom XML feed URL (e.g. https://techcrunch.com/feed/)"
-                            style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff', fontSize: '12px' }}
-                        />
-                        <button
-                            type="submit"
-                            disabled={!newRssUrl.trim()}
-                            style={{ border: 'none', background: '#eab308', color: '#000', borderRadius: '6px', padding: '8px 16px', fontWeight: 700, cursor: 'pointer' }}
-                        >
-                            + Add Feed
-                        </button>
-                    </form>
-
-                    <div style={{ display: 'grid', gap: '6px' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--light-color)' }}>Active RSS Subscriptions:</div>
-                        {rssSubscriptions.length === 0 ? (
-                            <div style={{ fontSize: '12px', color: '#94a3b8' }}>No custom RSS feeds added yet.</div>
-                        ) : (
-                            rssSubscriptions.map((url, idx) => (
-                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.3)', padding: '6px 12px', borderRadius: '6px', fontSize: '12px' }}>
-                                    <span style={{ color: '#fef08a', wordBreak: 'break-all' }}>{url}</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleRemoveRssFeed(url)}
-                                        style={{ border: 'none', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}
-                                    >
-                                        Remove
-                                    </button>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-            )}
-
             {/* Account Handle Configuration Drawer */}
             {showHandleConfig && (
                 <form
                     onSubmit={handleSaveHandles}
                     style={{
-                        background: 'rgba(15,23,42,0.85)',
+                        background: 'rgba(15,23,42,0.7)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '12px',
-                        padding: '18px',
-                        marginBottom: '18px',
+                        padding: '16px',
+                        marginBottom: '16px',
                         display: 'grid',
-                        gap: '14px'
+                        gap: '12px'
                     }}
                 >
                     <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
-                        🔗 Configure Social Media Handles / Subreddits / Channel Handles
+                        🔗 Configure Social Media Handles / Page IDs
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        Just enter your public handle or page name. No API keys are required from users here.
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>📘 Facebook Page ID or Handle</span>
                             <input
                                 type="text"
                                 value={handles.facebook}
                                 onChange={(e) => setHandles({ ...handles, facebook: e.target.value })}
-                                placeholder="e.g. MyBrandPage"
+                                placeholder="e.g. MyBrandPage or 109283749283"
                                 style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
@@ -774,45 +1119,23 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🦋 Bluesky Handle</span>
-                            <input
-                                type="text"
-                                value={handles.bluesky}
-                                onChange={(e) => setHandles({ ...handles, bluesky: e.target.value })}
-                                placeholder="e.g. bsky.app or user.bsky.social"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🤖 Reddit Subreddit</span>
-                            <input
-                                type="text"
-                                value={handles.reddit}
-                                onChange={(e) => setHandles({ ...handles, reddit: e.target.value })}
-                                placeholder="e.g. technology or news"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>▶️ YouTube Channel Handle / ID</span>
-                            <input
-                                type="text"
-                                value={handles.youtube}
-                                onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
-                                placeholder="e.g. MyChannel or UCxxxx"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>📸 Instagram Username</span>
                             <input
                                 type="text"
                                 value={handles.instagram}
                                 onChange={(e) => setHandles({ ...handles, instagram: e.target.value })}
                                 placeholder="e.g. mybrand"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                            />
+                        </label>
+
+                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                            <span>▶️ YouTube Channel Handle</span>
+                            <input
+                                type="text"
+                                value={handles.youtube}
+                                onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
+                                placeholder="e.g. MyChannel"
                                 style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
@@ -835,6 +1158,16 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 value={handles.linkedin}
                                 onChange={(e) => setHandles({ ...handles, linkedin: e.target.value })}
                                 placeholder="e.g. company-name"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                            />
+                        </label>
+                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                            <span>🦋 Bluesky Handle</span>
+                            <input
+                                type="text"
+                                value={handles.bluesky}
+                                onChange={(e) => setHandles({ ...handles, bluesky: e.target.value })}
+                                placeholder="e.g. wiseravenshare.bsky.social"
                                 style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
@@ -865,19 +1198,19 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     background: 'linear-gradient(145deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))',
                     border: '1px solid var(--border-color)',
                     borderRadius: '12px',
-                    padding: '18px',
-                    marginBottom: '20px'
+                    padding: '16px',
+                    marginBottom: '18px'
                 }}
             >
-                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    ✍️ Multi-Platform Crosspost Publisher ({activeMeta.label})
+                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ✍️ Post to Social Media Feed ({activeMeta.label})
                 </div>
 
                 <textarea
                     rows={3}
                     value={postMessage}
                     onChange={(e) => setPostMessage(e.target.value)}
-                    placeholder={`Write an update or announcement to publish across ${activeMeta.label}, Facebook, TikTok, YouTube, Bluesky...`}
+                    placeholder={`Write an update or post to publish to ${activeMeta.label} or cross-post across platforms...`}
                     style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -890,7 +1223,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '10px' }}>
                     <input
                         type="url"
                         value={mediaUrlInput}
@@ -902,26 +1235,22 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         type="url"
                         value={linkUrlInput}
                         onChange={(e) => setLinkUrlInput(e.target.value)}
-                        placeholder="Link URL (optional for Facebook/Bluesky/LinkedIn)"
+                        placeholder="Link URL (optional for Facebook/LinkedIn)"
                         style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '12px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={publishFacebook} onChange={(e) => setPublishFacebook(e.target.checked)} />
                             📘 Facebook
                         </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishBluesky} onChange={(e) => setPublishBluesky(e.target.checked)} />
-                            🦋 Bluesky
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={publishTikTok} onChange={(e) => setPublishTikTok(e.target.checked)} />
                             🎵 TikTok
                         </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={publishYouTube} onChange={(e) => setPublishYouTube(e.target.checked)} />
                             ▶️ YouTube
                         </label>
@@ -935,13 +1264,12 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             background: isPublishing ? 'var(--border-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                             color: '#fff',
                             borderRadius: '8px',
-                            padding: '10px 22px',
+                            padding: '10px 20px',
                             fontWeight: 700,
-                            cursor: isPublishing ? 'wait' : 'pointer',
-                            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.3)'
+                            cursor: isPublishing ? 'wait' : 'pointer'
                         }}
                     >
-                        {isPublishing ? 'Publishing...' : '🚀 Publish Multi-Post'}
+                        {isPublishing ? 'Publishing...' : '🚀 Publish Post'}
                     </button>
                 </div>
 
@@ -966,99 +1294,194 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 )}
             </form>
 
-            {/* Embedded Active Feed Channels Stream */}
-            {timelineItems.length > 0 && (
-                <div style={{ display: 'grid', gap: '14px', marginBottom: '20px' }}>
-                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#93c5fd' }}>
-                        Active Embedded Channel Streams ({timelineItems.length})
+            {/* Curator Controls */}
+            <div
+                style={{
+                    display: 'grid',
+                    gap: '10px',
+                    marginBottom: '18px',
+                    padding: '14px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(15,23,42,0.55)'
+                }}
+            >
+                <div style={{ fontWeight: 700, fontSize: '14px' }}>
+                    🧭 Curator Controls & View Layouts
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Search posts</span>
+                        <input
+                            type="search"
+                            value={feedSearch}
+                            onChange={(e) => setFeedSearch(e.target.value)}
+                            placeholder="Search by text or author"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span>Display template</span>
+                        <select
+                            value={displayTemplate}
+                            onChange={(e) => setDisplayTemplate(e.target.value)}
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                        >
+                            {CURATED_TEMPLATES.map((template) => (
+                                <option key={template.id} value={template.id}>{template.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '12px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideDuplicates} onChange={(e) => setHideDuplicates(e.target.checked)} />
+                        Hide duplicates
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={hideProfanity} onChange={(e) => setHideProfanity(e.target.checked)} />
+                        Hide profanity
+                    </label>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                    Showing {filteredFeedItems.length} curated item{filteredFeedItems.length === 1 ? '' : 's'}.
+                </div>
+            </div>
+
+            {/* Platform Accounts & Feeds Stream */}
+            <div style={{ display: 'grid', gap: '14px', marginBottom: '18px' }}>
+                <div style={{ fontWeight: 700, fontSize: '14px' }}>
+                    Active Feed Feeds & Embed Streams
+                </div>
+
+                {timelineItems.length === 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--light-color)', padding: '12px', border: '1px dashed var(--border-color)', borderRadius: '8px' }}>
+                        {activePlatform === 'rss' ? (
+                            <>No custom RSS feeds configured. Use <strong>📡 Custom RSS Feeds</strong> to add one.</>
+                        ) : (
+                            <>
+                                No account configured for {activeMeta.label}. Click{' '}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowHandleConfig(true)}
+                                    style={{
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: 'var(--highlight-color)',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        textDecoration: 'underline'
+                                    }}
+                                >
+                                    ⚙️ Connect Accounts
+                                </button>
+                                {' '}to set your handle/URL.
+                            </>
+                        )}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
+                ) : (
+                    <div style={{ display: 'grid', gap: '14px' }}>
                         {timelineItems.map((item) => (
-                            <FeedEmbedCard key={`${item.id}-feed-embed`} item={item} compact={compact} />
+                            <FeedEmbedCard
+                                key={`${item.id}-feed-embed`}
+                                item={item}
+                                compact={compact}
+                                previewItems={String(item.id || '').startsWith('rss-') ? (previewItemsByPlatform.rss || []) : (previewItemsByPlatform[item.id] || [])}
+                            />
                         ))}
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
-            {/* Live Aggregated Feed Timeline */}
-            <div style={{ marginTop: '16px' }}>
-                <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>Live {activeMeta.label} Stream Items ({filteredFeedItems.length})</span>
-                    {isLoadingFeed && <span style={{ fontSize: '12px', color: '#38bdf8' }}>Refreshing feeds...</span>}
+            {/* Live Feed Rendering */}
+            <div style={{ marginTop: '14px' }}>
+                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px' }}>
+                    Live {activeMeta.label} Posts Feed
                 </div>
 
-                {!isLoadingFeed && filteredFeedItems.length === 0 && (
-                    <div style={{ fontSize: '13px', color: 'var(--light-color)', padding: '16px', border: '1px dashed var(--border-color)', borderRadius: '10px', textAlign: 'center' }}>
-                        No live items returned for {activeMeta.label}. Configure handles in "⚙️ Connect Accounts" or add RSS feeds to populate live items.
+                {isLoadingFeed && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                        Refreshing {activeMeta.label} stream...
                     </div>
                 )}
 
-                <div style={{ display: 'grid', gap: displayTemplate === 'list' ? '8px' : '12px' }}>
-                    {filteredFeedItems.map((item) => {
-                        const platformColor =
-                            item.platform === 'facebook' ? '#93c5fd' :
-                            item.platform === 'tiktok' ? '#67e8f9' :
-                            item.platform === 'bluesky' ? '#38bdf8' :
-                            item.platform === 'reddit' ? '#f97316' :
-                            item.platform === 'youtube' ? '#f87171' :
-                            item.platform === 'rss' ? '#eab308' : '#a855f7';
+                {!isLoadingFeed && filteredFeedItems.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                        {activePlatform === 'rss' ? (
+                            <>No RSS items returned. Verify your feed URL in <strong>📡 Custom RSS Feeds</strong>.</>
+                        ) : (
+                            <>
+                                No live items returned for {activeMeta.label}. Add page/username in{' '}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowHandleConfig(true)}
+                                    style={{
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: 'var(--highlight-color)',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        textDecoration: 'underline'
+                                    }}
+                                >
+                                    ⚙️ Connect Accounts
+                                </button>
+                                {' '}to populate feed.
+                            </>
+                        )}
+                    </div>
+                )}
 
-                        return (
-                            <article
-                                key={`${item.platform}-${item.externalId}`}
-                                style={{
-                                    border: `1px solid rgba(255,255,255,0.08)`,
-                                    borderLeft: `4px solid ${platformColor}`,
-                                    borderRadius: '10px',
-                                    padding: '14px',
-                                    background: displayTemplate === 'signage' ? 'rgba(255,255,255,0.06)' : 'rgba(15, 23, 42, 0.5)',
-                                    display: displayTemplate === 'list' ? 'grid' : 'block',
-                                    gap: displayTemplate === 'list' ? '8px' : '0',
-                                    transition: 'transform 0.15s ease'
-                                }}
-                            >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                    <span style={{ textTransform: 'uppercase', fontWeight: 800, color: platformColor }}>
-                                        {item.platform} {item.authorHandle ? `• ${item.authorHandle}` : ''}
-                                    </span>
-                                    <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</span>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                    {filteredFeedItems.map((item) => (
+                        <article
+                            key={`${item.platform}-${item.externalId}`}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '10px',
+                                padding: '12px',
+                                background: displayTemplate === 'signage'
+                                    ? 'rgba(255,255,255,0.06)'
+                                    : 'rgba(255,255,255,0.02)',
+                                display: displayTemplate === 'list' ? 'grid' : 'block',
+                                gap: displayTemplate === 'list' ? '8px' : '0'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '11px', color: 'var(--light-color)' }}>
+                                <span style={{ textTransform: 'uppercase', fontWeight: 700, color: activeMeta.color }}>
+                                    {item.platform}
+                                </span>
+                                <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</span>
+                            </div>
+
+                            <div style={{ marginTop: '8px', fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                                {item.text || 'No text provided.'}
+                            </div>
+
+                            {item.mediaUrl && (
+                                <div style={{ marginTop: '8px' }}>
+                                    <img src={item.mediaUrl} alt="Feed Media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
                                 </div>
+                            )}
 
-                                <div style={{ marginTop: '8px', fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
-                                    {item.text || 'No text content.'}
-                                </div>
-
-                                {item.mediaUrl && (
-                                    <div style={{ marginTop: '10px' }}>
-                                        <img
-                                            src={item.mediaUrl}
-                                            alt="Feed Thumbnail"
-                                            style={{ maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', objectFit: 'cover' }}
-                                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                        />
-                                    </div>
-                                )}
-
-                                {item.permalinkUrl && (
-                                    <a
-                                        href={item.permalinkUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        style={{
-                                            marginTop: '10px',
-                                            display: 'inline-block',
-                                            fontSize: '12px',
-                                            color: platformColor,
-                                            textDecoration: 'none',
-                                            fontWeight: 600
-                                        }}
-                                    >
-                                        Open Original Post ↗
-                                    </a>
-                                )}
-                            </article>
-                        );
-                    })}
+                            {item.permalinkUrl && (
+                                <a
+                                    href={item.permalinkUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                        marginTop: '8px',
+                                        display: 'inline-block',
+                                        fontSize: '12px',
+                                        color: 'var(--highlight-color)',
+                                        textDecoration: 'none'
+                                    }}
+                                >
+                                    Open original post ↗
+                                </a>
+                            )}
+                        </article>
+                    ))}
                 </div>
             </div>
 
@@ -1077,7 +1500,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         🎬 TikTok App Review Demo Video Walkthrough Script
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.6, marginBottom: '14px' }}>
-                        TikTok Developer App Review requires submitting a 1–2 minute screen recording demo video showing the end-to-end user flow:
+                        TikTok Developer App Review requires submitting a 1–2 minute screen recording demo video showing the end-to-end user flow. Follow these steps when recording your screen:
                     </div>
 
                     <div style={{ display: 'grid', gap: '10px', fontSize: '12px' }}>
@@ -1091,46 +1514,27 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <div style={{ border: '1px solid rgba(103, 232, 249, 0.3)', borderRadius: '8px', padding: '10px', background: 'rgba(0,0,0,0.3)' }}>
                             <strong style={{ color: '#38bdf8' }}>Step 2: Show TikTok Account Connection (OAuth Flow)</strong>
                             <div style={{ marginTop: '4px', color: 'var(--light-color)' }}>
-                                Open <strong>⚙️ Connect Accounts</strong> or <strong>Profile Settings</strong>, click <strong>"Connect TikTok Account"</strong>, and show the TikTok OAuth authorization dialog requesting permissions.
+                                Open <strong>⚙️ Connect Accounts</strong> or <strong>Profile Settings</strong>, click <strong>"Connect TikTok Account"</strong>, and show the TikTok OAuth authorization dialog requesting <code>user.info.basic</code>, <code>video.list</code>, and <code>video.publish</code> permissions.
                             </div>
                         </div>
 
                         <div style={{ border: '1px solid rgba(103, 232, 249, 0.3)', borderRadius: '8px', padding: '10px', background: 'rgba(0,0,0,0.3)' }}>
                             <strong style={{ color: '#38bdf8' }}>Step 3: Create & Select Video Content</strong>
                             <div style={{ marginTop: '4px', color: 'var(--light-color)' }}>
-                                Select a video file or URL, enter a caption, and check the <strong>🎵 TikTok</strong> target box.
+                                Navigate to <strong>Ravensight Video Studio</strong> or the <strong>Post Creator</strong>. Record or select a video file, enter a caption (e.g., "Testing WiseRaven TikTok publishing integration"), and check the <strong>🎵 TikTok</strong> target box.
                             </div>
                         </div>
 
                         <div style={{ border: '1px solid rgba(103, 232, 249, 0.3)', borderRadius: '8px', padding: '10px', background: 'rgba(0,0,0,0.3)' }}>
                             <strong style={{ color: '#38bdf8' }}>Step 4: Execute Direct Publish & Show Confirmation</strong>
                             <div style={{ marginTop: '4px', color: 'var(--light-color)' }}>
-                                Click <strong>🚀 Publish Post</strong>. Show the real-time confirmation response.
+                                Click <strong>🚀 Publish Post</strong>. Show the real-time response returning <code>TIKTOK: Published successfully! ID: ...</code> and open the published video on TikTok.
                             </div>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Comprehensive API Requirements Section */}
-            {showApiDoc && (
-                <div
-                    style={{
-                        marginTop: '20px',
-                        background: 'linear-gradient(160deg, rgba(124, 58, 237, 0.1), rgba(15, 23, 42, 0.9))',
-                        border: '1px solid rgba(168, 85, 247, 0.4)',
-                        borderRadius: '12px',
-                        padding: '18px'
-                    }}
-                >
-                    <div style={{ fontWeight: 800, fontSize: '16px', color: '#c084fc', marginBottom: '6px' }}>
-                        📋 External APIs Supported for Live Multi-Platform Sync
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.6, marginBottom: '14px' }}>
-                        Wiseravenshare aggregates live feeds and supports multi-platform cross-posting across Meta (Facebook/Instagram), TikTok, Bluesky (AT Protocol), Reddit, YouTube Data API, and universal RSS 2.0 / Atom XML feeds.
-                    </div>
-                </div>
-            )}
         </section>
     );
 };

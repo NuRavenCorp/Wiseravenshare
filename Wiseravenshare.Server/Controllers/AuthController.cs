@@ -562,6 +562,19 @@ public class AuthController : ControllerBase
             user = _userStore.CreateUser(displayName, normalizedEmail, generatedPassword, string.Empty, string.Empty, string.Empty, string.Empty);
         }
 
+        var socialFeedActivationRequest = BuildSocialFeedActivationRequest(normalizedProvider, profile);
+        if (socialFeedActivationRequest is not null)
+        {
+            try
+            {
+                user = _userStore.UpdateSocialFeeds(user.Id, socialFeedActivationRequest);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Unable to activate social feed settings for {Provider} on {Email}.", normalizedProvider, normalizedEmail);
+            }
+        }
+
         var domainUserId = await EnsureDomainUserAsync(user);
         var accessScope = ResolveAccessScope(user.Email);
         var teamRole = ResolveTeamRole(user.Email);
@@ -1840,6 +1853,86 @@ public class AuthController : ControllerBase
             ? Convert.ToHexString(RandomNumberGenerator.GetBytes(12)).ToLowerInvariant()
             : profile.ProviderUserId.Trim().ToLowerInvariant();
         return $"{provider}.{providerUserId}@oauth.wise-ravens.local";
+    }
+
+    private static UpdateSocialFeedsRequest? BuildSocialFeedActivationRequest(string provider, SocialProfile profile)
+    {
+        var connection = BuildSocialFeedConnection(provider, profile);
+        if (connection is null)
+        {
+            return null;
+        }
+
+        return provider switch
+        {
+            "facebook" => new UpdateSocialFeedsRequest { Facebook = connection },
+            "tiktok" => new UpdateSocialFeedsRequest { TikTok = connection },
+            "youtube" => new UpdateSocialFeedsRequest { YouTube = connection },
+            "twitter" => new UpdateSocialFeedsRequest { Twitter = connection },
+            "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = connection },
+            _ => null
+        };
+    }
+
+    private static SocialFeedConnection? BuildSocialFeedConnection(string provider, SocialProfile profile)
+    {
+        var identifier = ResolveSocialAccountIdentifier(provider, profile);
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return null;
+        }
+
+        var profileUrl = BuildSocialProfileUrl(provider, identifier);
+        var designation = provider switch
+        {
+            "facebook" => "facebook-page",
+            "tiktok" => "tiktok-creator",
+            "youtube" => "youtube-channel",
+            "twitter" => "x-profile",
+            "linkedin" => "linkedin-profile",
+            _ => string.Empty
+        };
+
+        return new SocialFeedConnection
+        {
+            Enabled = true,
+            Username = identifier,
+            ProfileUrl = profileUrl,
+            FeedUrl = profileUrl,
+            Designation = designation
+        };
+    }
+
+    private static string ResolveSocialAccountIdentifier(string provider, SocialProfile profile)
+    {
+        var providerUserId = (profile.ProviderUserId ?? string.Empty).Trim();
+        var displayName = (profile.Name ?? string.Empty).Trim().TrimStart('@');
+
+        return provider switch
+        {
+            "facebook" => providerUserId,
+            "tiktok" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
+            "youtube" or "twitter" or "linkedin" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
+            _ => string.Empty
+        };
+    }
+
+    private static string BuildSocialProfileUrl(string provider, string identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return string.Empty;
+        }
+
+        return provider switch
+        {
+            "facebook" => $"https://www.facebook.com/{identifier}",
+            "tiktok" => $"https://www.tiktok.com/@{identifier}",
+            "youtube" => $"https://www.youtube.com/@{identifier}",
+            "twitter" => $"https://x.com/{identifier}",
+            "linkedin" => $"https://www.linkedin.com/in/{identifier}",
+            _ => string.Empty
+        };
     }
 
     private static string BuildUrl(string baseUrl, IReadOnlyDictionary<string, string?> queryParameters)

@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { videoService } from '../../Services/videoService';
+import { apiService } from '../../Services/api';
 import {
     getRavensightLocalSaveRootPreference,
     getRavensightLocalFolderPermission,
@@ -49,6 +50,9 @@ export const VideoStudio: React.FC = () => {
     const [folderPermission, setFolderPermission] = useState<RavensightLocalFolderPermission | null>(null);
     const [isPermissionLoading, setIsPermissionLoading] = useState(false);
     const [isPermissionSaving, setIsPermissionSaving] = useState(false);
+    const [musicLibrary, setMusicLibrary] = useState<Array<{ id: string; title?: string; artist?: string; album?: string; genre?: string; mediaUrl?: string }>>([]);
+    const [musicLibraryLoading, setMusicLibraryLoading] = useState(false);
+    const [selectedMusicTrackId, setSelectedMusicTrackId] = useState('');
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -79,6 +83,12 @@ export const VideoStudio: React.FC = () => {
         formData.append('youTubePermissionGranted', 'false');
         formData.append('privacy', privacy);
         formData.append('privacyStatus', privacy);
+        formData.append('musicTrackId', selectedMusicTrack?.id || '');
+        formData.append('musicTrackTitle', selectedMusicTrack?.title || '');
+        formData.append('musicTrackUrl', selectedMusicTrack?.mediaUrl || '');
+        formData.append('musicTrackArtist', selectedMusicTrack?.artist || '');
+        formData.append('musicTrackAlbum', selectedMusicTrack?.album || '');
+        formData.append('musicTrackGenre', selectedMusicTrack?.genre || '');
         formData.append('destinationFolder', '/wiseravenshare/ravensight/video');
         formData.append('storageMode', 'temporary');
         formData.append('isPermanent', 'false');
@@ -138,6 +148,43 @@ export const VideoStudio: React.FC = () => {
             isMounted = false;
         };
     }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadMusicLibrary = async () => {
+            try {
+                setMusicLibraryLoading(true);
+                const response = await apiService.getMusicLibrary();
+                if (!isMounted) {
+                    return;
+                }
+
+                const tracks = Array.isArray(response?.data) ? response.data : [];
+                setMusicLibrary(tracks);
+                if (!selectedMusicTrackId && tracks.length > 0) {
+                    setSelectedMusicTrackId(tracks[0].id || '');
+                }
+            } catch (error) {
+                console.warn('Unable to load music library for video soundtrack selection:', error);
+                if (isMounted) {
+                    setMusicLibrary([]);
+                }
+            } finally {
+                if (isMounted) {
+                    setMusicLibraryLoading(false);
+                }
+            }
+        };
+
+        void loadMusicLibrary();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const selectedMusicTrack = musicLibrary.find((track) => String(track?.id || '') === String(selectedMusicTrackId || ''));
 
     const startRecording = async () => {
         try {
@@ -310,6 +357,7 @@ export const VideoStudio: React.FC = () => {
         setDescription('');
         setHasAutoSaved(false);
         setIsAutoSaving(false);
+        setSelectedMusicTrackId(musicLibrary[0]?.id || '');
     };
 
     const formatTime = (seconds: number) => {
@@ -437,6 +485,37 @@ export const VideoStudio: React.FC = () => {
                             className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary focus:ring-1 focus:ring-primary transition resize-none"
                             disabled={!videoURL}
                         />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">
+                        Add Music to Video
+                        </label>
+                        <select
+                        value={selectedMusicTrackId}
+                        onChange={(e) => setSelectedMusicTrackId(e.target.value)}
+                        disabled={musicLibraryLoading || musicLibrary.length === 0}
+                        className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary focus:ring-1 focus:ring-primary transition"
+                        >
+                        <option value="">
+                            {musicLibraryLoading ? 'Loading music library...' : 'No soundtrack selected'}
+                        </option>
+                        {musicLibrary.map((track) => (
+                            <option key={track.id} value={track.id}>
+                                {track.artist ? `${track.artist} — ` : ''}{track.title || 'Untitled track'}
+                            </option>
+                        ))}
+                        </select>
+                        {selectedMusicTrack && (
+                        <div className="mt-2 rounded-lg border border-primary/25 bg-primary/10 p-3 text-sm text-gray-200">
+                            <div className="font-semibold">{selectedMusicTrack.title}</div>
+                            <div className="text-xs text-gray-400">
+                                {selectedMusicTrack.artist || 'Unknown artist'}
+                                {selectedMusicTrack.album ? ` • ${selectedMusicTrack.album}` : ''}
+                                {selectedMusicTrack.genre ? ` • ${selectedMusicTrack.genre}` : ''}
+                            </div>
+                        </div>
+                        )}
                     </div>
 
                     <div>

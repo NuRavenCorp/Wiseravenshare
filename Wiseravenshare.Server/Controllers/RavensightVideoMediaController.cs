@@ -100,7 +100,18 @@ public sealed class RavensightVideoMediaController : ControllerBase
                 title = dto.Title,
                 description = dto.Description,
                 privacy = dto.Privacy,
-                storageMode = resolvedStorageMode
+                storageMode = resolvedStorageMode,
+                music = string.IsNullOrWhiteSpace(dto.MusicTrackId)
+                    ? null
+                    : new
+                    {
+                        id = dto.MusicTrackId,
+                        title = dto.MusicTrackTitle,
+                        url = dto.MusicTrackUrl,
+                        artist = dto.MusicTrackArtist,
+                        album = dto.MusicTrackAlbum,
+                        genre = dto.MusicTrackGenre
+                    }
             })
         }, cancellationToken);
 
@@ -118,7 +129,13 @@ public sealed class RavensightVideoMediaController : ControllerBase
                     PrivacyStatus = "unlisted",
                     Status = "published",
                     StorageMode = resolvedStorageMode,
-                    IsPermanent = resolvedStorageMode == "permanent"
+                    IsPermanent = resolvedStorageMode == "permanent",
+                    MusicTrackId = string.IsNullOrWhiteSpace(dto.MusicTrackId) ? null : dto.MusicTrackId.Trim(),
+                    MusicTrackTitle = string.IsNullOrWhiteSpace(dto.MusicTrackTitle) ? null : dto.MusicTrackTitle.Trim(),
+                    MusicTrackUrl = string.IsNullOrWhiteSpace(dto.MusicTrackUrl) ? null : dto.MusicTrackUrl.Trim(),
+                    MusicTrackArtist = string.IsNullOrWhiteSpace(dto.MusicTrackArtist) ? null : dto.MusicTrackArtist.Trim(),
+                    MusicTrackAlbum = string.IsNullOrWhiteSpace(dto.MusicTrackAlbum) ? null : dto.MusicTrackAlbum.Trim(),
+                    MusicTrackGenre = string.IsNullOrWhiteSpace(dto.MusicTrackGenre) ? null : dto.MusicTrackGenre.Trim()
                 }, ct),
                 BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription),
                 TimeSpan.FromSeconds(5));
@@ -204,6 +221,12 @@ public sealed class RavensightVideoMediaController : ControllerBase
             ThumbnailUrl = string.Empty,
             Status = "published",
             PrivacyStatus = "unlisted",
+            MusicTrackId = string.IsNullOrWhiteSpace(dto.MusicTrackId) ? null : dto.MusicTrackId.Trim(),
+            MusicTrackTitle = string.IsNullOrWhiteSpace(dto.MusicTrackTitle) ? null : dto.MusicTrackTitle.Trim(),
+            MusicTrackUrl = string.IsNullOrWhiteSpace(dto.MusicTrackUrl) ? null : dto.MusicTrackUrl.Trim(),
+            MusicTrackArtist = string.IsNullOrWhiteSpace(dto.MusicTrackArtist) ? null : dto.MusicTrackArtist.Trim(),
+            MusicTrackAlbum = string.IsNullOrWhiteSpace(dto.MusicTrackAlbum) ? null : dto.MusicTrackAlbum.Trim(),
+            MusicTrackGenre = string.IsNullOrWhiteSpace(dto.MusicTrackGenre) ? null : dto.MusicTrackGenre.Trim(),
             StorageMode = resolvedStorageMode,
             RetentionStatus = VideoRetentionPolicy.GetStorageStatus(now, dto.IsPermanent, nowUtc: now, hasActiveSubscription: hasActiveSubscription),
             CreatedAt = now,

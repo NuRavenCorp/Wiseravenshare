@@ -127,6 +127,7 @@ const aiFallbackNews = [
 
 const baseCategories = ['All', 'Business', 'Productivity', 'Research', 'Policy', 'Engineering', 'Security', 'Healthcare', 'Education', 'General'];
 const baseCoverage = ['All', 'Breaking', 'Nationwide', 'International', 'BBC', 'Free Tier'];
+const CUSTOM_FEEDS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
 
 const breakingKeywords = /(breaking|urgent|alert|war|attack|crisis|storm|flood|quake|evacuation|protest|election)/i;
 
@@ -156,6 +157,41 @@ const freeTierFeeds = [
         coverage: ['Nationwide', 'Free Tier']
     }
 ];
+
+const normalizeCoverageLabel = (value) => {
+    const trimmed = String(value || '').trim();
+    return trimmed || 'Custom';
+};
+
+const normalizeCustomFeed = (feed, index = 0) => {
+    const rawSource = String(feed?.source || '').trim();
+    const rawUrl = String(feed?.rssUrl || feed?.url || '').trim();
+    const rawCoverage = Array.isArray(feed?.coverage)
+        ? feed.coverage.map(normalizeCoverageLabel).filter(Boolean)
+        : [];
+
+    return {
+        id: String(feed?.id || `custom-feed-${index}`).trim() || `custom-feed-${index}`,
+        source: rawSource || `Custom Feed ${index + 1}`,
+        rssUrl: rawUrl,
+        coverage: rawCoverage.length > 0 ? rawCoverage : ['Custom', 'Free Tier']
+    };
+};
+
+const readCustomFeeds = () => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(CUSTOM_FEEDS_STORAGE_KEY) || '[]');
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+
+        return parsed
+            .map((feed, index) => normalizeCustomFeed(feed, index))
+            .filter((feed) => Boolean(feed.rssUrl));
+    } catch {
+        return [];
+    }
+};
 
 const humanTime = (iso) => {
     const date = new Date(iso);
@@ -296,8 +332,8 @@ const mapRssItemToArticle = (feed, item, index) => {
     };
 };
 
-const fetchFreeTierFeedArticles = async () => {
-    const requests = freeTierFeeds.map(async (feed) => {
+const fetchFeedArticles = async (feeds) => {
+    const requests = feeds.map(async (feed) => {
         try {
             const rssToJsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rssUrl)}`;
             const response = await fetch(rssToJsonUrl);
@@ -319,10 +355,19 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [selectedCoverage, setSelectedCoverage] = useState(baseCoverage.includes(initialCoverage) ? initialCoverage : 'All');
     const [newsItems, setNewsItems] = useState(aiFallbackNews);
+    const [customFeeds, setCustomFeeds] = useState(() => readCustomFeeds());
+    const [customFeedSource, setCustomFeedSource] = useState('');
+    const [customFeedUrl, setCustomFeedUrl] = useState('');
+    const [customFeedCoverage, setCustomFeedCoverage] = useState('Custom');
+    const [customFeedError, setCustomFeedError] = useState('');
 
     useEffect(() => {
         setSelectedCoverage(baseCoverage.includes(initialCoverage) ? initialCoverage : 'All');
     }, [initialCoverage]);
+
+    useEffect(() => {
+        localStorage.setItem(CUSTOM_FEEDS_STORAGE_KEY, JSON.stringify(customFeeds));
+    }, [customFeeds]);
 
     useEffect(() => {
         let cancelled = false;
@@ -332,7 +377,8 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
                 const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
                 const postArticles = [...feedPosts, ...discoverPosts].slice(0, 18).map(toArticleFromPost);
-                const freeTierArticles = await fetchFreeTierFeedArticles();
+                const allFeeds = [...freeTierFeeds, ...customFeeds];
+                const freeTierArticles = await fetchFeedArticles(allFeeds);
 
                 const merged = [...freeTierArticles, ...postArticles, ...aiFallbackNews]
                     .map(normalizeArticle)
@@ -354,7 +400,59 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [customFeeds]);
+
+    const handleAddCustomFeed = (event) => {
+        event.preventDefault();
+        const url = String(customFeedUrl || '').trim();
+        const source = String(customFeedSource || '').trim();
+        const coverage = normalizeCoverageLabel(customFeedCoverage);
+        setCustomFeedError('');
+
+        if (!url) {
+            setCustomFeedError('Feed URL is required.');
+            return;
+        }
+
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch {
+            setCustomFeedError('Feed URL must be a valid absolute URL.');
+            return;
+        }
+
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            setCustomFeedError('Feed URL must start with http:// or https://.');
+            return;
+        }
+
+        setCustomFeeds((prev) => {
+            const alreadyExists = prev.some((feed) => String(feed.rssUrl || '').trim().toLowerCase() === parsed.toString().toLowerCase());
+            if (alreadyExists) {
+                setCustomFeedError('That feed is already subscribed.');
+                return prev;
+            }
+
+            return [
+                {
+                    id: `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+                    source: source || parsed.hostname.replace(/^www\./i, ''),
+                    rssUrl: parsed.toString(),
+                    coverage: [coverage, 'Custom', 'Free Tier'].filter((value, index, arr) => arr.indexOf(value) === index)
+                },
+                ...prev
+            ];
+        });
+
+        setCustomFeedSource('');
+        setCustomFeedUrl('');
+        setCustomFeedCoverage('Custom');
+    };
+
+    const handleRemoveCustomFeed = (feedId) => {
+        setCustomFeeds((prev) => prev.filter((feed) => feed.id !== feedId));
+    };
 
     const availableCategories = useMemo(() => {
         const dynamic = [...new Set(newsItems.map((item) => item.category).filter(Boolean))].sort();
@@ -468,6 +566,114 @@ const AINews = ({ onOpenArticle, initialCoverage = 'All' }) => {
                     ))}
                 </select>
             </div>
+
+            <form
+                onSubmit={handleAddCustomFeed}
+                style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '12px',
+                    background: 'rgba(255,255,255,0.02)',
+                    padding: '12px',
+                    marginBottom: '16px',
+                    display: 'grid',
+                    gap: '10px'
+                }}
+            >
+                <div style={{ fontSize: '13px', fontWeight: 700 }}>Custom RSS & Atom Feed Subscription Manager</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) minmax(260px, 2fr) minmax(140px, 1fr) auto', gap: '8px' }}>
+                    <input
+                        value={customFeedSource}
+                        onChange={(e) => setCustomFeedSource(e.target.value)}
+                        placeholder="Feed name (optional)"
+                        style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                    <input
+                        value={customFeedUrl}
+                        onChange={(e) => setCustomFeedUrl(e.target.value)}
+                        placeholder="https://example.com/rss or atom.xml"
+                        style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                    <select
+                        value={customFeedCoverage}
+                        onChange={(e) => setCustomFeedCoverage(e.target.value)}
+                        style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    >
+                        <option value="Custom">Custom</option>
+                        <option value="Breaking">Breaking</option>
+                        <option value="Nationwide">Nationwide</option>
+                        <option value="International">International</option>
+                    </select>
+                    <button
+                        type="submit"
+                        style={{
+                            border: '1px solid var(--highlight-color)',
+                            background: 'rgba(79, 116, 214, 0.22)',
+                            color: 'var(--text-color)',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            cursor: 'pointer',
+                            fontWeight: 700
+                        }}
+                    >
+                        Add feed
+                    </button>
+                </div>
+                {customFeedError && (
+                    <div style={{ fontSize: '12px', color: '#fca5a5' }}>{customFeedError}</div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {customFeeds.length === 0 ? (
+                        <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>No custom feeds subscribed yet.</span>
+                    ) : customFeeds.map((feed) => (
+                        <span
+                            key={feed.id}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                borderRadius: '999px',
+                                border: '1px solid var(--border-color)',
+                                padding: '5px 10px',
+                                fontSize: '12px'
+                            }}
+                        >
+                            <span>{feed.source}</span>
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveCustomFeed(feed.id)}
+                                style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#fca5a5',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    fontSize: '12px'
+                                }}
+                            >
+                                Remove
+                            </button>
+                        </span>
+                    ))}
+                </div>
+            </form>
 
             <div style={{ display: 'grid', gap: '12px' }}>
                 {groupedNews.map((group) => (
