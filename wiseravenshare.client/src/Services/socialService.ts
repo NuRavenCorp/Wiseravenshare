@@ -56,6 +56,37 @@ export type PublishSocialContentResponse = {
   results: SocialPublishResult[];
 };
 
+export type TikTokUserInfo = {
+  openId?: string;
+  unionId?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  bioDescription?: string;
+  followerCount: number;
+  followingCount: number;
+  likesCount: number;
+};
+
+export type TikTokVideoItem = {
+  id: string;
+  title?: string;
+  videoDescription?: string;
+  createTime: number;
+  coverImageUrl?: string;
+  shareUrl?: string;
+  embedLink?: string;
+  likeCount: number;
+  commentCount: number;
+  shareCount: number;
+  viewCount: number;
+};
+
+export type TikTokVideoListResponse = {
+  videos: TikTokVideoItem[];
+  cursor: number;
+  hasMore: boolean;
+};
+
 function getAuthToken(): string | null {
   return getSharedAuthToken();
 }
@@ -87,6 +118,51 @@ async function getCombinedFeed(limit = 10, pageId?: string, username?: string, b
   const response = await fetch(`${apiBase}/api/social/feed?${query.toString()}`, { method: 'GET' });
   if (!response.ok) {
     throw new Error(await parseError(response, `Failed to load social feed (${response.status})`));
+  }
+
+  return response.json();
+}
+
+async function getTikTokAuthUrl(redirectUri: string, state?: string): Promise<{ authUrl: string; scopes: string }> {
+  const query = new URLSearchParams({ redirectUri });
+  if (state) query.append('state', state);
+
+  const response = await fetch(`${apiBase}/api/tiktok/auth-url?${query.toString()}`, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(await parseError(response, 'Failed to fetch TikTok auth URL.'));
+  }
+  return response.json();
+}
+
+async function getTikTokUserInfo(): Promise<TikTokUserInfo | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+
+  const response = await fetch(`${apiBase}/api/tiktok/user/info`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!response.ok) return null;
+  return response.json();
+}
+
+async function getTikTokVideos(cursor = 0, maxCount = 20): Promise<TikTokVideoListResponse> {
+  const query = new URLSearchParams({ cursor: String(cursor), maxCount: String(maxCount) });
+  const headers: Record<string, string> = {};
+
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${apiBase}/api/tiktok/videos?${query.toString()}`, {
+    method: 'GET',
+    headers
+  });
+
+  if (!response.ok) {
+    return { videos: [], cursor: 0, hasMore: false };
   }
 
   return response.json();
@@ -126,6 +202,9 @@ async function getProviderStatuses(): Promise<SocialProviderStatus[]> {
 
 export const socialService = {
   getCombinedFeed,
+  getTikTokAuthUrl,
+  getTikTokUserInfo,
+  getTikTokVideos,
   publishContent,
   getProviderStatuses,
 };

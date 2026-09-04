@@ -1108,7 +1108,35 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🎵 TikTok Username</span>
+                            <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>🎵 TikTok Username</span>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            const redirectUri = `${window.location.origin}/oauth/tiktok/callback`;
+                                            const res = await socialService.getTikTokAuthUrl(redirectUri);
+                                            if (res?.authUrl) {
+                                                window.open(res.authUrl, '_blank', 'width=600,height=700');
+                                            }
+                                        } catch (err) {
+                                            alert('Failed to launch TikTok OAuth dialog. Ensure Social:TikTok:ClientKey is set.');
+                                        }
+                                    }}
+                                    style={{
+                                        border: 'none',
+                                        background: 'rgba(103, 232, 249, 0.2)',
+                                        color: '#67e8f9',
+                                        borderRadius: '4px',
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        cursor: 'pointer',
+                                        fontWeight: 700
+                                    }}
+                                >
+                                    🔑 Authorize OAuth v2
+                                </button>
+                            </span>
                             <input
                                 type="text"
                                 value={handles.tiktok}

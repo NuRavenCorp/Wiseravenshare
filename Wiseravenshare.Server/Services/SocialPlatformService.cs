@@ -39,13 +39,23 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly IConfiguration _configuration;
     private readonly ILogger<SocialPlatformService> _logger;
     private readonly IYouTubeService _youTubeService;
+    private readonly IRssFeedService _rssFeedService;
+    private readonly ITikTokAggregatorService _tikTokAggregatorService;
 
-    public SocialPlatformService(HttpClient httpClient, IConfiguration configuration, ILogger<SocialPlatformService> logger, IYouTubeService youTubeService)
+    public SocialPlatformService(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<SocialPlatformService> logger,
+        IYouTubeService youTubeService,
+        IRssFeedService rssFeedService,
+        ITikTokAggregatorService tikTokAggregatorService)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
         _youTubeService = youTubeService;
+        _rssFeedService = rssFeedService;
+        _tikTokAggregatorService = tikTokAggregatorService;
     }
 
     public async Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit)
@@ -105,51 +115,32 @@ public class SocialPlatformService : ISocialPlatformService
             : username;
 
         var accessToken = _configuration["Social:TikTok:AccessToken"];
-        if (string.IsNullOrWhiteSpace(resolvedUsername) || string.IsNullOrWhiteSpace(accessToken))
+        if (string.IsNullOrWhiteSpace(accessToken))
         {
             return [];
         }
 
-        var safeLimit = Math.Clamp(limit, 1, 20);
-        var fields = "id,create_time,cover_image_url,share_url,title,video_description";
-        var requestUrl = $"{TikTokApiBase}/video/list/?fields={Uri.EscapeDataString(fields)}";
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Content = JsonContent.Create(new { max_count = safeLimit });
-
-        using var response = await _httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            _logger.LogWarning("TikTok feed request failed: {Status} {Body}", (int)response.StatusCode, body);
-            return [];
-        }
-
-        var json = await response.Content.ReadAsStringAsync();
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty("data", out var data)
-            || !data.TryGetProperty("videos", out var videos)
-            || videos.ValueKind != JsonValueKind.Array)
+        var catalog = await _tikTokAggregatorService.GetVideoCatalogAsync(accessToken, cursor: 0, maxCount: limit);
+        if (catalog == null || catalog.Videos.Count == 0)
         {
             return [];
         }
 
         var items = new List<SocialFeedItemDto>();
-        foreach (var video in videos.EnumerateArray())
+        foreach (var video in catalog.Videos)
         {
-            var title = video.TryGetProperty("title", out var titleNode) ? titleNode.GetString() : null;
-            var description = video.TryGetProperty("video_description", out var descriptionNode) ? descriptionNode.GetString() : null;
+            var textBody = string.IsNullOrWhiteSpace(video.VideoDescription) ? video.Title : video.VideoDescription;
+            var formattedText = $"[🎵 TikTok • {video.ViewCount} 👁️ • {video.LikeCount} ❤️ • {video.CommentCount} 💬]\n{textBody}";
 
             items.Add(new SocialFeedItemDto
             {
                 Platform = "tiktok",
-                ExternalId = video.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
-                Text = string.IsNullOrWhiteSpace(description) ? title : description,
-                MediaUrl = video.TryGetProperty("cover_image_url", out var cover) ? cover.GetString() : null,
-                PermalinkUrl = video.TryGetProperty("share_url", out var share) ? share.GetString() : null,
-                AuthorHandle = resolvedUsername,
-                CreatedAt = ParseUnixDate(video, "create_time")
+                ExternalId = video.Id,
+                Text = formattedText,
+                MediaUrl = video.CoverImageUrl,
+                PermalinkUrl = video.ShareUrl ?? video.EmbedLink,
+                AuthorHandle = resolvedUsername ?? "TikTok Creator",
+                CreatedAt = video.CreateTime > 0 ? DateTimeOffset.FromUnixTimeSeconds(video.CreateTime) : DateTimeOffset.UtcNow
             });
         }
 

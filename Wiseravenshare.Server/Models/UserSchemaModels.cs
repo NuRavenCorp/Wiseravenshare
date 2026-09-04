@@ -34,6 +34,9 @@ public sealed class SocialFeedConnection
     public string ProfileUrl { get; set; } = string.Empty;
     public string FeedUrl { get; set; } = string.Empty;
     public string Designation { get; set; } = string.Empty;
+    public string AccessToken { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+    public DateTimeOffset? TokenExpiresAt { get; set; }
 }
 
 public sealed class UserResponse
