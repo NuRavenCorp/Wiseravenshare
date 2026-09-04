@@ -56,6 +56,20 @@ const parseAdminEmails = () => {
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
 };
 
+const hasPrivilegedAggregatorRole = (user) => {
+    const roleCandidates = [
+        user?.teamRole,
+        user?.role,
+        user?.effectiveRole,
+        user?.accessScope,
+        user?.access_scope
+    ]
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean);
+
+    return roleCandidates.includes('privileged') || roleCandidates.includes('priveledged');
+};
+
 const resolveInitialPublicPage = () => {
     if (typeof window === 'undefined') {
         return 'public-home';
@@ -106,6 +120,9 @@ const App = () => {
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.has(email);
     }, [adminEmails, user?.email]);
+    const canAccessPlatformAggregator = useMemo(() => {
+        return isAdminUser || hasPrivilegedAggregatorRole(user);
+    }, [isAdminUser, user]);
 
     useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';
@@ -158,6 +175,11 @@ const App = () => {
 
     useEffect(() => {
         const handleOpenSocialAggregator = (event) => {
+            if (!canAccessPlatformAggregator) {
+                addToast('Platform aggregator is restricted to admin and priveledged users.', 'info');
+                return;
+            }
+
             const detail = event?.detail || {};
             const requestedPlatform = String(detail.platform || '').trim().toLowerCase().replace('-feed', '');
             const platformPage = requestedPlatform && requestedPlatform !== 'all' ? `${requestedPlatform}-feed` : '';
@@ -178,7 +200,7 @@ const App = () => {
         return () => {
             window.removeEventListener('wiseraven:open-social-aggregator', handleOpenSocialAggregator);
         };
-    }, []);
+    }, [addToast, canAccessPlatformAggregator]);
 
     useEffect(() => {
         if (!isAuthenticated) {
@@ -421,7 +443,9 @@ const App = () => {
             case 'linkedin-feed':
             case 'bluesky-feed':
             case 'social-feeds':
-                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />;
+                return canAccessPlatformAggregator
+                    ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Platform aggregator access is limited to admin and priveledged users.</div>;
             case 'ravensight':
                 return <RavensightVideo onNavigate={navigateFromRavensight} />;
             case 'newsroom-video':
@@ -534,6 +558,42 @@ const App = () => {
                     </div>
                 ))}
             </div>
+
+            <div style={{ marginTop: '28px', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '24px', background: 'var(--card-bg)' }}>
+                <h2 style={{ marginTop: 0, marginBottom: '16px', fontSize: '20px' }}>Frequently Asked Questions</h2>
+                <div style={{ display: 'grid', gap: '16px' }}>
+                    <div>
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>What is WiseRavenShare?</h3>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
+                            WiseRavenShare is a public media collaboration platform designed for podcasters, journalists, content creators, and newsrooms to record, upload, verify, and distribute multimedia content securely across the internet and connected social media channels.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>Who can use WiseRavenShare?</h3>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
+                            Anyone can create an account to publish podcasts, record newsroom segments, upload music and video, and share stories across social platforms. Sign up is free and open to content creators worldwide.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>What are the main features?</h3>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
+                            Ravensight Studio for recording, AI-powered content verification and truth scoring, secure media upload with malware scanning, social distribution tools, collaborative newsroom workflows, and integrated messaging and notification systems.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>Is content moderated?</h3>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
+                            Yes. All uploads are scanned for malware as a mandatory security policy. Content is subject to our Terms of Service, and we enforce community guidelines to maintain a safe platform for creators and audiences.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>Can I connect social media accounts?</h3>
+                        <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
+                            Yes. Authenticated users can connect and manage accounts on Facebook, TikTok, Instagram, YouTube, Twitter, LinkedIn, and Bluesky to directly distribute content from WiseRavenShare to those platforms.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 
@@ -564,7 +624,6 @@ const App = () => {
     const navItems = [
         { id: 'feed', label: 'Feed' },
         { id: 'discover', label: 'Discover' },
-        { id: 'social-feeds', label: 'Social Feeds' },
         { id: 'bookmarks', label: 'Bookmarks' },
         { id: 'notifications', label: 'Notifications' },
         { id: 'messages', label: 'Messages' },
@@ -582,6 +641,10 @@ const App = () => {
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }
     ];
+
+    if (canAccessPlatformAggregator) {
+        navItems.splice(2, 0, { id: 'social-feeds', label: 'Social Feeds' });
+    }
 
     if (isAdminUser) {
         navItems.splice(8, 0,

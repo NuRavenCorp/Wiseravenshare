@@ -12,6 +12,20 @@ const parseAdminEmails = () => {
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
 };
 
+const hasPrivilegedAggregatorRole = (user) => {
+    const roleCandidates = [
+        user?.teamRole,
+        user?.role,
+        user?.effectiveRole,
+        user?.accessScope,
+        user?.access_scope
+    ]
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean);
+
+    return roleCandidates.includes('privileged') || roleCandidates.includes('priveledged');
+};
+
 const getConnection = (feeds, ...keys) => {
     const source = feeds || {};
     for (const key of keys) {
@@ -96,6 +110,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     const { updateProfile } = useAuth();
     const adminEmails = parseAdminEmails();
     const isAdminUser = adminEmails.has(String(user?.email || '').trim().toLowerCase());
+    const canAccessPlatformAggregator = isAdminUser || hasPrivilegedAggregatorRole(user);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -208,6 +223,10 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     ];
 
     const openAggregator = (platformId) => {
+        if (!canAccessPlatformAggregator) {
+            return;
+        }
+
         if (!platformId) {
             onNavigate('social-feeds');
             return;
@@ -220,6 +239,10 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
     };
 
     const openConnectAccounts = (platformId) => {
+        if (!canAccessPlatformAggregator) {
+            return;
+        }
+
         const platform = String(platformId || '').replace('-feed', '');
         onNavigate(platformId || 'social-feeds');
         window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
@@ -384,6 +407,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                 ))}
             </ul>
 
+            {canAccessPlatformAggregator && (
             <div style={{
                 marginTop: '14px',
                 background: 'var(--card-bg)',
@@ -480,6 +504,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                     })}
                 </div>
             </div>
+            )}
         </aside>
     );
 };
