@@ -31,6 +31,27 @@ const buttonStyle = {
     cursor: 'pointer'
 };
 
+const normalizeTeamSnapshot = (payload) => {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const members = Array.isArray(source.members) ? source.members : [];
+    const pendingInvites = Array.isArray(source.pendingInvites) ? source.pendingInvites : [];
+    return { members, pendingInvites };
+};
+
+const mergePendingInvites = (existingInvites, nextInvite) => {
+    const current = Array.isArray(existingInvites) ? existingInvites : [];
+    if (!nextInvite?.inviteId) {
+        return current;
+    }
+
+    const deduped = current.filter((invite) => invite?.inviteId !== nextInvite.inviteId);
+    return [nextInvite, ...deduped].sort((left, right) => {
+        const leftTime = new Date(left?.createdAtUtc || 0).getTime();
+        const rightTime = new Date(right?.createdAtUtc || 0).getTime();
+        return rightTime - leftTime;
+    });
+};
+
 const TeamAccessAdminPage = () => {
     const { user } = useAuth();
     const { addToast } = useNotification();
@@ -62,20 +83,35 @@ const TeamAccessAdminPage = () => {
 
         setLoading(true);
         try {
-            const [teamSnapshot, policyResponse, accountingResponse] = await Promise.all([
+            const [snapshotResult, policyResult, accountingResult] = await Promise.allSettled([
                 authService.getTeamAccessSnapshot(),
                 apiService.getAdminPolicyHistory(),
                 apiService.getAdminUserAccounting()
             ]);
 
-            setSnapshot(teamSnapshot || null);
-            const allHistory = Array.isArray(policyResponse?.data?.history) ? policyResponse.data.history : [];
-            setUserAccounting(accountingResponse?.data || null);
-            setAuditHistory(
-                allHistory
-                    .filter((record) => String(record?.policyKey || '').toLowerCase().startsWith('team-access.'))
-                    .slice(0, 20)
-            );
+            if (snapshotResult.status === 'fulfilled') {
+                setSnapshot(normalizeTeamSnapshot(snapshotResult.value));
+            } else {
+                setSnapshot(null);
+                addToast('Unable to load team snapshot.', 'error');
+            }
+
+            if (policyResult.status === 'fulfilled') {
+                const allHistory = Array.isArray(policyResult.value?.data?.history) ? policyResult.value.data.history : [];
+                setAuditHistory(
+                    allHistory
+                        .filter((record) => String(record?.policyKey || '').toLowerCase().startsWith('team-access.'))
+                        .slice(0, 20)
+                );
+            } else {
+                setAuditHistory([]);
+            }
+
+            if (accountingResult.status === 'fulfilled') {
+                setUserAccounting(accountingResult.value?.data || null);
+            } else {
+                setUserAccounting(null);
+            }
         } catch (error) {
             addToast(error?.message || 'Unable to load team access console.', 'error');
         } finally {
@@ -109,6 +145,21 @@ const TeamAccessAdminPage = () => {
                 emailDelivered: response?.emailDelivered === true,
                 emailDispatchStatus: response?.emailDispatchStatus || 'unknown'
             });
+            if (invite?.inviteId) {
+                const optimisticInvite = {
+                    ...invite,
+                    createdAtUtc: invite.createdAtUtc || new Date().toISOString(),
+                    teamRole: invite.teamRole || payload.teamRole,
+                    inviteeEmail: invite.inviteeEmail || payload.email
+                };
+                setSnapshot((prev) => {
+                    const current = normalizeTeamSnapshot(prev);
+                    return {
+                        ...current,
+                        pendingInvites: mergePendingInvites(current.pendingInvites, optimisticInvite)
+                    };
+                });
+            }
             setEmail('');
             setName('');
             setActionReason('');
