@@ -13,13 +13,13 @@ import { ErrorBoundary } from '../Components/Common/ErrorBoundary.jsx';
 import { consumeCollaborationHandoff } from '../Services/collaborationBridge';
 
 const card = {
-    background: 'var(--card-bg)', border: '1px solid var(--border-color)',
+    background: 'transparent', border: '1px solid var(--border-color)',
     borderRadius: '14px', padding: '20px'
 };
 
 const input = {
     width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px',
-    background: 'var(--background-color, rgba(255,255,255,0.05))', color: 'var(--text-color)',
+    background: 'transparent', color: 'var(--text-color)',
     border: '1px solid var(--border-color)', borderRadius: '10px'
 };
 
@@ -31,7 +31,35 @@ const primaryBtn = {
 
 const featureTile = {
     padding: '12px 8px', borderRadius: '10px', textAlign: 'center',
-    background: 'var(--background-color, rgba(255,255,255,0.05))'
+    background: 'transparent'
+};
+
+const extractRoomId = (roomPayload) => {
+    if (typeof roomPayload === 'string') {
+        const direct = roomPayload.trim();
+        return direct || '';
+    }
+
+    if (!roomPayload || typeof roomPayload !== 'object') {
+        return '';
+    }
+
+    const candidates = [
+        roomPayload.roomId,
+        roomPayload.roomID,
+        roomPayload.room_id,
+        roomPayload.id,
+        roomPayload.RoomId
+    ];
+
+    for (const candidate of candidates) {
+        const value = String(candidate || '').trim();
+        if (value) {
+            return value;
+        }
+    }
+
+    return '';
 };
 
 const CollaborationPage = ({ initialRoomId }) => {
@@ -78,7 +106,7 @@ const CollaborationPage = ({ initialRoomId }) => {
         setError(null);
         try {
             const room = await createRoom(roomName.trim(), platform);
-            const roomId = room?.roomId || room?.id;
+            const roomId = extractRoomId(room);
             if (roomId) setActiveRoomId(roomId);
             else setError('Room created but no ID was returned.');
         } catch (err) {
@@ -141,6 +169,18 @@ const CollaborationPage = ({ initialRoomId }) => {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: 640, margin: '0 auto' }}>
             <div style={{ textAlign: 'center' }}>
+                <img
+                    src="/raven-enflight.jpeg"
+                    alt="Raven enflight"
+                    style={{
+                        width: '96px',
+                        height: '96px',
+                        objectFit: 'cover',
+                        borderRadius: '50%',
+                        border: '1px solid var(--border-color)',
+                        marginBottom: '10px'
+                    }}
+                />
                 <h1 style={{ margin: '0 0 6px', fontSize: '22px' }}>Cross-Platform Collaboration</h1>
                 <p style={{ margin: 0, fontSize: '13px', color: 'var(--light-color)' }}>
                     Connect and collaborate with users across TikTok, Facebook, Instagram and more
@@ -156,7 +196,7 @@ const CollaborationPage = ({ initialRoomId }) => {
                 </div>
             )}
 
-            <div style={{ display: 'flex', gap: '4px', padding: '4px', borderRadius: '12px', background: 'var(--background-color, rgba(255,255,255,0.05))' }}>
+            <div style={{ display: 'flex', gap: '4px', padding: '4px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--border-color)' }}>
                 {tabBtn('create', FiPlus, 'Create Room')}
                 {tabBtn('join', FiLink, 'Join Room')}
             </div>

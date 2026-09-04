@@ -35,6 +35,7 @@ class PlannerState {
             goalsAchieved: 0
         };
         this.reminderDispatchInFlight = new Set();
+        this.deadlineNotificationLog = {};
         this.listeners = [];
         this.loadState();
         this.startReminderWatcher();
@@ -100,7 +101,128 @@ class PlannerState {
         return null;
     }
 
+    getDeadlineAlertWindow(dueDate) {
+        if (!dueDate) {
+            return null;
+        }
+
+        const targetDate = new Date(dueDate);
+        if (Number.isNaN(targetDate.getTime())) {
+            return null;
+        }
+
+        const hoursLeft = (targetDate.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (hoursLeft < 0) {
+            return { kind: 'overdue', hoursLeft };
+        }
+
+        if (hoursLeft <= 24) {
+            return { kind: 'due-24h', hoursLeft };
+        }
+
+        if (hoursLeft <= 72) {
+            return { kind: 'due-72h', hoursLeft };
+        }
+
+        return null;
+    }
+
+    getDeadlineAlertMessage(itemType, title, alertWindow) {
+        if (!alertWindow) {
+            return null;
+        }
+
+        const safeType = itemType === 'goal' ? 'Goal' : 'Task';
+        if (alertWindow.kind === 'overdue') {
+            return `${safeType} "${title}" is overdue.`;
+        }
+        if (alertWindow.kind === 'due-24h') {
+            return `${safeType} "${title}" is due within 24 hours.`;
+        }
+        return `${safeType} "${title}" is due within 72 hours.`;
+    }
+
+    shouldEmitDeadlineAlert(itemId, alertKind) {
+        const alertKey = `${itemId}:${alertKind}`;
+        const lastSentIso = this.deadlineNotificationLog[alertKey];
+        if (!lastSentIso) {
+            return true;
+        }
+
+        const lastSentAt = new Date(lastSentIso);
+        if (Number.isNaN(lastSentAt.getTime())) {
+            return true;
+        }
+
+        const cooldownMs = 12 * 60 * 60 * 1000;
+        return Date.now() - lastSentAt.getTime() >= cooldownMs;
+    }
+
+    markDeadlineAlertEmitted(itemId, alertKind) {
+        const nowIso = new Date().toISOString();
+        this.deadlineNotificationLog[`${itemId}:${alertKind}`] = nowIso;
+
+        const cutoff = Date.now() - (14 * 24 * 60 * 60 * 1000);
+        const nextLog = {};
+        Object.entries(this.deadlineNotificationLog).forEach(([key, value]) => {
+            const parsed = new Date(value);
+            if (!Number.isNaN(parsed.getTime()) && parsed.getTime() >= cutoff) {
+                nextLog[key] = value;
+            }
+        });
+        this.deadlineNotificationLog = nextLog;
+    }
+
+    processDeadlineNotifications() {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        let didUpdateLog = false;
+        const activeTasks = Object.values(this.tasks || {})
+            .flat()
+            .filter((task) => task && !task.completed);
+        const activeGoals = Object.values(this.goals || {})
+            .flat()
+            .filter((goal) => goal && !goal.completed && Number(goal.progress || 0) < 100);
+
+        const dueItems = [
+            ...activeTasks.map((task) => ({ id: task.id, itemType: 'task', title: task.title, dueDate: task.dueDate })),
+            ...activeGoals.map((goal) => ({ id: goal.id, itemType: 'goal', title: goal.title, dueDate: goal.dueDate }))
+        ];
+
+        dueItems.forEach((item) => {
+            const alertWindow = this.getDeadlineAlertWindow(item.dueDate);
+            if (!alertWindow || !item.id || !item.title) {
+                return;
+            }
+
+            if (!this.shouldEmitDeadlineAlert(item.id, alertWindow.kind)) {
+                return;
+            }
+
+            const message = this.getDeadlineAlertMessage(item.itemType, item.title, alertWindow);
+            if (!message) {
+                return;
+            }
+
+            this.emitPlannerNotification({
+                type: alertWindow.kind === 'overdue' ? 'warning' : 'info',
+                toastType: 'warning',
+                title: 'Planner deadline alert',
+                message
+            });
+            this.markDeadlineAlertEmitted(item.id, alertWindow.kind);
+            didUpdateLog = true;
+        });
+
+        if (didUpdateLog) {
+            this.saveState();
+        }
+    }
+
     saveState() {
+        this.calculateStats();
         const state = {
             goals: this.goals,
             tasks: this.tasks,
@@ -109,10 +231,10 @@ class PlannerState {
             completedTasks: this.completedTasks,
             settings: this.settings,
             stats: this.stats,
+            deadlineNotificationLog: this.deadlineNotificationLog,
             lastSave: new Date().toISOString()
         };
         localStorage.setItem('wiseRavenState', JSON.stringify(state));
-        this.calculateStats();
         this.notify();
     }
 
@@ -127,6 +249,7 @@ class PlannerState {
             this.completedTasks = state.completedTasks || this.completedTasks;
             this.settings = state.settings || this.settings;
             this.stats = state.stats || this.stats;
+            this.deadlineNotificationLog = state.deadlineNotificationLog || this.deadlineNotificationLog;
         } else {
             this.addSampleData();
         }
@@ -158,8 +281,10 @@ class PlannerState {
         }
 
         this.processCalendarReminders();
+        this.processDeadlineNotifications();
         window.setInterval(() => {
             this.processCalendarReminders();
+            this.processDeadlineNotifications();
         }, 60 * 1000);
     }
 
@@ -326,6 +451,7 @@ class PlannerState {
 
     calculateStats() {
         const allTasks = [...this.tasks.day, ...this.tasks.week, ...this.tasks.month];
+        const allGoals = Object.values(this.goals || {}).flat();
         const today = new Date().toDateString();
 
         this.stats.dailyCompleted = this.completedTasks.filter(
@@ -337,10 +463,12 @@ class PlannerState {
         if (allTasks.length > 0) {
             const completedCount = allTasks.filter(task => task.completed).length;
             this.stats.productivityScore = Math.round((completedCount / allTasks.length) * 100);
+        } else {
+            this.stats.productivityScore = 0;
         }
 
-        this.stats.goalsAchieved = this.completedTasks.filter(
-            task => task.type === 'goal'
+        this.stats.goalsAchieved = allGoals.filter(
+            goal => goal.completed || Number(goal.progress || 0) >= 100
         ).length;
     }
 
