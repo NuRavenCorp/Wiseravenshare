@@ -108,13 +108,16 @@ public class AuthController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            if (!_userStore.TryGetByEmail(request.Email.Trim(), out var createdUser) || createdUser is null)
+            if (string.Equals(ex.Message, "An account with that email already exists.", StringComparison.Ordinal))
             {
-                throw;
+                return Conflict(new { message = "An account with that email already exists." });
             }
 
-            user = createdUser;
-            _logger.LogWarning(ex, "Proceeding with signup despite persistence availability warning for {Email}.", user.Email);
+            _logger.LogWarning(ex, "Signup blocked because durable persistence is unavailable for {Email}.", request.Email);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Signup is temporarily unavailable while account storage reconnects. Please try again shortly."
+            });
         }
 
         try

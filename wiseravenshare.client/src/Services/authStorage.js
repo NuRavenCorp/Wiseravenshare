@@ -4,6 +4,19 @@ const LEGACY_TOKEN_KEYS = ['ws.accessToken', 'wise-raven-token'];
 const AUTH_COOKIE_NAME = 'wr_auth_token';
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
+const resolveCookieDomainFlag = (host) => {
+    const value = String(host || '').toLowerCase();
+    if (value === 'wise-ravens.com' || value === 'www.wise-ravens.com' || value.endsWith('.wise-ravens.com')) {
+        return '; Domain=.wise-ravens.com';
+    }
+
+    if (value === 'wiseravenshare.com' || value === 'www.wiseravenshare.com' || value.endsWith('.wiseravenshare.com')) {
+        return '; Domain=.wiseravenshare.com';
+    }
+
+    return '';
+};
+
 const getWindow = () => (typeof window !== 'undefined' ? window : globalThis);
 
 const getStorage = () => {
@@ -36,8 +49,7 @@ const writeCookie = (token) => {
     const secureFlag = win.location?.protocol === 'https:' ? '; Secure' : '';
     const sameSiteFlag = '; SameSite=Lax';
     const host = (win.location?.hostname || '').toLowerCase();
-    const isProductionHost = host === 'wise-ravens.com' || host === 'www.wise-ravens.com';
-    const domainFlag = isProductionHost ? '; Domain=.wise-ravens.com' : '';
+    const domainFlag = resolveCookieDomainFlag(host);
 
     const cookieValue = encodeURIComponent(token);
     const cookie = `${AUTH_COOKIE_NAME}=${cookieValue}; Path=/; Max-Age=${AUTH_COOKIE_MAX_AGE_SECONDS}${sameSiteFlag}${secureFlag}${domainFlag}`;
@@ -52,8 +64,7 @@ const clearCookie = () => {
 
     const secureFlag = win.location?.protocol === 'https:' ? '; Secure' : '';
     const host = (win.location?.hostname || '').toLowerCase();
-    const isProductionHost = host === 'wise-ravens.com' || host === 'www.wise-ravens.com';
-    const domainFlag = isProductionHost ? '; Domain=.wise-ravens.com' : '';
+    const domainFlag = resolveCookieDomainFlag(host);
     win.document.cookie = `${AUTH_COOKIE_NAME}=; Path=/; Max-Age=0${secureFlag}${domainFlag}`;
 };
 

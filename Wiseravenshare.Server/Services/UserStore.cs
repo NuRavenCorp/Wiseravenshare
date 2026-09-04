@@ -248,7 +248,16 @@ public sealed class UserStore
             throw new InvalidOperationException("An account with that email already exists.");
         }
 
-        PersistUsers(user);
+        try
+        {
+            PersistUsers(user);
+        }
+        catch
+        {
+            _usersByEmail.TryRemove(user.Email, out _);
+            throw;
+        }
+
         return user;
     }
 
@@ -830,7 +839,7 @@ public sealed class UserStore
 
         if (!dbSuccess && _requireDatabasePersistence)
         {
-            Console.WriteLine("Warning: Database persistence failed, but user state was persisted to local storage.");
+            throw new InvalidOperationException("User persistence requires a reachable database. Retry after database connectivity is restored.");
         }
     }
 
