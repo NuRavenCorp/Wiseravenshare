@@ -30,6 +30,7 @@ import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
 import MusicStudioPage from './Pages/MusicStudioPage';
+import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
@@ -126,6 +127,30 @@ const App = () => {
         sanitizeStoredArray('wiseBookmarks', sanitizePosts);
         sanitizeStoredArray('wiseMessagesConversations', sanitizePosts);
         localStorage.setItem(migrationKey, 'done');
+    }, []);
+
+    useEffect(() => {
+        const handleOpenSocialAggregator = (event) => {
+            const detail = event?.detail || {};
+            const requestedPlatform = String(detail.platform || '').trim().toLowerCase().replace('-feed', '');
+            const platformPage = requestedPlatform && requestedPlatform !== 'all' ? `${requestedPlatform}-feed` : '';
+            if (platformPage) {
+                setCurrentPage(platformPage);
+                return;
+            }
+
+            if (detail.page) {
+                setCurrentPage(detail.page);
+                return;
+            }
+
+            setCurrentPage('social-feeds');
+        };
+
+        window.addEventListener('wiseraven:open-social-aggregator', handleOpenSocialAggregator);
+        return () => {
+            window.removeEventListener('wiseraven:open-social-aggregator', handleOpenSocialAggregator);
+        };
     }, []);
 
     useEffect(() => {
@@ -367,6 +392,7 @@ const App = () => {
             case 'youtube-feed':
             case 'twitter-feed':
             case 'linkedin-feed':
+            case 'bluesky-feed':
             case 'social-feeds':
                 return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />;
             case 'ravensight':
@@ -391,6 +417,8 @@ const App = () => {
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'music-player':
                 return <MusicStudioPage onNavigate={setCurrentPage} />;
+            case 'my-library':
+                return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':
                 return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
@@ -429,6 +457,7 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'music-player', label: '🎚️ Music Studio' },
+        { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }
     ];

@@ -20,13 +20,18 @@ const normalizeSocialFeeds = (socialFeeds) => {
         enabled: Boolean(connection?.enabled),
         username: String(connection?.username || '').trim(),
         profileUrl: String(connection?.profileUrl || '').trim(),
-        feedUrl: String(connection?.feedUrl || '').trim()
+        feedUrl: String(connection?.feedUrl || '').trim(),
+        designation: String(connection?.designation || '').trim()
     });
 
     return {
         tikTok: mapConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: mapConnection(getConnection(feeds, 'facebook', 'Facebook')),
-        instagram: mapConnection(getConnection(feeds, 'instagram', 'Instagram'))
+        instagram: mapConnection(getConnection(feeds, 'instagram', 'Instagram')),
+        youtube: mapConnection(getConnection(feeds, 'youtube', 'YouTube')),
+        twitter: mapConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedin: mapConnection(getConnection(feeds, 'linkedin', 'LinkedIn')),
+        bluesky: mapConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
 };
 

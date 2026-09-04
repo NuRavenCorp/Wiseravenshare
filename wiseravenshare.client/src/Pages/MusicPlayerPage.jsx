@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch } from 'react-icons/fi';
 import AudioPlayer from '../Components/Ravensight/AudioPlayer';
-import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
+import { apiService } from '../Services/api';
 import '../Styles/MusicPlayer.css';
 
 /**
@@ -11,7 +11,6 @@ import '../Styles/MusicPlayer.css';
  * Supports all audio formats with equalizer and visualizer
  */
 const MusicPlayerPage = ({ onNavigate }) => {
-  const { user } = useAuth();
   const { addToast } = useNotification();
 
   // State management
@@ -28,6 +27,29 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const [showPlaylistMenu, setShowPlaylistMenu] = useState(null);
   const searchInputRef = useRef(null);
 
+  const normalizeTrack = (track) => {
+    if (!track || typeof track !== 'object') return null;
+    const mediaUrl = String(
+      track.mediaUrl
+      || track.url
+      || track.fileUrl
+      || track.publicUrl
+      || track.MediaUrl
+      || track.Url
+      || ''
+    ).trim();
+
+    return {
+      id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+      title: String(track.title || track.Title || 'Untitled').trim(),
+      artist: String(track.artist || track.Artist || '').trim(),
+      album: String(track.album || track.Album || '').trim(),
+      genre: String(track.genre || track.Genre || '').trim(),
+      mediaUrl,
+      url: mediaUrl
+    };
+  };
+
   // Load music library from backend or localStorage
   useEffect(() => {
     loadMusicLibrary();
@@ -36,31 +58,20 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const loadMusicLibrary = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('authToken');
-      
-      if (token) {
-        const response = await fetch('/api/ravensight/media/music', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const tracks = Array.isArray(data) ? data : [];
-          setMusicLibrary(tracks);
-          
-          if (tracks.length > 0) {
-            setCurrentTrack(tracks[0]);
-            setCurrentTrackIndex(0);
-          }
-        }
-      } else {
-        // No auth token — load from localStorage or start with empty library
-        const stored = localStorage.getItem('wiseMusic_library');
-        const tracks = stored ? JSON.parse(stored) : [];
-        setMusicLibrary(tracks);
-        if (tracks.length > 0) {
-          setCurrentTrack(tracks[0]);
-        }
+      const response = await apiService.getMusicLibrary();
+      const tracks = (Array.isArray(response?.data) ? response.data : [])
+        .map(normalizeTrack)
+        .filter(Boolean);
+      setMusicLibrary(tracks);
+      try {
+        localStorage.setItem('wiseMusic_library', JSON.stringify(tracks));
+      } catch {
+        /* ignore storage errors */
+      }
+
+      if (tracks.length > 0) {
+        setCurrentTrack(tracks[0]);
+        setCurrentTrackIndex(0);
       }
 
       // Load playlists
@@ -69,10 +80,21 @@ const MusicPlayerPage = ({ onNavigate }) => {
         setPlaylists(JSON.parse(storedPlaylists));
       }
     } catch (error) {
+      try {
+        const stored = localStorage.getItem('wiseMusic_library');
+        const tracks = (stored ? JSON.parse(stored) : [])
+          .map(normalizeTrack)
+          .filter(Boolean);
+        setMusicLibrary(tracks);
+        if (tracks.length > 0) {
+          setCurrentTrack(tracks[0]);
+          setCurrentTrackIndex(0);
+        }
+      } catch {
+        setMusicLibrary([]);
+      }
       console.error('Failed to load music library:', error);
       addToast('Failed to load music library', 'error');
-      setMusicLibrary([]);
-      setCurrentTrack(null);
     } finally {
       setIsLoading(false);
     }
@@ -84,9 +106,9 @@ const MusicPlayerPage = ({ onNavigate }) => {
     : musicLibrary;
 
   const searchedTracks = filteredTracks.filter(track =>
-    track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    track.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    track.album.toLowerCase().includes(searchQuery.toLowerCase())
+    String(track?.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(track?.artist || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(track?.album || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Handlers

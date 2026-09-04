@@ -3,6 +3,7 @@ import Compartment from '../Components/Common/Compartment';
 import { consumePodcastHandoffDraft } from '../Services/podcastStudioBridge';
 import { queueCollaborationHandoff } from '../Services/collaborationBridge';
 import { authService } from '../Services/Auth.jsx';
+import { apiService } from '../Services/api';
 import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
@@ -151,6 +152,16 @@ const apiRoleToRoleLabel = {
     'script-lead': 'Script Lead'
 };
 
+const normalizeLoginIdentifier = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
+
+const inferIdentifierType = (identifier) => {
+    const value = String(identifier || '').trim();
+    if (!value) return 'manual';
+    if (value.includes('@')) return 'email';
+    if (value.startsWith('@')) return 'handle';
+    return 'username';
+};
+
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const [title, setTitle] = useState('The Social Creator Teams Brief');
@@ -194,6 +205,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [syncInput, setSyncInput] = useState('');
     const [syncRole, setSyncRole] = useState('Guest');
     const [teamMembersList, setTeamMembersList] = useState(initialTeamMembers);
+    const [teamDirectory, setTeamDirectory] = useState([]);
     const [tandemSyncedAt, setTandemSyncedAt] = useState(null);
     const [syncMessage, setSyncMessage] = useState('');
     const [guestNameInput, setGuestNameInput] = useState('');
@@ -213,6 +225,65 @@ const PodcastStudioPage = ({ onNavigate }) => {
         canAssignShots: Boolean(value?.canAssignShots),
         canApproveSegments: Boolean(value?.canApproveSegments)
     });
+
+    const resolveLoginStatus = (identifier) => {
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier);
+        const currentIdentifiers = [
+            normalizeLoginIdentifier(user?.email),
+            normalizeLoginIdentifier(user?.handle),
+            normalizeLoginIdentifier(user?.name),
+            normalizeLoginIdentifier(user?.displayName)
+        ].filter(Boolean);
+
+        if (normalizedIdentifier && currentIdentifiers.includes(normalizedIdentifier)) {
+            return { loginState: 'online', loginStatus: 'Logged in now' };
+        }
+
+        const match = teamDirectory.find((member) => {
+            const directoryIdentifiers = [
+                normalizeLoginIdentifier(member?.email),
+                normalizeLoginIdentifier(member?.handle),
+                normalizeLoginIdentifier(member?.name)
+            ].filter(Boolean);
+            return normalizedIdentifier && directoryIdentifiers.includes(normalizedIdentifier);
+        });
+
+        if (match) {
+            const connected = Boolean(match?.isOnline || match?.isActive || String(match?.status || '').toLowerCase() === 'online');
+            return connected
+                ? { loginState: 'online', loginStatus: 'Directory login active' }
+                : { loginState: 'identified', loginStatus: 'Directory account identified' };
+        }
+
+        return normalizedIdentifier
+            ? { loginState: 'pending', loginStatus: 'Awaiting login in room' }
+            : { loginState: 'manual', loginStatus: 'Manual pair (no login ID)' };
+    };
+
+    const upsertTeamMember = ({ identifier, name, role, locale, device, status, loginState, loginStatus }) => {
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier || '');
+        const normalizedName = String(name || '').trim().toLowerCase();
+        const deduped = teamMembersList.filter((member) => {
+            const memberIdentifier = normalizeLoginIdentifier(member?.identifier || '');
+            const memberName = String(member?.name || '').trim().toLowerCase();
+            if (normalizedIdentifier && memberIdentifier === normalizedIdentifier) return false;
+            if (!normalizedIdentifier && normalizedName && memberName === normalizedName) return false;
+            return true;
+        });
+
+        return [{
+            name,
+            role,
+            locale,
+            device,
+            status,
+            syncedAt: new Date().toLocaleTimeString(),
+            identifier: identifier || '',
+            identifierType: inferIdentifierType(identifier),
+            loginState,
+            loginStatus
+        }, ...deduped];
+    };
 
     const applyPolicyState = (state) => {
         const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
@@ -351,6 +422,34 @@ const PodcastStudioPage = ({ onNavigate }) => {
     }, []);
 
     useEffect(() => {
+        let isMounted = true;
+        const loadTeamDirectory = async () => {
+            try {
+                const response = await apiService.getUsers({ page: 1, pageSize: 200 });
+                if (!isMounted) return;
+                const payload = response?.data;
+                const users = Array.isArray(payload)
+                    ? payload
+                    : Array.isArray(payload?.users)
+                        ? payload.users
+                        : Array.isArray(payload?.items)
+                            ? payload.items
+                            : [];
+                setTeamDirectory(users);
+            } catch {
+                if (isMounted) {
+                    setTeamDirectory(user ? [user] : []);
+                }
+            }
+        };
+
+        void loadTeamDirectory();
+        return () => {
+            isMounted = false;
+        };
+    }, [user]);
+
+    useEffect(() => {
         const intervalId = window.setInterval(() => {
             loadPodcastControlPolicy();
         }, 45000);
@@ -394,6 +493,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         if (handoff.notes) {
             setScriptText((previous) => `${previous}\n\nProducer handoff notes:\n${handoff.notes}`.trim());
+        }
+
+        if (handoff.soundtrack?.title || handoff.soundtrack?.mediaUrl) {
+            const soundtrackLabel = handoff.soundtrack.artist
+                ? `${handoff.soundtrack.artist} — ${handoff.soundtrack.title || 'Untitled track'}`
+                : (handoff.soundtrack.title || handoff.soundtrack.mediaUrl);
+            setScriptText((previous) => `${previous}\n\nStory soundtrack:\n${soundtrackLabel}`.trim());
         }
 
         setStatus(`Dispatch handoff received (${handoff.urgency || 'Standard'})`);
@@ -656,25 +762,22 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         const nameFromEmail = identifier.includes('@') ? identifier.split('@')[0] : identifier.replace(/^@/, '');
         const formattedName = nameFromEmail.charAt(0).toUpperCase() + nameFromEmail.slice(1);
+        const login = resolveLoginStatus(identifier);
 
-        const newMember = {
+        const updatedList = upsertTeamMember({
             name: formattedName,
             role: syncRole,
             locale: 'Remote Tandem',
             device: 'Paired Sync',
             status: 'Synced in Tandem',
-            syncedAt: new Date().toLocaleTimeString(),
-            identifier
-        };
-
-        const updatedList = [
-            newMember,
-            ...teamMembersList.filter((m) => m.identifier !== identifier && m.name !== formattedName)
-        ];
+            identifier,
+            loginState: login.loginState,
+            loginStatus: login.loginStatus
+        });
 
         setTeamMembersList(updatedList);
         setSyncInput('');
-        setSyncMessage(`Successfully paired ${identifier} as ${syncRole} in tandem!`);
+        setSyncMessage(`Synced ${identifier} as ${syncRole}. Login status: ${login.loginStatus}.`);
 
         broadcastTandemState({ teamMembersList: updatedList });
         setStatus(`Team member ${formattedName} synced in tandem as ${syncRole}.`);
@@ -685,15 +788,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleGuestInvite = () => {
         const gName = guestNameInput.trim();
         if (!gName) return;
-        const newGuestMember = {
+        const login = resolveLoginStatus(gName);
+        const updatedList = upsertTeamMember({
             name: gName,
             role: 'Guest',
             locale: 'Connected Remote',
             device: 'Mobile Mosaic',
             status: 'Synced in Tandem',
-            syncedAt: new Date().toLocaleTimeString()
-        };
-        const updatedList = [newGuestMember, ...teamMembersList];
+            identifier: gName,
+            loginState: login.loginState,
+            loginStatus: login.loginStatus
+        });
         setTeamMembersList(updatedList);
         setGuestNameInput('');
         setGuestConnected(true);
@@ -704,6 +809,27 @@ const PodcastStudioPage = ({ onNavigate }) => {
             mode: 'create',
             roomName: `${gName} Guest Room`
         });
+    };
+
+    const handleShareScript = () => {
+        try {
+            localStorage.setItem('wiseSharedPodcastScript', scriptText);
+        } catch {
+            // Best effort only.
+        }
+        broadcastTandemState({ scriptText, shared: true });
+        setStatus('Script shared and synced across all connected tandem team members.');
+    };
+
+    const setRemoteGuestMode = () => {
+        setSelectedMode('Remote guest');
+        setGuestConnected(true);
+        setStatus('Remote guest mode enabled. Pair and quick join are now ready.');
+        broadcastTandemState({ selectedMode: 'Remote guest' });
+    };
+
+    const runWorkflowNavigator = () => {
+        void runNextStudioAction();
     };
 
     const handleQuickJoin = () => {
@@ -720,6 +846,21 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         if (typeof onNavigate === 'function') {
             onNavigate('collaboration');
+        }
+
+        const normalizedJoinInput = normalizeLoginIdentifier(value);
+        if (normalizedJoinInput) {
+            setTeamMembersList((previous) => previous.map((member) => {
+                if (normalizeLoginIdentifier(member?.identifier || member?.name || '') !== normalizedJoinInput) {
+                    return member;
+                }
+                return {
+                    ...member,
+                    loginState: 'online',
+                    loginStatus: 'Joined room',
+                    syncedAt: new Date().toLocaleTimeString()
+                };
+            }));
         }
 
         setStatus('Opening Collaboration quick join...');
@@ -1147,6 +1288,26 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             {syncMessage}
                         </div>
                     )}
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                        <button type="button" onClick={handleSyncConnection} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(2, 132, 199, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Sync Connection
+                        </button>
+                        <button type="button" onClick={handleGuestInvite} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Pair Guest Feed
+                        </button>
+                        <button type="button" onClick={handleQuickJoin} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Quick Join Room
+                        </button>
+                        <button type="button" onClick={setRemoteGuestMode} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(139, 92, 246, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Remote Guest
+                        </button>
+                        <button type="button" onClick={handleShareScript} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(34, 197, 94, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Share Script
+                        </button>
+                        <button type="button" onClick={runWorkflowNavigator} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(234, 179, 8, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
+                            Podcast Workflow Navigator
+                        </button>
+                    </div>
                 </div>
 
                 {/* Video Monitor Grid & Remote Feeds */}
@@ -1574,13 +1735,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        try {
-                                            localStorage.setItem('wiseSharedPodcastScript', scriptText);
-                                        } catch {}
-                                        broadcastTandemState({ scriptText, shared: true });
-                                        setStatus('Script shared and synced across all connected tandem team members.');
-                                    }}
+                                    onClick={handleShareScript}
                                     style={{
                                         border: '1px solid var(--highlight-color)',
                                         background: 'rgba(56, 189, 248, 0.2)',
@@ -1703,11 +1858,30 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         <div>
                                             <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 {member.name}
-                                                <span style={{ fontSize: '10px', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: '4px' }}>
-                                                    Synced
+                                                <span style={{
+                                                    fontSize: '10px',
+                                                    background: member.loginState === 'online'
+                                                        ? 'rgba(34, 197, 94, 0.2)'
+                                                        : member.loginState === 'identified'
+                                                            ? 'rgba(56, 189, 248, 0.2)'
+                                                            : 'rgba(234, 179, 8, 0.2)',
+                                                    color: member.loginState === 'online'
+                                                        ? '#4ade80'
+                                                        : member.loginState === 'identified'
+                                                            ? '#7dd3fc'
+                                                            : '#fcd34d',
+                                                    padding: '2px 6px',
+                                                    borderRadius: '4px'
+                                                }}>
+                                                    {member.loginStatus || 'Synced'}
                                                 </span>
                                             </div>
                                             <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>{member.role}</div>
+                                            {member.identifier && (
+                                                <div style={{ color: '#93c5fd', fontSize: '11px' }}>
+                                                    Login ID: {member.identifier}
+                                                </div>
+                                            )}
                                         </div>
                                         <div style={{ textAlign: 'right', color: 'var(--light-color)', fontSize: '12px' }}>
                                             <div>{member.locale}</div>
@@ -1765,4 +1939,3 @@ const PodcastStudioPage = ({ onNavigate }) => {
 };
 
 export default PodcastStudioPage;
-

@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaVideo, FaStop, FaRedo, FaUpload, FaCamera, FaMicrophone, FaMicrophoneSlash, FaVideoSlash } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
+import { apiService } from '../../Services/api';
 import { useAuth } from '../../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../../Services/ravensightVideoStore';
 
-const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99 }) => {
+const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPriceMonthly = 9.99, defaultSoundtrackId = '', onSoundtrackSelected = null }) => {
     const defaultDestinationFolder = '/wiseravenshare/ravensight/video';
     const [isRecording, setIsRecording] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -30,6 +31,9 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
     const [savePermanently, setSavePermanently] = useState(false);
     const [facebookPermissionGranted, setFacebookPermissionGranted] = useState(false);
     const [privacyStatus, setPrivacyStatus] = useState('unlisted');
+    const [musicLibrary, setMusicLibrary] = useState([]);
+    const [musicLibraryLoading, setMusicLibraryLoading] = useState(false);
+    const [selectedMusicTrackId, setSelectedMusicTrackId] = useState('');
 
     const videoRef = useRef(null);
     const mediaRecorderRef = useRef(null);
@@ -49,6 +53,61 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             }
         };
     }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+        const loadMusicLibrary = async () => {
+            try {
+                setMusicLibraryLoading(true);
+                const response = await apiService.getMusicLibrary();
+                if (!isMounted) {
+                    return;
+                }
+                const tracks = Array.isArray(response?.data) ? response.data : [];
+                setMusicLibrary(tracks);
+                if (defaultSoundtrackId && tracks.some((track) => String(track?.id || '') === String(defaultSoundtrackId))) {
+                    setSelectedMusicTrackId(defaultSoundtrackId);
+                    return;
+                }
+                if (!selectedMusicTrackId && tracks.length > 0) {
+                    setSelectedMusicTrackId(tracks[0].id || '');
+                }
+            } catch (error) {
+                if (isMounted) {
+                    setMusicLibrary([]);
+                }
+                console.warn('Unable to load music library for recorder soundtrack selection:', error);
+            } finally {
+                if (isMounted) {
+                    setMusicLibraryLoading(false);
+                }
+            }
+        };
+
+        void loadMusicLibrary();
+        return () => {
+            isMounted = false;
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        if (!defaultSoundtrackId) {
+            return;
+        }
+        if (String(selectedMusicTrackId || '') === String(defaultSoundtrackId)) {
+            return;
+        }
+        setSelectedMusicTrackId(defaultSoundtrackId);
+    }, [defaultSoundtrackId, selectedMusicTrackId]);
+
+    const selectedMusicTrack = musicLibrary.find((track) => String(track?.id || '') === String(selectedMusicTrackId || ''));
+
+    useEffect(() => {
+        if (typeof onSoundtrackSelected === 'function') {
+            onSoundtrackSelected(selectedMusicTrack || null);
+        }
+    }, [onSoundtrackSelected, selectedMusicTrack]);
 
     const loadDevices = async () => {
         try {
@@ -206,6 +265,12 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             formData.append('youTubePermissionGranted', String(!libraryOnly && youTubePermissionGranted));
             formData.append('tikTokPermissionGranted', String(!libraryOnly && tikTokPermissionGranted));
             formData.append('facebookPermissionGranted', String(!libraryOnly && facebookPermissionGranted));
+            formData.append('musicTrackId', selectedMusicTrack?.id || '');
+            formData.append('musicTrackTitle', selectedMusicTrack?.title || '');
+            formData.append('musicTrackUrl', selectedMusicTrack?.mediaUrl || '');
+            formData.append('musicTrackArtist', selectedMusicTrack?.artist || '');
+            formData.append('musicTrackAlbum', selectedMusicTrack?.album || '');
+            formData.append('musicTrackGenre', selectedMusicTrack?.genre || '');
             const wantsPermanentStorage = libraryOnly || Boolean(savePermanently);
             formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
             formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
@@ -238,7 +303,13 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                 title: videoTitle || `Recording ${new Date().toLocaleString()}`,
                 description: videoDescription,
                 privacyStatus,
-                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary'
+                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary',
+                musicTrackId: selectedMusicTrack?.id || '',
+                musicTrackTitle: selectedMusicTrack?.title || '',
+                musicTrackUrl: selectedMusicTrack?.mediaUrl || '',
+                musicTrackArtist: selectedMusicTrack?.artist || '',
+                musicTrackAlbum: selectedMusicTrack?.album || '',
+                musicTrackGenre: selectedMusicTrack?.genre || ''
             });
 
             upsertLocalVideo(fallbackVideo);
@@ -527,6 +598,39 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
                                         resize: 'vertical'
                                     }}
                                 />
+                            </div>
+
+                            <div style={{ marginBottom: '15px' }}>
+                                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                                    Music soundtrack
+                                </label>
+                                <select
+                                    value={selectedMusicTrackId}
+                                    onChange={(e) => setSelectedMusicTrackId(e.target.value)}
+                                    disabled={musicLibraryLoading || musicLibrary.length === 0}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'var(--card-bg)',
+                                        color: 'var(--text-color)'
+                                    }}
+                                >
+                                    <option value="">
+                                        {musicLibraryLoading ? 'Loading music library...' : 'No soundtrack selected'}
+                                    </option>
+                                    {musicLibrary.map((track) => (
+                                        <option key={track.id} value={track.id}>
+                                            {track.artist ? `${track.artist} — ` : ''}{track.title || 'Untitled track'}
+                                        </option>
+                                    ))}
+                                </select>
+                                {selectedMusicTrack && (
+                                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)' }}>
+                                        Linked soundtrack: {selectedMusicTrack.artist ? `${selectedMusicTrack.artist} — ` : ''}{selectedMusicTrack.title}
+                                    </div>
+                                )}
                             </div>
 
                             <div style={{ marginBottom: '15px' }}>

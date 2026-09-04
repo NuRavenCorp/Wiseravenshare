@@ -52,6 +52,30 @@ const fmt = (s) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
 
+const normalizeTrack = (track) => {
+  if (!track || typeof track !== 'object') return null;
+  const mediaUrl = String(
+    track.mediaUrl
+    || track.url
+    || track.fileUrl
+    || track.publicUrl
+    || track.MediaUrl
+    || track.Url
+    || ''
+  ).trim();
+
+  return {
+    id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    title: String(track.title || track.Title || 'Untitled').trim(),
+    artist: String(track.artist || track.Artist || '').trim(),
+    album: String(track.album || track.Album || '').trim(),
+    genre: String(track.genre || track.Genre || '').trim(),
+    duration: track.duration || track.Duration || '',
+    mediaUrl,
+    url: mediaUrl
+  };
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const MusicStudioPage = ({ onNavigate }) => {
   const { user } = useAuth();
@@ -91,34 +115,59 @@ const MusicStudioPage = ({ onNavigate }) => {
   const [uploadAlbum,   setUploadAlbum]   = useState('');
   const [uploadGenre,   setUploadGenre]   = useState('');
   const [isUploading,   setIsUploading]   = useState(false);
+  const [inputDevices,  setInputDevices]  = useState([]);
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
+  const [inputStatus, setInputStatus] = useState('disconnected');
+  const [inputLevel, setInputLevel] = useState(0);
+  const [inputConnectionType, setInputConnectionType] = useState('wired');
+  const [isInputRecording, setIsInputRecording] = useState(false);
+  const [inputRecordingTime, setInputRecordingTime] = useState(0);
+  const [isSavingInputRecording, setIsSavingInputRecording] = useState(false);
+  const [monitorInputEnabled, setMonitorInputEnabled] = useState(false);
+  const [monitorInputLevel, setMonitorInputLevel] = useState(0.8);
+  const [inputRecordingTitle, setInputRecordingTitle] = useState('');
 
   // DOM / Audio refs
   const audioRef   = useRef(null);
   const canvasRef  = useRef(null);
   const nodesRef   = useRef(null);   // null = graph not yet built
   const vizRafRef  = useRef(null);
+  const inputStreamRef = useRef(null);
+  const inputAudioContextRef = useRef(null);
+  const inputAnalyserRef = useRef(null);
+  const inputMonitorGainRef = useRef(null);
+  const inputMeterRafRef = useRef(null);
+  const inputRecorderRef = useRef(null);
+  const inputChunksRef = useRef([]);
+  const inputTimerRef = useRef(null);
 
   // ── 1. Library load ──────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         setIsLoading(true);
-        const token = localStorage.getItem('authToken');
-        if (token) {
-          const res = await apiService.getMusicLibrary();
-          if (res?.data) {
-            const data = res.data;
-            const tracks = Array.isArray(data) ? data : [];
-            setLibrary(tracks);
-            if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
-          }
-        } else {
+        const res = await apiService.getMusicLibrary();
+        const tracks = (Array.isArray(res?.data) ? res.data : [])
+          .map(normalizeTrack)
+          .filter(Boolean);
+        setLibrary(tracks);
+        try {
+          localStorage.setItem('wiseMusic_library', JSON.stringify(tracks));
+        } catch {
+          /* ignore storage errors */
+        }
+        if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
+      } catch (e) {
+        try {
           const stored = localStorage.getItem('wiseMusic_library');
-          const tracks = stored ? JSON.parse(stored) : [];
+          const tracks = (stored ? JSON.parse(stored) : [])
+            .map(normalizeTrack)
+            .filter(Boolean);
           setLibrary(tracks);
           if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
+        } catch {
+          setLibrary([]);
         }
-      } catch (e) {
         console.error('Library load failed', e);
       } finally {
         setIsLoading(false);
@@ -189,7 +238,12 @@ const MusicStudioPage = ({ onNavigate }) => {
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
-    el.src = currentTrack.mediaUrl || currentTrack.url || '';
+    const sourceUrl = String(currentTrack.mediaUrl || currentTrack.url || '').trim();
+    if (!sourceUrl) {
+      addToast('This track has no playable media URL yet.', 'warning');
+      return;
+    }
+    el.src = sourceUrl;
     el.load();
     // Resume playback after load if we were playing before
     if (wasPlaying) {
@@ -419,6 +473,268 @@ const MusicStudioPage = ({ onNavigate }) => {
     }
   }, [vizData]);
 
+  const detectInputConnectionType = (label = '') => {
+    const normalized = String(label || '').toLowerCase();
+    if (normalized.includes('bluetooth') || normalized.includes('airpods') || normalized.includes('buds') || normalized.includes('wireless')) {
+      return 'bluetooth';
+    }
+    if (normalized.includes('network') || normalized.includes('remote') || normalized.includes('ip')) {
+      return 'network';
+    }
+    return 'wired';
+  };
+
+  const stopInputMeter = () => {
+    if (inputMeterRafRef.current) {
+      cancelAnimationFrame(inputMeterRafRef.current);
+      inputMeterRafRef.current = null;
+    }
+  };
+
+  const disconnectInputDevice = () => {
+    if (inputTimerRef.current) {
+      clearInterval(inputTimerRef.current);
+      inputTimerRef.current = null;
+    }
+    if (inputRecorderRef.current && inputRecorderRef.current.state !== 'inactive') {
+      inputRecorderRef.current.stop();
+    }
+    stopInputMeter();
+    if (inputStreamRef.current) {
+      inputStreamRef.current.getTracks().forEach((track) => track.stop());
+      inputStreamRef.current = null;
+    }
+    if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
+      inputAudioContextRef.current.close().catch(() => {});
+      inputAudioContextRef.current = null;
+    }
+    inputAnalyserRef.current = null;
+    inputMonitorGainRef.current = null;
+    inputRecorderRef.current = null;
+    inputChunksRef.current = [];
+    setInputStatus('disconnected');
+    setInputLevel(0);
+    setIsInputRecording(false);
+    setInputRecordingTime(0);
+    setMonitorInputEnabled(false);
+  };
+
+  const refreshInputDevices = async () => {
+    try {
+      let grantedStream = null;
+      try {
+        grantedStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch (permissionError) {
+        console.warn('Audio permission not yet granted for full device labels.', permissionError);
+      }
+
+      if (grantedStream) {
+        grantedStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === 'audioinput');
+      setInputDevices(inputs);
+      if (!selectedInputDeviceId && inputs.length > 0) {
+        setSelectedInputDeviceId(inputs[0].deviceId);
+      }
+    } catch (error) {
+      addToast(error?.message || 'Unable to load audio input devices.', 'error');
+    }
+  };
+
+  const startInputMeter = () => {
+    const analyser = inputAnalyserRef.current;
+    if (!analyser) return;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    const draw = () => {
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = data[i] / 255;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      setInputLevel(Math.min(100, Math.round(rms * 160)));
+      inputMeterRafRef.current = requestAnimationFrame(draw);
+    };
+
+    stopInputMeter();
+    inputMeterRafRef.current = requestAnimationFrame(draw);
+  };
+
+  const connectInputDevice = async () => {
+    const targetId = selectedInputDeviceId || inputDevices[0]?.deviceId;
+    if (!targetId) {
+      addToast('No input device selected.', 'warning');
+      return;
+    }
+
+    if (inputStatus === 'connected' || inputStatus === 'recording') {
+      disconnectInputDevice();
+      return;
+    }
+
+    setInputStatus('connecting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: targetId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        },
+        video: false
+      });
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      const monitorGain = ctx.createGain();
+      monitorGain.gain.value = 0;
+
+      source.connect(analyser);
+      source.connect(monitorGain);
+      monitorGain.connect(ctx.destination);
+
+      inputStreamRef.current = stream;
+      inputAudioContextRef.current = ctx;
+      inputAnalyserRef.current = analyser;
+      inputMonitorGainRef.current = monitorGain;
+
+      const selectedDevice = inputDevices.find((device) => device.deviceId === targetId);
+      const type = detectInputConnectionType(selectedDevice?.label || '');
+      setInputConnectionType(type);
+      setInputStatus('connected');
+      startInputMeter();
+      addToast(`${selectedDevice?.label || 'Audio input'} connected.`, 'success');
+    } catch (error) {
+      setInputStatus('error');
+      addToast(error?.message || 'Failed to connect selected audio input.', 'error');
+    }
+  };
+
+  const uploadRecordedInput = async (blob) => {
+    const ext = blob.type.includes('mp4') ? 'm4a' : 'webm';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fallbackName = `live-input-${stamp}.${ext}`;
+    const title = inputRecordingTitle.trim() || `Live Input ${new Date().toLocaleString()}`;
+    const deviceLabel = inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || 'External Input';
+    const file = new File([blob], fallbackName, { type: blob.type || 'audio/webm' });
+
+    setIsSavingInputRecording(true);
+    try {
+      const response = await apiService.uploadMusicTrack(file, {
+        title,
+        artist: `${deviceLabel} (${inputConnectionType})`,
+        album: 'Live Input',
+        genre: inputConnectionType === 'bluetooth' ? 'Bluetooth Live' : 'Live Capture',
+        destinationFolder: '/wiseravenshare/ravensight/music'
+      });
+
+      const uploadedTrack = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
+      if (uploadedTrack) {
+        setLibrary((prev) => {
+          const next = [uploadedTrack, ...prev];
+          try {
+            localStorage.setItem('wiseMusic_library', JSON.stringify(next));
+          } catch {
+            /* ignore storage errors */
+          }
+          return next;
+        });
+        setCurrentTrack(uploadedTrack);
+        setTrackIndex(0);
+      }
+      addToast('Recorded input saved to your music library.', 'success');
+    } catch (error) {
+      addToast(error?.message || 'Failed to save recorded input.', 'error');
+    } finally {
+      setIsSavingInputRecording(false);
+    }
+  };
+
+  const startInputRecording = () => {
+    if (!inputStreamRef.current) {
+      addToast('Connect an input device first.', 'warning');
+      return;
+    }
+    if (isInputRecording) {
+      return;
+    }
+
+    try {
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      const mimeType = candidates.find((item) => MediaRecorder.isTypeSupported(item)) || '';
+      const recorder = mimeType
+        ? new MediaRecorder(inputStreamRef.current, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(inputStreamRef.current);
+
+      inputChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) {
+          inputChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        const finalType = mimeType || recorder.mimeType || 'audio/webm';
+        const blob = new Blob(inputChunksRef.current, { type: finalType });
+        inputChunksRef.current = [];
+        if (blob.size > 0) {
+          await uploadRecordedInput(blob);
+        }
+      };
+
+      recorder.start(300);
+      inputRecorderRef.current = recorder;
+      setIsInputRecording(true);
+      setInputStatus('recording');
+      setInputRecordingTime(0);
+      if (inputTimerRef.current) {
+        clearInterval(inputTimerRef.current);
+      }
+      inputTimerRef.current = setInterval(() => {
+        setInputRecordingTime((prev) => prev + 1);
+      }, 1000);
+      addToast('Input recording started.', 'success');
+    } catch (error) {
+      addToast(error?.message || 'Unable to start recording.', 'error');
+    }
+  };
+
+  const stopInputRecording = () => {
+    if (!inputRecorderRef.current || inputRecorderRef.current.state === 'inactive') {
+      return;
+    }
+    inputRecorderRef.current.stop();
+    setIsInputRecording(false);
+    setInputStatus('connected');
+    if (inputTimerRef.current) {
+      clearInterval(inputTimerRef.current);
+      inputTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    refreshInputDevices();
+    const onDeviceChange = () => refreshInputDevices();
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
+
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
+      disconnectInputDevice();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!inputMonitorGainRef.current) return;
+    inputMonitorGainRef.current.gain.value = monitorInputEnabled ? monitorInputLevel : 0;
+  }, [monitorInputEnabled, monitorInputLevel]);
+
   // ── Transport handlers ────────────────────────────────────────────────────────
   const play = () => {
     const el = audioRef.current;
@@ -464,9 +780,17 @@ const MusicStudioPage = ({ onNavigate }) => {
         destinationFolder: '/wiseravenshare/ravensight/music'
       });
 
-      const uploadedTrack = response?.data?.track || response?.data?.file || response?.data || null;
+      const uploadedTrack = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
       if (uploadedTrack) {
-        setLibrary((prev) => [uploadedTrack, ...prev]);
+        setLibrary((prev) => {
+          const next = [uploadedTrack, ...prev];
+          try {
+            localStorage.setItem('wiseMusic_library', JSON.stringify(next));
+          } catch {
+            /* ignore storage errors */
+          }
+          return next;
+        });
         setCurrentTrack(uploadedTrack);
         setTrackIndex(0);
       }
@@ -710,6 +1034,9 @@ const MusicStudioPage = ({ onNavigate }) => {
             <button className={activePanel === 'vocal'   ? 'active' : ''} onClick={() => setActivePanel('vocal')}>
               <FiMic /> Vocal
             </button>
+            <button className={activePanel === 'input'   ? 'active' : ''} onClick={() => setActivePanel('input')}>
+              <FiRadio /> Input
+            </button>
           </div>
 
           {/* ── EQ panel ── */}
@@ -831,6 +1158,105 @@ const MusicStudioPage = ({ onNavigate }) => {
                     Sync lyrics from the Music Rights Studio to display them here
                   </p>
                 </div>
+              )}
+            </div>
+          )}
+
+          {activePanel === 'input' && (
+            <div className="panel input-panel">
+              <p className="input-desc">
+                Connect paired Bluetooth microphones, USB interfaces, home amplifier inputs, and other system audio inputs.
+                Your device must already be paired/available in your OS audio settings.
+              </p>
+
+              <div className="input-device-row">
+                <select
+                  className="input-select"
+                  value={selectedInputDeviceId}
+                  onChange={(e) => setSelectedInputDeviceId(e.target.value)}
+                >
+                  {inputDevices.length === 0 && (
+                    <option value="">No input devices detected</option>
+                  )}
+                  {inputDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+                <button className="input-btn" onClick={refreshInputDevices}>
+                  Refresh
+                </button>
+                <button
+                  className={`input-btn ${inputStatus === 'connected' || inputStatus === 'recording' ? 'danger' : 'primary'}`}
+                  onClick={connectInputDevice}
+                >
+                  {inputStatus === 'connected' || inputStatus === 'recording' ? 'Disconnect' : 'Connect'}
+                </button>
+              </div>
+
+              <div className="input-status-line">
+                <span className={`input-status-badge ${inputStatus}`}>{inputStatus.toUpperCase()}</span>
+                <span className="input-type">Type: {inputConnectionType}</span>
+                {isInputRecording && (
+                  <span className="input-rec-time">● REC {fmt(inputRecordingTime)}</span>
+                )}
+              </div>
+
+              <div className="input-meter-wrap">
+                <div className="input-meter-label">
+                  Live input level <span>{inputLevel}%</span>
+                </div>
+                <div className="input-meter">
+                  <div className="input-meter-fill" style={{ width: `${inputLevel}%` }} />
+                </div>
+              </div>
+
+              <div className="input-monitor-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={monitorInputEnabled}
+                    onChange={(e) => setMonitorInputEnabled(e.target.checked)}
+                  />
+                  Monitor input to speakers/headphones
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={monitorInputLevel}
+                  onChange={(e) => setMonitorInputLevel(parseFloat(e.target.value))}
+                  disabled={!monitorInputEnabled}
+                />
+              </div>
+
+              <div className="input-record-row">
+                <input
+                  type="text"
+                  className="input-title"
+                  value={inputRecordingTitle}
+                  onChange={(e) => setInputRecordingTitle(e.target.value)}
+                  placeholder="Recording title (optional)"
+                />
+                {!isInputRecording ? (
+                  <button
+                    className="input-btn primary"
+                    onClick={startInputRecording}
+                    disabled={inputStatus !== 'connected'}
+                  >
+                    Start Recording
+                  </button>
+                ) : (
+                  <button className="input-btn danger" onClick={stopInputRecording}>
+                    Stop Recording
+                  </button>
+                )}
+              </div>
+
+              {isSavingInputRecording && (
+                <div className="input-saving-note">Saving recorded input to your music library…</div>
               )}
             </div>
           )}

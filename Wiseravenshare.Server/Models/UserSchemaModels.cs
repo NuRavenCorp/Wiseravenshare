@@ -21,6 +21,10 @@ public sealed class SocialFeedSettings
     public SocialFeedConnection TikTok { get; set; } = new();
     public SocialFeedConnection Facebook { get; set; } = new();
     public SocialFeedConnection Instagram { get; set; } = new();
+    public SocialFeedConnection YouTube { get; set; } = new();
+    public SocialFeedConnection Twitter { get; set; } = new();
+    public SocialFeedConnection LinkedIn { get; set; } = new();
+    public SocialFeedConnection Bluesky { get; set; } = new();
 }
 
 public sealed class SocialFeedConnection
@@ -29,6 +33,7 @@ public sealed class SocialFeedConnection
     public string Username { get; set; } = string.Empty;
     public string ProfileUrl { get; set; } = string.Empty;
     public string FeedUrl { get; set; } = string.Empty;
+    public string Designation { get; set; } = string.Empty;
 }
 
 public sealed class UserResponse
@@ -64,4 +69,8 @@ public sealed class UpdateSocialFeedsRequest
     public SocialFeedConnection? TikTok { get; set; }
     public SocialFeedConnection? Facebook { get; set; }
     public SocialFeedConnection? Instagram { get; set; }
+    public SocialFeedConnection? YouTube { get; set; }
+    public SocialFeedConnection? Twitter { get; set; }
+    public SocialFeedConnection? LinkedIn { get; set; }
+    public SocialFeedConnection? Bluesky { get; set; }
 }

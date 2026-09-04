@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { FaUpload, FaYoutube, FaFileVideo, FaTrash, FaCheck, FaSpinner } from 'react-icons/fa';
 import { ravensightAPI } from '../../Services/RavensightAPI';
+import { apiService } from '../../Services/api';
 import { useAuth } from '../../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../../Services/ravensightVideoStore';
 
@@ -53,6 +54,9 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     const [tagInput, setTagInput] = useState('');
     const [savePermanently, setSavePermanently] = useState(false);
     const [uploadedVideos, setUploadedVideos] = useState([]);
+    const [musicLibrary, setMusicLibrary] = useState([]);
+    const [musicLibraryLoading, setMusicLibraryLoading] = useState(false);
+    const [selectedMusicTrackId, setSelectedMusicTrackId] = useState('');
     const fileInputRef = useRef(null);
     const { user } = useAuth();
 
@@ -112,6 +116,43 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
     React.useEffect(() => {
         setPublishingQueue(readPublishingQueue());
     }, []);
+
+    React.useEffect(() => {
+        let isMounted = true;
+
+        const loadMusicLibrary = async () => {
+            try {
+                setMusicLibraryLoading(true);
+                const response = await apiService.getMusicLibrary();
+                if (!isMounted) {
+                    return;
+                }
+
+                const tracks = Array.isArray(response?.data) ? response.data : [];
+                setMusicLibrary(tracks);
+                if (!selectedMusicTrackId && tracks.length > 0) {
+                    setSelectedMusicTrackId(tracks[0].id || '');
+                }
+            } catch (error) {
+                console.warn('Unable to load music library for video soundtrack selection:', error);
+                if (isMounted) {
+                    setMusicLibrary([]);
+                }
+            } finally {
+                if (isMounted) {
+                    setMusicLibraryLoading(false);
+                }
+            }
+        };
+
+        void loadMusicLibrary();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const selectedMusicTrack = musicLibrary.find((track) => String(track?.id || '') === String(selectedMusicTrackId || ''));
 
     const handleFileSelect = (event) => {
         const file = event.target.files[0];
@@ -175,6 +216,12 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         formData.append('youTubePermissionGranted', String(!libraryOnly && videoDetails.youTubePermissionGranted));
         formData.append('tikTokPermissionGranted', String(!libraryOnly && videoDetails.tikTokPermissionGranted));
         formData.append('facebookPermissionGranted', String(!libraryOnly && videoDetails.facebookPermissionGranted));
+        formData.append('musicTrackId', selectedMusicTrack?.id || '');
+        formData.append('musicTrackTitle', selectedMusicTrack?.title || '');
+        formData.append('musicTrackUrl', selectedMusicTrack?.mediaUrl || '');
+        formData.append('musicTrackArtist', selectedMusicTrack?.artist || '');
+        formData.append('musicTrackAlbum', selectedMusicTrack?.album || '');
+        formData.append('musicTrackGenre', selectedMusicTrack?.genre || '');
         const wantsPermanentStorage = libraryOnly || Boolean(savePermanently);
         formData.append('destinationFolder', String(destinationFolder || defaultDestinationFolder));
         formData.append('storageMode', wantsPermanentStorage ? 'permanent' : 'temporary');
@@ -210,7 +257,13 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                 title: videoDetails.title,
                 description: videoDetails.description,
                 privacyStatus: videoDetails.privacyStatus,
-                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary'
+                storageMode: (libraryOnly || savePermanently) ? 'permanent' : 'temporary',
+                musicTrackId: selectedMusicTrack?.id || '',
+                musicTrackTitle: selectedMusicTrack?.title || '',
+                musicTrackUrl: selectedMusicTrack?.mediaUrl || '',
+                musicTrackArtist: selectedMusicTrack?.artist || '',
+                musicTrackAlbum: selectedMusicTrack?.album || '',
+                musicTrackGenre: selectedMusicTrack?.genre || ''
             });
 
             upsertLocalVideo(fallbackVideo);
@@ -300,6 +353,7 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
         });
         setSavePermanently(false);
         setUploadProgress(0);
+        setSelectedMusicTrackId(musicLibrary[0]?.id || '');
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -470,6 +524,53 @@ const VideoUploader = ({ onNotification, canDirectUpload = true, subscriptionPri
                                     resize: 'vertical'
                                 }}
                             />
+                        </div>
+
+                        <div style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                                Add Music to Video
+                            </label>
+                            <select
+                                value={selectedMusicTrackId}
+                                onChange={(e) => setSelectedMusicTrackId(e.target.value)}
+                                disabled={musicLibraryLoading || musicLibrary.length === 0}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'var(--card-bg)',
+                                    color: 'var(--text-color)'
+                                }}
+                            >
+                                <option value="">
+                                    {musicLibraryLoading
+                                        ? 'Loading music library...'
+                                        : 'No soundtrack selected'}
+                                </option>
+                                {musicLibrary.map((track) => (
+                                    <option key={track.id} value={track.id}>
+                                        {track.artist ? `${track.artist} — ` : ''}{track.title || 'Untitled track'}
+                                    </option>
+                                ))}
+                            </select>
+                            {selectedMusicTrack && (
+                                <div style={{
+                                    marginTop: '10px',
+                                    padding: '10px',
+                                    borderRadius: '8px',
+                                    background: 'rgba(79, 116, 214, 0.12)',
+                                    border: '1px solid rgba(79, 116, 214, 0.25)',
+                                    color: 'var(--light-color)'
+                                }}>
+                                    <div style={{ fontWeight: 600 }}>{selectedMusicTrack.title}</div>
+                                    <div style={{ fontSize: '12px', opacity: 0.8 }}>
+                                        {selectedMusicTrack.artist || 'Unknown artist'}
+                                        {selectedMusicTrack.album ? ` • ${selectedMusicTrack.album}` : ''}
+                                        {selectedMusicTrack.genre ? ` • ${selectedMusicTrack.genre}` : ''}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ marginBottom: '15px' }}>

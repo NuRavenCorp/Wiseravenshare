@@ -14,6 +14,12 @@ public sealed class VideoLibraryVideo
     public string? YouTubeUrl { get; set; }
     public string? TikTokUrl { get; set; }
     public string? FacebookUrl { get; set; }
+    public string? MusicTrackId { get; set; }
+    public string? MusicTrackTitle { get; set; }
+    public string? MusicTrackUrl { get; set; }
+    public string? MusicTrackArtist { get; set; }
+    public string? MusicTrackAlbum { get; set; }
+    public string? MusicTrackGenre { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public string RetentionStatus { get; set; } = "active";
     public DateTime? ExpiresAt { get; set; }
@@ -37,6 +43,12 @@ public sealed class CreateVideoLibraryEntryRequest
     public string? YouTubeUrl { get; set; }
     public string? TikTokUrl { get; set; }
     public string? FacebookUrl { get; set; }
+    public string? MusicTrackId { get; set; }
+    public string? MusicTrackTitle { get; set; }
+    public string? MusicTrackUrl { get; set; }
+    public string? MusicTrackArtist { get; set; }
+    public string? MusicTrackAlbum { get; set; }
+    public string? MusicTrackGenre { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public bool IsPermanent { get; set; }
 }
@@ -112,4 +124,3 @@ public sealed class Ravensight_VideoLibraryComment
     public string Comment { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }
-

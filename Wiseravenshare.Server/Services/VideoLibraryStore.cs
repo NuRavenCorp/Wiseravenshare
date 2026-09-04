@@ -161,6 +161,12 @@ CREATE TABLE IF NOT EXISTS {videosTable} (
     youtube_url TEXT NULL,
     tiktok_url TEXT NULL,
     facebook_url TEXT NULL,
+    music_track_id TEXT NULL,
+    music_track_title TEXT NULL,
+    music_track_url TEXT NULL,
+    music_track_artist TEXT NULL,
+    music_track_album TEXT NULL,
+    music_track_genre TEXT NULL,
     storage_mode TEXT NOT NULL DEFAULT 'temporary',
     retention_status TEXT NOT NULL DEFAULT 'active',
     expires_at TIMESTAMPTZ NULL,
@@ -170,6 +176,14 @@ CREATE TABLE IF NOT EXISTS {videosTable} (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE {videosTable}
+    ADD COLUMN IF NOT EXISTS music_track_id TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_title TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_artist TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_album TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_genre TEXT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ravensight_videos_v2_user_id_created_at
     ON {videosTable} (user_id, created_at DESC);
@@ -268,6 +282,12 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_v2_video_id_created_at
             YouTubeUrl = string.IsNullOrWhiteSpace(request.YouTubeUrl) ? null : request.YouTubeUrl.Trim(),
             TikTokUrl = string.IsNullOrWhiteSpace(request.TikTokUrl) ? null : request.TikTokUrl.Trim(),
             FacebookUrl = string.IsNullOrWhiteSpace(request.FacebookUrl) ? null : request.FacebookUrl.Trim(),
+            MusicTrackId = string.IsNullOrWhiteSpace(request.MusicTrackId) ? null : request.MusicTrackId.Trim(),
+            MusicTrackTitle = string.IsNullOrWhiteSpace(request.MusicTrackTitle) ? null : request.MusicTrackTitle.Trim(),
+            MusicTrackUrl = string.IsNullOrWhiteSpace(request.MusicTrackUrl) ? null : request.MusicTrackUrl.Trim(),
+            MusicTrackArtist = string.IsNullOrWhiteSpace(request.MusicTrackArtist) ? null : request.MusicTrackArtist.Trim(),
+            MusicTrackAlbum = string.IsNullOrWhiteSpace(request.MusicTrackAlbum) ? null : request.MusicTrackAlbum.Trim(),
+            MusicTrackGenre = string.IsNullOrWhiteSpace(request.MusicTrackGenre) ? null : request.MusicTrackGenre.Trim(),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -286,10 +306,12 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_v2_video_id_created_at
             var sql = $@"
 INSERT INTO {_videosTable} (
     id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-    youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+    youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre,
+    storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
 ) VALUES (
     @id, @user_id, @title, @description, @tags, @video_url, @thumbnail_url, @status, @privacy_status,
-    @youtube_url, @tiktok_url, @facebook_url, @storage_mode, @retention_status, @expires_at, 0, 0, 0, @created_at, @updated_at
+    @youtube_url, @tiktok_url, @facebook_url, @music_track_id, @music_track_title, @music_track_url, @music_track_artist, @music_track_album, @music_track_genre,
+    @storage_mode, @retention_status, @expires_at, 0, 0, 0, @created_at, @updated_at
 );";
 
             await using var command = new NpgsqlCommand(sql, connection);
@@ -305,6 +327,12 @@ INSERT INTO {_videosTable} (
             command.Parameters.AddWithValue("youtube_url", (object?)entity.YouTubeUrl ?? DBNull.Value);
             command.Parameters.AddWithValue("tiktok_url", (object?)entity.TikTokUrl ?? DBNull.Value);
             command.Parameters.AddWithValue("facebook_url", (object?)entity.FacebookUrl ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_id", (object?)entity.MusicTrackId ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_title", (object?)entity.MusicTrackTitle ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_url", (object?)entity.MusicTrackUrl ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_artist", (object?)entity.MusicTrackArtist ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_album", (object?)entity.MusicTrackAlbum ?? DBNull.Value);
+            command.Parameters.AddWithValue("music_track_genre", (object?)entity.MusicTrackGenre ?? DBNull.Value);
             command.Parameters.AddWithValue("storage_mode", entity.StorageMode);
             command.Parameters.AddWithValue("retention_status", entity.RetentionStatus);
             command.Parameters.AddWithValue("expires_at", (object?)entity.ExpiresAt ?? DBNull.Value);
@@ -330,7 +358,7 @@ INSERT INTO {_videosTable} (
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE user_id = @user_id
   AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
@@ -364,7 +392,7 @@ ORDER BY created_at DESC;";
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 {whereClause}
 ORDER BY created_at DESC
@@ -398,7 +426,7 @@ LIMIT @limit_plus_one OFFSET @offset;";
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE id = @id
   AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
@@ -621,14 +649,20 @@ LIMIT @limit OFFSET @offset;";
                 YouTubeUrl = reader.IsDBNull(9) ? null : reader.GetString(9),
                 TikTokUrl = reader.IsDBNull(10) ? null : reader.GetString(10),
                 FacebookUrl = reader.IsDBNull(11) ? null : reader.GetString(11),
-                StorageMode = reader.IsDBNull(12) ? "temporary" : reader.GetString(12),
-                RetentionStatus = reader.IsDBNull(13) ? "active" : reader.GetString(13),
-                ExpiresAt = reader.IsDBNull(14) ? null : reader.GetDateTime(14),
-                Views = reader.GetInt32(15),
-                Likes = reader.GetInt32(16),
-                Comments = reader.GetInt32(17),
-                CreatedAt = reader.GetDateTime(18),
-                UpdatedAt = reader.GetDateTime(19)
+                MusicTrackId = reader.IsDBNull(12) ? null : reader.GetString(12),
+                MusicTrackTitle = reader.IsDBNull(13) ? null : reader.GetString(13),
+                MusicTrackUrl = reader.IsDBNull(14) ? null : reader.GetString(14),
+                MusicTrackArtist = reader.IsDBNull(15) ? null : reader.GetString(15),
+                MusicTrackAlbum = reader.IsDBNull(16) ? null : reader.GetString(16),
+                MusicTrackGenre = reader.IsDBNull(17) ? null : reader.GetString(17),
+                StorageMode = reader.IsDBNull(18) ? "temporary" : reader.GetString(18),
+                RetentionStatus = reader.IsDBNull(19) ? "active" : reader.GetString(19),
+                ExpiresAt = reader.IsDBNull(20) ? null : reader.GetDateTime(20),
+                Views = reader.GetInt32(21),
+                Likes = reader.GetInt32(22),
+                Comments = reader.GetInt32(23),
+                CreatedAt = reader.GetDateTime(24),
+                UpdatedAt = reader.GetDateTime(25)
             });
         }
 

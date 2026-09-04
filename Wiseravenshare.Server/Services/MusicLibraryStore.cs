@@ -119,7 +119,7 @@ ORDER BY created_at DESC;";
             ["destinationFolder"] = saved.DestinationFolder,
             ["sourceFileName"] = file.FileName,
             ["storedFileName"] = saved.FileName,
-            ["mediaUrl"] = saved.PublicUrl ?? ResolveMediaUrl(null, saved.FileName, file.FileName)
+            ["mediaUrl"] = ResolveMediaUrl(saved.PublicUrl, saved.RelativePath, saved.FileName)
         };
 
         await InsertBucketObjectAsync(bucketObjectId, userId, file, saved, metadata, cancellationToken);
@@ -132,7 +132,7 @@ ORDER BY created_at DESC;";
             Album = Convert.ToString(metadata["album"]) ?? string.Empty,
             Genre = Convert.ToString(metadata["genre"]) ?? string.Empty,
             Fingerprint = Convert.ToString(metadata["fingerprint"]),
-            MediaUrl = Convert.ToString(metadata["mediaUrl"]) ?? ResolveMediaUrl(saved.PublicUrl, saved.FileName, file.FileName),
+            MediaUrl = Convert.ToString(metadata["mediaUrl"]) ?? ResolveMediaUrl(saved.PublicUrl, saved.RelativePath, saved.FileName),
             FileName = saved.FileName,
             UploadedAt = saved.SavedAtUtc.ToString("O"),
             SizeBytes = saved.SizeBytes

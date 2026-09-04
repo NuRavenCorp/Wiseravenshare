@@ -22,7 +22,8 @@ const normalizeConnection = (connection) => ({
     enabled: Boolean(connection?.enabled),
     username: String(connection?.username || '').trim(),
     profileUrl: String(connection?.profileUrl || '').trim(),
-    feedUrl: String(connection?.feedUrl || '').trim()
+    feedUrl: String(connection?.feedUrl || '').trim(),
+    designation: String(connection?.designation || '').trim()
 });
 
 const normalizeSocialFeeds = (socialFeeds) => {
@@ -33,7 +34,8 @@ const normalizeSocialFeeds = (socialFeeds) => {
         instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
         youtube: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube')),
         twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
-        linkedin: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'))
+        linkedin: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
 };
 
@@ -100,7 +102,8 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         instagram: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         twitter: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        linkedin: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
+        linkedin: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        bluesky: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
     };
     const [posts, setPosts] = useState([]);
     const [likedPosts, setLikedPosts] = useState([]);
@@ -356,6 +359,14 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
             await updateProfile(nextForm);
             if (user?.id) {
                 localStorage.removeItem(getProfileDraftKey(user.id));
+            }
+            const connectedPlatforms = Object.entries(nextForm.socialFeeds || {})
+                .filter(([, connection]) => Boolean(connection?.enabled || connection?.username || connection?.profileUrl || connection?.feedUrl))
+                .map(([platform]) => platform);
+            if (connectedPlatforms.length > 0) {
+                window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
+                    detail: { page: 'social-feeds', platform: connectedPlatforms[0] }
+                }));
             }
             setEditing(false);
             if (cameraStream) {
@@ -721,6 +732,16 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             style={{ color: '#60a5fa', fontSize: '13px' }}
                                         >
                                             LinkedIn Feed
+                                        </a>
+                                    )}
+                                    {user.socialFeeds?.bluesky?.enabled && (
+                                        <a
+                                            href={user.socialFeeds?.bluesky?.profileUrl || user.socialFeeds?.bluesky?.feedUrl || `https://bsky.app/profile/${user.socialFeeds?.bluesky?.username || ''}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ color: '#60a5fa', fontSize: '13px' }}
+                                        >
+                                            Bluesky Feed
                                         </a>
                                     )}
                                 </div>

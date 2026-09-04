@@ -373,17 +373,37 @@ public sealed class UserStore
 
         if (request.TikTok is not null)
         {
-            current.TikTok = NormalizeConnection(request.TikTok);
+            current.TikTok = NormalizeConnection(request.TikTok, "tiktok");
         }
 
         if (request.Facebook is not null)
         {
-            current.Facebook = NormalizeConnection(request.Facebook);
+            current.Facebook = NormalizeConnection(request.Facebook, "facebook");
         }
 
         if (request.Instagram is not null)
         {
-            current.Instagram = NormalizeConnection(request.Instagram);
+            current.Instagram = NormalizeConnection(request.Instagram, "instagram");
+        }
+
+        if (request.YouTube is not null)
+        {
+            current.YouTube = NormalizeConnection(request.YouTube, "youtube");
+        }
+
+        if (request.Twitter is not null)
+        {
+            current.Twitter = NormalizeConnection(request.Twitter, "twitter");
+        }
+
+        if (request.LinkedIn is not null)
+        {
+            current.LinkedIn = NormalizeConnection(request.LinkedIn, "linkedin");
+        }
+
+        if (request.Bluesky is not null)
+        {
+            current.Bluesky = NormalizeConnection(request.Bluesky, "bluesky");
         }
 
         user.SocialFeeds = current;
@@ -484,26 +504,263 @@ public sealed class UserStore
     {
         return new SocialFeedSettings
         {
-            TikTok = NormalizeConnection(feeds.TikTok),
-            Facebook = NormalizeConnection(feeds.Facebook),
-            Instagram = NormalizeConnection(feeds.Instagram)
+            TikTok = NormalizeConnection(feeds.TikTok, "tiktok"),
+            Facebook = NormalizeConnection(feeds.Facebook, "facebook"),
+            Instagram = NormalizeConnection(feeds.Instagram, "instagram"),
+            YouTube = NormalizeConnection(feeds.YouTube, "youtube"),
+            Twitter = NormalizeConnection(feeds.Twitter, "twitter"),
+            LinkedIn = NormalizeConnection(feeds.LinkedIn, "linkedin"),
+            Bluesky = NormalizeConnection(feeds.Bluesky, "bluesky")
         };
     }
 
-    private static SocialFeedConnection NormalizeConnection(SocialFeedConnection? connection)
+    private static SocialFeedConnection NormalizeConnection(SocialFeedConnection? connection, string platform)
     {
         if (connection is null)
         {
             return new SocialFeedConnection();
         }
 
+        var normalizedPlatform = NormalizePlatform(platform);
+        var username = NormalizeUsername(connection.Username, normalizedPlatform);
+        var profileUrl = NormalizeAbsoluteUrl(connection.ProfileUrl);
+        var feedUrl = NormalizeAbsoluteUrl(connection.FeedUrl);
+        var urlDerivedUsername = string.IsNullOrWhiteSpace(username)
+            ? ExtractAccountIdentifier(normalizedPlatform, profileUrl, feedUrl)
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(urlDerivedUsername))
+        {
+            username = urlDerivedUsername;
+        }
+
+        if (string.IsNullOrWhiteSpace(profileUrl))
+        {
+            profileUrl = BuildDefaultProfileUrl(normalizedPlatform, username);
+        }
+
+        if (string.IsNullOrWhiteSpace(feedUrl))
+        {
+            feedUrl = profileUrl;
+        }
+
+        var hasConnectionData = !string.IsNullOrWhiteSpace(username)
+            || !string.IsNullOrWhiteSpace(profileUrl)
+            || !string.IsNullOrWhiteSpace(feedUrl);
+
+        var designation = hasConnectionData
+            ? (string.IsNullOrWhiteSpace(connection.Designation)
+                ? InferDesignation(normalizedPlatform, username, profileUrl)
+                : connection.Designation.Trim().ToLowerInvariant())
+            : string.Empty;
+
         return new SocialFeedConnection
         {
-            Enabled = connection.Enabled,
-            Username = (connection.Username ?? string.Empty).Trim(),
-            ProfileUrl = (connection.ProfileUrl ?? string.Empty).Trim(),
-            FeedUrl = (connection.FeedUrl ?? string.Empty).Trim()
+            Enabled = connection.Enabled || hasConnectionData,
+            Username = username,
+            ProfileUrl = profileUrl,
+            FeedUrl = feedUrl,
+            Designation = designation
         };
+    }
+
+    private static string NormalizePlatform(string platform)
+    {
+        var value = (platform ?? string.Empty).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "tiktok" or "tik-tok" => "tiktok",
+            "youtube" or "yt" => "youtube",
+            "twitter" or "x" => "twitter",
+            "linkedin" => "linkedin",
+            "bluesky" or "bsky" => "bluesky",
+            "facebook" => "facebook",
+            "instagram" => "instagram",
+            _ => value
+        };
+    }
+
+    private static string NormalizeUsername(string? username, string platform)
+    {
+        var value = (username ?? string.Empty).Trim();
+        if (value.StartsWith("@", StringComparison.Ordinal))
+        {
+            value = value[1..];
+        }
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            var identifier = platform switch
+            {
+                "youtube" => ExtractYouTubeIdentifier(uri),
+                "linkedin" => ExtractLinkedInIdentifier(uri),
+                "bluesky" => ExtractBlueskyIdentifier(uri),
+                _ => ExtractIdentifierFromUrlPath(uri)
+            };
+            value = string.IsNullOrWhiteSpace(identifier) ? string.Empty : identifier;
+        }
+
+        return value.Trim();
+    }
+
+    private static string NormalizeAbsoluteUrl(string? value)
+    {
+        var candidate = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri.ToString();
+        }
+
+        if (Uri.TryCreate($"https://{candidate.TrimStart('/')}", UriKind.Absolute, out var prefixedUri))
+        {
+            return prefixedUri.ToString();
+        }
+
+        return string.Empty;
+    }
+
+    private static string ExtractAccountIdentifier(string platform, string profileUrl, string feedUrl)
+    {
+        foreach (var candidate in new[] { profileUrl, feedUrl })
+        {
+            if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+            {
+                continue;
+            }
+
+            var identifier = platform switch
+            {
+                "youtube" => ExtractYouTubeIdentifier(uri),
+                "linkedin" => ExtractLinkedInIdentifier(uri),
+                "bluesky" => ExtractBlueskyIdentifier(uri),
+                _ => ExtractIdentifierFromUrlPath(uri)
+            };
+
+            if (!string.IsNullOrWhiteSpace(identifier))
+            {
+                return identifier;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ExtractIdentifierFromUrlPath(Uri uri)
+    {
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var value = segments[0].Trim();
+        return value.StartsWith("@", StringComparison.Ordinal) ? value[1..] : value;
+    }
+
+    private static string ExtractYouTubeIdentifier(Uri uri)
+    {
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (segments[0].StartsWith("@", StringComparison.Ordinal))
+        {
+            return segments[0][1..];
+        }
+
+        if (segments.Length >= 2 &&
+            (string.Equals(segments[0], "channel", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[0], "c", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[0], "user", StringComparison.OrdinalIgnoreCase)))
+        {
+            return segments[1];
+        }
+
+        return segments[0];
+    }
+
+    private static string ExtractLinkedInIdentifier(Uri uri)
+    {
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length >= 2 &&
+            (string.Equals(segments[0], "in", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[0], "company", StringComparison.OrdinalIgnoreCase)))
+        {
+            return segments[1];
+        }
+
+        return segments.Length > 0 ? segments[0] : string.Empty;
+    }
+
+    private static string BuildDefaultProfileUrl(string platform, string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return string.Empty;
+        }
+
+        return platform switch
+        {
+            "facebook" => $"https://www.facebook.com/{username}",
+            "instagram" => $"https://www.instagram.com/{username}",
+            "youtube" => username.StartsWith("UC", StringComparison.OrdinalIgnoreCase)
+                ? $"https://www.youtube.com/channel/{username}"
+                : $"https://www.youtube.com/@{username}",
+            "twitter" => $"https://x.com/{username}",
+            "linkedin" => $"https://www.linkedin.com/in/{username}",
+            "bluesky" => $"https://bsky.app/profile/{username}",
+            _ => $"https://www.tiktok.com/@{username}"
+        };
+    }
+
+    private static string InferDesignation(string platform, string username, string profileUrl)
+    {
+        return platform switch
+        {
+            "facebook" => IsNumericIdentifier(username) ? "facebook-page-id" : "facebook-page",
+            "instagram" => "instagram-creator",
+            "youtube" => username.StartsWith("UC", StringComparison.OrdinalIgnoreCase)
+                ? "youtube-channel-id"
+                : "youtube-channel",
+            "twitter" => "x-profile",
+            "linkedin" => profileUrl.Contains("/company/", StringComparison.OrdinalIgnoreCase)
+                ? "linkedin-company"
+                : "linkedin-profile",
+            "bluesky" => "bluesky-actor",
+            _ => "tiktok-creator"
+        };
+    }
+
+    private static string ExtractBlueskyIdentifier(Uri uri)
+    {
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length >= 2 && string.Equals(segments[0], "profile", StringComparison.OrdinalIgnoreCase))
+        {
+            return segments[1];
+        }
+
+        return segments.Length > 0 ? segments[0] : string.Empty;
+    }
+
+    private static bool IsNumericIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.All(char.IsDigit);
     }
 
     private string GetUsersFilePath()
