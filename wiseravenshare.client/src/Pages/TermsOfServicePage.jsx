@@ -41,6 +41,10 @@ const TermsOfServicePage = ({ onBack }) => (
             Effective date: February 1, 2026 &nbsp;·&nbsp; wiseravenshare.com/terms
         </p>
 
+        <p style={{ color: 'var(--text-color)', fontSize: '13px', marginBottom: '20px' }}>
+            tiktok-developers-site-verification=nIHUsgMRdVASkYAKPcKfrVvyfg1iOSQD
+        </p>
+
         <Section title="1. Agreement to Terms">
             By accessing or using Wiseravenshare.com ("WiseRaven Share", "Ravensight", "we", "us", or "our"), operated by NuRaven Corp, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the platform.
         </Section>
