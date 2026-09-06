@@ -124,7 +124,7 @@ public class EnhancedTruthEngineController : ControllerBase
     /// Batch verification of multiple claims
     /// </summary>
     [HttpPost("verify-batch")]
-    public async Task<ActionResult<List<ComprehensiveTruthAssessment>>> VerifyBatchAsync([FromBody] BatchVerificationRequest request)
+    public async Task<ActionResult<List<ComprehensiveTruthAssessment>>> VerifyBatchAsync([FromBody] EnhancedBatchVerificationRequest request)
     {
         if (request?.Claims == null || request.Claims.Count == 0)
         {
@@ -159,7 +159,7 @@ public class EnhancedTruthEngineController : ControllerBase
     /// Simple endpoint for quick truth scoring
     /// </summary>
     [HttpPost("score")]
-    public async Task<ActionResult<TruthScore>> GetTruthScoreAsync([FromBody] AssessmentRequest request)
+    public async Task<ActionResult<EnhancedTruthScore>> GetTruthScoreAsync([FromBody] AssessmentRequest request)
     {
         if (string.IsNullOrWhiteSpace(request?.Claim))
         {
@@ -190,7 +190,7 @@ public class TextRequest
     public string? Text { get; set; }
 }
 
-public class BatchVerificationRequest
+public class EnhancedBatchVerificationRequest
 {
     public List<string> Claims { get; set; } = new();
 }

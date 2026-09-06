@@ -9,7 +9,7 @@ namespace Wiseravenshare.Server.Services.Truth;
 public interface IEnhancedTruthEngine
 {
     Task<MisbeliefAnalysis> DetectMisbeleifs(string claim);
-    Task<TruthScore> VerifyClaimAsync(string claim);
+    Task<EnhancedTruthScore> VerifyClaimAsync(string claim);
     Task<LogicalFallacyDetection> DetectFallaciesAsync(string text);
     Task<ComprehensiveTruthAssessment> AssessClaimAsync(string claim);
 }
@@ -391,10 +391,10 @@ public class EnhancedTruthVerificationEngine : IEnhancedTruthEngine
         return assessment;
     }
 
-    public async Task<TruthScore> VerifyClaimAsync(string claim)
+    public async Task<EnhancedTruthScore> VerifyClaimAsync(string claim)
     {
         var assessment = await AssessClaimAsync(claim);
-        return new TruthScore
+        return new EnhancedTruthScore
         {
             Score = assessment.FinalTruthScore,
             Confidence = assessment.MisbeliefConfidence,
@@ -500,7 +500,7 @@ public class ComprehensiveTruthAssessment
     public DateTime ProcessedAt { get; set; }
 }
 
-public class TruthScore
+public class EnhancedTruthScore
 {
     public int Score { get; set; }
     public double Confidence { get; set; }

@@ -162,6 +162,47 @@ const inferIdentifierType = (identifier) => {
     return 'username';
 };
 
+const resolveUploadedMediaUrl = (payload, fallback = '') => {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const direct = String(
+        source.mediaUrl
+        || source.filePath
+        || source.file?.mediaUrl
+        || source.file?.MediaUrl
+        || source.file?.publicUrl
+        || source.file?.PublicUrl
+        || source.video?.videoUrl
+        || source.video?.VideoUrl
+        || source.video?.mediaUrl
+        || source.video?.MediaUrl
+        || source.video?.filePath
+        || ''
+    ).trim();
+    if (direct) {
+        return direct;
+    }
+
+    const relativePath = String(source.file?.relativePath || source.file?.RelativePath || '').trim();
+    if (relativePath) {
+        const encoded = relativePath
+            .replace(/\\/g, '/')
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+        if (encoded) {
+            return `/api/videostreaming/blob/${encoded}`;
+        }
+    }
+
+    const fileName = String(source.fileName || source.file?.fileName || source.video?.fileName || '').trim();
+    if (fileName) {
+        return `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
+    }
+
+    return fallback;
+};
+
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const [title, setTitle] = useState('The Social Creator Teams Brief');
@@ -349,9 +390,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
         const payload = {
             type: 'PODCAST_TANDEM_SYNC',
             title: overrides.title ?? title,
+            format: overrides.format ?? format,
             scriptText: overrides.scriptText ?? scriptText,
             storyAngle: overrides.storyAngle ?? storyAngle,
             urgency: overrides.urgency ?? urgency,
+            selectedMode: overrides.selectedMode ?? selectedMode,
+            runOrderApproved: overrides.runOrderApproved ?? runOrderApproved,
+            hasSavedRecording: overrides.hasSavedRecording ?? hasSavedRecording,
             teamMembersList: overrides.teamMembersList ?? teamMembersList,
             senderRole: controlRole,
             timestamp: new Date().toISOString()
@@ -385,9 +430,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 const data = event.data;
                 if (data?.type === 'PODCAST_TANDEM_SYNC') {
                     if (data.title) setTitle(data.title);
+                    if (data.format && formatDefinitions[data.format]) setFormat(data.format);
                     if (data.scriptText) setScriptText(data.scriptText);
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
+                    if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                    if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 }
@@ -401,9 +450,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 try {
                     const data = JSON.parse(e.newValue);
                     if (data.title) setTitle(data.title);
+                    if (data.format && formatDefinitions[data.format]) setFormat(data.format);
                     if (data.scriptText) setScriptText(data.scriptText);
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
+                    if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                    if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 } catch {
@@ -411,6 +464,24 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 }
             }
         };
+
+        try {
+            const savedState = localStorage.getItem('wisePodcastTandemState');
+            if (savedState) {
+                const data = JSON.parse(savedState);
+                if (data.title) setTitle(data.title);
+                if (data.format && formatDefinitions[data.format]) setFormat(data.format);
+                if (data.scriptText) setScriptText(data.scriptText);
+                if (data.storyAngle) setStoryAngle(data.storyAngle);
+                if (data.urgency) setUrgency(data.urgency);
+                if (data.selectedMode) setSelectedMode(data.selectedMode);
+                if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
+                if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+            }
+        } catch {
+            // Ignore restore parse error.
+        }
 
         window.addEventListener('storage', handleStorage);
         return () => {
@@ -686,18 +757,21 @@ const PodcastStudioPage = ({ onNavigate }) => {
             formData.append('storageMode', 'permanent');
 
             const response = await ravensightAPI.uploadVideo(formData);
+            const uploadedMediaUrl = resolveUploadedMediaUrl(response, recordedVideoUrl || '');
             if (response?.video) {
                 upsertLocalVideo({
                     ...response.video,
                     userId: user?.id,
                     channelName: user?.name || 'WiseRaven Podcast Host',
                     channelAvatar: user?.avatar,
-                    videoUrl: response.video.videoUrl || recordedVideoUrl
+                    videoUrl: response.video.videoUrl || response.video.mediaUrl || uploadedMediaUrl,
+                    mediaUrl: response.video.mediaUrl || response.video.videoUrl || uploadedMediaUrl
                 });
             } else {
                 throw new Error('Local store fallback');
             }
             setHasSavedRecording(true);
+            broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording successfully saved to Ravensight Library!');
         } catch {
             const fallback = buildLocalFallbackVideo({
@@ -710,6 +784,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             });
             upsertLocalVideo(fallback);
             setHasSavedRecording(true);
+            broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording saved locally to Ravensight Library.');
         } finally {
             setIsSavingRecording(false);
@@ -874,9 +949,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
         if (!definition) return;
 
         setFormat(nextFormat);
+        setRunOrderApproved(false);
         setScriptText(definition.segments.join('\n'));
         setStatus(`${definition.icon} ${definition.label} format: ${definition.description}`);
-        broadcastTandemState({ format: nextFormat, scriptText: definition.segments.join('\n') });
+        broadcastTandemState({ format: nextFormat, scriptText: definition.segments.join('\n'), runOrderApproved: false });
     };
 
     // Urgency buttons set their namesake dispatch posture:
@@ -1580,7 +1656,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     value={title}
                                     onChange={(event) => {
                                         setTitle(event.target.value);
-                                        broadcastTandemState({ title: event.target.value });
+                                        setRunOrderApproved(false);
+                                        broadcastTandemState({ title: event.target.value, runOrderApproved: false });
                                     }}
                                     style={{
                                         padding: '12px',
@@ -1654,7 +1731,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     value={storyAngle}
                                     onChange={(event) => {
                                         setStoryAngle(event.target.value);
-                                        broadcastTandemState({ storyAngle: event.target.value });
+                                        setRunOrderApproved(false);
+                                        broadcastTandemState({ storyAngle: event.target.value, runOrderApproved: false });
                                     }}
                                     style={{
                                         padding: '12px',
@@ -1696,7 +1774,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     value={scriptText}
                                     onChange={(event) => {
                                         setScriptText(event.target.value);
-                                        broadcastTandemState({ scriptText: event.target.value });
+                                        setRunOrderApproved(false);
+                                        broadcastTandemState({ scriptText: event.target.value, runOrderApproved: false });
                                     }}
                                     rows={8}
                                     disabled={!permissions.canEditScript}

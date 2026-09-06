@@ -16,7 +16,7 @@ using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Middleware;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
-using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -1192,6 +1192,8 @@ builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
 builder.Services.AddScoped<ITwilioService, TwilioService>();
 builder.Services.AddScoped<ICommunicationService, CommunicationService>();
+builder.Services.AddScoped<IEngagementNotificationService, EngagementNotificationService>();
+builder.Services.AddScoped<ICostTrackingService, CostTrackingService>();
 builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent

@@ -299,8 +299,8 @@ public class TwilioService : ITwilioService
                 .Select(m => new MessageRecord
                 {
                     MessageSid = m.Sid,
-                    To = m.To,
-                    From = m.From,
+                    To = m.To?.ToString() ?? string.Empty,
+                    From = m.From?.ToString() ?? string.Empty,
                     Body = m.Body,
                     Status = m.Status.ToString(),
                     DateSent = m.DateSent,

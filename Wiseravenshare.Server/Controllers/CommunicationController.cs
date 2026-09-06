@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.Entities.Communique;
 using Wiseravenshare.Server.Services.Communication;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -137,13 +138,13 @@ public class CommunicationController : ControllerBase
 
         try
         {
-            bool result = await _communicationService.SendVerificationAsync(request.PhoneNumber, out string verificationSid);
+            var verificationResult = await _communicationService.SendVerificationAsync(request.PhoneNumber);
 
             return Ok(new VerificationResponse
             {
-                Success = result,
-                VerificationSid = verificationSid,
-                Message = result ? "Verification code sent" : "Failed to send verification code",
+                Success = verificationResult.Success,
+                VerificationSid = verificationResult.VerificationSid,
+                Message = verificationResult.Success ? "Verification code sent" : "Failed to send verification code",
                 Timestamp = DateTime.UtcNow
             });
         }
