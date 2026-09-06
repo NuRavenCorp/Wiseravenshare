@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  FiMic, FiMicOff, FiRefreshCw, FiLink2, FiX, FiPlay,
-  FiStopCircle, FiArrowRight, FiWifi, FiVolume2
+  FiMic, FiMicOff, FiRefreshCw, FiX, FiPlay,
+  FiStopCircle, FiArrowRight
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
+import { apiService } from '../Services/api';
+import ConnectionIndicator from '../Components/Common/ConnectionIndicator';
 import '../Styles/InstrumentConnector.css';
 
 /**
@@ -37,6 +39,7 @@ function InstrumentConnectorPage() {
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordings, setRecordings] = useState([]);
   const [connectionType, setConnectionType] = useState(null); // 'usb', 'bluetooth', 'network'
+  const [connectionSignal, setConnectionSignal] = useState(false);
   const [midiDevices, setMidiDevices] = useState([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState(null);
   
@@ -50,6 +53,37 @@ function InstrumentConnectorPage() {
   const animationFrameRef = useRef(null);
   const recordingStartTimeRef = useRef(null);
   const midiAccessRef = useRef(null);
+  const autoConnectInFlightRef = useRef(false);
+
+  const detectConnectionType = (deviceLabel) => {
+    const label = String(deviceLabel || '').toLowerCase();
+    if (label.includes('bluetooth') || label.includes('airpods') || label.includes('wireless')) {
+      return 'bluetooth';
+    }
+    if (label.includes('network') || label.includes('stream')) {
+      return 'network';
+    }
+    if (label.includes('usb') || label.includes('interface') || label.includes('adapter')) {
+      return 'usb';
+    }
+    return 'wired';
+  };
+
+  const registerConnection = async ({ deviceIdentifier, deviceName, transport, hardwareAddress, metadataJson }) => {
+    try {
+      await apiService.upsertInstrumentConnection({
+        deviceIdentifier,
+        deviceName,
+        transport,
+        hardwareAddress,
+        isPaired: true,
+        isTrusted: true,
+        metadataJson,
+      });
+    } catch (err) {
+      console.warn('Failed to register instrument connection:', err?.message || err);
+    }
+  };
 
   // ─── Device Enumeration ────────────────────────────────────────────
   useEffect(() => {
@@ -58,16 +92,6 @@ function InstrumentConnectorPage() {
         const audioDevices = await navigator.mediaDevices.enumerateDevices();
         const inputs = audioDevices.filter(d => d.kind === 'audioinput');
         setDevices(inputs);
-        
-        // Try to detect connection type from device label
-        inputs.forEach(device => {
-          const label = device.label.toLowerCase();
-          if (label.includes('bluetooth') || label.includes('airpods')) {
-            console.log('Detected Bluetooth device:', device.label);
-          } else if (label.includes('usb') || label.includes('interface')) {
-            console.log('Detected USB device:', device.label);
-          }
-        });
 
         showNotification(`Found ${inputs.length} audio input devices`, 'info');
       } catch (err) {
@@ -115,10 +139,35 @@ function InstrumentConnectorPage() {
     console.warn('MIDI access denied or not available:', err);
   };
 
+  const handleBluetoothPairing = async () => {
+    if (!navigator.bluetooth) {
+      showNotification('Bluetooth pairing is not supported in this browser. Pair in your OS settings.', 'warning');
+      return;
+    }
+
+    try {
+      const btDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+      showNotification('Bluetooth device selected. Refreshing audio inputs...', 'success');
+      await apiService.registerBluetoothPair({
+        deviceIdentifier: String(btDevice?.id || btDevice?.name || `bt-${Date.now()}`),
+        deviceName: String(btDevice?.name || 'Bluetooth Audio Device'),
+        metadataJson: JSON.stringify({ source: 'web-bluetooth', pairedAt: new Date().toISOString() })
+      });
+      const audioDevices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = audioDevices.filter((d) => d.kind === 'audioinput');
+      setDevices(inputs);
+    } catch (err) {
+      if (err?.name === 'NotFoundError') {
+        showNotification('No Bluetooth device selected.', 'info');
+        return;
+      }
+      showNotification('Bluetooth pairing failed. Pair from OS settings and retry.', 'error');
+    }
+  };
+
   // ─── Connect to Device ───────────────────────────────────────────────
   const handleConnect = async (deviceId) => {
-    if (connectionStatus === 'connected' || connectionStatus === 'recording') {
-      handleDisconnect();
+    if (!deviceId || connectionStatus === 'connecting') {
       return;
     }
 
@@ -154,17 +203,20 @@ function InstrumentConnectorPage() {
       // Detect device type from label
       const device = devices.find(d => d.deviceId === deviceId);
       if (device) {
-        const label = device.label.toLowerCase();
-        if (label.includes('bluetooth') || label.includes('airpods')) {
-          setConnectionType('bluetooth');
-        } else if (label.includes('usb') || label.includes('interface')) {
-          setConnectionType('usb');
-        } else {
-          setConnectionType('usb'); // default to USB/wired
-        }
+        const detected = detectConnectionType(device.label);
+        setConnectionType(detected);
+        registerConnection({
+          deviceIdentifier: device.deviceId,
+          deviceName: device.label || 'Unknown Device',
+          transport: detected,
+          metadataJson: JSON.stringify({ source: 'instrument-connector', userAgent: navigator.userAgent })
+        });
       }
 
       setConnectionStatus('connected');
+      setConnectionSignal(true);
+      setTimeout(() => setConnectionSignal(false), 400);
+      setTimeout(() => setConnectionSignal(true), 900);
       showNotification(`Connected to: ${device?.label || 'Unknown Device'}`, 'success');
 
       // Start visualizer
@@ -175,6 +227,33 @@ function InstrumentConnectorPage() {
       showNotification('Failed to connect: ' + err.message, 'error');
     }
   };
+
+  // ─── Auto Plug-and-Play Connect ──────────────────────────────────────
+  useEffect(() => {
+    if (
+      devices.length === 0 ||
+      connectionStatus === 'connected' ||
+      connectionStatus === 'recording' ||
+      connectionStatus === 'connecting' ||
+      autoConnectInFlightRef.current
+    ) {
+      return;
+    }
+
+    const preferredDeviceId = selectedDeviceId && devices.some((d) => d.deviceId === selectedDeviceId)
+      ? selectedDeviceId
+      : devices[0]?.deviceId;
+
+    if (!preferredDeviceId) {
+      return;
+    }
+
+    autoConnectInFlightRef.current = true;
+    handleConnect(preferredDeviceId)
+      .finally(() => {
+        autoConnectInFlightRef.current = false;
+      });
+  }, [devices, selectedDeviceId, connectionStatus]);
 
   // ─── Disconnect from Device ─────────────────────────────────────────
   const handleDisconnect = () => {
@@ -376,7 +455,7 @@ function InstrumentConnectorPage() {
           <FiMic /> Instrument Connector
         </div>
         <p className="ic-subtitle">
-          Connect USB, Bluetooth, or network audio devices to record live instruments
+          Plug in or pair your instrument input and WiseRavenShare will auto-connect
         </p>
       </div>
 
@@ -385,26 +464,35 @@ function InstrumentConnectorPage() {
         <div className="ic-panel ic-devices">
           <div className="ic-section-header">
             <h2>Audio Input Devices</h2>
-            <button
-              className="ic-btn-icon"
-              onClick={() => {
-                navigator.mediaDevices.enumerateDevices().then(audioDevices => {
-                  const inputs = audioDevices.filter(d => d.kind === 'audioinput');
-                  setDevices(inputs);
-                  showNotification('Device list refreshed', 'info');
-                });
-              }}
-              title="Refresh device list"
-            >
-              <FiRefreshCw />
-            </button>
+            <div className="ic-section-actions">
+              <button
+                className="ic-btn-icon"
+                onClick={handleBluetoothPairing}
+                title="Pair Bluetooth device"
+              >
+                📶
+              </button>
+              <button
+                className="ic-btn-icon"
+                onClick={() => {
+                  navigator.mediaDevices.enumerateDevices().then(audioDevices => {
+                    const inputs = audioDevices.filter(d => d.kind === 'audioinput');
+                    setDevices(inputs);
+                    showNotification('Device list refreshed', 'info');
+                  });
+                }}
+                title="Refresh device list"
+              >
+                <FiRefreshCw />
+              </button>
+            </div>
           </div>
 
           {devices.length === 0 ? (
             <div className="ic-empty-state">
               <FiMicOff />
               <p>No audio input devices found</p>
-              <small>Connect a microphone, audio interface, or Bluetooth device</small>
+              <small>Pair Bluetooth in system settings or plug in a wired/USB device</small>
             </div>
           ) : (
             <div className="ic-device-list">
@@ -425,29 +513,19 @@ function InstrumentConnectorPage() {
                       <div className="ic-device-id">ID: {device.deviceId.slice(0, 8)}...</div>
                     </div>
                   </div>
-                  <button
-                    className={`ic-btn ic-btn-connect ${
-                      selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected'
-                        ? 'connected'
-                        : ''
-                    }`}
-                    onClick={() => handleConnect(device.deviceId)}
-                  >
-                    {selectedDeviceId === device.deviceId &&
-                    connectionStatus !== 'disconnected' ? (
-                      <>
-                        <FiX /> Disconnect
-                      </>
-                    ) : (
-                      <>
-                        <FiLink2 /> Connect
-                      </>
-                    )}
-                  </button>
+                  <div className={`ic-auto-pill ${selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected' ? 'connected' : ''}`}>
+                    {selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected'
+                      ? 'Connected'
+                      : 'Plug-and-play'}
+                  </div>
                 </div>
               ))}
             </div>
           )}
+
+          <small className="ic-note">
+            Plug-and-play is automatic. Bluetooth devices must be paired in OS or browser prompt first.
+          </small>
 
           {/* MIDI Devices */}
           {midiDevices.length > 0 && (
@@ -475,69 +553,12 @@ function InstrumentConnectorPage() {
             <h2>Connection Status</h2>
           </div>
 
-          <div className={`ic-status-box ic-status-${connectionStatus}`}>
-            <div className="ic-status-indicator">
-              {connectionStatus === 'disconnected' && (
-                <>
-                  <FiMicOff className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Disconnected</div>
-                    <small>Select a device to connect</small>
-                  </div>
-                </>
-              )}
-              {connectionStatus === 'connecting' && (
-                <>
-                  <FiRefreshCw className="ic-status-icon spinning" />
-                  <div>
-                    <div className="ic-status-title">Connecting...</div>
-                    <small>Requesting access to device</small>
-                  </div>
-                </>
-              )}
-              {(connectionStatus === 'connected' || connectionStatus === 'recording') && (
-                <>
-                  <FiMic className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Connected</div>
-                    <small>
-                      {devices.find(d => d.deviceId === selectedDeviceId)?.label ||
-                        'Unknown Device'}
-                    </small>
-                  </div>
-                </>
-              )}
-              {connectionStatus === 'error' && (
-                <>
-                  <FiMicOff className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Connection Error</div>
-                    <small>Try another device or check permissions</small>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {connectionType && (
-              <div className="ic-connection-type">
-                {connectionType === 'bluetooth' && (
-                  <>
-                    <FiBluetooth /> Bluetooth
-                  </>
-                )}
-                {connectionType === 'usb' && (
-                  <>
-                    <FiUsb /> USB/Wired
-                  </>
-                )}
-                {connectionType === 'network' && (
-                  <>
-                    <FiWifi /> Network
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          <ConnectionIndicator
+            status={connectionStatus === 'recording' ? 'connected' : connectionStatus}
+            device={devices.find(d => d.deviceId === selectedDeviceId) || null}
+            connectionType={connectionType}
+            signal={connectionSignal}
+          />
 
           {/* Audio Level & Waveform */}
           {connectionStatus !== 'disconnected' && (
