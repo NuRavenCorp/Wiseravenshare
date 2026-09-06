@@ -795,7 +795,173 @@ CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureSourceCaptures"" (
 CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_user_time
     ON app_data.""StudioCaptureSourceCaptures"" (""UserId"", ""CapturedAtUtc"" DESC);
 CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_rig
-    ON app_data.""StudioCaptureSourceCaptures"" (""RigProfileId"");";
+    ON app_data.""StudioCaptureSourceCaptures"" (""RigProfileId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""MediaType"" INTEGER NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""FileName"" VARCHAR(255) NOT NULL,
+    ""FilePath"" VARCHAR(2048) NOT NULL,
+    ""FileUrl"" VARCHAR(2048) NOT NULL,
+    ""MimeType"" VARCHAR(255) NOT NULL,
+    ""FileSize"" BIGINT NOT NULL DEFAULT 0,
+    ""Width"" INTEGER NULL,
+    ""Height"" INTEGER NULL,
+    ""Duration"" INTEGER NULL,
+    ""ThumbnailPath"" VARCHAR(2048) NULL,
+    ""ThumbnailUrl"" VARCHAR(2048) NULL,
+    ""PreviewPath"" VARCHAR(2048) NULL,
+    ""PreviewUrl"" VARCHAR(2048) NULL,
+    ""Metadata"" JSONB NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""Views"" INTEGER NOT NULL DEFAULT 0,
+    ""Downloads"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_items_user
+    ON app_data.""MediaItems"" (""UserId"");
+CREATE INDEX IF NOT EXISTS idx_media_items_type_status
+    ON app_data.""MediaItems"" (""MediaType"", ""Status"");
+CREATE INDEX IF NOT EXISTS idx_media_items_created
+    ON app_data.""MediaItems"" (""CreatedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(100) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""UsageCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_tags_name
+    ON app_data.""MediaTags"" (""Name"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItemTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""TagId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_item_tags_media_tag
+    ON app_data.""MediaItemTags"" (""MediaId"", ""TagId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaComments"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ParentCommentId"" UUID NULL,
+    ""Content"" VARCHAR(2000) NOT NULL,
+    ""LikesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RepliesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsSoftDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""TimestampSeconds"" INTEGER NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_comments_media
+    ON app_data.""MediaComments"" (""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_comments_user
+    ON app_data.""MediaComments"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylists"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""CoverImageUrl"" VARCHAR(2048) NULL,
+    ""ItemCount"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_playlists_user
+    ON app_data.""MediaPlaylists"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylistItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PlaylistId"" UUID NOT NULL,
+    ""MediaId"" UUID NOT NULL,
+    ""OrderIndex"" INTEGER NOT NULL DEFAULT 0,
+    ""AddedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_media
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_order
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""OrderIndex"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaViewHistories"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ViewedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PositionSeconds"" INTEGER NULL,
+    ""ViewDuration"" INTEGER NULL,
+    ""DeviceInfo"" VARCHAR(256) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_view_histories_media_user_time
+    ON app_data.""MediaViewHistories"" (""MediaId"", ""UserId"", ""ViewedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_likes_media_user
+    ON app_data.""MediaLikes"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_bookmarks_media_user
+    ON app_data.""MediaBookmarks"" (""MediaId"", ""UserId"");";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
@@ -956,10 +1122,14 @@ builder.Services.AddScoped<ITruthRepository, TruthRepository>();
 builder.Services.AddScoped<IAgentRepository, AgentRepository>();
 builder.Services.AddScoped<IStudioCaptureRigProfileRepository, StudioCaptureRigProfileRepository>();
 builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureSourceCaptureRepository>();
+builder.Services.AddScoped<IMediaRepository, MediaRepository>();
+builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
+builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, Wiseravenshare.Server.Services.Media.MediaService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
 builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();

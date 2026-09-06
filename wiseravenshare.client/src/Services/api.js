@@ -292,6 +292,61 @@ const toArrayPayload = (payload) => {
     return [];
 };
 
+const toMediaUploadUrl = (payload = {}) => {
+    const source = payload?.data || payload || {};
+    const direct = String(
+        source.mediaUrl
+        || source.filePath
+        || source.file?.mediaUrl
+        || source.file?.MediaUrl
+        || source.file?.publicUrl
+        || source.track?.mediaUrl
+        || source.video?.mediaUrl
+        || source.video?.videoUrl
+        || ''
+    ).trim();
+    if (direct) {
+        return direct;
+    }
+
+    const relativePath = String(source.file?.relativePath || source.file?.RelativePath || '').trim();
+    if (relativePath) {
+        const encoded = relativePath
+            .replace(/\\/g, '/')
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+        if (encoded) {
+            return `/api/videostreaming/blob/${encoded}`;
+        }
+    }
+
+    const fileName = String(source.fileName || source.file?.fileName || source.track?.fileName || '').trim();
+    if (fileName) {
+        return `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
+    }
+
+    return '';
+};
+
+const normalizeMediaUploadResponse = (response) => {
+    const source = response?.data || {};
+    const mediaUrl = toMediaUploadUrl(source);
+    if (!mediaUrl) {
+        return response;
+    }
+
+    return {
+        ...response,
+        data: {
+            ...source,
+            mediaUrl,
+            filePath: source.filePath || mediaUrl
+        }
+    };
+};
+
 const toTrendingTopics = (payload) => {
     const source = toArrayPayload(payload?.articles ? payload.articles : payload);
 
@@ -941,7 +996,7 @@ export const apiService = {
 
         for (const url of candidateUrls) {
             try {
-                return await axios.post(url, formData, {
+                const response = await axios.post(url, formData, {
                     ...requestConfig,
                     headers: {
                         ...requestConfig.headers,
@@ -950,6 +1005,7 @@ export const apiService = {
                             : {})
                     }
                 });
+                return normalizeMediaUploadResponse(response);
             } catch (error) {
                 lastError = error;
                 const status = error?.response?.status;

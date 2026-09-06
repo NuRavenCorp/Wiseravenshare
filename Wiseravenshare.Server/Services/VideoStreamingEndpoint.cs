@@ -33,38 +33,36 @@ public class VideoStreamingController : ControllerBase
             return BadRequest("Invalid fileName.");
         }
 
-        var storageFolderName = _configuration["Storage:Video:StorageFolderName"]?.Trim();
-        if (string.IsNullOrWhiteSpace(storageFolderName))
+        var storageFolderNames = ResolveStorageFolderNames();
+        var defaultDestinations = ResolveDefaultDestinations();
+        var candidatePaths = new List<string>();
+
+        foreach (var storageFolderName in storageFolderNames)
         {
-            storageFolderName = "ravensight_videos";
+            foreach (var destination in defaultDestinations)
+            {
+                var destinationParts = destination.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+            }
         }
 
-        var defaultDestination = NormalizeDestinationFolder(
-            _configuration["Storage:Video:DefaultFolder"],
-            "wiseravenshare/ravensight/video");
-        var destinationParts = defaultDestination.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-        var candidatePaths = new[]
-        {
-            Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()),
-            Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()),
-            Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()),
-
-            Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName),
-            Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName),
-            Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName)
-        };
+        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName));
 
         var filePath = candidatePaths.FirstOrDefault(System.IO.File.Exists);
 
         if (string.IsNullOrWhiteSpace(filePath))
         {
-            var searchRoots = new[]
+            var searchRoots = new List<string>();
+            foreach (var storageFolderName in storageFolderNames)
             {
-                Path.Combine(_environment.ContentRootPath, storageFolderName),
-                Path.Combine(AppContext.BaseDirectory, storageFolderName),
-                Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName)
-            };
+                searchRoots.Add(Path.Combine(_environment.ContentRootPath, storageFolderName));
+                searchRoots.Add(Path.Combine(AppContext.BaseDirectory, storageFolderName));
+                searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName));
+            }
 
             foreach (var root in searchRoots)
             {
@@ -133,19 +131,56 @@ public class VideoStreamingController : ControllerBase
     {
         var normalizedFileName = Path.GetFileName(fileName);
         var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
-        var defaultDestination = NormalizeDestinationFolder(
-            _configuration["Storage:Video:DefaultFolder"],
-            "wiseravenshare/ravensight/video");
+        var candidates = new List<string>();
 
-        var candidates = new List<string>
+        foreach (var defaultDestination in ResolveDefaultDestinations())
         {
-            $"{projectFolder}/{defaultDestination}/{normalizedFileName}".Replace("//", "/"),
-            $"{projectFolder}/{normalizedFileName}".Replace("//", "/"),
-            $"{defaultDestination}/{normalizedFileName}".Replace("//", "/"),
-            normalizedFileName
-        };
+            candidates.Add($"{projectFolder}/{defaultDestination}/{normalizedFileName}".Replace("//", "/"));
+            candidates.Add($"{defaultDestination}/{normalizedFileName}".Replace("//", "/"));
+        }
+
+        candidates.Add($"{projectFolder}/{normalizedFileName}".Replace("//", "/"));
+        candidates.Add(normalizedFileName);
 
         return candidates.Where(item => !string.IsNullOrWhiteSpace(item));
+    }
+
+    private string[] ResolveStorageFolderNames()
+    {
+        var configured = new[]
+        {
+            _configuration["Storage:Video:StorageFolderName"],
+            _configuration["Storage:Photo:StorageFolderName"],
+            _configuration["Storage:Music:StorageFolderName"]
+        };
+
+        return configured
+            .Select(value => string.IsNullOrWhiteSpace(value) ? null : value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Concat(new[] { "ravensight_videos", "ravensight_photos", "ravensight_music" })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
+    private string[] ResolveDefaultDestinations()
+    {
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        var configuredVideo = NormalizeDestinationFolder(
+            _configuration["Storage:Video:DefaultFolder"],
+            $"{projectFolder}/ravensight/video");
+
+        var defaults = new[]
+        {
+            configuredVideo,
+            $"{projectFolder}/ravensight/photo",
+            $"{projectFolder}/ravensight/music"
+        };
+
+        return defaults
+            .Select(value => NormalizeDestinationFolder(value, $"{projectFolder}/ravensight/video"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string NormalizeDestinationFolder(string? requested, string defaultFolder)
