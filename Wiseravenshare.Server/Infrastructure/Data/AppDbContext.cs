@@ -53,6 +53,8 @@ public class AppDbContext : DbContext
 
     // Communique
     public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
+    public DbSet<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences> CommunicationPreferences => Set<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>();
+    public DbSet<Wiseravenshare.Server.Entities.Communique.NotificationCost> NotificationCosts => Set<Wiseravenshare.Server.Entities.Communique.NotificationCost>();
 
     // Collaboration
     public DbSet<Project> Projects => Set<Project>();
@@ -487,6 +489,35 @@ public class AppDbContext : DbContext
             entity.ToTable("CallLogs");
             entity.HasIndex(c => c.UserId);
             entity.HasIndex(c => c.Timestamp);
+        });
+
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>(entity =>
+        {
+            entity.ToTable("CommunicationPreferences");
+            entity.HasIndex(cp => cp.UserId).IsUnique();
+            entity.Property(cp => cp.PreferredChannel).HasMaxLength(20);
+            entity.Property(cp => cp.VerifiedPhoneNumber).HasMaxLength(20);
+            entity.HasOne(cp => cp.User)
+                .WithOne()
+                .HasForeignKey<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>(cp => cp.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.NotificationCost>(entity =>
+        {
+            entity.ToTable("NotificationCosts");
+            entity.Property(nc => nc.NotificationType).HasMaxLength(20);
+            entity.Property(nc => nc.PhoneNumber).HasMaxLength(20);
+            entity.Property(nc => nc.DeliveryStatus).HasMaxLength(20);
+            entity.Property(nc => nc.TwilioSid).HasMaxLength(255);
+            entity.Property(nc => nc.CostUsd).HasPrecision(10, 6);
+            entity.HasIndex(nc => nc.UserId);
+            entity.HasIndex(nc => nc.SentAt);
+            entity.HasIndex(nc => nc.NotificationType);
+            entity.HasOne(nc => nc.User)
+                .WithMany()
+                .HasForeignKey(nc => nc.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ── Collaboration ──

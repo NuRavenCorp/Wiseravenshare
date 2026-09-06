@@ -8,6 +8,7 @@ using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.DTOs.User;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.DTOs.Social;
 
 namespace Wiseravenshare.Server.Services;
@@ -37,6 +38,7 @@ public class PostService : IPostService
     private readonly ITruthService _truthService;
     private readonly ISocialPublishDispatcher _socialPublishDispatcher;
     private readonly ICrossPlatformPublishService _crossPlatformPublishService;
+    private readonly IEngagementNotificationService _engagementNotificationService;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -45,6 +47,7 @@ public class PostService : IPostService
         ITruthService truthService,
         ISocialPublishDispatcher socialPublishDispatcher,
         ICrossPlatformPublishService crossPlatformPublishService,
+        IEngagementNotificationService engagementNotificationService,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -52,6 +55,7 @@ public class PostService : IPostService
         _truthService = truthService;
         _socialPublishDispatcher = socialPublishDispatcher;
         _crossPlatformPublishService = crossPlatformPublishService;
+        _engagementNotificationService = engagementNotificationService;
         _logger = logger;
     }
 
@@ -374,6 +378,20 @@ public class PostService : IPostService
 
         await _postRepository.LikePostAsync(postId, userId);
         _logger.LogInformation("User {UserId} liked post {PostId}", userId, postId);
+
+        // Send notification to post author (fire-and-forget)
+        if (post.UserId != userId)
+        {
+            var liker = await _userRepository.GetByIdAsync(userId);
+            var likerName = liker?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostLikedAsync(
+                post.UserId,
+                postId,
+                likerName,
+                post.Content ?? "your post"
+            );
+        }
+
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
@@ -400,6 +418,20 @@ public class PostService : IPostService
 
         await _postRepository.RepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
+
+        // Send notification to post author (fire-and-forget)
+        if (post.UserId != userId)
+        {
+            var sharedBy = await _userRepository.GetByIdAsync(userId);
+            var sharedByName = sharedBy?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostSharedAsync(
+                post.UserId,
+                postId,
+                sharedByName,
+                post.Content ?? "your post"
+            );
+        }
+
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 

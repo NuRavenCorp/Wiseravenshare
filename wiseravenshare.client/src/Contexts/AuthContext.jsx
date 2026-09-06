@@ -86,12 +86,19 @@ export const AuthProvider = ({ children }) => {
 
     const clearAuthState = () => {
         authService.clearToken();
+        authService.clearRefreshToken();
         authService.clearUser();
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('wr_auth_token');
         localStorage.removeItem('user_data');
         localStorage.removeItem('wiseSocialFeeds');
         localStorage.removeItem('ws.accessToken');
         localStorage.removeItem('wise-raven-token');
+        localStorage.removeItem('auth_refresh_token');
+        sessionStorage.removeItem('auth_token');
+        sessionStorage.removeItem('wr_auth_token');
+        sessionStorage.removeItem('ws.accessToken');
+        sessionStorage.removeItem('wise-raven-token');
         setUser(null);
         window.dispatchEvent(new Event('wiseraven:social-updated'));
     };
