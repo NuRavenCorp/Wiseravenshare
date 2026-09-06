@@ -59,7 +59,8 @@ public class CostTrackingService : ICostTrackingService
     {
         try
         {
-            var cost = NotificationCost.CreateSms(userId, phoneNumber, messageLength);
+            var userIdGuid = ParseUserGuidOrThrow(userId);
+            var cost = NotificationCost.CreateSms(userIdGuid, phoneNumber, messageLength);
             await _costRepository.AddAsync(cost);
             
             _logger.LogInformation(
@@ -78,7 +79,8 @@ public class CostTrackingService : ICostTrackingService
     {
         try
         {
-            var cost = NotificationCost.CreateWhatsApp(userId, phoneNumber);
+            var userIdGuid = ParseUserGuidOrThrow(userId);
+            var cost = NotificationCost.CreateWhatsApp(userIdGuid, phoneNumber);
             await _costRepository.AddAsync(cost);
 
             _logger.LogInformation(
@@ -96,7 +98,8 @@ public class CostTrackingService : ICostTrackingService
     {
         try
         {
-            var cost = NotificationCost.CreateVerification(userId, phoneNumber, channel);
+            var userIdGuid = ParseUserGuidOrThrow(userId);
+            var cost = NotificationCost.CreateVerification(userIdGuid, phoneNumber, channel);
             await _costRepository.AddAsync(cost);
 
             _logger.LogInformation(
@@ -128,7 +131,7 @@ public class CostTrackingService : ICostTrackingService
                 .AsEnumerable();
 
             if (!string.IsNullOrEmpty(userId))
-                costs = costs.Where(c => c.UserId == userId);
+                costs = costs.Where(c => c.UserId == ParseUserGuidOrThrow(userId));
 
             var summary = new CostSummaryDto
             {
@@ -197,7 +200,7 @@ public class CostTrackingService : ICostTrackingService
                 .AsEnumerable();
 
             if (!string.IsNullOrEmpty(userId))
-                costs = costs.Where(c => c.UserId == userId);
+                costs = costs.Where(c => c.UserId == ParseUserGuidOrThrow(userId));
 
             var smsCosts = costs.Where(c => c.NotificationType == "SMS").ToList();
             var whatsAppCosts = costs.Where(c => c.NotificationType == "WhatsApp").ToList();
@@ -261,6 +264,16 @@ public class CostTrackingService : ICostTrackingService
             "year" => DateTime.UtcNow.AddYears(-1),
             _ => DateTime.UtcNow.AddDays(-30) // default to month
         };
+    }
+
+    private static Guid ParseUserGuidOrThrow(string userId)
+    {
+        if (Guid.TryParse(userId, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new ArgumentException("User ID must be a valid GUID.", nameof(userId));
     }
 }
 

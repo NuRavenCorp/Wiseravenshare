@@ -16,8 +16,8 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                 schema: "app_data",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "text", nullable: false),
-                    UserId = table.Column<string>(type: "text", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
                     NotificationType = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     PhoneNumber = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     MessageLength = table.Column<int>(type: "integer", nullable: false),

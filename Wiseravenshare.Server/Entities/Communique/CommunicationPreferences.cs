@@ -9,7 +9,7 @@ public class CommunicationPreferences : BaseEntity
     /// <summary>
     /// User ID associated with these preferences
     /// </summary>
-    public string UserId { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
 
     /// <summary>
     /// Enable SMS notifications

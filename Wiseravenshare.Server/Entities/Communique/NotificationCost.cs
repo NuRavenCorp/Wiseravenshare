@@ -9,7 +9,7 @@ public class NotificationCost : BaseEntity
     /// <summary>
     /// User ID who sent the notification
     /// </summary>
-    public string UserId { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
 
     /// <summary>
     /// Type of notification: SMS | WhatsApp | Verify
@@ -61,7 +61,7 @@ public class NotificationCost : BaseEntity
     /// <summary>
     /// Factory method for SMS costs
     /// </summary>
-    public static NotificationCost CreateSms(string userId, string phoneNumber, int messageLength)
+    public static NotificationCost CreateSms(Guid userId, string phoneNumber, int messageLength)
     {
         return new NotificationCost
         {
@@ -77,7 +77,7 @@ public class NotificationCost : BaseEntity
     /// <summary>
     /// Factory method for WhatsApp costs
     /// </summary>
-    public static NotificationCost CreateWhatsApp(string userId, string phoneNumber)
+    public static NotificationCost CreateWhatsApp(Guid userId, string phoneNumber)
     {
         return new NotificationCost
         {
@@ -93,7 +93,7 @@ public class NotificationCost : BaseEntity
     /// <summary>
     /// Factory method for verification costs
     /// </summary>
-    public static NotificationCost CreateVerification(string userId, string phoneNumber, string channel)
+    public static NotificationCost CreateVerification(Guid userId, string phoneNumber, string channel)
     {
         return new NotificationCost
         {

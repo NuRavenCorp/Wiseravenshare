@@ -272,15 +272,16 @@ public class CommunicationService : ICommunicationService
         try
         {
             // Try to find existing preferences
+            var userIdGuid = ParseUserGuidOrThrow(userId);
             var preferences = (await _preferencesRepository.GetAllAsync())
-                .FirstOrDefault(p => p.UserId == userId);
+                .FirstOrDefault(p => p.UserId == userIdGuid);
 
             if (preferences == null)
             {
                 // Create default preferences
                 preferences = new CommunicationPreferences
                 {
-                    UserId = userId,
+                    UserId = userIdGuid,
                     EnableSmsNotifications = true,
                     EnableWhatsAppNotifications = true,
                     EnableEngagementNotifications = true,
@@ -307,7 +308,7 @@ public class CommunicationService : ICommunicationService
     {
         try
         {
-            preferences.UserId = userId;
+            preferences.UserId = ParseUserGuidOrThrow(userId);
             preferences.UpdatedAt = DateTime.UtcNow;
 
             await _preferencesRepository.UpdateAsync(preferences);
