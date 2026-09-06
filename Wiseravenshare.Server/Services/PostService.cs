@@ -211,6 +211,7 @@ public class PostService : IPostService
         {
             PostType.Video => "video",
             PostType.Image => "photo",
+            PostType.Audio => "music",
             _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
         };
 
@@ -243,6 +244,7 @@ public class PostService : IPostService
         {
             PostType.Video => "video",
             PostType.Image => "photo",
+            PostType.Audio => "music",
             _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
         };
 

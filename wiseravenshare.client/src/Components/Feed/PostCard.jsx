@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import Compartment from '../Common/Compartment';
 import { truthEngine } from '../../Services/truthEngine';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
+import { classifyPostMedia } from './postMediaClassifier';
 
 const PostCard = ({
     post,
@@ -136,9 +137,7 @@ const PostCard = ({
                 const rawMediaUrl = post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '';
                 const resolvedMedia = resolveMediaUrl(rawMediaUrl);
                 if (!resolvedMedia) return null;
-
-                const isVideoPost = post.type === 'Video' || post.mediaType === 'video' || /\.(mp4|webm|mov|avi|mkv)$/i.test(resolvedMedia) || resolvedMedia.startsWith('data:video/') || resolvedMedia.includes('videostreaming');
-                const isImagePost = post.type === 'Image' || post.mediaType === 'photo' || post.mediaType === 'image' || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(resolvedMedia) || resolvedMedia.startsWith('data:image/');
+                const { isVideoPost, isImagePost, isAudioPost } = classifyPostMedia(post, resolvedMedia);
 
                 return (
                     <div style={{ marginTop: '12px', borderRadius: '12px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
@@ -156,6 +155,15 @@ const PostCard = ({
                                 alt="Story media"
                                 style={{ width: '100%', maxHeight: '420px', objectFit: 'cover', display: 'block', borderRadius: '12px' }}
                             />
+                        ) : isAudioPost ? (
+                            <div style={{ padding: '14px', background: 'rgba(255,255,255,0.04)' }}>
+                                <audio
+                                    src={resolvedMedia}
+                                    controls
+                                    preload="metadata"
+                                    style={{ width: '100%' }}
+                                />
+                            </div>
                         ) : (
                             <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <span style={{ fontSize: '13px', color: 'var(--light-color)' }}>📄 Attached Story File</span>

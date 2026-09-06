@@ -1,0 +1,325 @@
+/* wiseravenshare.client/src/Components/HistoricalPosts/HistoricalCalendar.css */
+
+.historical-calendar {
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Calendar Header */
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #ecf0f1;
+}
+
+.calendar-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.4em;
+  font-weight: 600;
+}
+
+.btn-nav {
+  background: #3498db;
+  color: white;
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.btn-nav:hover {
+  background: #2980b9;
+  transform: scale(1.1);
+}
+
+.btn-nav:active {
+  transform: scale(0.95);
+}
+
+/* Weekday Labels */
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.weekday {
+  text-align: center;
+  font-weight: 600;
+  color: #7f8c8d;
+  font-size: 0.9em;
+  padding: 10px;
+}
+
+/* Calendar Grid */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-bottom: 30px;
+}
+
+.calendar-day {
+  aspect-ratio: 1 / 1;
+  border: 2px solid #ecf0f1;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  background: white;
+  transition: all 0.3s ease;
+  min-height: 60px;
+}
+
+.calendar-day.empty {
+  cursor: default;
+  background: transparent;
+  border: none;
+}
+
+.calendar-day:not(.empty):hover {
+  border-color: #3498db;
+  background: #f0f8ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(52, 152, 219, 0.15);
+}
+
+.calendar-day.has-posts {
+  border-color: #2ecc71;
+  background: #f0fff4;
+  font-weight: 600;
+}
+
+.calendar-day.has-posts:hover {
+  border-color: #27ae60;
+  background: #e8f8f1;
+  box-shadow: 0 4px 10px rgba(46, 204, 113, 0.15);
+}
+
+.calendar-day.today {
+  border-color: #e74c3c;
+  background: #fadbd8;
+  font-weight: 600;
+}
+
+.calendar-day.today:hover {
+  box-shadow: 0 4px 10px rgba(231, 76, 60, 0.15);
+}
+
+.day-number {
+  font-size: 1em;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.post-indicator {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 0.8em;
+  color: #2ecc71;
+  font-weight: 700;
+}
+
+.calendar-day.today .day-number {
+  color: #e74c3c;
+  font-weight: 700;
+}
+
+/* Calendar Legend */
+.calendar-legend {
+  display: flex;
+  gap: 30px;
+  justify-content: center;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9em;
+  color: #555;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.legend-dot.has-posts {
+  background: #2ecc71;
+  border: 1px solid #27ae60;
+}
+
+.legend-dot.today {
+  background: #e74c3c;
+  border: 1px solid #c0392b;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .historical-calendar {
+    padding: 15px;
+  }
+
+  .calendar-header h3 {
+    font-size: 1.2em;
+  }
+
+  .calendar-grid {
+    gap: 8px;
+  }
+
+  .calendar-day {
+    min-height: 50px;
+    border-width: 1px;
+  }
+
+  .day-number {
+    font-size: 0.9em;
+  }
+}
+
+@media (max-width: 768px) {
+  .historical-calendar {
+    padding: 12px;
+  }
+
+  .calendar-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+  }
+
+  .calendar-header h3 {
+    font-size: 1.1em;
+  }
+
+  .btn-nav {
+    width: 35px;
+    height: 35px;
+    font-size: 1em;
+  }
+
+  .weekday {
+    font-size: 0.8em;
+    padding: 8px;
+  }
+
+  .calendar-grid {
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+
+  .calendar-day {
+    min-height: 45px;
+    border-width: 1px;
+  }
+
+  .day-number {
+    font-size: 0.85em;
+  }
+
+  .calendar-legend {
+    gap: 20px;
+    padding: 12px;
+    font-size: 0.85em;
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .historical-calendar {
+    padding: 10px;
+  }
+
+  .calendar-header {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    gap: 10px;
+  }
+
+  .calendar-header h3 {
+    font-size: 1em;
+  }
+
+  .btn-nav {
+    width: 32px;
+    height: 32px;
+    font-size: 0.9em;
+  }
+
+  .weekday {
+    font-size: 0.7em;
+    padding: 6px 2px;
+  }
+
+  .calendar-grid {
+    gap: 4px;
+    margin-bottom: 15px;
+  }
+
+  .calendar-day {
+    min-height: 40px;
+    border-width: 1px;
+    padding: 4px;
+  }
+
+  .day-number {
+    font-size: 0.75em;
+  }
+
+  .post-indicator {
+    top: 0px;
+    right: 2px;
+    font-size: 0.7em;
+  }
+
+  .calendar-legend {
+    gap: 15px;
+    padding: 10px;
+    font-size: 0.75em;
+    flex-wrap: wrap;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .legend-item {
+    gap: 6px;
+  }
+}

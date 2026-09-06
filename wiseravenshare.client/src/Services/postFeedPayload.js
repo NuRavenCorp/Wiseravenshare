@@ -52,7 +52,7 @@ const sanitizeMediaUrl = (value) => {
         return null;
     }
 
-    if (text.startsWith('data:video/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
+    if (text.startsWith('data:video/') || text.startsWith('data:audio/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
         return text;
     }
 
@@ -127,13 +127,24 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
     const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
+    const resolvedMediaUrl = sanitizeMediaUrl(post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null));
+    const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
+    const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
+        ? rawType
+        : resolvedMediaUrl && /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(resolvedMediaUrl)
+            ? 'audio'
+            : resolvedMediaUrl && /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(resolvedMediaUrl)
+                ? 'photo'
+                : resolvedMediaUrl && /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(resolvedMediaUrl)
+                    ? 'video'
+                    : null;
 
     return {
         ...post,
         id: post?.id || `local-post-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         userId: resolvedUserId,
-        mediaType: post?.mediaType || (String(post?.type || '').toLowerCase() === 'video' ? 'video' : null),
-        mediaUrl: sanitizeMediaUrl(post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null)),
+        mediaType: inferredMediaType,
+        mediaUrl: resolvedMediaUrl,
         likes: Number(post?.likes ?? post?.likesCount ?? 0),
         reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
         comments: Array.isArray(post?.comments) ? post.comments : [],

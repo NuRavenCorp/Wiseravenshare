@@ -368,6 +368,53 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [showDeveloperApis, setShowDeveloperApis] = useState(false);
     const [providerStatuses, setProviderStatuses] = useState([]);
     const [providerStatusError, setProviderStatusError] = useState('');
+    const handleInputRefs = useRef({});
+
+    const platformDisplayNames = {
+        facebook: 'Facebook',
+        tiktok: 'TikTok',
+        youtube: 'YouTube',
+        twitter: 'Twitter / X',
+        linkedin: 'LinkedIn',
+        bluesky: 'Bluesky',
+        instagram: 'Instagram'
+    };
+
+    const focusHandleInput = (platform) => {
+        const input = handleInputRefs.current[platform];
+        if (input && typeof input.focus === 'function') {
+            input.focus();
+            if (typeof input.select === 'function') {
+                input.select();
+            }
+        }
+    };
+
+    const launchConnectPlatform = async (platform) => {
+        const normalized = String(platform || '').trim().toLowerCase();
+        if (!normalized) {
+            return;
+        }
+
+        if (normalized === 'tiktok') {
+            try {
+                const redirectUri = `${window.location.origin}/api/auth/oauth/tiktok/callback`;
+                const res = await socialService.getTikTokAuthUrl(redirectUri);
+                if (res?.authUrl) {
+                    window.open(res.authUrl, '_blank', 'width=600,height=700');
+                    setConnectionNotice('TikTok OAuth opened in a new window.');
+                }
+            } catch (err) {
+                setConnectionNotice(err?.message || 'Failed to launch TikTok OAuth dialog.');
+            }
+            return;
+        }
+
+        setActivePlatform(normalized);
+        setShowHandleConfig(true);
+        setConnectionNotice(`Enter your ${platformDisplayNames[normalized] || normalized} handle and save to connect the feed.`);
+        window.setTimeout(() => focusHandleInput(normalized), 0);
+    };
 
     useEffect(() => {
         setSnapshot(getSnapshot(user));
@@ -1091,6 +1138,24 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                     Read: {provider.readConfigured ? 'configured' : 'not configured'} · Publish: {provider.publishConfigured ? 'configured' : 'not configured'}
                                 </div>
                                 <div style={{ color: '#cbd5e1', marginTop: '2px' }}>{provider.detail}</div>
+                                <div style={{ marginTop: '8px' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => launchConnectPlatform(provider.platform)}
+                                        style={{
+                                            border: '1px solid rgba(103, 232, 249, 0.35)',
+                                            background: 'rgba(103, 232, 249, 0.12)',
+                                            color: '#67e8f9',
+                                            borderRadius: '999px',
+                                            padding: '5px 10px',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        {provider.platform === 'tiktok' ? 'Connect TikTok Account' : 'Connect'}
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -1148,6 +1213,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>📘 Facebook Page ID or Handle</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.facebook = node; }}
                                 type="text"
                                 value={handles.facebook}
                                 onChange={(e) => setHandles({ ...handles, facebook: e.target.value })}
@@ -1162,15 +1228,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 <button
                                     type="button"
                                     onClick={async () => {
-                                        try {
-                                            const redirectUri = `${window.location.origin}/oauth/tiktok/callback`;
-                                            const res = await socialService.getTikTokAuthUrl(redirectUri);
-                                            if (res?.authUrl) {
-                                                window.open(res.authUrl, '_blank', 'width=600,height=700');
-                                            }
-                                        } catch (err) {
-                                            alert('Failed to launch TikTok OAuth dialog. Ensure Social:TikTok:ClientKey is set.');
-                                        }
+                                        launchConnectPlatform('tiktok');
                                     }}
                                     style={{
                                         border: 'none',
@@ -1187,6 +1245,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 </button>
                             </span>
                             <input
+                                ref={(node) => { handleInputRefs.current.tiktok = node; }}
                                 type="text"
                                 value={handles.tiktok}
                                 onChange={(e) => setHandles({ ...handles, tiktok: e.target.value })}
@@ -1198,6 +1257,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>📸 Instagram Username</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.instagram = node; }}
                                 type="text"
                                 value={handles.instagram}
                                 onChange={(e) => setHandles({ ...handles, instagram: e.target.value })}
@@ -1209,6 +1269,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>▶️ YouTube Channel Handle</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.youtube = node; }}
                                 type="text"
                                 value={handles.youtube}
                                 onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
@@ -1220,6 +1281,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>🐦 Twitter / X Handle</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.twitter = node; }}
                                 type="text"
                                 value={handles.twitter}
                                 onChange={(e) => setHandles({ ...handles, twitter: e.target.value })}
@@ -1231,6 +1293,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>💼 LinkedIn Profile/Company ID</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.linkedin = node; }}
                                 type="text"
                                 value={handles.linkedin}
                                 onChange={(e) => setHandles({ ...handles, linkedin: e.target.value })}
@@ -1241,6 +1304,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span>🦋 Bluesky Handle</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.bluesky = node; }}
                                 type="text"
                                 value={handles.bluesky}
                                 onChange={(e) => setHandles({ ...handles, bluesky: e.target.value })}
