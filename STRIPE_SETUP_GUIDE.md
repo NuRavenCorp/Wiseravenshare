@@ -49,6 +49,9 @@ Stripe_WiseravenShare_MusicStudioRights_StandardProdId=prod_...
 Stripe_WiseravenShare_MusicStudioRights_ProProdId=prod_...
 STRIPE_SECRET_KEY=sk_test_... (already configured)
 STRIPE_WEBHOOK_SECRET=whsec_... (already configured)
+STRIPE_PUBLISHABLE_API=pk_test_... (DO alias)
+STRIPE_RESTRICTED_API=rk_test_... (optional DO alias)
+STRIPE_SECRET_API=sk_test_... (DO alias)
 ```
 
 ### 3. Implement Backend Endpoint ⏳

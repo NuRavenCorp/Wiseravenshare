@@ -52,8 +52,17 @@ services:
         value: bucket-wrs-01010
       - key: Persistence__RequireDatabase
         value: "true"
+      - key: STRIPE_PUBLISHABLE_API
+        value: ${STRIPE_PUBLISHABLE_API}
+        type: SECRET
       - key: STRIPE_SECRET_KEY
-        value: ${STRIPE_SECRET_KEY}
+        value: ${STRIPE_SECRET_API}
+        type: SECRET
+      - key: STRIPE_RESTRICTED_API
+        value: ${STRIPE_RESTRICTED_API}
+        type: SECRET
+      - key: STRIPE_SECRET_API
+        value: ${STRIPE_SECRET_API}
         type: SECRET
       - key: STRIPE_WEBHOOK_SECRET
         value: ${STRIPE_WEBHOOK_SECRET}
@@ -170,7 +179,7 @@ static_sites:
       - key: VITE_RAVENSIGHT_API_URL
         value: ${APP_URL}/api/ravensight
       - key: VITE_STRIPE_PUBLISHABLE_KEY
-        value: ${STRIPE_PUBLISHABLE_KEY}
+        value: ${STRIPE_PUBLISHABLE_API}
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID
         value: prod_VC3xoP4UjLvOF2
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID

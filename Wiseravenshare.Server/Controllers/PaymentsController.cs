@@ -33,7 +33,7 @@ public class PaymentsController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetPublicConfig()
     {
-        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_KEY");
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
         return Ok(new
         {
             publishableKey,
@@ -80,7 +80,7 @@ public class PaymentsController : ControllerBase
     [HttpPost("checkout-session")]
     public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
     {
-        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_KEY");
+        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
         if (string.IsNullOrWhiteSpace(secretKey))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Stripe secret key is not configured." });
@@ -217,9 +217,24 @@ public class PaymentsController : ControllerBase
         return ResolveConfig(legacySectionKey, legacyEnvKey);
     }
 
-    private string ResolveConfig(string sectionKey, string envKey)
+    private string ResolveConfig(string sectionKey, params string[] envKeys)
     {
-        return (_configuration[sectionKey] ?? _configuration[envKey] ?? string.Empty).Trim();
+        var value = _configuration[sectionKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        foreach (var envKey in envKeys)
+        {
+            value = _configuration[envKey];
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
     }
 
     private object BuildCatalogPlan(

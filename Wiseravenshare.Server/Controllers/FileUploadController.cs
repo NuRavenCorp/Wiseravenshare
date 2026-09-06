@@ -51,7 +51,12 @@ public class MediaController : ControllerBase
             return BadRequest("No file uploaded.");
         }
 
-            var allowedTypes = new[] { ".mp4", ".mov", ".webm", ".avi", ".jpg", ".png", ".mp3" };
+        var allowedTypes = new[]
+        {
+            ".mp4", ".mov", ".webm", ".avi", ".mkv",
+            ".jpg", ".jpeg", ".png", ".webp", ".gif",
+            ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"
+        };
         var extension = Path.GetExtension(upload.File.FileName).ToLowerInvariant();
 
         if (!allowedTypes.Contains(extension))
@@ -70,7 +75,8 @@ public class MediaController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
-        var isVideo = extension is ".mp4" or ".mov" or ".webm";
+        var isVideo = extension is ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv";
+        var isAudio = extension is ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".flac";
         if (upload.PublishToYouTube && string.IsNullOrWhiteSpace(upload.YouTubeChannelOrEmail))
         {
             return BadRequest("YouTube details are required when publishing to YouTube.");
@@ -106,8 +112,12 @@ public class MediaController : ControllerBase
         string? facebookUrl = null;
         PublishSocialContentResponse? socialShare = null;
 
-        var isPhoto = extension is ".jpg" or ".png";
-        var mediaType = isPhoto ? SocialMediaType.Photo : SocialMediaType.Video;
+        var isPhoto = extension is ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif";
+        var mediaType = isPhoto
+            ? SocialMediaType.Photo
+            : isAudio
+                ? SocialMediaType.Music
+                : SocialMediaType.Video;
         var wantsSocialCrossPost = upload.PublishToYouTube || upload.PublishToTikTok || upload.PublishToFacebook;
 
         if (wantsSocialCrossPost)

@@ -29,7 +29,7 @@ public class SubscriptionService : ISubscriptionService
         _logger = logger;
         _growthService = growthService;
 
-        _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_KEY");
+        _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
         _webhookSecret = ResolveConfig(configuration, "Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
     }
 
@@ -406,8 +406,23 @@ public class SubscriptionService : ISubscriptionService
         StripeConfiguration.ApiKey = _secretKey;
     }
 
-    private static string ResolveConfig(IConfiguration configuration, string sectionKey, string envKey)
+    private static string ResolveConfig(IConfiguration configuration, string sectionKey, params string[] envKeys)
     {
-        return (configuration[sectionKey] ?? configuration[envKey] ?? string.Empty).Trim();
+        var value = configuration[sectionKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        foreach (var envKey in envKeys)
+        {
+            value = configuration[envKey];
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
     }
 }

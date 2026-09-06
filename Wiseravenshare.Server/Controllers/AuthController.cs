@@ -484,6 +484,30 @@ public class AuthController : ControllerBase
             return Redirect(unavailableUrl);
         }
 
+        if (string.Equals(normalizedProvider, "google", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(state)
+            && string.IsNullOrWhiteSpace(code)
+            && string.IsNullOrWhiteSpace(error))
+        {
+            return Content(
+                """
+                <!doctype html>
+                <html lang="en">
+                <head><meta charset="utf-8"><title>Google OAuth Callback</title></head>
+                <body>
+                  <h1>Google OAuth callback is active</h1>
+                  <p>This endpoint is used by Google Sign-In and must be opened by the OAuth flow.</p>
+                  <p>Supported callback URLs:</p>
+                  <ul>
+                    <li>https://wise-ravens.com/api/auth/oauth/google/callback</li>
+                    <li>https://wiseravenshare.com/api/auth/oauth/google/callback</li>
+                  </ul>
+                </body>
+                </html>
+                """,
+                "text/html");
+        }
+
         if (string.IsNullOrWhiteSpace(state) || !OAuthStatesByToken.TryRemove(state, out var stateRecord))
         {
             var staleStateUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), normalizedProvider, "Sign-in session expired. Please try again.");

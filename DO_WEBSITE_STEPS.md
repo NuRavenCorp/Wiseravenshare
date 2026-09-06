@@ -39,7 +39,7 @@ Run the app in containers while connecting to managed DigitalOcean services.
 
 4) Stripe values
 - Stripe Dashboard -> Developers -> API keys and Webhooks.
-- Fill STRIPE_PUBLISHABLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.
+- Fill STRIPE_PUBLISHABLE_API, STRIPE_RESTRICTED_API, STRIPE_SECRET_API, STRIPE_WEBHOOK_SECRET.
 
 5) Prepare local env file
 - Copy .env.container.do.example to .env.container.

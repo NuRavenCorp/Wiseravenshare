@@ -137,6 +137,9 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
         const payload = uploadResponse?.data || uploadResponse || {};
         const resolvedMediaUrl = payload?.mediaUrl
             || payload?.filePath
+            || payload?.track?.mediaUrl
+            || payload?.track?.MediaUrl
+            || payload?.track?.url
             || payload?.file?.mediaUrl
             || payload?.file?.MediaUrl
             || payload?.video?.mediaUrl
@@ -277,7 +280,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
             content: content,
             type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
             mediaUrl: uploadedMediaUrl || null,
-            mediaUrls: uploadedMediaUrl ? [uploadedMediaUrl] : null,
+            mediaUrls: uploadedMediaUrl ? JSON.stringify([uploadedMediaUrl]) : null,
             youtubeUrl: uploadedYoutubeUrl,
             tiktokUrl: uploadedTikTokUrl,
             facebookUrl: uploadedFacebookUrl,

@@ -15,6 +15,9 @@
     --high: #f59e0b;
     --medium: #10b981;
     --low: #3b82f6;
+    --app-container-padding: 20px;
+    --app-nav-font-size: 12px;
+    --app-touch-target-min-height: 36px;
 }
 
 * {
@@ -72,7 +75,7 @@ img, svg, video {
 .container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 20px;
+    padding: var(--app-container-padding);
 }
 
 .flex {
@@ -170,6 +173,28 @@ img, svg, video {
 @media (max-width: 768px) {
     .grid-3 {
         grid-template-columns: 1fr;
+    }
+
+    html[data-screen-size="lg"] {
+        --app-container-padding: 16px;
+    }
+
+    html[data-screen-size="md"] {
+        --app-container-padding: 14px;
+        --app-nav-font-size: 11px;
+        --app-touch-target-min-height: 34px;
+    }
+
+    html[data-screen-size="sm"] {
+        --app-container-padding: 12px;
+        --app-nav-font-size: 11px;
+        --app-touch-target-min-height: 34px;
+    }
+
+    html[data-screen-size="xs"] {
+        --app-container-padding: 10px;
+        --app-nav-font-size: 10px;
+        --app-touch-target-min-height: 32px;
     }
 
     .left-column {

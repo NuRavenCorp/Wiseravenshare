@@ -1,0 +1,192 @@
+/* wiseravenshare.client/src/Components/MediaLibrary/MediaUpload.css */
+
+.media-upload {
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+}
+
+.upload-header {
+  margin-bottom: 20px;
+  border-bottom: 2px solid #ecf0f1;
+  padding-bottom: 15px;
+}
+
+.upload-header h3 {
+  margin: 0 0 5px 0;
+  color: #2c3e50;
+  font-size: 1.2em;
+}
+
+.upload-header p {
+  margin: 0;
+  color: #7f8c8d;
+  font-size: 0.9em;
+}
+
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.drop-zone {
+  border: 2px dashed #bdc3c7;
+  border-radius: 8px;
+  padding: 30px 20px;
+  text-align: center;
+  transition: all 0.3s ease;
+  background: #f8f9fa;
+  cursor: pointer;
+}
+
+.drop-zone:hover,
+.drop-zone.active {
+  border-color: #3498db;
+  background: #ecf7ff;
+}
+
+.drop-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.drop-label .icon {
+  font-size: 2em;
+}
+
+.drop-label .text {
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.drop-label small {
+  color: #7f8c8d;
+  font-size: 0.85em;
+}
+
+.preview-thumbnail {
+  width: 100%;
+  height: 120px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8f9fa;
+}
+
+.preview-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.9em;
+}
+
+.form-group input[type="text"],
+.form-group input[type="url"],
+.form-group textarea,
+.form-group select {
+  padding: 10px 12px;
+  border: 1px solid #bdc3c7;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="url"]:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-group small {
+  color: #7f8c8d;
+  font-size: 0.85em;
+}
+
+.form-group.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-group.checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #3498db;
+}
+
+.form-group.checkbox label {
+  margin: 0;
+}
+
+.error-message {
+  background: #fadbd8;
+  color: #c0392b;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  border-left: 3px solid #c0392b;
+}
+
+.btn-upload {
+  padding: 12px 20px;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-upload:hover:not(:disabled) {
+  background: #229954;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-upload:disabled {
+  background: #95a5a6;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+@media (max-width: 768px) {
+  .media-upload {
+    padding: 15px;
+  }
+
+  .drop-zone {
+    padding: 20px 15px;
+  }
+
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    font-size: 16px;
+  }
+}

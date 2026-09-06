@@ -39,6 +39,7 @@ import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
 import { apiService } from './Services/api';
+import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
 
 const SPONSOR_PAYMENT_LINK = String(
@@ -98,6 +99,7 @@ const resolveInitialPublicPage = () => {
 };
 
 const App = () => {
+    useScreenSize();
     const [currentPage, setCurrentPage] = useState(() =>
         resolveInitialPublicPage()
     );
@@ -669,7 +671,8 @@ const App = () => {
                             padding: '8px 14px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px'
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)'
                         }}
                     >
                         Back To Main App
@@ -699,7 +702,8 @@ const App = () => {
                                 padding: '8px 12px',
                                 borderRadius: '999px',
                                 cursor: 'pointer',
-                                fontSize: '12px'
+                                fontSize: 'var(--app-nav-font-size)',
+                                minHeight: 'var(--app-touch-target-min-height)'
                             }}
                         >
                             {item.label}
@@ -714,7 +718,8 @@ const App = () => {
                             padding: '8px 12px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px',
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)',
                             fontWeight: 'bold'
                         }}
                     >
@@ -729,7 +734,8 @@ const App = () => {
                             padding: '8px 12px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px',
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)',
                             fontWeight: 'bold'
                         }}
                     >
@@ -747,17 +753,17 @@ const App = () => {
                 </div>
             </div>
             <RavenCommuniqueModal isOpen={communiqueOpen} onClose={() => setCommuniqueOpen(false)} />
-            <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: '12px', color: 'var(--light-color)' }}>
+            <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: 'var(--app-nav-font-size)', color: 'var(--light-color)' }}>
                 <button
                     onClick={() => setCurrentPage('privacy')}
-                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: 'var(--app-nav-font-size)' }}
                 >
                     Privacy Policy
                 </button>
                 &nbsp;·&nbsp;
                 <button
                     onClick={() => setCurrentPage('terms')}
-                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: 'var(--app-nav-font-size)' }}
                 >
                     Terms of Service
                 </button>
