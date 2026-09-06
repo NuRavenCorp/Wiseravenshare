@@ -1,7 +1,7 @@
 // Wiseravenshare.Server/Services/Communication/CommunicationService.cs
 using Microsoft.Extensions.Logging;
-using Wiseravenshare.Server.Infrastructure.Data;
-using Wiseravenshare.Server.Infrastructure.Data.Models;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Communique;
 using Wiseravenshare.Server.Interfaces.Repositories;
 
 namespace Wiseravenshare.Server.Services.Communication;
@@ -9,7 +9,7 @@ namespace Wiseravenshare.Server.Services.Communication;
 public interface ICommunicationService
 {
     Task<bool> SendNotificationAsync(string userId, string message, string? phoneNumber = null, string channel = "sms");
-    Task<bool> SendVerificationAsync(string phoneNumber, out string verificationSid);
+    Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber);
     Task<bool> VerifyPhoneNumberAsync(string phoneNumber, string code);
     Task<bool> NotifyEngagementAsync(string userId, string contentTitle, string activityType);
     Task<bool> SendBulkNotificationAsync(List<string> userIds, string message);
@@ -57,7 +57,8 @@ public class CommunicationService : ICommunicationService
             // Get phone number from user if not provided
             if (string.IsNullOrEmpty(phoneNumber))
             {
-                var user = await _userRepository.GetByIdAsync(userId);
+                var userIdGuid = ParseUserGuidOrThrow(userId);
+                var user = await _userRepository.GetByIdAsync(userIdGuid);
                 phoneNumber = user?.PhoneNumber;
 
                 if (string.IsNullOrEmpty(phoneNumber))
@@ -109,25 +110,23 @@ public class CommunicationService : ICommunicationService
     /// <summary>
     /// Send verification code to phone number
     /// </summary>
-    public async Task<bool> SendVerificationAsync(string phoneNumber, out string verificationSid)
+    public async Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber)
     {
-        verificationSid = string.Empty;
-
         if (!_twilioService.IsEnabled)
         {
             _logger.LogWarning("Twilio is not enabled");
-            return false;
+            return (false, string.Empty);
         }
 
         try
         {
-            verificationSid = await _twilioService.SendVerificationCodeAsync(phoneNumber, "sms");
-            return !string.IsNullOrEmpty(verificationSid);
+            var verificationSid = await _twilioService.SendVerificationCodeAsync(phoneNumber, "sms");
+            return (!string.IsNullOrEmpty(verificationSid), verificationSid ?? string.Empty);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending verification code to {PhoneNumber}", phoneNumber);
-            return false;
+            return (false, string.Empty);
         }
     }
 
@@ -165,7 +164,8 @@ public class CommunicationService : ICommunicationService
 
         try
         {
-            var user = await _userRepository.GetByIdAsync(userId);
+            var userIdGuid = ParseUserGuidOrThrow(userId);
+            var user = await _userRepository.GetByIdAsync(userIdGuid);
             if (user?.PhoneNumber == null)
             {
                 return false;
@@ -288,7 +288,7 @@ public class CommunicationService : ICommunicationService
                     CreatedAt = DateTime.UtcNow
                 };
 
-                await _preferencesRepository.CreateAsync(preferences);
+                preferences = await _preferencesRepository.AddAsync(preferences);
             }
 
             return preferences;
@@ -319,22 +319,14 @@ public class CommunicationService : ICommunicationService
             return false;
         }
     }
-}
 
-/// <summary>
-/// User communication preferences
-/// </summary>
-public class CommunicationPreferences
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString();
-    public string UserId { get; set; } = string.Empty;
-    public bool EnableSmsNotifications { get; set; } = true;
-    public bool EnableWhatsAppNotifications { get; set; } = true;
-    public bool EnableEngagementNotifications { get; set; } = true;
-    public bool EnableAlerts { get; set; } = true;
-    public string PreferredChannel { get; set; } = "sms"; // sms or whatsapp
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? UpdatedAt { get; set; }
-    public bool IsVerified { get; set; }
-    public string? VerifiedPhoneNumber { get; set; }
+    private static Guid ParseUserGuidOrThrow(string userId)
+    {
+        if (Guid.TryParse(userId, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new ArgumentException("User ID must be a valid GUID.", nameof(userId));
+    }
 }
