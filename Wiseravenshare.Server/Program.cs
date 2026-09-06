@@ -1190,6 +1190,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
+builder.Services.AddScoped<ITwilioService, TwilioService>();
+builder.Services.AddScoped<ICommunicationService, CommunicationService>();
 builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
