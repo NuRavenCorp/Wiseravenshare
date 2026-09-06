@@ -47,7 +47,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("by-date")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetPostsByDate(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetPostsByDate(
             [FromQuery] DateTime date,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
@@ -79,7 +79,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("by-date-range")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetPostsByDateRange(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetPostsByDateRange(
             [FromQuery] DateTime startDate,
             [FromQuery] DateTime endDate,
             [FromQuery] int page = 1,
@@ -110,7 +110,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("month/{year}/{month}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<HistoricalPostsService.PostDateSummary>>> GetMonthSummary(int year, int month)
+        public async Task<ActionResult<IEnumerable<PostDateSummary>>> GetMonthSummary(int year, int month)
         {
             try
             {
@@ -136,7 +136,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("year/{year}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<HistoricalPostsService.PostDateSummary>>> GetYearSummary(int year)
+        public async Task<ActionResult<IEnumerable<PostDateSummary>>> GetYearSummary(int year)
         {
             try
             {
@@ -164,7 +164,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("by-week")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetPostsByWeek(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetPostsByWeek(
             [FromQuery] DateTime weekStartDate,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
@@ -193,7 +193,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("timeline")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<HistoricalPostsService.HistoricalDaySnapshot>>> GetHistoricalTimeline(
+        public async Task<ActionResult<IEnumerable<HistoricalDaySnapshot>>> GetHistoricalTimeline(
             [FromQuery] int daysBack = 30)
         {
             try
@@ -222,7 +222,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("statistics")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.PostStatisticsResponse>> GetPostStatistics(
+        public async Task<ActionResult<PostStatisticsResponse>> GetPostStatistics(
             [FromQuery] DateTime startDate,
             [FromQuery] DateTime endDate)
         {
@@ -274,7 +274,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("today")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetTodaysPosts(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetTodaysPosts(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
@@ -300,7 +300,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("yesterday")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetYesterdaysPosts(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetYesterdaysPosts(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
@@ -327,7 +327,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("this-week")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<HistoricalPostsService.DailyPostsArchiveResponse>> GetThisWeeksPosts(
+        public async Task<ActionResult<DailyPostsArchiveResponse>> GetThisWeeksPosts(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
@@ -353,7 +353,7 @@ namespace Wiseravenshare.Server.Controllers
         [HttpGet("this-month")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<ActionResult<IEnumerable<HistoricalPostsService.PostDateSummary>>> GetThisMonthsPosts()
+        public async Task<ActionResult<IEnumerable<PostDateSummary>>> GetThisMonthsPosts()
         {
             try
             {
