@@ -43,7 +43,7 @@ public class WiseCoinService : IWiseCoinService
     private readonly IRepository<CoinTransaction> _transactionRepository;
     private readonly IRepository<CoinStake> _stakeRepository;
     private readonly IRepository<WorkHourValuation> _valuationRepository;
-    private readonly IBadgeService _badgeService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IMemoryCache _cache;
     private readonly ILogger<WiseCoinService> _logger;
     private readonly ILedgerHashService _ledger;
@@ -59,7 +59,7 @@ public class WiseCoinService : IWiseCoinService
         IRepository<CoinTransaction> transactionRepository,
         IRepository<CoinStake> stakeRepository,
         IRepository<WorkHourValuation> valuationRepository,
-        IBadgeService badgeService,
+        IServiceProvider serviceProvider,
         IMemoryCache cache,
         ILogger<WiseCoinService> logger,
         ILedgerHashService ledgerHashService)
@@ -68,7 +68,7 @@ public class WiseCoinService : IWiseCoinService
         _transactionRepository = transactionRepository;
         _stakeRepository = stakeRepository;
         _valuationRepository = valuationRepository;
-        _badgeService = badgeService;
+        _serviceProvider = serviceProvider;
         _cache = cache;
         _logger = logger;
         _ledger = ledgerHashService;
@@ -81,7 +81,8 @@ public class WiseCoinService : IWiseCoinService
         {
             wallet = new WiseCoin { UserId = userId };
             await _walletRepository.AddAsync(wallet);
-            await _badgeService.AwardWelcomeBadgesAsync(userId);
+            var badgeService = _serviceProvider.GetRequiredService<IBadgeService>();
+            await badgeService.AwardWelcomeBadgesAsync(userId);
             await UpdateBadgeMultipliersAsync(userId);
             wallet = (await _walletRepository.FindAsync(w => w.UserId == userId)).First();
             _logger.LogInformation("Created WSC wallet for user {UserId}", userId);
@@ -123,7 +124,8 @@ public class WiseCoinService : IWiseCoinService
         await _ledger.StampChainAsync(transaction);
         await _transactionRepository.AddAsync(transaction);
         await _walletRepository.UpdateAsync(wallet);
-        await _badgeService.CheckAndAwardMilestoneBadgesAsync(userId);
+        var badgeService = _serviceProvider.GetRequiredService<IBadgeService>();
+        await badgeService.CheckAndAwardMilestoneBadgesAsync(userId);
 
         _cache.Remove($"wallet_balance_{userId}");
         return new TransactionResult { Success = true, TransactionId = transaction.Id, Amount = rewardAmount, NewBalance = wallet.Balance };
@@ -233,7 +235,7 @@ public class WiseCoinService : IWiseCoinService
             _ => 1.0m
         };
 
-        var annualRate = STAKING_BASE_RATE * rewardMultiplier + await _badgeService.GetStakingBonusAsync(userId);
+        var annualRate = STAKING_BASE_RATE * rewardMultiplier + await _serviceProvider.GetRequiredService<IBadgeService>().GetStakingBonusAsync(userId);
 
         var stake = new CoinStake
         {
@@ -293,7 +295,7 @@ public class WiseCoinService : IWiseCoinService
     {
         var wallet = await GetOrCreateWalletAsync(userId);
         var valuation = await GetCurrentValuationAsync();
-        var multiplier = wallet.TotalMultiplier * (1 + await _badgeService.GetSkillBonusAsync(userId));
+        var multiplier = wallet.TotalMultiplier * (1 + await _serviceProvider.GetRequiredService<IBadgeService>().GetSkillBonusAsync(userId));
         return valuation.WSCPerHour * multiplier;
     }
 
@@ -361,10 +363,11 @@ public class WiseCoinService : IWiseCoinService
     private async Task<decimal> CalculateRewardAsync(Guid userId, decimal baseAmount, TransactionType type)
     {
         var wallet = await GetOrCreateWalletAsync(userId);
+        var badgeService = _serviceProvider.GetRequiredService<IBadgeService>();
         var multiplier = wallet.TotalMultiplier;
-        multiplier += await _badgeService.GetEarningBonusAsync(userId, type);
-        multiplier *= (1 + await _badgeService.GetSkillBonusAsync(userId));
-        multiplier *= (1 + await _badgeService.GetReputationBonusAsync(userId));
+        multiplier += await badgeService.GetEarningBonusAsync(userId, type);
+        multiplier *= (1 + await badgeService.GetSkillBonusAsync(userId));
+        multiplier *= (1 + await badgeService.GetReputationBonusAsync(userId));
         return baseAmount * multiplier;
     }
 
@@ -407,7 +410,8 @@ public class WiseCoinService : IWiseCoinService
     public async Task UpdateBadgeMultipliersAsync(Guid userId)
     {
         var wallet = await GetOrCreateWalletAsync(userId);
-        var badges = await _badgeService.GetUserBadgesAsync(userId);
+        var badgeService = _serviceProvider.GetRequiredService<IBadgeService>();
+        var badges = await badgeService.GetUserBadgesAsync(userId);
 
         decimal badgeMul = 1m, skillMul = 1m, repMul = 1m;
         foreach (var userBadge in badges)

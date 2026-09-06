@@ -1027,8 +1027,10 @@ builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashSe
 // Daily ledger anchor + integrity check (hash chain tamper-evidence).
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LedgerAnchorBackgroundService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IBadgeService, Wiseravenshare.Server.Services.Currency.BadgeService>();
-builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService, Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>() as Wiseravenshare.Server.Services.Currency.CurrencyAgentService ?? throw new InvalidOperationException("CurrencyAgentService must be registered as the concrete hosted service"));
+// Register CurrencyAgentService as singleton for hosted service (requires scoped dependencies to be lazy-resolved)
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
 builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
