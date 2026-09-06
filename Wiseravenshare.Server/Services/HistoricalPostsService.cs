@@ -342,8 +342,7 @@ namespace Wiseravenshare.Server.Services
                 SharesCount = post.SharesCount,
                 BookmarksCount = post.BookmarksCount,
                 ViewsCount = post.ViewsCount,
-                CreatedAt = post.CreatedAt,
-                UpdatedAt = post.UpdatedAt
+                CreatedAt = post.CreatedAt
             };
         }
     }
