@@ -59,6 +59,49 @@ const sanitizeMediaUrl = (value) => {
     return null;
 };
 
+const resolvePrimaryMediaUrl = (post) => {
+    const directCandidate = sanitizeMediaUrl(
+        post?.mediaUrl
+        || post?.url
+        || post?.imageUrl
+        || post?.photoUrl
+        || post?.thumbnailUrl
+    );
+    if (directCandidate) {
+        return directCandidate;
+    }
+
+    const mediaUrls = post?.mediaUrls;
+    if (Array.isArray(mediaUrls)) {
+        for (const candidate of mediaUrls) {
+            const resolved = sanitizeMediaUrl(candidate);
+            if (resolved) return resolved;
+        }
+    } else if (typeof mediaUrls === 'string') {
+        const trimmed = mediaUrls.trim();
+        if (trimmed) {
+            const parsedAsDirect = sanitizeMediaUrl(trimmed);
+            if (parsedAsDirect) {
+                return parsedAsDirect;
+            }
+
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                    for (const candidate of parsed) {
+                        const resolved = sanitizeMediaUrl(candidate);
+                        if (resolved) return resolved;
+                    }
+                }
+            } catch {
+                // Ignore invalid JSON mediaUrls payloads.
+            }
+        }
+    }
+
+    return null;
+};
+
 const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) => {
     const text = cleanWhitespaceText(value);
     if (!text) {
@@ -127,7 +170,7 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
     const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
-    const resolvedMediaUrl = sanitizeMediaUrl(post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null));
+    const resolvedMediaUrl = resolvePrimaryMediaUrl(post);
     const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
     const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
         ? rawType
