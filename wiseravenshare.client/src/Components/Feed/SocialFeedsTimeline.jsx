@@ -143,10 +143,10 @@ const normalizeFeeds = (feeds) => {
         tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         facebook: getConnection(source, 'facebook', 'Facebook'),
         instagram: getConnection(source, 'instagram', 'Instagram'),
-        youtube: getConnection(source, 'youtube', 'YouTube'),
-        twitter: getConnection(source, 'twitter', 'Twitter'),
+        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube'),
+        twitter: getConnection(source, 'twitter', 'Twitter', 'X'),
         linkedin: getConnection(source, 'linkedin', 'LinkedIn'),
-        bluesky: getConnection(source, 'bluesky', 'Bluesky')
+        bluesky: getConnection(source, 'bluesky', 'Bluesky', 'BlueSky')
     };
 };
 
@@ -257,57 +257,32 @@ const getSnapshot = (user) => {
     };
 };
 
-const normalizeFeedConnections = (feeds = {}) => ({
-    facebook: {
-        enabled: Boolean(feeds.facebook?.enabled),
-        username: String(feeds.facebook?.username || '').trim(),
-        profileUrl: String(feeds.facebook?.profileUrl || '').trim(),
-        feedUrl: String(feeds.facebook?.feedUrl || '').trim(),
-        designation: String(feeds.facebook?.designation || '').trim()
-    },
-    tikTok: {
-        enabled: Boolean(feeds.tikTok?.enabled),
-        username: String(feeds.tikTok?.username || '').trim(),
-        profileUrl: String(feeds.tikTok?.profileUrl || '').trim(),
-        feedUrl: String(feeds.tikTok?.feedUrl || '').trim(),
-        designation: String(feeds.tikTok?.designation || '').trim()
-    },
-    instagram: {
-        enabled: Boolean(feeds.instagram?.enabled),
-        username: String(feeds.instagram?.username || '').trim(),
-        profileUrl: String(feeds.instagram?.profileUrl || '').trim(),
-        feedUrl: String(feeds.instagram?.feedUrl || '').trim(),
-        designation: String(feeds.instagram?.designation || '').trim()
-    },
-    youtube: {
-        enabled: Boolean(feeds.youtube?.enabled),
-        username: String(feeds.youtube?.username || '').trim(),
-        profileUrl: String(feeds.youtube?.profileUrl || '').trim(),
-        feedUrl: String(feeds.youtube?.feedUrl || '').trim(),
-        designation: String(feeds.youtube?.designation || '').trim()
-    },
-    twitter: {
-        enabled: Boolean(feeds.twitter?.enabled),
-        username: String(feeds.twitter?.username || '').trim(),
-        profileUrl: String(feeds.twitter?.profileUrl || '').trim(),
-        feedUrl: String(feeds.twitter?.feedUrl || '').trim(),
-        designation: String(feeds.twitter?.designation || '').trim()
-    },
-    linkedin: {
-        enabled: Boolean(feeds.linkedin?.enabled),
-        username: String(feeds.linkedin?.username || '').trim(),
-        profileUrl: String(feeds.linkedin?.profileUrl || '').trim(),
-        feedUrl: String(feeds.linkedin?.feedUrl || '').trim(),
-        designation: String(feeds.linkedin?.designation || '').trim()
-    },
-    bluesky: {
-        enabled: Boolean(feeds.bluesky?.enabled),
-        username: String(feeds.bluesky?.username || '').trim(),
-        profileUrl: String(feeds.bluesky?.profileUrl || '').trim(),
-        feedUrl: String(feeds.bluesky?.feedUrl || '').trim(),
-        designation: String(feeds.bluesky?.designation || '').trim()
-    }
-});
+const normalizeFeedConnections = (feeds = {}) => {
+    const getFeed = (source, ...keys) => {
+        for (const key of keys) {
+            if (source?.[key]) return source[key];
+        }
+        return {};
+    };
+
+    const normalizeConn = (conn = {}) => ({
+        enabled: Boolean(conn?.enabled),
+        username: String(conn?.username || '').trim(),
+        profileUrl: String(conn?.profileUrl || '').trim(),
+        feedUrl: String(conn?.feedUrl || '').trim(),
+        designation: String(conn?.designation || '').trim()
+    });
+
+    return {
+        facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
+        tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
+        instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
+        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube')),
+        twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter', 'X')),
+        linkedin: normalizeConn(getFeed(feeds, 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky', 'BlueSky'))
+    };
+};
 
 const getConnectedPlatforms = (snapshot) => {
     const source = snapshot || {};
@@ -620,7 +595,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.bluesky.username, customRssFeeds]);
+    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, snapshot.twitter?.username, snapshot.linkedin?.username, snapshot.bluesky.username, customRssFeeds]);
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
@@ -648,7 +623,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             if (userId) {
                 try {
                     const response = await apiService.updateSocialFeeds(userId, updatedFeeds);
-                    persistedFeeds = normalizeFeedConnections(response?.data || response || updatedFeeds);
+                    const responseData = response?.data?.socialFeeds || response?.socialFeeds || response?.data || response;
+                    persistedFeeds = normalizeFeedConnections(responseData);
                 } catch (err) {
                     console.warn('Backend social feed save failed, using local cache fallback:', err);
                 }
@@ -659,6 +635,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             const nextUser = { ...cachedUser, ...user, socialFeeds: persistedFeeds };
             localStorage.setItem('user_data', JSON.stringify(nextUser));
             window.dispatchEvent(new Event('wiseraven:social-updated'));
+            
+            // Update snapshot with new feeds
+            setSnapshot(normalizeFeeds(persistedFeeds));
+            
             const nextSnapshot = getSnapshot(nextUser);
             const connected = getConnectedPlatforms(nextSnapshot);
             setConnectionNotice(
@@ -796,51 +776,51 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             });
         }
 
-        if (snapshot.youtube.enabled || snapshot.youtube.resolvedUrl) {
+        if (snapshot.youtube?.enabled || snapshot.youtube?.resolvedUrl) {
             items.push({
                 id: 'youtube',
                 platform: 'YouTube',
                 icon: '▶️',
                 color: '#f87171',
-                username: snapshot.youtube.username,
-                designation: snapshot.youtube.designation,
-                url: snapshot.youtube.resolvedUrl
+                username: snapshot.youtube?.username,
+                designation: snapshot.youtube?.designation,
+                url: snapshot.youtube?.resolvedUrl
             });
         }
 
-        if (snapshot.twitter.enabled || snapshot.twitter.resolvedUrl) {
+        if (snapshot.twitter?.enabled || snapshot.twitter?.resolvedUrl) {
             items.push({
                 id: 'twitter',
                 platform: 'Twitter / X',
                 icon: '🐦',
                 color: '#38bdf8',
-                username: snapshot.twitter.username,
-                designation: snapshot.twitter.designation,
-                url: snapshot.twitter.resolvedUrl
+                username: snapshot.twitter?.username,
+                designation: snapshot.twitter?.designation,
+                url: snapshot.twitter?.resolvedUrl
             });
         }
 
-        if (snapshot.linkedin.enabled || snapshot.linkedin.resolvedUrl) {
+        if (snapshot.linkedin?.enabled || snapshot.linkedin?.resolvedUrl) {
             items.push({
                 id: 'linkedin',
                 platform: 'LinkedIn',
                 icon: '💼',
                 color: '#60a5fa',
-                username: snapshot.linkedin.username,
-                designation: snapshot.linkedin.designation,
-                url: snapshot.linkedin.resolvedUrl
+                username: snapshot.linkedin?.username,
+                designation: snapshot.linkedin?.designation,
+                url: snapshot.linkedin?.resolvedUrl
             });
         }
 
-        if (snapshot.bluesky.enabled || snapshot.bluesky.resolvedUrl) {
+        if (snapshot.bluesky?.enabled || snapshot.bluesky?.resolvedUrl) {
             items.push({
                 id: 'bluesky',
                 platform: 'Bluesky',
                 icon: '🦋',
                 color: '#60a5fa',
-                username: snapshot.bluesky.username,
-                designation: snapshot.bluesky.designation,
-                url: snapshot.bluesky.resolvedUrl
+                username: snapshot.bluesky?.username,
+                designation: snapshot.bluesky?.designation,
+                url: snapshot.bluesky?.resolvedUrl
             });
         }
 

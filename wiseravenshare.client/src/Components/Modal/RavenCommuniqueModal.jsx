@@ -1,6 +1,6 @@
 // wiseravenshare.client/src/Components/Modal/RavenCommuniqueModal.jsx
-import React, { useState } from 'react';
-import { sendCommunique } from '../../Services/communiqueService';
+import React, { useEffect, useState } from 'react';
+import { getCommuniqueMessages, sendCommunique } from '../../Services/communiqueService';
 import '../../Styles/RavenCommunique.css';
 
 const CHANNELS = [
@@ -17,12 +17,38 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
     const [message, setMessage]   = useState('');
     const [status, setStatus]     = useState(STATUS.idle);
     const [feedback, setFeedback] = useState('');
-
-    if (!isOpen) return null;
-
+    const [history, setHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState('');
     const isVoice     = channel === 'voice';
     const charLimit   = 1600;
     const charsLeft   = charLimit - message.length;
+
+    const loadHistory = async (selectedChannel = '') => {
+        setHistoryLoading(true);
+        setHistoryError('');
+        try {
+            const items = await getCommuniqueMessages({
+                channel: selectedChannel || '',
+                limit: 12
+            });
+            setHistory(Array.isArray(items) ? items : []);
+        } catch (err) {
+            setHistory([]);
+            setHistoryError(err?.message || 'Unable to load aggregated message history.');
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isOpen) {
+            return;
+        }
+        loadHistory('');
+    }, [isOpen]);
+
+    if (!isOpen) return null;
 
     const handleSend = async (e) => {
         e.preventDefault();
@@ -42,9 +68,11 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
             );
             setTo('');
             setMessage('');
+            await loadHistory('');
         } catch (err) {
             setStatus(STATUS.error);
             setFeedback(err.message || 'Send failed. Please try again.');
+            await loadHistory('');
         }
     };
 
@@ -154,6 +182,47 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
                 </form>
 
                 <p className="rc-powered">Powered by Twilio · RavenCommuniqué</p>
+
+                <div style={{ marginTop: '12px', borderTop: '1px solid rgba(148,163,184,0.3)', paddingTop: '10px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>
+                        Aggregated Channel Activity (SMS · WhatsApp · Voice)
+                    </div>
+                    {historyLoading && (
+                        <div style={{ fontSize: '12px', opacity: 0.8 }}>Loading activity…</div>
+                    )}
+                    {!historyLoading && historyError && (
+                        <div style={{ fontSize: '12px', color: '#fca5a5' }}>{historyError}</div>
+                    )}
+                    {!historyLoading && !historyError && history.length === 0 && (
+                        <div style={{ fontSize: '12px', opacity: 0.8 }}>No activity yet.</div>
+                    )}
+                    {!historyLoading && history.length > 0 && (
+                        <div style={{ display: 'grid', gap: '6px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                            {history.map((entry) => (
+                                <div
+                                    key={entry.id}
+                                    style={{
+                                        border: '1px solid rgba(148,163,184,0.3)',
+                                        borderRadius: '8px',
+                                        padding: '6px 8px',
+                                        fontSize: '11px',
+                                        background: 'rgba(15,23,42,0.5)'
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                        <strong style={{ textTransform: 'uppercase' }}>{entry.channel}</strong>
+                                        <span>{entry.requestedAtUtc ? new Date(entry.requestedAtUtc).toLocaleString() : ''}</span>
+                                    </div>
+                                    <div>To: {entry.to}</div>
+                                    {entry.messagePreview && <div style={{ opacity: 0.9 }}>{entry.messagePreview}</div>}
+                                    <div style={{ color: entry.success ? '#86efac' : '#fca5a5' }}>
+                                        {entry.success ? 'Delivered request accepted' : (entry.errorMessage || 'Failed')}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
