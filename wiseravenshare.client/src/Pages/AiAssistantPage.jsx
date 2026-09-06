@@ -25,9 +25,10 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const scrollRef = useRef(null);
     const abortRef = useRef(null);
 
-    // Initialize Ollama health check on page load
+    // Initialize Ollama health check on page load (once only)
     useEffect(() => {
         let cancelled = false;
+        let hasAlerted = false;
         
         const initOllama = async () => {
             setOllamaInitializing(true);
@@ -45,7 +46,9 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                 }
             } else {
                 setOllamaError(health.message);
-                if (addTruthAlert) {
+                // Only alert once on initial check failure
+                if (addTruthAlert && !hasAlerted) {
+                    hasAlerted = true;
                     addTruthAlert('error', 'Ollama Offline', health.message);
                 }
             }
@@ -58,7 +61,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
         return () => {
             cancelled = true;
         };
-    }, [addTruthAlert]);
+    }, []); // Empty dependency array - run only on mount
 
     useEffect(() => {
         if (scrollRef.current) {

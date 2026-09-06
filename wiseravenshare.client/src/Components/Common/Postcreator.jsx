@@ -54,7 +54,7 @@ const safeAvatarInitials = (value, name) => {
     return null; // use <img> instead
 };
 
-const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
+const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatformPublish = false }) => {
     const [content, setContent] = useState('');
     const [mediaFile, setMediaFile] = useState(null);
     const [mediaType, setMediaType] = useState(null);
@@ -500,42 +500,46 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser }) => {
                 ))}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
-                <input
-                    type="checkbox"
-                    id="youtube"
-                    checked={publishToYouTube}
-                    disabled={!canPublishVideo}
-                    onChange={(e) => setPublishToYouTube(e.target.checked)}
-                />
-                <label htmlFor="youtube" style={{ cursor: 'pointer' }}>
-                    🎬 Publish video to YouTube via Ravensight
-                </label>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
-                <input
-                    type="checkbox"
-                    id="tiktok"
-                    checked={publishToTikTok}
-                    disabled={!canPublishVideo}
-                    onChange={(e) => setPublishToTikTok(e.target.checked)}
-                />
-                <label htmlFor="tiktok" style={{ cursor: 'pointer' }}>
-                    🎵 Publish video to TikTok via Ravensight
-                </label>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
-                <input
-                    type="checkbox"
-                    id="facebook"
-                    checked={publishToFacebook}
-                    disabled={!canPublishVideo}
-                    onChange={(e) => setPublishToFacebook(e.target.checked)}
-                />
-                <label htmlFor="facebook" style={{ cursor: 'pointer' }}>
-                    📘 Publish video to Facebook via Ravensight
-                </label>
-            </div>
+            {!hideMultiPlatformPublish && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
+                    <input
+                        type="checkbox"
+                        id="youtube"
+                        checked={publishToYouTube}
+                        disabled={!canPublishVideo}
+                        onChange={(e) => setPublishToYouTube(e.target.checked)}
+                    />
+                    <label htmlFor="youtube" style={{ cursor: 'pointer' }}>
+                        🎬 Publish video to YouTube via Ravensight
+                    </label>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
+                    <input
+                        type="checkbox"
+                        id="tiktok"
+                        checked={publishToTikTok}
+                        disabled={!canPublishVideo}
+                        onChange={(e) => setPublishToTikTok(e.target.checked)}
+                    />
+                    <label htmlFor="tiktok" style={{ cursor: 'pointer' }}>
+                        🎵 Publish video to TikTok via Ravensight
+                    </label>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 0' }}>
+                    <input
+                        type="checkbox"
+                        id="facebook"
+                        checked={publishToFacebook}
+                        disabled={!canPublishVideo}
+                        onChange={(e) => setPublishToFacebook(e.target.checked)}
+                    />
+                    <label htmlFor="facebook" style={{ cursor: 'pointer' }}>
+                        📘 Publish video to Facebook via Ravensight
+                    </label>
+                </div>
+              </>
+            )}
             {publishToYouTube && canPublishVideo && (
                 <div style={{ marginTop: '8px' }}>
                     <input
