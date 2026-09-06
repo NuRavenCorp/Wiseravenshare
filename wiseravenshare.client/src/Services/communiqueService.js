@@ -3,15 +3,27 @@
 
 import { getAuthToken } from './authStorage';
 
-const COMMUNIQUE_BASE_URL =
-    import.meta?.env?.VITE_COMMUNIQUE_URL ||
-    'https://communique.wiseravenshare.com';
+// Use the same origin as the main API — never a separate communique subdomain.
+const resolveCommuniqueApiBase = () => {
+    const configured = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '');
+    if (configured) {
+        return `${configured.replace(/\/api$/i, '')}/api`;
+    }
+    if (typeof window !== 'undefined') {
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host === 'localhost' || host === '127.0.0.1') {
+            return 'http://localhost:5242/api';
+        }
+        return `${window.location.origin}/api`;
+    }
+    return '/api';
+};
+
+const COMMUNIQUE_BASE_URL = resolveCommuniqueApiBase();
 
 const getAuthHeader = () => {
     try {
-        const raw = getAuthToken()
-            || localStorage.getItem('wiseAuthToken')
-            || sessionStorage.getItem('wiseAuthToken');
+        const raw = getAuthToken();
         return raw ? { Authorization: `Bearer ${raw}` } : {};
     } catch {
         return {};
@@ -43,23 +55,23 @@ const post = async (path, body) =>
 
 /** Send an SMS via Twilio */
 export const sendSms = (to, message) =>
-    post('/api/communique/sms', { to, message });
+    post('/communique/sms', { to, message });
 
 /** Send a WhatsApp message via Twilio */
 export const sendWhatsApp = (to, message) =>
-    post('/api/communique/whatsapp', { to, message });
+    post('/communique/whatsapp', { to, message });
 
 /** Unified send — channel: 'sms' | 'whatsapp' | 'voice' */
 export const sendCommunique = (channel, to, message) =>
-    post('/api/communique/send', { channel, to, message });
+    post('/communique/send', { channel, to, message });
 
 /** Start phone verification — channel: 'sms' | 'whatsapp' */
 export const startCommuniqueVerification = (to, channel = 'sms') =>
-    post('/api/communique/verify/start', { to, channel });
+    post('/communique/verify/start', { to, channel });
 
 /** Check a phone verification code */
 export const checkCommuniqueVerification = (to, code) =>
-    post('/api/communique/verify/check', { to, code });
+    post('/communique/verify/check', { to, code });
 
 /** Aggregated recent dispatches across SMS/WhatsApp/Voice */
 export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) => {
@@ -68,7 +80,7 @@ export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) =
     if (Number.isFinite(limit) && limit > 0) query.set('limit', String(Math.floor(limit)));
     const suffix = query.toString() ? `?${query.toString()}` : '';
 
-    return request(`/api/communique/messages${suffix}`, {
+    return request(`/communique/messages${suffix}`, {
         method: 'GET'
     });
 };
