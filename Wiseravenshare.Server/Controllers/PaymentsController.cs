@@ -77,6 +77,76 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    [HttpGet("health")]
+    [AllowAnonymous]
+    public IActionResult GetStripeHealth()
+    {
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+        var webhookSecret = ResolveConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+
+        var creatorProMonthly = ResolvePriceIdRaw("creator_pro", "monthly");
+        var creatorProAnnual = ResolvePriceIdRaw("creator_pro", "annual");
+        var growthSuiteMonthly = ResolvePriceIdRaw("growth_suite", "monthly");
+        var growthSuiteAnnual = ResolvePriceIdRaw("growth_suite", "annual");
+        var studioPlusMonthly = ResolvePriceIdRaw("studio_plus", "monthly");
+        var studioPlusAnnual = ResolvePriceIdRaw("studio_plus", "annual");
+
+        var issues = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(publishableKey)) issues.Add("missing: Stripe publishable key");
+        if (string.IsNullOrWhiteSpace(secretKey)) issues.Add("missing: Stripe secret key");
+        if (string.IsNullOrWhiteSpace(webhookSecret)) issues.Add("missing: Stripe webhook secret");
+
+        if (string.IsNullOrWhiteSpace(creatorProMonthly)) issues.Add("missing: creator_pro monthly price id");
+        else if (!IsStripePriceId(creatorProMonthly)) issues.Add("invalid: creator_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(creatorProAnnual)) issues.Add("missing: creator_pro annual price id");
+        else if (!IsStripePriceId(creatorProAnnual)) issues.Add("invalid: creator_pro annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(growthSuiteMonthly)) issues.Add("missing: growth_suite monthly price id");
+        else if (!IsStripePriceId(growthSuiteMonthly)) issues.Add("invalid: growth_suite monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(growthSuiteAnnual)) issues.Add("missing: growth_suite annual price id");
+        else if (!IsStripePriceId(growthSuiteAnnual)) issues.Add("invalid: growth_suite annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(studioPlusMonthly)) issues.Add("missing: studio_plus monthly price id");
+        else if (!IsStripePriceId(studioPlusMonthly)) issues.Add("invalid: studio_plus monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(studioPlusAnnual)) issues.Add("missing: studio_plus annual price id");
+        else if (!IsStripePriceId(studioPlusAnnual)) issues.Add("invalid: studio_plus annual must start with price_");
+
+        return Ok(new
+        {
+            configured = issues.Count == 0,
+            keys = new
+            {
+                publishableKeyConfigured = !string.IsNullOrWhiteSpace(publishableKey),
+                secretKeyConfigured = !string.IsNullOrWhiteSpace(secretKey),
+                webhookSecretConfigured = !string.IsNullOrWhiteSpace(webhookSecret)
+            },
+            plans = new
+            {
+                creator_pro = new
+                {
+                    monthly = new { value = creatorProMonthly, validPriceId = IsStripePriceId(creatorProMonthly) },
+                    annual = new { value = creatorProAnnual, validPriceId = IsStripePriceId(creatorProAnnual) }
+                },
+                growth_suite = new
+                {
+                    monthly = new { value = growthSuiteMonthly, validPriceId = IsStripePriceId(growthSuiteMonthly) },
+                    annual = new { value = growthSuiteAnnual, validPriceId = IsStripePriceId(growthSuiteAnnual) }
+                },
+                studio_plus = new
+                {
+                    monthly = new { value = studioPlusMonthly, validPriceId = IsStripePriceId(studioPlusMonthly) },
+                    annual = new { value = studioPlusAnnual, validPriceId = IsStripePriceId(studioPlusAnnual) }
+                }
+            },
+            issues
+        });
+    }
+
     [HttpPost("checkout-session")]
     public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
     {
@@ -179,6 +249,12 @@ public class PaymentsController : ControllerBase
 
     private string ResolvePriceId(string plan, string billingCycle)
     {
+        var rawPriceId = ResolvePriceIdRaw(plan, billingCycle);
+        return IsStripePriceId(rawPriceId) ? rawPriceId : string.Empty;
+    }
+
+    private string ResolvePriceIdRaw(string plan, string billingCycle)
+    {
         var normalizedPlan = string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim();
         var normalizedCycle = string.Equals(billingCycle, "annual", StringComparison.OrdinalIgnoreCase)
             ? "annual"
@@ -215,6 +291,11 @@ public class PaymentsController : ControllerBase
             : "STRIPE_PRICE_MONTHLY_ID";
 
         return ResolveConfig(legacySectionKey, legacyEnvKey);
+    }
+
+    private static bool IsStripePriceId(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
     }
 
     private string ResolveConfig(string sectionKey, params string[] envKeys)

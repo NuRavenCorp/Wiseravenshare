@@ -98,6 +98,21 @@ public class BillingController : ControllerBase
         return Ok(result);
     }
 
+    [Authorize]
+    [HttpGet("webhook-workflow")]
+    [ProducesResponseType(typeof(StripeWebhookWorkflowStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetWebhookWorkflowStatus()
+    {
+        if (!IsAllAccessAdmin())
+        {
+            return Forbid();
+        }
+
+        var result = await _subscriptionService.GetWebhookWorkflowStatusAsync(includeAllSubscriptions: true);
+        return Ok(result);
+    }
+
     private bool IsAllAccessAdmin()
     {
         var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;

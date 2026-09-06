@@ -62,7 +62,6 @@ namespace Wiseravenshare.Server.DTOs.Post
 
     public class CreatePostDto
     {
-        [Required]
         [MaxLength(1000)]
         public string Content { get; set; } = string.Empty;
 

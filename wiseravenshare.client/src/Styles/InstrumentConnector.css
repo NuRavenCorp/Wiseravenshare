@@ -166,6 +166,18 @@
   box-shadow: 0 0 20px rgba(100, 200, 255, 0.3);
 }
 
+.ic-btn-recording-start {
+  min-height: 48px;
+}
+
+.ic-btn-recording-start:disabled {
+  transform: none;
+}
+
+.ic-btn-recording-start:disabled:hover {
+  box-shadow: none;
+}
+
 .ic-btn-secondary {
   background: rgba(255, 150, 100, 0.1);
   border-color: rgba(255, 150, 100, 0.3);

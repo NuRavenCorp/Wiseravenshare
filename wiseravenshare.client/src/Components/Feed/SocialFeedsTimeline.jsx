@@ -422,6 +422,39 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, []);
 
     useEffect(() => {
+        try {
+            const raw = localStorage.getItem('wiseSocialAggregatorIntent');
+            if (!raw) {
+                return;
+            }
+
+            const detail = JSON.parse(raw);
+            const createdAt = Number(detail?.createdAt || 0);
+            const isFresh = Number.isFinite(createdAt) && (Date.now() - createdAt) < 5 * 60 * 1000;
+            if (!isFresh) {
+                localStorage.removeItem('wiseSocialAggregatorIntent');
+                return;
+            }
+
+            const platform = String(detail?.platform || '').trim().toLowerCase().replace('-feed', '');
+            const hasKnownPlatform = platform && PLATFORMS.some((item) => item.id === platform);
+            if (hasKnownPlatform) {
+                setActivePlatform(platform);
+            }
+
+            if (detail?.openConfig) {
+                setShowHandleConfig(true);
+                const targetPlatform = hasKnownPlatform ? platform : 'facebook';
+                window.setTimeout(() => focusHandleInput(targetPlatform), 0);
+            }
+
+            localStorage.removeItem('wiseSocialAggregatorIntent');
+        } catch {
+            localStorage.removeItem('wiseSocialAggregatorIntent');
+        }
+    }, []);
+
+    useEffect(() => {
         const refresh = () => setSnapshot(getSnapshot(user));
         refresh();
         const intervalId = setInterval(refresh, REFRESH_MS);
