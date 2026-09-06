@@ -16,8 +16,8 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                 schema: "app_data",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "text", nullable: false),
-                    UserId = table.Column<string>(type: "text", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
                     EnableSmsNotifications = table.Column<bool>(type: "boolean", nullable: false),
                     EnableWhatsAppNotifications = table.Column<bool>(type: "boolean", nullable: false),
                     EnableEngagementNotifications = table.Column<bool>(type: "boolean", nullable: false),

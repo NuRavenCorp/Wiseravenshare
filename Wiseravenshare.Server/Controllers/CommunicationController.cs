@@ -232,9 +232,14 @@ public class CommunicationController : ControllerBase
         try
         {
             var userId = GetCurrentUserId();
+            if (!Guid.TryParse(userId, out var userIdGuid))
+            {
+                return BadRequest(new { error = "Invalid authenticated user ID" });
+            }
+
             var preferences = new CommunicationPreferences
             {
-                UserId = userId,
+                UserId = userIdGuid,
                 EnableSmsNotifications = request.EnableSmsNotifications,
                 EnableWhatsAppNotifications = request.EnableWhatsAppNotifications,
                 EnableEngagementNotifications = request.EnableEngagementNotifications,
