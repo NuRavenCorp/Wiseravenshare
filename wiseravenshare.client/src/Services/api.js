@@ -514,6 +514,11 @@ export const apiService = {
     updateProfile: (userId, updates) => api.put(`/users/${userId}`, updates),
     getSocialFeeds: (userId) => api.get(`/users/${userId}/feeds`),
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),
+    getInstrumentConnections: () => api.get('/instrumentconnections'),
+    upsertInstrumentConnection: (payload) => api.post('/instrumentconnections', payload),
+    registerBluetoothPair: (payload) => api.post('/instrumentconnections/bluetooth/pair', payload),
+    instrumentConnectionHeartbeat: (id) => api.post(`/instrumentconnections/${id}/heartbeat`),
+    removeInstrumentConnection: (id) => api.delete(`/instrumentconnections/${id}`),
 
     // Posts endpoints
     getPosts: async (params = {}) => {

@@ -725,7 +725,30 @@ CREATE TABLE IF NOT EXISTS app_data.file_transfers (
 CREATE INDEX IF NOT EXISTS idx_bridge_sessions_platform_user
     ON app_data.bridge_sessions (platform, external_user_id);
 CREATE INDEX IF NOT EXISTS idx_room_participants_room
-    ON app_data.room_participants (room_id, is_active);";
+    ON app_data.room_participants (room_id, is_active);
+
+CREATE TABLE IF NOT EXISTS app_data."InstrumentConnections" (
+    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "UserId" UUID NOT NULL,
+    "DeviceIdentifier" VARCHAR(120) NOT NULL,
+    "DeviceName" VARCHAR(255) NOT NULL,
+    "Transport" VARCHAR(40) NOT NULL DEFAULT 'wired',
+    "HardwareAddress" VARCHAR(120),
+    "IsPaired" BOOLEAN NOT NULL DEFAULT TRUE,
+    "IsTrusted" BOOLEAN NOT NULL DEFAULT FALSE,
+    "IsActive" BOOLEAN NOT NULL DEFAULT TRUE,
+    "LastSeenAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "MetadataJson" TEXT,
+    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
+    "DeletedAt" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
+    ON app_data."InstrumentConnections" ("UserId");
+CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
+    ON app_data."InstrumentConnections" ("UserId", "DeviceIdentifier");";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);

@@ -29,6 +29,7 @@ public class AppDbContext : DbContext
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
     public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
+    public DbSet<InstrumentConnection> InstrumentConnections => Set<InstrumentConnection>();
     public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
     public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
     public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
@@ -281,6 +282,23 @@ public class AppDbContext : DbContext
                 .HasForeignKey(c => c.PostId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+            modelBuilder.Entity<InstrumentConnection>(entity =>
+            {
+                entity.ToTable("InstrumentConnections");
+                entity.Property(c => c.DeviceIdentifier).HasMaxLength(120);
+                entity.Property(c => c.DeviceName).HasMaxLength(255);
+                entity.Property(c => c.Transport).HasMaxLength(40);
+                entity.Property(c => c.HardwareAddress).HasMaxLength(120);
+                entity.Property(c => c.MetadataJson).HasColumnType("text");
+                entity.HasIndex(c => c.UserId);
+                entity.HasIndex(c => new { c.UserId, c.DeviceIdentifier }).IsUnique();
+
+                entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            });
 
         // ── Communique ──
         modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.CallLog>(entity =>

@@ -73,6 +73,12 @@
   margin-bottom: 1.5rem;
 }
 
+.ic-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .ic-section-header h2 {
   font-size: 1.4rem;
   font-weight: 600;
@@ -305,6 +311,25 @@
 .ic-device-id {
   font-size: 0.75rem;
   color: #808080;
+}
+
+.ic-auto-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(100, 200, 255, 0.25);
+  background: rgba(100, 200, 255, 0.08);
+  color: #9ad7ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ic-auto-pill.connected {
+  border-color: rgba(100, 220, 120, 0.45);
+  background: rgba(100, 220, 120, 0.15);
+  color: #a5f1b0;
 }
 
 /* ─── Empty State ────────────────────────────────────────────────────────────── */

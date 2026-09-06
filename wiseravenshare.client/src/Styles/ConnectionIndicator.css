@@ -1,0 +1,179 @@
+.connection-indicator {
+  border: 1px solid rgba(100, 200, 255, 0.2);
+  background: rgba(20, 30, 45, 0.55);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.connection-indicator-content {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.95rem;
+}
+
+.connection-indicator-left {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.connection-indicator-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(100, 200, 255, 0.15);
+  color: #8bd4ff;
+  flex-shrink: 0;
+}
+
+.ic-status-icon,
+.ic-status-spinner {
+  font-size: 18px;
+}
+
+.ic-status-spinner {
+  animation: ci-spin 0.9s linear infinite;
+}
+
+.connection-indicator-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #e7f4ff;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.connection-indicator-subtitle {
+  color: #99acc0;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connection-indicator-reconnecting {
+  font-size: 0.9rem;
+}
+
+.connection-signal {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.connection-signal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+}
+
+.connection-signal-pulse {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(34, 197, 94, 0.55);
+  opacity: 0;
+}
+
+.connection-signal.pulse .connection-signal-pulse {
+  animation: ci-pulse 1.5s ease-out infinite;
+}
+
+.connection-indicator-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #8ec5ff;
+  font-size: 0.8rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(80, 140, 220, 0.14);
+  border: 1px solid rgba(120, 180, 255, 0.26);
+}
+
+.connection-indicator-close {
+  border: none;
+  background: transparent;
+  color: #b7c6d4;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.connection-indicator-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.connection-indicator-bar {
+  height: 3px;
+}
+
+.connection-bar-disconnected {
+  background: #6b7280;
+}
+
+.connection-bar-connecting {
+  background: #f59e0b;
+}
+
+.connection-bar-connected {
+  background: #22c55e;
+}
+
+.connection-bar-error {
+  background: #ef4444;
+}
+
+.connection-indicator-connected {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.connection-indicator-connecting {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.connection-indicator-error {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+@keyframes ci-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ci-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .connection-indicator-content {
+    grid-template-columns: 1fr auto;
+  }
+
+  .connection-indicator-type {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
