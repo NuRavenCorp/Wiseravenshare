@@ -36,6 +36,7 @@ function InstrumentConnectorPage() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingRecording, setIsStartingRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordings, setRecordings] = useState([]);
   const [connectionType, setConnectionType] = useState(null); // 'usb', 'bluetooth', 'network'
@@ -68,6 +69,23 @@ function InstrumentConnectorPage() {
   const recordingStartTimeRef = useRef(null);
   const midiAccessRef = useRef(null);
   const autoConnectInFlightRef = useRef(false);
+
+  const resolveSupportedRecorderMimeType = () => {
+    const MediaRecorderCtor = window.MediaRecorder;
+    if (!MediaRecorderCtor || typeof MediaRecorderCtor.isTypeSupported !== 'function') {
+      return '';
+    }
+
+    const preferredTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg'
+    ];
+
+    return preferredTypes.find((type) => MediaRecorderCtor.isTypeSupported(type)) || '';
+  };
 
   const detectConnectionType = (deviceLabel) => {
     const label = String(deviceLabel || '').toLowerCase();
@@ -371,17 +389,32 @@ function InstrumentConnectorPage() {
 
   // ─── Start Recording ────────────────────────────────────────────────
   const handleStartRecording = () => {
-    if (!mediaStreamRef.current) {
+    if (isRecording || isStartingRecording) {
+      return;
+    }
+
+    const stream = mediaStreamRef.current;
+    if (!stream) {
       showNotification('No device connected', 'error');
       return;
     }
 
+    const liveAudioTracks = stream.getAudioTracks().filter((track) => track.readyState === 'live');
+    if (liveAudioTracks.length === 0) {
+      showNotification('Connected device has no live audio input. Reconnect and try again.', 'error');
+      return;
+    }
+
+    setIsStartingRecording(true);
+
     try {
-      const mimeType = 'audio/webm;codecs=opus';
-      const mediaRecorder = new MediaRecorder(mediaStreamRef.current, {
-        mimeType,
+      const mimeType = resolveSupportedRecorderMimeType();
+      const recorderOptions = {
+        ...(mimeType ? { mimeType } : {}),
         audioBitsPerSecond: 128000, // 128 kbps
-      });
+      };
+
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
 
       const chunks = [];
       mediaRecorder.ondataavailable = (e) => {
@@ -390,8 +423,34 @@ function InstrumentConnectorPage() {
         }
       };
 
+      mediaRecorder.onerror = (event) => {
+        const reason = event?.error?.message || 'Unknown recording error';
+        clearInterval(recordingIntervalRef.current);
+        setIsRecording(false);
+        setConnectionStatus('connected');
+        showNotification('Recording error: ' + reason, 'error');
+      };
+
+      mediaRecorder.onstart = () => {
+        setIsStartingRecording(false);
+        setIsRecording(true);
+        setRecordingTime(0);
+        recordingStartTimeRef.current = Date.now();
+        setConnectionStatus('recording');
+
+        // Use elapsed clock time to avoid interval drift.
+        recordingIntervalRef.current = setInterval(() => {
+          const startedAt = recordingStartTimeRef.current || Date.now();
+          const elapsedSeconds = (Date.now() - startedAt) / 1000;
+          setRecordingTime(elapsedSeconds);
+        }, 100);
+
+        showNotification('Recording started', 'success');
+      };
+
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: mimeType });
+        const blobType = mimeType || chunks[0]?.type || 'audio/webm';
+        const blob = new Blob(chunks, { type: blobType });
         const url = URL.createObjectURL(blob);
         const timestamp = new Date().toLocaleString();
         const deviceLabel = devices.find(d => d.deviceId === selectedDeviceId)?.label || 'Unknown';
@@ -411,7 +470,7 @@ function InstrumentConnectorPage() {
               metadataJson: JSON.stringify({
                 transport: connectionType || 'analog',
                 audioBitsPerSecond: 128000,
-                mimeType,
+                mimeType: blobType,
                 userAgent: navigator.userAgent,
               }),
             });
@@ -442,20 +501,10 @@ function InstrumentConnectorPage() {
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-      recordingStartTimeRef.current = Date.now();
-      setConnectionStatus('recording');
-
-      // Update recording time every 100ms
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingTime(t => t + 0.1);
-      }, 100);
-
-      showNotification('Recording started', 'success');
+      mediaRecorder.start(250);
     } catch (err) {
       console.error('Error starting recording:', err);
+      setIsStartingRecording(false);
       showNotification('Failed to start recording: ' + err.message, 'error');
     }
   };
@@ -466,6 +515,7 @@ function InstrumentConnectorPage() {
       mediaRecorderRef.current.stop();
       clearInterval(recordingIntervalRef.current);
       setIsRecording(false);
+      setIsStartingRecording(false);
       setConnectionStatus('connected');
       showNotification('Recording saved', 'success');
     }
@@ -707,11 +757,11 @@ function InstrumentConnectorPage() {
           <div className="ic-recording-controls">
             {!isRecording ? (
               <button
-                className="ic-btn ic-btn-primary"
+                className="ic-btn ic-btn-primary ic-btn-recording-start"
                 onClick={handleStartRecording}
-                disabled={connectionStatus !== 'connected'}
+                disabled={connectionStatus !== 'connected' || isStartingRecording}
               >
-                <FiPlay /> Start Recording
+                <FiPlay /> {isStartingRecording ? 'Starting...' : 'Start Recording'}
               </button>
             ) : (
               <>

@@ -292,27 +292,94 @@ const toArrayPayload = (payload) => {
     return [];
 };
 
-const toMediaUploadUrl = (payload = {}) => {
-    const source = payload?.data || payload || {};
-    const direct = String(
-        source.mediaUrl
-        || source.filePath
-        || source.file?.mediaUrl
-        || source.file?.MediaUrl
-        || source.file?.publicUrl
-        || source.track?.mediaUrl
-        || source.video?.mediaUrl
-        || source.video?.videoUrl
-        || ''
-    ).trim();
-    if (direct) {
-        return direct;
+const isLikelyFileSystemPath = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return false;
+
+    return /^[a-z]:[\\/]/i.test(text)
+        || text.startsWith('\\\\')
+        || text.startsWith('file:');
+};
+
+const normalizeWebMediaUrl = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+
+    if (text.startsWith('data:') || text.startsWith('blob:') || /^https?:\/\//i.test(text)) {
+        return text;
     }
 
-    const relativePath = String(source.file?.relativePath || source.file?.RelativePath || '').trim();
+    if (text.startsWith('/')) {
+        return text;
+    }
+
+    if (text.startsWith('api/')) {
+        return `/${text}`;
+    }
+
+    return '';
+};
+
+const toSafeObjectPath = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (normalizeWebMediaUrl(text) || isLikelyFileSystemPath(text)) return '';
+
+    return text
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .join('/');
+};
+
+const extractFileName = (...candidates) => {
+    for (const candidate of candidates) {
+        const text = String(candidate || '').trim();
+        if (!text) continue;
+
+        const cleaned = text.replace(/[?#].*$/, '').replace(/\\/g, '/');
+        const name = cleaned.split('/').pop() || '';
+        if (name) {
+            return name;
+        }
+    }
+
+    return '';
+};
+
+const toMediaUploadUrl = (payload = {}) => {
+    const source = payload?.data || payload || {};
+    const directCandidates = [
+        source.mediaUrl,
+        source.file?.mediaUrl,
+        source.file?.MediaUrl,
+        source.file?.publicUrl,
+        source.file?.PublicUrl,
+        source.track?.mediaUrl,
+        source.video?.mediaUrl,
+        source.video?.MediaUrl,
+        source.video?.videoUrl,
+        source.video?.VideoUrl,
+        source.filePath
+    ];
+
+    for (const candidate of directCandidates) {
+        const normalized = normalizeWebMediaUrl(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    const relativePath = toSafeObjectPath(
+        source.file?.relativePath
+        || source.file?.RelativePath
+        || source.track?.relativePath
+        || source.track?.RelativePath
+        || source.filePath
+        || ''
+    );
     if (relativePath) {
         const encoded = relativePath
-            .replace(/\\/g, '/')
             .split('/')
             .filter(Boolean)
             .map((segment) => encodeURIComponent(segment))
@@ -322,7 +389,16 @@ const toMediaUploadUrl = (payload = {}) => {
         }
     }
 
-    const fileName = String(source.fileName || source.file?.fileName || source.track?.fileName || '').trim();
+    const fileName = extractFileName(
+        source.fileName,
+        source.file?.fileName,
+        source.file?.FileName,
+        source.track?.fileName,
+        source.track?.FileName,
+        source.video?.fileName,
+        source.video?.FileName,
+        source.filePath
+    );
     if (fileName) {
         return `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
     }

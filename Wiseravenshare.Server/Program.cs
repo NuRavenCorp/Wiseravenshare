@@ -1189,6 +1189,7 @@ builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
+builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
 builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
@@ -1320,6 +1321,91 @@ if (!string.IsNullOrWhiteSpace(activeDatabaseName)
 if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authentication:AllowSelfRegistration", false))
 {
     app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
+}
+
+string ResolveStripeConfig(string sectionKey, params string[] envKeys)
+{
+    var value = app.Configuration[sectionKey];
+    if (!string.IsNullOrWhiteSpace(value))
+    {
+        return value.Trim();
+    }
+
+    foreach (var envKey in envKeys)
+    {
+        value = app.Configuration[envKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+    }
+
+    return string.Empty;
+}
+
+bool IsStripePriceId(string? value) =>
+    !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+
+var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+
+if (string.IsNullOrWhiteSpace(stripePublishableKey))
+{
+    app.Logger.LogWarning("Stripe publishable key is missing. Set Stripe:PublishableKey or STRIPE_PUBLISHABLE_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeSecretKey))
+{
+    app.Logger.LogWarning("Stripe secret key is missing. Set Stripe:SecretKey or STRIPE_SECRET_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeWebhookSecret))
+{
+    app.Logger.LogWarning("Stripe webhook secret is missing. Set Stripe:WebhookSecret or STRIPE_WEBHOOK_SECRET.");
+}
+
+var stripePlanMappings = new[]
+{
+    new
+    {
+        Plan = "creator_pro",
+        Monthly = ResolveStripeConfig("Stripe:PriceCreatorProMonthlyId", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceCreatorProAnnualId", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "growth_suite",
+        Monthly = ResolveStripeConfig("Stripe:PriceGrowthSuiteMonthlyId", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceGrowthSuiteAnnualId", "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "studio_plus",
+        Monthly = ResolveStripeConfig("Stripe:PriceStudioPlusMonthlyId", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceStudioPlusAnnualId", "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    }
+};
+
+foreach (var mapping in stripePlanMappings)
+{
+    if (string.IsNullOrWhiteSpace(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} monthly.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} monthly must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Monthly[..Math.Min(mapping.Monthly.Length, 5)]);
+    }
+
+    if (string.IsNullOrWhiteSpace(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} annual.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} annual must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Annual[..Math.Min(mapping.Annual.Length, 5)]);
+    }
 }
 
 using (var scope = app.Services.CreateScope())

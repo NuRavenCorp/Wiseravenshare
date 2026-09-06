@@ -35,41 +35,121 @@ const getVideoDurationSeconds = (file) => {
 
 const extractUploadedMediaUrl = (payload) => {
     const source = payload?.data || payload || {};
-    const fileName = source.fileName
-        || source.file?.fileName
-        || source.file?.FileName
-        || '';
-    const directUrl = (
-        source.mediaUrl
+
+    const isLikelyFileSystemPath = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return false;
+
+        return /^[a-z]:[\\/]/i.test(text)
+            || text.startsWith('\\\\')
+            || text.startsWith('file:');
+    };
+
+    const normalizeWebMediaUrl = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return '';
+
+        if (text.startsWith('data:') || text.startsWith('blob:') || /^https?:\/\//i.test(text)) {
+            return text;
+        }
+
+        if (text.startsWith('/')) {
+            return text;
+        }
+
+        if (text.startsWith('api/')) {
+            return `/${text}`;
+        }
+
+        return '';
+    };
+
+    const toSafeObjectPath = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        if (normalizeWebMediaUrl(text) || isLikelyFileSystemPath(text)) return '';
+
+        return text
+            .replace(/\\/g, '/')
+            .split('/')
+            .filter(Boolean)
+            .join('/');
+    };
+
+    const extractFileName = (...candidates) => {
+        for (const candidate of candidates) {
+            const text = String(candidate || '').trim();
+            if (!text) continue;
+
+            const cleaned = text.replace(/[?#].*$/, '').replace(/\\/g, '/');
+            const name = cleaned.split('/').pop() || '';
+            if (name) {
+                return name;
+            }
+        }
+
+        return '';
+    };
+
+    const directCandidates = [
+        source.mediaUrl,
+        source.file?.mediaUrl,
+        source.file?.MediaUrl,
+        source.file?.publicUrl,
+        source.file?.PublicUrl,
+        source.video?.videoUrl,
+        source.video?.VideoUrl,
+        source.video?.mediaUrl,
+        source.video?.MediaUrl,
+        source.url,
+        source.Url,
+        source.filePath,
+        source.file?.filePath,
+        source.video?.filePath
+    ];
+
+    for (const candidate of directCandidates) {
+        const resolved = normalizeWebMediaUrl(candidate);
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+    const relativePath = toSafeObjectPath(
+        source.file?.relativePath
+        || source.file?.RelativePath
         || source.filePath
-        || source.file?.mediaUrl
-        || source.file?.MediaUrl
-        || source.file?.publicUrl
-        || source.file?.PublicUrl
         || source.file?.filePath
-        || source.video?.videoUrl
-        || source.video?.VideoUrl
-        || source.video?.mediaUrl
-        || source.video?.MediaUrl
         || source.video?.filePath
-        || source.url
-        || source.Url
         || ''
     );
-
-    if (directUrl) {
-        return directUrl;
+    if (relativePath) {
+        const encoded = relativePath
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+        if (encoded) {
+            return `/api/videostreaming/blob/${encoded}`;
+        }
     }
+
+    const fileName = extractFileName(
+        source.fileName,
+        source.file?.fileName,
+        source.file?.FileName,
+        source.video?.fileName,
+        source.video?.FileName,
+        source.filePath,
+        source.file?.filePath,
+        source.video?.filePath
+    );
 
     if (fileName && typeof window !== 'undefined') {
         return `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
     }
 
-    return (
-        source.file?.relativePath
-        || source.file?.RelativePath
-        || ''
-    );
+    return '';
 };
 
 const AmateurJournalistPage = ({ onNavigate }) => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 import { truthService } from '../../Services/truthService';
 import { apiService } from '../../Services/api';
@@ -75,6 +75,41 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
 
     const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
 
+    // Auto-save media to computer when a file is selected.
+    useEffect(() => {
+        if (!mediaFile) return;
+
+        (async () => {
+            try {
+                const resolvedType = mediaType || (mediaFile.type?.startsWith('video/')
+                    ? 'video'
+                    : mediaFile.type?.startsWith('image/')
+                        ? 'photo'
+                        : mediaFile.type?.startsWith('audio/')
+                            ? 'audio'
+                            : 'photo');
+
+                const result = await saveFileToRavensightFolder(
+                    mediaFile,
+                    mediaFile.name || `ravensight_${Date.now()}`,
+                    resolvedType,
+                    localSaveRoot
+                );
+
+                if (result.ok) {
+                    if (result.mode === 'directory') {
+                        const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
+                        addTruthAlert('success', `Auto-saved to ${rootLabel}/Ravensight`, null);
+                    } else {
+                        addTruthAlert('success', 'Auto-saved to computer', null);
+                    }
+                }
+            } catch {
+                // Silent fail on auto-save to keep creation flow uninterrupted.
+            }
+        })();
+    }, [mediaFile, mediaType, localSaveRoot, addTruthAlert]);
+
     const handleFileUpload = (type) => {
         const input = document.createElement('input');
         input.type = 'file';
@@ -135,41 +170,110 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
 
     const normalizeUploadedMedia = (uploadResponse) => {
         const payload = uploadResponse?.data || uploadResponse || {};
-        const relativePath = payload?.file?.relativePath
+
+        const isLikelyFileSystemPath = (value) => {
+            const text = String(value || '').trim();
+            if (!text) return false;
+
+            return /^[a-z]:[\\/]/i.test(text)
+                || text.startsWith('\\\\')
+                || text.startsWith('file:');
+        };
+
+        const normalizeWebMediaUrl = (value) => {
+            const text = String(value || '').trim();
+            if (!text) return null;
+
+            if (text.startsWith('data:') || text.startsWith('blob:') || /^https?:\/\//i.test(text)) {
+                return text;
+            }
+
+            if (text.startsWith('/')) {
+                return text;
+            }
+
+            if (text.startsWith('api/')) {
+                return `/${text}`;
+            }
+
+            return null;
+        };
+
+        const toSafeObjectPath = (value) => {
+            const text = String(value || '').trim();
+            if (!text) return '';
+            if (normalizeWebMediaUrl(text) || isLikelyFileSystemPath(text)) return '';
+
+            return text
+                .replace(/\\/g, '/')
+                .split('/')
+                .filter(Boolean)
+                .join('/');
+        };
+
+        const extractFileName = (...candidates) => {
+            for (const candidate of candidates) {
+                const text = String(candidate || '').trim();
+                if (!text) continue;
+
+                const cleaned = text.replace(/[?#].*$/, '').replace(/\\/g, '/');
+                const name = cleaned.split('/').pop() || '';
+                if (name) {
+                    return name;
+                }
+            }
+
+            return '';
+        };
+
+        const directCandidates = [
+            payload?.mediaUrl,
+            payload?.file?.mediaUrl,
+            payload?.file?.MediaUrl,
+            payload?.track?.mediaUrl,
+            payload?.track?.MediaUrl,
+            payload?.track?.url,
+            payload?.video?.mediaUrl,
+            payload?.video?.MediaUrl,
+            payload?.video?.videoUrl,
+            payload?.video?.VideoUrl,
+            payload?.video?.video_url,
+            payload?.filePath
+        ];
+
+        const resolvedDirectMediaUrl = directCandidates
+            .map((candidate) => normalizeWebMediaUrl(candidate))
+            .find(Boolean);
+
+        const relativePath = toSafeObjectPath(
+            payload?.file?.relativePath
             || payload?.file?.RelativePath
             || payload?.track?.relativePath
             || payload?.track?.RelativePath
-            || '';
-        const encodedRelativePath = String(relativePath || '')
-            .replace(/\\/g, '/')
+            || payload?.filePath
+            || ''
+        );
+        const encodedRelativePath = relativePath
             .split('/')
             .filter(Boolean)
             .map((segment) => encodeURIComponent(segment))
             .join('/');
-        const resolvedMediaUrl = payload?.mediaUrl
-            || payload?.filePath
-            || payload?.track?.mediaUrl
-            || payload?.track?.MediaUrl
-            || payload?.track?.url
-            || payload?.file?.mediaUrl
-            || payload?.file?.MediaUrl
-            || payload?.video?.mediaUrl
-            || payload?.video?.MediaUrl
-            || payload?.video?.videoUrl
-            || payload?.video?.VideoUrl
-            || payload?.video?.video_url
+
+        const fileName = extractFileName(
+            payload?.fileName,
+            payload?.file?.fileName,
+            payload?.file?.FileName,
+            payload?.file?.file_name,
+            payload?.track?.fileName,
+            payload?.track?.FileName,
+            payload?.video?.fileName,
+            payload?.video?.FileName,
+            payload?.filePath
+        );
+
+        const normalizedMediaUrl = resolvedDirectMediaUrl
             || (encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : null)
-            || null;
-
-        const fileName = payload?.fileName
-            || payload?.file?.fileName
-            || payload?.file?.FileName
-            || payload?.file?.file_name
-            || null;
-
-        const normalizedMediaUrl = resolvedMediaUrl || (fileName
-            ? `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
-            : null);
+            || (fileName ? `${window.location.origin}/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : null);
 
         return {
             mediaUrl: normalizedMediaUrl,
@@ -180,28 +284,33 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     };
 
     const handleSubmit = async () => {
-        if (!content.trim()) {
-            addTruthAlert('warning', 'Please add text content to publish your post.', null);
+        const trimmedContent = content.trim();
+        const contentForPayload = trimmedContent || (mediaFile ? ' ' : trimmedContent);
+
+        if (!trimmedContent && !mediaFile) {
+            addTruthAlert('warning', 'Add text or upload media before publishing.', null);
             return;
         }
 
-        try {
-            const moderationResponse = await apiService.checkModeration(content || '');
-            const moderation = moderationResponse?.data;
+        if (trimmedContent) {
+            try {
+                const moderationResponse = await apiService.checkModeration(trimmedContent);
+                const moderation = moderationResponse?.data;
 
-            if (moderation && moderation.allowed === false) {
-                const reason = Array.isArray(moderation.reasons) && moderation.reasons.length > 0
-                    ? ` ${moderation.reasons[0]}`
-                    : '';
-                addTruthAlert('warning', `Post blocked by anti-spam checks.${reason}`, null);
-                return;
-            }
+                if (moderation && moderation.allowed === false) {
+                    const reason = Array.isArray(moderation.reasons) && moderation.reasons.length > 0
+                        ? ` ${moderation.reasons[0]}`
+                        : '';
+                    addTruthAlert('warning', `Post blocked by anti-spam checks.${reason}`, null);
+                    return;
+                }
 
-            if (moderation && moderation.flagged) {
-                addTruthAlert('info', 'This post may look spammy. Consider editing before publishing.', null);
+                if (moderation && moderation.flagged) {
+                    addTruthAlert('info', 'This post may look spammy. Consider editing before publishing.', null);
+                }
+            } catch {
+                // Keep posting flow available if moderation endpoint is unavailable.
             }
-        } catch {
-            // Keep posting flow available if moderation endpoint is unavailable.
         }
 
         setIsUploading(true);
@@ -219,10 +328,11 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         }, 200);
 
         // Analyze content for truth — questions are open inquiries and get no integrity check or score.
-        const isQuestionPost = truthEngine.isQuestion(content);
-        const analysis = isQuestionPost ? [] : truthEngine.analyzeContent(content);
-        const truthScoreResult = isQuestionPost ? null : await truthService.getTruthScore(content);
-        const truthScore = truthScoreResult?.score ?? null;
+        const shouldRunTruthAnalysis = Boolean(trimmedContent);
+        const isQuestionPost = shouldRunTruthAnalysis ? truthEngine.isQuestion(trimmedContent) : false;
+        const analysis = shouldRunTruthAnalysis && !isQuestionPost ? truthEngine.analyzeContent(trimmedContent) : [];
+        const truthScoreResult = shouldRunTruthAnalysis && !isQuestionPost ? await truthService.getTruthScore(trimmedContent) : null;
+        const truthScore = shouldRunTruthAnalysis ? (truthScoreResult?.score ?? null) : null;
         let correction = null;
 
         if (!isQuestionPost && analysis.length > 0 && analysis[0].isTrue === false && analysis[0].confidence > 0.9) {
@@ -238,8 +348,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         if (mediaFile) {
             try {
                 const uploadResponse = await apiService.uploadMedia(mediaFile, mediaType, {
-                    title: content.slice(0, 60) || mediaFile.name,
-                    description: content,
+                    title: trimmedContent.slice(0, 60) || mediaFile.name,
+                    description: trimmedContent,
                     destinationFolder,
                     publishToYouTube,
                     publishToTikTok,
@@ -289,7 +399,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         }
 
         const payload = {
-            content: content,
+            content: contentForPayload,
             type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
             mediaUrl: uploadedMediaUrl || null,
             mediaUrls: uploadedMediaUrl ? JSON.stringify([uploadedMediaUrl]) : null,
@@ -407,35 +517,6 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 addTruthAlert('success', `Post published! Truth score: ${truthScore ?? 100}%`, null);
             }
         }, 1000);
-    };
-
-    const handleSaveMediaToComputer = async () => {
-        if (!mediaFile) {
-            addTruthAlert('warning', 'No media selected to save.', null);
-            return;
-        }
-
-        const resolvedType = mediaType || (mediaFile.type?.startsWith('video/')
-            ? 'video'
-            : mediaFile.type?.startsWith('image/')
-                ? 'photo'
-                : mediaFile.type?.startsWith('audio/')
-                    ? 'audio'
-                    : 'photo');
-
-        const result = await saveFileToRavensightFolder(mediaFile, mediaFile.name || `ravensight_${Date.now()}`, resolvedType, localSaveRoot);
-        if (!result.ok) {
-            addTruthAlert('warning', 'Could not save this file to your computer.', null);
-            return;
-        }
-
-        if (result.mode === 'directory') {
-            const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
-            addTruthAlert('success', `Saved to ${rootLabel}/Ravensight`, null);
-            return;
-        }
-
-        addTruthAlert('success', 'Saved to computer', null);
     };
 
     const handleLocalSaveRootChange = (value) => {
@@ -672,20 +753,6 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 }}>
                     <span>{mediaFile.name}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <button
-                            onClick={handleSaveMediaToComputer}
-                            type="button"
-                            style={{
-                                background: 'none',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: '999px',
-                                color: 'var(--light-color)',
-                                padding: '4px 12px',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            Save to Computer
-                        </button>
                         <button onClick={() => {
                             setMediaFile(null);
                             setMediaType(null);

@@ -13,6 +13,61 @@ namespace Wiseravenshare.Server.Services;
 
 public class SubscriptionService : ISubscriptionService
 {
+    private static readonly StripeWebhookTriggerDto[] WorkflowTriggerBlueprint =
+    [
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "checkout.session.completed",
+            Steps = [
+                "hydrate checkout session",
+                "load Stripe subscription",
+                "upsert local subscription state"
+            ]
+        },
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "customer.subscription.created",
+            Steps = [
+                "read Stripe subscription object",
+                "upsert local subscription state"
+            ]
+        },
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "customer.subscription.updated",
+            Steps = [
+                "read Stripe subscription object",
+                "upsert local subscription state"
+            ]
+        },
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "customer.subscription.deleted",
+            Steps = [
+                "read Stripe subscription object",
+                "upsert local subscription state"
+            ]
+        },
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "invoice.payment_succeeded",
+            Steps = [
+                "read Stripe invoice object",
+                "fetch latest Stripe subscription",
+                "upsert local subscription state"
+            ]
+        },
+        new StripeWebhookTriggerDto
+        {
+            Trigger = "invoice.payment_failed",
+            Steps = [
+                "read Stripe invoice object",
+                "fetch latest Stripe subscription",
+                "upsert local subscription state"
+            ]
+        }
+    ];
+
     private readonly AppDbContext _dbContext;
     private readonly ILogger<SubscriptionService> _logger;
     private readonly GrowthService _growthService;
@@ -149,6 +204,52 @@ public class SubscriptionService : ISubscriptionService
         };
     }
 
+    public async Task<StripeWebhookWorkflowStatusDto> GetWebhookWorkflowStatusAsync(bool includeAllSubscriptions, Guid? userId = null)
+    {
+        var query = _dbContext.Set<UserSubscription>()
+            .AsNoTracking()
+            .Where(s => !s.IsDeleted);
+
+        if (!includeAllSubscriptions)
+        {
+            if (!userId.HasValue || userId.Value == Guid.Empty)
+            {
+                return new StripeWebhookWorkflowStatusDto
+                {
+                    GeneratedAtUtc = DateTime.UtcNow,
+                    Triggers = WorkflowTriggerBlueprint.Select(CloneTrigger).ToList(),
+                    Subscriptions = []
+                };
+            }
+
+            query = query.Where(s => s.UserId == userId.Value);
+        }
+
+        var subscriptions = await query
+            .OrderByDescending(s => s.UpdatedAt)
+            .Take(200)
+            .Select(s => new StripeWebhookSubscriptionStateDto
+            {
+                UserId = s.UserId,
+                StripeCustomerId = s.StripeCustomerId,
+                StripeSubscriptionId = s.StripeSubscriptionId,
+                StripePriceId = s.StripePriceId,
+                Status = s.Status,
+                CancelAtPeriodEnd = s.CancelAtPeriodEnd,
+                CurrentPeriodEnd = s.CurrentPeriodEnd,
+                LastWebhookEventId = s.LastWebhookEventId,
+                UpdatedAtUtc = s.UpdatedAt
+            })
+            .ToListAsync();
+
+        return new StripeWebhookWorkflowStatusDto
+        {
+            GeneratedAtUtc = DateTime.UtcNow,
+            Triggers = WorkflowTriggerBlueprint.Select(CloneTrigger).ToList(),
+            Subscriptions = subscriptions
+        };
+    }
+
     public async Task HandleWebhookAsync(string payload, string signatureHeader)
     {
         EnsureStripeConfigured();
@@ -164,32 +265,58 @@ public class SubscriptionService : ISubscriptionService
             stripeEvent = EventUtility.ParseEvent(payload);
         }
 
-        if (stripeEvent.Type == "checkout.session.completed" && stripeEvent.Data.Object is CheckoutSession checkoutSession)
+        await RunWebhookWorkflowAsync(stripeEvent);
+    }
+
+    private async Task RunWebhookWorkflowAsync(Event stripeEvent)
+    {
+        if (stripeEvent is null)
         {
+            return;
+        }
+
+        var trigger = stripeEvent.Type ?? string.Empty;
+        _logger.LogInformation("Stripe workflow trigger received: {Trigger} ({EventId})", trigger, stripeEvent.Id);
+
+        if (trigger == "checkout.session.completed" && stripeEvent.Data.Object is CheckoutSession checkoutSession)
+        {
+            // Workflow: checkout.session.completed -> hydrate subscription -> upsert local subscription state
             await HandleCheckoutCompletedAsync(checkoutSession, stripeEvent.Id);
             return;
         }
 
-        if (stripeEvent.Data.Object is Stripe.Subscription stripeSubscription)
+        if (trigger is "customer.subscription.created" or "customer.subscription.updated" or "customer.subscription.deleted")
         {
+            // Workflow: subscription lifecycle event -> upsert local subscription state
+            if (stripeEvent.Data.Object is not Stripe.Subscription stripeSubscription)
+            {
+                _logger.LogWarning("Stripe workflow expected subscription object for trigger {Trigger} ({EventId}).", trigger, stripeEvent.Id);
+                return;
+            }
+
             await UpsertFromStripeSubscriptionAsync(stripeSubscription, stripeEvent.Id);
             return;
         }
 
-        if (stripeEvent.Type == "invoice.payment_succeeded" && stripeEvent.Data.Object is Invoice invoice && !string.IsNullOrWhiteSpace(invoice.SubscriptionId))
+        if (trigger == "invoice.payment_succeeded" && stripeEvent.Data.Object is Invoice invoice && !string.IsNullOrWhiteSpace(invoice.SubscriptionId))
         {
+            // Workflow: invoice.payment_succeeded -> load subscription from Stripe -> upsert local state
             var subscriptionService = new Stripe.SubscriptionService();
             var refreshedSubscription = await subscriptionService.GetAsync(invoice.SubscriptionId);
             await UpsertFromStripeSubscriptionAsync(refreshedSubscription, stripeEvent.Id);
             return;
         }
 
-        if (stripeEvent.Type == "invoice.payment_failed" && stripeEvent.Data.Object is Invoice failedInvoice && !string.IsNullOrWhiteSpace(failedInvoice.SubscriptionId))
+        if (trigger == "invoice.payment_failed" && stripeEvent.Data.Object is Invoice failedInvoice && !string.IsNullOrWhiteSpace(failedInvoice.SubscriptionId))
         {
+            // Workflow: invoice.payment_failed -> load subscription from Stripe -> upsert local state
             var subscriptionService = new Stripe.SubscriptionService();
             var refreshedSubscription = await subscriptionService.GetAsync(failedInvoice.SubscriptionId);
             await UpsertFromStripeSubscriptionAsync(refreshedSubscription, stripeEvent.Id);
+            return;
         }
+
+        _logger.LogInformation("Stripe workflow trigger ignored: {Trigger} ({EventId})", trigger, stripeEvent.Id);
     }
 
     private async Task HandleCheckoutCompletedAsync(CheckoutSession session, string eventId)
@@ -224,6 +351,17 @@ public class SubscriptionService : ISubscriptionService
         var subscription = await _dbContext.Set<UserSubscription>()
             .AsTracking()
             .FirstOrDefaultAsync(s => s.StripeCustomerId == customerId && !s.IsDeleted);
+
+        if (subscription != null
+            && !string.IsNullOrWhiteSpace(subscription.LastWebhookEventId)
+            && string.Equals(subscription.LastWebhookEventId, eventId, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "Skipping duplicate Stripe webhook event {EventId} for customer {CustomerId}.",
+                eventId,
+                customerId);
+            return;
+        }
 
         if (subscription == null)
         {
@@ -424,5 +562,14 @@ public class SubscriptionService : ISubscriptionService
         }
 
         return string.Empty;
+    }
+
+    private static StripeWebhookTriggerDto CloneTrigger(StripeWebhookTriggerDto trigger)
+    {
+        return new StripeWebhookTriggerDto
+        {
+            Trigger = trigger.Trigger,
+            Steps = trigger.Steps.ToList()
+        };
     }
 }

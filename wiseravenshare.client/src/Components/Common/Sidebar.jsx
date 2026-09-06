@@ -244,14 +244,29 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         }
 
         const platform = String(platformId || '').replace('-feed', '');
-        onNavigate(platformId || 'social-feeds');
-        window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
-            detail: {
+        try {
+            localStorage.setItem('wiseSocialAggregatorIntent', JSON.stringify({
                 page: platformId || 'social-feeds',
                 platform,
-                openConfig: true
-            }
-        }));
+                openConfig: true,
+                createdAt: Date.now()
+            }));
+        } catch {
+            /* ignore storage failures */
+        }
+
+        onNavigate(platformId || 'social-feeds');
+
+        // Delay dispatch so the destination page has time to mount listeners.
+        window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
+                detail: {
+                    page: platformId || 'social-feeds',
+                    platform,
+                    openConfig: true
+                }
+            }));
+        }, 75);
     };
 
     const disconnectFeed = async (platformId) => {
