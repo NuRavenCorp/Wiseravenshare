@@ -47,7 +47,29 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, cancellationToken);
-        return Ok(new { track });
+        var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)
+            ? $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(track.FileName)}"
+            : track.MediaUrl;
+
+        return Ok(new
+        {
+            track,
+            file = new RavensightSavedMediaDto
+            {
+                FileName = track.FileName,
+                RelativePath = string.Empty,
+                DestinationFolder = dto.DestinationFolder ?? string.Empty,
+                ContentType = dto.File.ContentType,
+                SizeBytes = track.SizeBytes,
+                SavedAtUtc = DateTime.TryParse(track.UploadedAt, out var uploadedAt)
+                    ? uploadedAt.ToUniversalTime()
+                    : DateTime.UtcNow,
+                MediaUrl = mediaUrl
+            },
+            fileName = track.FileName,
+            filePath = mediaUrl,
+            mediaUrl
+        });
     }
 
     private bool TryResolveUserId(out Guid userId)

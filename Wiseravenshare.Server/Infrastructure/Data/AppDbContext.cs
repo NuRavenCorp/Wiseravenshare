@@ -32,6 +32,15 @@ public class AppDbContext : DbContext
     public DbSet<InstrumentConnection> InstrumentConnections => Set<InstrumentConnection>();
     public DbSet<StudioCaptureRigProfile> StudioCaptureRigProfiles => Set<StudioCaptureRigProfile>();
     public DbSet<StudioCaptureSourceCapture> StudioCaptureSourceCaptures => Set<StudioCaptureSourceCapture>();
+    public DbSet<MediaItem> MediaItems => Set<MediaItem>();
+    public DbSet<MediaTag> MediaTags => Set<MediaTag>();
+    public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
+    public DbSet<MediaComment> MediaComments => Set<MediaComment>();
+    public DbSet<MediaPlaylist> MediaPlaylists => Set<MediaPlaylist>();
+    public DbSet<MediaPlaylistItem> MediaPlaylistItems => Set<MediaPlaylistItem>();
+    public DbSet<MediaViewHistory> MediaViewHistories => Set<MediaViewHistory>();
+    public DbSet<MediaLike> MediaLikes => Set<MediaLike>();
+    public DbSet<MediaBookmark> MediaBookmarks => Set<MediaBookmark>();
     public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
     public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
     public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
@@ -333,6 +342,143 @@ public class AppDbContext : DbContext
                     .WithMany()
                     .HasForeignKey(c => c.RigProfileId)
                     .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<MediaItem>(entity =>
+            {
+                entity.ToTable("MediaItems");
+                entity.Property(x => x.Title).HasMaxLength(255);
+                entity.Property(x => x.Description).HasMaxLength(2000);
+                entity.Property(x => x.FileName).HasMaxLength(255);
+                entity.Property(x => x.FilePath).HasMaxLength(2048);
+                entity.Property(x => x.FileUrl).HasMaxLength(2048);
+                entity.Property(x => x.MimeType).HasMaxLength(255);
+                entity.Property(x => x.ThumbnailPath).HasMaxLength(2048);
+                entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
+                entity.Property(x => x.PreviewPath).HasMaxLength(2048);
+                entity.Property(x => x.PreviewUrl).HasMaxLength(2048);
+                entity.Property(x => x.Metadata).HasColumnType("jsonb");
+                entity.HasIndex(x => x.UserId);
+                entity.HasIndex(x => new { x.MediaType, x.Status });
+                entity.HasIndex(x => x.CreatedAt);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaTag>(entity =>
+            {
+                entity.ToTable("MediaTags");
+                entity.Property(x => x.Name).HasMaxLength(100);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.HasIndex(x => x.Name).IsUnique();
+            });
+
+            modelBuilder.Entity<MediaItemTag>(entity =>
+            {
+                entity.ToTable("MediaItemTags");
+                entity.HasIndex(x => new { x.MediaId, x.TagId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.Tags)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.MediaTag)
+                    .WithMany(x => x.MediaItems)
+                    .HasForeignKey(x => x.TagId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaComment>(entity =>
+            {
+                entity.ToTable("MediaComments");
+                entity.Property(x => x.Content).HasMaxLength(2000);
+                entity.HasIndex(x => x.MediaId);
+                entity.HasIndex(x => x.UserId);
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.Comments)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.ParentComment)
+                    .WithMany(x => x.Replies)
+                    .HasForeignKey(x => x.ParentCommentId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<MediaPlaylist>(entity =>
+            {
+                entity.ToTable("MediaPlaylists");
+                entity.Property(x => x.Name).HasMaxLength(255);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.Property(x => x.CoverImageUrl).HasMaxLength(2048);
+                entity.HasIndex(x => x.UserId);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaPlaylistItem>(entity =>
+            {
+                entity.ToTable("MediaPlaylistItems");
+                entity.HasIndex(x => new { x.PlaylistId, x.MediaId }).IsUnique();
+                entity.HasIndex(x => new { x.PlaylistId, x.OrderIndex });
+                entity.HasOne(x => x.Playlist)
+                    .WithMany(x => x.Items)
+                    .HasForeignKey(x => x.PlaylistId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.PlaylistItems)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaViewHistory>(entity =>
+            {
+                entity.ToTable("MediaViewHistories");
+                entity.Property(x => x.DeviceInfo).HasMaxLength(256);
+                entity.Property(x => x.IPAddress).HasMaxLength(80);
+                entity.HasIndex(x => new { x.MediaId, x.UserId, x.ViewedAt });
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaLike>(entity =>
+            {
+                entity.ToTable("MediaLikes");
+                entity.HasIndex(x => new { x.MediaId, x.UserId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaBookmark>(entity =>
+            {
+                entity.ToTable("MediaBookmarks");
+                entity.HasIndex(x => new { x.MediaId, x.UserId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
         // ── Communique ──

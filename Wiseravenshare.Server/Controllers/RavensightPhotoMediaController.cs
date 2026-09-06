@@ -57,6 +57,13 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             })
         }, cancellationToken);
 
+        var blobStreamUrl = BuildBlobStreamUrl(saved.RelativePath);
+        var mediaUrl = !string.IsNullOrWhiteSpace(saved.PublicUrl)
+            ? saved.PublicUrl
+            : !string.IsNullOrWhiteSpace(blobStreamUrl)
+                ? blobStreamUrl
+                : $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.FileName)}";
+
         var response = new RavensightSavedMediaDto
         {
             FileName = saved.FileName,
@@ -65,12 +72,15 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             ContentType = saved.ContentType,
             SizeBytes = saved.SizeBytes,
             SavedAtUtc = saved.SavedAtUtc,
-            MediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.FileName)}"
+            MediaUrl = mediaUrl
         };
 
         return Ok(new
         {
             file = response,
+            fileName = response.FileName,
+            filePath = response.MediaUrl,
+            mediaUrl = response.MediaUrl,
             caption = dto.Caption,
             mediaAssetId = mediaRecord.Id,
             retention = new
@@ -91,5 +101,22 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
+    }
+
+    private string BuildBlobStreamUrl(string? relativePath)
+    {
+        var normalized = string.IsNullOrWhiteSpace(relativePath)
+            ? string.Empty
+            : relativePath.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        var encodedPath = string.Join('/',
+            normalized
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+        return $"{Request.Scheme}://{Request.Host}/api/videostreaming/blob/{encodedPath}";
     }
 }

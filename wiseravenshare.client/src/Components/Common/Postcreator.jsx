@@ -135,6 +135,17 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
 
     const normalizeUploadedMedia = (uploadResponse) => {
         const payload = uploadResponse?.data || uploadResponse || {};
+        const relativePath = payload?.file?.relativePath
+            || payload?.file?.RelativePath
+            || payload?.track?.relativePath
+            || payload?.track?.RelativePath
+            || '';
+        const encodedRelativePath = String(relativePath || '')
+            .replace(/\\/g, '/')
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
         const resolvedMediaUrl = payload?.mediaUrl
             || payload?.filePath
             || payload?.track?.mediaUrl
@@ -147,6 +158,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             || payload?.video?.videoUrl
             || payload?.video?.VideoUrl
             || payload?.video?.video_url
+            || (encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : null)
             || null;
 
         const fileName = payload?.fileName
@@ -293,6 +305,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 const createdPost = {
                     ...(createResponse?.data || createResponse || {}),
                     id: createResponse?.data?.id || createResponse?.id,
+                    type: createResponse?.data?.type || createResponse?.type || payload.type,
+                    mediaType: createResponse?.data?.mediaType || createResponse?.mediaType || mediaType,
                     mediaUrl: createResponse?.data?.mediaUrl || createResponse?.mediaUrl || uploadedMediaUrl,
                     mediaUrls: createResponse?.data?.mediaUrls || createResponse?.mediaUrls || (uploadedMediaUrl ? [uploadedMediaUrl] : []),
                     youtubeUrl: createResponse?.data?.youtubeUrl || createResponse?.youtubeUrl || uploadedYoutubeUrl,

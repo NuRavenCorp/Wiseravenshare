@@ -52,7 +52,7 @@ const sanitizeMediaUrl = (value) => {
         return null;
     }
 
-    if (text.startsWith('data:video/') || text.startsWith('data:audio/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
+    if (text.startsWith('data:video/') || text.startsWith('data:audio/') || text.startsWith('data:image/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
         return text;
     }
 
@@ -100,6 +100,26 @@ const resolvePrimaryMediaUrl = (post) => {
     }
 
     return null;
+};
+
+const resolveMediaFileNameFromUrl = (value) => {
+    const source = cleanWhitespaceText(value);
+    if (!source) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(source, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+        const fromQuery = String(parsed.searchParams.get('fileName') || '').trim();
+        if (fromQuery) {
+            return fromQuery.toLowerCase();
+        }
+
+        const pathName = String(parsed.pathname || '').trim();
+        return pathName ? pathName.toLowerCase() : '';
+    } catch {
+        return source.toLowerCase();
+    }
 };
 
 const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) => {
@@ -172,13 +192,14 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
     const resolvedMediaUrl = resolvePrimaryMediaUrl(post);
     const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
+    const mediaFileHint = resolveMediaFileNameFromUrl(resolvedMediaUrl);
     const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
         ? rawType
-        : resolvedMediaUrl && /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(resolvedMediaUrl)
+        : mediaFileHint && /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(mediaFileHint)
             ? 'audio'
-            : resolvedMediaUrl && /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(resolvedMediaUrl)
+            : mediaFileHint && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(mediaFileHint)
                 ? 'photo'
-                : resolvedMediaUrl && /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(resolvedMediaUrl)
+                : mediaFileHint && /\.(mp4|webm|mov|avi|mkv)$/i.test(mediaFileHint)
                     ? 'video'
                     : null;
 
