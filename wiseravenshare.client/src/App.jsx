@@ -39,6 +39,7 @@ import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
 import { apiService } from './Services/api';
+import aiAssistantService from './Services/aiAssistantService';
 import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
 
@@ -226,6 +227,16 @@ const App = () => {
             engine.destroy();
         };
     }, [isAuthenticated, addToast]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        aiAssistantService.healthCheck(8, 750).catch(() => {
+            // Warm-up is best-effort; AI page handles user-visible errors.
+        });
+    }, [isAuthenticated]);
 
     useEffect(() => {
         const perfTrimKey = 'wisePerfTrimV2';

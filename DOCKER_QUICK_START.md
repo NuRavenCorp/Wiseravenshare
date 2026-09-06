@@ -64,6 +64,7 @@ docker-compose --profile local-db --profile with-ai --profile with-cache --profi
 | **API (Frontend + Backend)** | 10000 | Main app | default |
 | PostgreSQL | 5432 | Database | `local-db` |
 | Ollama | 11434 | AI assistant | `with-ai` |
+| Ollama Init | - | Auto-pulls `OLLAMA_DEFAULT_MODEL` | `with-ai` |
 | Redis | 6379 | Cache | `with-cache` |
 | MinIO API | 9000 | Object storage | `with-storage` |
 | MinIO Console | 9001 | Storage admin | `with-storage` |
