@@ -66,7 +66,7 @@ public sealed class StudioCaptureService : IStudioCaptureService
         var sourceName = string.IsNullOrWhiteSpace(request.SourceName) ? "Unknown Source" : request.SourceName.Trim();
         var deviceIdentifier = string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? "unknown-device" : request.DeviceIdentifier.Trim();
         var durationSeconds = request.DurationSeconds.HasValue && request.DurationSeconds.Value > 0
-            ? Math.Round(request.DurationSeconds.Value, 3)
+            ? (decimal?)Math.Round(request.DurationSeconds.Value, 3)
             : null;
         var channelCount = request.ChannelCount.HasValue && request.ChannelCount.Value > 0
             ? request.ChannelCount
