@@ -402,7 +402,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         : 'Local feed is active, but no signup location is available yet.')
                     : 'National feed is active.'}
             </div>
-            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} />
+            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
                 {rankedFeedPosts.map(post => (
                     <PostCard
