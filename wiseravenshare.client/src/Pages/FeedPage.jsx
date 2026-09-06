@@ -18,6 +18,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
     const [feedScope, setFeedScope] = useState('local');
+    const [expandedPhotoDayKeys, setExpandedPhotoDayKeys] = useState({});
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
@@ -48,6 +49,16 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const isQuestionPost = (post) => {
         const content = String(post?.content || '').trim();
         return Boolean(content) && truthEngine.isQuestion(content);
+    };
+
+    const isPhotoPost = (post) => {
+        const type = String(post?.mediaType || post?.type || '').toLowerCase();
+        if (type === 'photo' || type === 'image') {
+            return true;
+        }
+
+        const mediaUrl = String(post?.mediaUrl || post?.imageUrl || '').toLowerCase();
+        return /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaUrl);
     };
 
     const buildIntegrityReport = (post, mode = 'manual') => {
@@ -303,6 +314,45 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         });
     }, [posts, feedScope, localRegion]);
 
+    const { nonPhotoPosts, photoPostsByDay } = useMemo(() => {
+        const byDay = {};
+        const nonPhotos = [];
+
+        rankedFeedPosts.forEach((post) => {
+            if (!isPhotoPost(post)) {
+                nonPhotos.push(post);
+                return;
+            }
+
+            const createdAt = post?.createdAt ? new Date(post.createdAt) : new Date();
+            const safeDate = Number.isFinite(createdAt.getTime()) ? createdAt : new Date();
+            const dayKey = safeDate.toISOString().slice(0, 10);
+            if (!byDay[dayKey]) {
+                byDay[dayKey] = [];
+            }
+            byDay[dayKey].push(post);
+        });
+
+        const grouped = Object.entries(byDay)
+            .sort((left, right) => right[0].localeCompare(left[0]))
+            .map(([dayKey, items]) => ({
+                dayKey,
+                items
+            }));
+
+        return {
+            nonPhotoPosts: nonPhotos,
+            photoPostsByDay: grouped
+        };
+    }, [rankedFeedPosts]);
+
+    const togglePhotoDay = (dayKey) => {
+        setExpandedPhotoDayKeys((prev) => ({
+            ...prev,
+            [dayKey]: !prev[dayKey]
+        }));
+    };
+
     useEffect(() => {
         setIntegrityReports((prev) => {
             const next = { ...prev };
@@ -404,7 +454,73 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             </div>
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
-                {rankedFeedPosts.map(post => (
+                {photoPostsByDay.map((group) => {
+                    const isExpanded = Boolean(expandedPhotoDayKeys[group.dayKey]);
+                    const dayLabel = new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+
+                    return (
+                        <div
+                            key={`photo-day-${group.dayKey}`}
+                            style={{
+                                marginBottom: '14px',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '12px',
+                                background: 'rgba(17, 24, 39, 0.5)'
+                            }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => togglePhotoDay(group.dayKey)}
+                                style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    padding: '12px 14px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    fontWeight: 700
+                                }}
+                            >
+                                <span>📸 Daily Photo Uploads · {dayLabel}</span>
+                                <span style={{ fontSize: '12px', color: 'var(--light-color)', fontWeight: 600 }}>
+                                    {group.items.length} photo{group.items.length === 1 ? '' : 's'} · {isExpanded ? 'Hide' : 'Show'}
+                                </span>
+                            </button>
+
+                            {isExpanded && (
+                                <div style={{ padding: '0 10px 10px 10px' }}>
+                                    {group.items.map((post) => (
+                                        <PostCard
+                                            key={post.id}
+                                            post={post}
+                                            onLike={handleLike}
+                                            onRepost={handleRepost}
+                                            onDispute={handleDisputePost}
+                                            onVerify={handleVerifyPost}
+                                            integrityReport={integrityReports[post.id]}
+                                            currentUser={currentUser}
+                                            isFollowing={following.includes(post.userId)}
+                                            onFollow={handleFollow}
+                                            onBookmark={handleBookmark}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
+                {nonPhotoPosts.map(post => (
                     <PostCard
                         key={post.id}
                         post={post}
