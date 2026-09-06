@@ -30,6 +30,8 @@ public class AppDbContext : DbContext
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
     public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
     public DbSet<InstrumentConnection> InstrumentConnections => Set<InstrumentConnection>();
+    public DbSet<StudioCaptureRigProfile> StudioCaptureRigProfiles => Set<StudioCaptureRigProfile>();
+    public DbSet<StudioCaptureSourceCapture> StudioCaptureSourceCaptures => Set<StudioCaptureSourceCapture>();
     public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
     public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
     public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
@@ -298,6 +300,39 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(c => c.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<StudioCaptureRigProfile>(entity =>
+            {
+                entity.ToTable("StudioCaptureRigProfiles");
+                entity.Property(c => c.RigName).HasMaxLength(150);
+                entity.Property(c => c.Notes).HasMaxLength(1200);
+                entity.HasIndex(c => c.UserId).IsUnique();
+                entity.HasOne(c => c.User)
+                    .WithMany()
+                    .HasForeignKey(c => c.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<StudioCaptureSourceCapture>(entity =>
+            {
+                entity.ToTable("StudioCaptureSourceCaptures");
+                entity.Property(c => c.SourceType).HasMaxLength(30);
+                entity.Property(c => c.SourceName).HasMaxLength(255);
+                entity.Property(c => c.DeviceIdentifier).HasMaxLength(255);
+                entity.Property(c => c.FileName).HasMaxLength(255);
+                entity.Property(c => c.FingerprintHash).HasMaxLength(128);
+                entity.Property(c => c.MetadataJson).HasColumnType("text");
+                entity.HasIndex(c => c.UserId);
+                entity.HasIndex(c => c.CapturedAtUtc);
+                entity.HasOne(c => c.User)
+                    .WithMany()
+                    .HasForeignKey(c => c.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(c => c.RigProfile)
+                    .WithMany()
+                    .HasForeignKey(c => c.RigProfileId)
+                    .OnDelete(DeleteBehavior.SetNull);
             });
 
         // ── Communique ──

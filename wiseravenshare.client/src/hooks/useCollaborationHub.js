@@ -27,7 +27,13 @@ export const useCollaborationHub = () => {
     const startedRef = useRef(false);
 
     const connect = useCallback(async () => {
-        if (!getAuthToken() || startedRef.current) return;
+        if (startedRef.current || isConnecting) return;
+
+        if (!getAuthToken()) {
+            setError('Please sign in to use collaboration rooms.');
+            setIsConnected(false);
+            return;
+        }
 
         setIsConnecting(true);
         try {
@@ -60,7 +66,7 @@ export const useCollaborationHub = () => {
         } finally {
             setIsConnecting(false);
         }
-    }, []);
+    }, [isConnecting]);
 
     const disconnect = useCallback(async () => {
         if (connectionRef.current) {

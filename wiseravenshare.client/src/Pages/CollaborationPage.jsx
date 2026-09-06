@@ -63,7 +63,7 @@ const extractRoomId = (roomPayload) => {
 };
 
 const CollaborationPage = ({ initialRoomId }) => {
-    const { isConnected, isConnecting, createRoom, joinRoom } = useCollaborationHub();
+    const { isConnected, isConnecting, error: hubError, connect, createRoom, joinRoom } = useCollaborationHub();
     const [platform, setPlatform] = useState('web');
     const [activeRoomId, setActiveRoomId] = useState(initialRoomId || null);
     const [tab, setTab] = useState('create');
@@ -105,6 +105,9 @@ const CollaborationPage = ({ initialRoomId }) => {
         setBusy(true);
         setError(null);
         try {
+            if (!isConnected) {
+                await connect();
+            }
             const room = await createRoom(roomName.trim(), platform);
             const roomId = extractRoomId(room);
             if (roomId) setActiveRoomId(roomId);
@@ -126,6 +129,9 @@ const CollaborationPage = ({ initialRoomId }) => {
         setBusy(true);
         setError(null);
         try {
+            if (!isConnected) {
+                await connect();
+            }
             await joinRoom(roomId);
             setActiveRoomId(roomId);
         } catch (err) {
@@ -233,8 +239,8 @@ const CollaborationPage = ({ initialRoomId }) => {
                         </div>
                         <button
                             onClick={handleCreateRoom}
-                            disabled={!roomName.trim() || busy || !isConnected}
-                            style={{ ...primaryBtn, opacity: !roomName.trim() || busy || !isConnected ? 0.5 : 1 }}
+                            disabled={!roomName.trim() || busy}
+                            style={{ ...primaryBtn, opacity: !roomName.trim() || busy ? 0.5 : 1 }}
                         >
                             {busy ? 'Creating...' : 'Create Collaboration Room'}
                         </button>
@@ -259,8 +265,8 @@ const CollaborationPage = ({ initialRoomId }) => {
                         </div>
                         <button
                             onClick={handleJoinRoom}
-                            disabled={!joinRoomId.trim() || busy || !isConnected}
-                            style={{ ...primaryBtn, opacity: !joinRoomId.trim() || busy || !isConnected ? 0.5 : 1 }}
+                            disabled={!joinRoomId.trim() || busy}
+                            style={{ ...primaryBtn, opacity: !joinRoomId.trim() || busy ? 0.5 : 1 }}
                         >
                             {busy ? 'Joining...' : 'Join Room'}
                         </button>
@@ -273,6 +279,10 @@ const CollaborationPage = ({ initialRoomId }) => {
 
             {error && (
                 <p style={{ margin: 0, fontSize: '12px', color: 'var(--danger-color, #ef4444)', textAlign: 'center' }}>{error}</p>
+            )}
+
+            {!error && hubError && (
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--danger-color, #ef4444)', textAlign: 'center' }}>{hubError}</p>
             )}
 
             <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--light-color)' }}>

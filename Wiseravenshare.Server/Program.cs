@@ -748,7 +748,54 @@ CREATE TABLE IF NOT EXISTS app_data."InstrumentConnections" (
 CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
     ON app_data."InstrumentConnections" ("UserId");
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
-    ON app_data."InstrumentConnections" ("UserId", "DeviceIdentifier");";
+    ON app_data."InstrumentConnections" ("UserId", "DeviceIdentifier");
+
+CREATE TABLE IF NOT EXISTS app_data."StudioCaptureRigProfiles" (
+    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "UserId" UUID NOT NULL,
+    "RigName" VARCHAR(150) NOT NULL DEFAULT 'WiseRaven Capture Rig',
+    "AnalogInputChannels" INTEGER NOT NULL DEFAULT 2,
+    "HasAnalogPreamps" BOOLEAN NOT NULL DEFAULT TRUE,
+    "HasUsbCConnectivity" BOOLEAN NOT NULL DEFAULT TRUE,
+    "HasBluetoothPairing" BOOLEAN NOT NULL DEFAULT TRUE,
+    "HasMidiInOut" BOOLEAN NOT NULL DEFAULT TRUE,
+    "HasWifi6Streaming" BOOLEAN NOT NULL DEFAULT TRUE,
+    "EnableIpProtection" BOOLEAN NOT NULL DEFAULT TRUE,
+    "Notes" VARCHAR(1200) NULL,
+    "LastConfiguredAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
+    "DeletedAt" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_capture_rig_profiles_user
+    ON app_data."StudioCaptureRigProfiles" ("UserId");
+
+CREATE TABLE IF NOT EXISTS app_data."StudioCaptureSourceCaptures" (
+    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "UserId" UUID NOT NULL,
+    "RigProfileId" UUID NULL,
+    "SourceType" VARCHAR(30) NOT NULL DEFAULT 'analog',
+    "SourceName" VARCHAR(255) NOT NULL,
+    "DeviceIdentifier" VARCHAR(255) NOT NULL,
+    "FileName" VARCHAR(255) NULL,
+    "DurationSeconds" NUMERIC NULL,
+    "ChannelCount" INTEGER NULL,
+    "CapturedAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "FingerprintHash" VARCHAR(128) NOT NULL,
+    "FingerprintedAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "MetadataJson" TEXT NULL,
+    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
+    "DeletedAt" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_user_time
+    ON app_data."StudioCaptureSourceCaptures" ("UserId", "CapturedAtUtc" DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_rig
+    ON app_data."StudioCaptureSourceCaptures" ("RigProfileId");";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
@@ -907,9 +954,12 @@ builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.I
 builder.Services.AddScoped<IPostRepository, PostRepository>();
 builder.Services.AddScoped<ITruthRepository, TruthRepository>();
 builder.Services.AddScoped<IAgentRepository, AgentRepository>();
+builder.Services.AddScoped<IStudioCaptureRigProfileRepository, StudioCaptureRigProfileRepository>();
+builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureSourceCaptureRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
 builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
