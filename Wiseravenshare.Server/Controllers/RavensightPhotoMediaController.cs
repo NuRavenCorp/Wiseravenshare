@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -15,11 +16,16 @@ public sealed class RavensightPhotoMediaController : ControllerBase
 {
     private readonly IRavensightPhotoService _photoService;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly ILogger<RavensightPhotoMediaController> _logger;
 
-    public RavensightPhotoMediaController(IRavensightPhotoService photoService, RavensightMediaCatalogStore mediaCatalogStore)
+    public RavensightPhotoMediaController(
+        IRavensightPhotoService photoService,
+        RavensightMediaCatalogStore mediaCatalogStore,
+        ILogger<RavensightPhotoMediaController> logger)
     {
         _photoService = photoService;
         _mediaCatalogStore = mediaCatalogStore;
+        _logger = logger;
     }
 
     [HttpPost("save")]
@@ -38,24 +44,41 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         }
 
         var saved = await _photoService.SavePhotoAsync(dto.File, dto.DestinationFolder, cancellationToken);
-        var preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
-        var mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+        RavensightMediaUserPreference? preference = null;
+        RavensightMediaAssetRecord? mediaRecord = null;
+        var persistenceStatus = "ready";
+
+        try
         {
-            UserId = userId,
-            MediaType = RavensightMediaType.Photo,
-            FileName = saved.FileName,
-            RelativePath = saved.RelativePath,
-            PublicUrl = saved.PublicUrl,
-            AbsolutePath = saved.AbsolutePath,
-            DestinationFolder = saved.DestinationFolder,
-            ContentType = saved.ContentType,
-            SizeBytes = saved.SizeBytes,
-            SavedAtUtc = saved.SavedAtUtc,
-            MetadataJson = JsonSerializer.Serialize(new
+            preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
+            mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
             {
-                caption = dto.Caption
-            })
-        }, cancellationToken);
+                UserId = userId,
+                MediaType = RavensightMediaType.Photo,
+                FileName = saved.FileName,
+                RelativePath = saved.RelativePath,
+                PublicUrl = saved.PublicUrl,
+                AbsolutePath = saved.AbsolutePath,
+                DestinationFolder = saved.DestinationFolder,
+                ContentType = saved.ContentType,
+                SizeBytes = saved.SizeBytes,
+                SavedAtUtc = saved.SavedAtUtc,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    caption = dto.Caption
+                })
+            }, cancellationToken);
+        }
+        catch (PostgresException ex)
+        {
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Photo catalog save failed at DB layer for user {UserId}; returning file response without catalog metadata.", userId);
+        }
+        catch (Exception ex)
+        {
+            persistenceStatus = "degraded";
+            _logger.LogError(ex, "Photo catalog save failed unexpectedly for user {UserId}; returning file response without catalog metadata.", userId);
+        }
 
         var blobStreamUrl = BuildBlobStreamUrl(saved.RelativePath);
         var mediaUrl = !string.IsNullOrWhiteSpace(saved.PublicUrl)
@@ -82,11 +105,12 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             filePath = response.MediaUrl,
             mediaUrl = response.MediaUrl,
             caption = dto.Caption,
-            mediaAssetId = mediaRecord.Id,
+            persistenceStatus,
+            mediaAssetId = mediaRecord?.Id,
             retention = new
             {
                 days = VideoRetentionPolicy.TemporaryRetentionDays,
-                expiresAtUtc = mediaRecord.ExpiresAtUtc,
+                expiresAtUtc = mediaRecord?.ExpiresAtUtc,
                 warning = $"This Ravensight server copy will auto-delete in {VideoRetentionPolicy.TemporaryRetentionDays} days unless you save it to your local Ravensight folder.",
                 localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
                 localFolderIdentityKey = preference?.FolderIdentityKey

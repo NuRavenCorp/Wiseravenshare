@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { truthEngine } from '../../Services/TruthDetectionEngine';
 import { truthService } from '../../Services/truthService';
 import { apiService } from '../../Services/api';
@@ -71,13 +71,21 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     const [isUploading, setIsUploading] = useState(false);
     const [destinationFolder, setDestinationFolder] = useState(resolveRavensightDestination('video'));
     const [localSaveRoot, setLocalSaveRoot] = useState(getRavensightLocalSaveRootPreference());
+    const autoSavedFilesRef = useRef(new WeakSet());
+    const addTruthAlertRef = useRef(addTruthAlert);
     const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
     const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
 
+    useEffect(() => {
+        addTruthAlertRef.current = addTruthAlert;
+    }, [addTruthAlert]);
+
     // Auto-save media to computer when a file is selected.
     useEffect(() => {
         if (!mediaFile) return;
+        if (autoSavedFilesRef.current.has(mediaFile)) return;
+        autoSavedFilesRef.current.add(mediaFile);
 
         (async () => {
             try {
@@ -99,16 +107,16 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 if (result.ok) {
                     if (result.mode === 'directory') {
                         const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
-                        addTruthAlert('success', `Auto-saved to ${rootLabel}/Ravensight`, null);
+                        addTruthAlertRef.current?.('success', `Auto-saved to ${rootLabel}/Ravensight`, null);
                     } else {
-                        addTruthAlert('success', 'Auto-saved to computer', null);
+                        addTruthAlertRef.current?.('success', 'Auto-saved to computer', null);
                     }
                 }
             } catch {
                 // Silent fail on auto-save to keep creation flow uninterrupted.
             }
         })();
-    }, [mediaFile, mediaType, localSaveRoot, addTruthAlert]);
+    }, [mediaFile, mediaType, localSaveRoot]);
 
     const handleFileUpload = (type) => {
         const input = document.createElement('input');

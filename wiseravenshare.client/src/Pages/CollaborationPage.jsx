@@ -62,6 +62,33 @@ const extractRoomId = (roomPayload) => {
     return '';
 };
 
+const parseRoomIdFromInput = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const queryMatch = raw.match(/[?&]room=([^&]+)/i);
+    if (queryMatch?.[1]) {
+        return decodeURIComponent(queryMatch[1]).trim();
+    }
+
+    try {
+        const parsedUrl = new URL(raw);
+        const roomFromQuery = parsedUrl.searchParams.get('room');
+        if (roomFromQuery && roomFromQuery.trim()) {
+            return roomFromQuery.trim();
+        }
+
+        const segments = parsedUrl.pathname.split('/').filter(Boolean);
+        if (segments.length > 0) {
+            return decodeURIComponent(segments[segments.length - 1]).trim();
+        }
+    } catch {
+        // Not a URL; treat as a direct room ID.
+    }
+
+    return raw;
+};
+
 const CollaborationPage = ({ initialRoomId }) => {
     const { isConnected, isConnecting, error: hubError, connect, createRoom, joinRoom } = useCollaborationHub();
     const [platform, setPlatform] = useState('web');
@@ -120,12 +147,8 @@ const CollaborationPage = ({ initialRoomId }) => {
     };
 
     const handleJoinRoom = async () => {
-        // Accept a raw ID or a full invite link containing ?room=
-        const raw = joinRoomId.trim();
-        if (!raw || busy) return;
-        let roomId = raw;
-        const match = raw.match(/[?&]room=([^&]+)/);
-        if (match) roomId = decodeURIComponent(match[1]);
+        const roomId = parseRoomIdFromInput(joinRoomId);
+        if (!roomId || busy) return;
         setBusy(true);
         setError(null);
         try {
