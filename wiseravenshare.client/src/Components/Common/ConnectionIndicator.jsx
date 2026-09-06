@@ -1,6 +1,6 @@
 import React from 'react';
 import { FiMic, FiMicOff, FiRefreshCw, FiAlertCircle, FiWifi, FiPhone } from 'react-icons/fi';
-import '../Styles/ConnectionIndicator.css';
+import '../../Styles/ConnectionIndicator.css';
 
 /**
  * ConnectionIndicator Component

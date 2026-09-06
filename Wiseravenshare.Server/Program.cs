@@ -727,75 +727,75 @@ CREATE INDEX IF NOT EXISTS idx_bridge_sessions_platform_user
 CREATE INDEX IF NOT EXISTS idx_room_participants_room
     ON app_data.room_participants (room_id, is_active);
 
-CREATE TABLE IF NOT EXISTS app_data."InstrumentConnections" (
-    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "UserId" UUID NOT NULL,
-    "DeviceIdentifier" VARCHAR(120) NOT NULL,
-    "DeviceName" VARCHAR(255) NOT NULL,
-    "Transport" VARCHAR(40) NOT NULL DEFAULT 'wired',
-    "HardwareAddress" VARCHAR(120),
-    "IsPaired" BOOLEAN NOT NULL DEFAULT TRUE,
-    "IsTrusted" BOOLEAN NOT NULL DEFAULT FALSE,
-    "IsActive" BOOLEAN NOT NULL DEFAULT TRUE,
-    "LastSeenAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "MetadataJson" TEXT,
-    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
-    "DeletedAt" TIMESTAMPTZ NULL
+CREATE TABLE IF NOT EXISTS app_data.""InstrumentConnections"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(120) NOT NULL,
+    ""DeviceName"" VARCHAR(255) NOT NULL,
+    ""Transport"" VARCHAR(40) NOT NULL DEFAULT 'wired',
+    ""HardwareAddress"" VARCHAR(120),
+    ""IsPaired"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsTrusted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LastSeenAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
-    ON app_data."InstrumentConnections" ("UserId");
+    ON app_data.""InstrumentConnections"" (""UserId"");
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
-    ON app_data."InstrumentConnections" ("UserId", "DeviceIdentifier");
+    ON app_data.""InstrumentConnections"" (""UserId"", ""DeviceIdentifier"");
 
-CREATE TABLE IF NOT EXISTS app_data."StudioCaptureRigProfiles" (
-    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "UserId" UUID NOT NULL,
-    "RigName" VARCHAR(150) NOT NULL DEFAULT 'WiseRaven Capture Rig',
-    "AnalogInputChannels" INTEGER NOT NULL DEFAULT 2,
-    "HasAnalogPreamps" BOOLEAN NOT NULL DEFAULT TRUE,
-    "HasUsbCConnectivity" BOOLEAN NOT NULL DEFAULT TRUE,
-    "HasBluetoothPairing" BOOLEAN NOT NULL DEFAULT TRUE,
-    "HasMidiInOut" BOOLEAN NOT NULL DEFAULT TRUE,
-    "HasWifi6Streaming" BOOLEAN NOT NULL DEFAULT TRUE,
-    "EnableIpProtection" BOOLEAN NOT NULL DEFAULT TRUE,
-    "Notes" VARCHAR(1200) NULL,
-    "LastConfiguredAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
-    "DeletedAt" TIMESTAMPTZ NULL
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureRigProfiles"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigName"" VARCHAR(150) NOT NULL DEFAULT 'WiseRaven Capture Rig',
+    ""AnalogInputChannels"" INTEGER NOT NULL DEFAULT 2,
+    ""HasAnalogPreamps"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasUsbCConnectivity"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasBluetoothPairing"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasMidiInOut"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasWifi6Streaming"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""EnableIpProtection"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Notes"" VARCHAR(1200) NULL,
+    ""LastConfiguredAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_capture_rig_profiles_user
-    ON app_data."StudioCaptureRigProfiles" ("UserId");
+    ON app_data.""StudioCaptureRigProfiles"" (""UserId"");
 
-CREATE TABLE IF NOT EXISTS app_data."StudioCaptureSourceCaptures" (
-    "Id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "UserId" UUID NOT NULL,
-    "RigProfileId" UUID NULL,
-    "SourceType" VARCHAR(30) NOT NULL DEFAULT 'analog',
-    "SourceName" VARCHAR(255) NOT NULL,
-    "DeviceIdentifier" VARCHAR(255) NOT NULL,
-    "FileName" VARCHAR(255) NULL,
-    "DurationSeconds" NUMERIC NULL,
-    "ChannelCount" INTEGER NULL,
-    "CapturedAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "FingerprintHash" VARCHAR(128) NOT NULL,
-    "FingerprintedAtUtc" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "MetadataJson" TEXT NULL,
-    "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "IsDeleted" BOOLEAN NOT NULL DEFAULT FALSE,
-    "DeletedAt" TIMESTAMPTZ NULL
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureSourceCaptures"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigProfileId"" UUID NULL,
+    ""SourceType"" VARCHAR(30) NOT NULL DEFAULT 'analog',
+    ""SourceName"" VARCHAR(255) NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(255) NOT NULL,
+    ""FileName"" VARCHAR(255) NULL,
+    ""DurationSeconds"" NUMERIC NULL,
+    ""ChannelCount"" INTEGER NULL,
+    ""CapturedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""FingerprintHash"" VARCHAR(128) NOT NULL,
+    ""FingerprintedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_user_time
-    ON app_data."StudioCaptureSourceCaptures" ("UserId", "CapturedAtUtc" DESC);
+    ON app_data.""StudioCaptureSourceCaptures"" (""UserId"", ""CapturedAtUtc"" DESC);
 CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_rig
-    ON app_data."StudioCaptureSourceCaptures" ("RigProfileId");";
+    ON app_data.""StudioCaptureSourceCaptures"" (""RigProfileId"");";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);

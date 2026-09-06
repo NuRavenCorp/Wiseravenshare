@@ -42,6 +42,20 @@ function InstrumentConnectorPage() {
   const [connectionSignal, setConnectionSignal] = useState(false);
   const [midiDevices, setMidiDevices] = useState([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState(null);
+  const [studioRigProfile, setStudioRigProfile] = useState({
+    id: null,
+    rigName: 'WiseRaven Capture Rig',
+    analogInputChannels: 2,
+    hasAnalogPreamps: true,
+    hasUsbCConnectivity: true,
+    hasBluetoothPairing: true,
+    hasMidiInOut: true,
+    hasWifi6Streaming: true,
+    enableIpProtection: true,
+    notes: '',
+  });
+  const [sourceCaptures, setSourceCaptures] = useState([]);
+  const [isSavingRigProfile, setIsSavingRigProfile] = useState(false);
   
   // Refs
   const audioContextRef = useRef(null);
@@ -122,6 +136,76 @@ function InstrumentConnectorPage() {
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [showNotification]);
+
+  useEffect(() => {
+    const loadCaptureRig = async () => {
+      try {
+        const [profileRes, capturesRes] = await Promise.all([
+          apiService.getStudioCaptureProfile(),
+          apiService.getStudioCaptureSources(8),
+        ]);
+
+        const profile = profileRes?.data;
+        if (profile && typeof profile === 'object') {
+          setStudioRigProfile({
+            id: profile.id || null,
+            rigName: profile.rigName || 'WiseRaven Capture Rig',
+            analogInputChannels: Number(profile.analogInputChannels || 2),
+            hasAnalogPreamps: Boolean(profile.hasAnalogPreamps),
+            hasUsbCConnectivity: Boolean(profile.hasUsbCConnectivity),
+            hasBluetoothPairing: Boolean(profile.hasBluetoothPairing),
+            hasMidiInOut: Boolean(profile.hasMidiInOut),
+            hasWifi6Streaming: Boolean(profile.hasWifi6Streaming),
+            enableIpProtection: Boolean(profile.enableIpProtection),
+            notes: profile.notes || '',
+          });
+        }
+
+        const captures = Array.isArray(capturesRes?.data) ? capturesRes.data : [];
+        setSourceCaptures(captures);
+      } catch (err) {
+        console.warn('Unable to load capture rig profile:', err?.message || err);
+      }
+    };
+
+    loadCaptureRig();
+  }, []);
+
+  const updateRigProfileField = (field, value) => {
+    setStudioRigProfile((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const saveRigProfile = async () => {
+    setIsSavingRigProfile(true);
+    try {
+      const payload = {
+        rigName: studioRigProfile.rigName,
+        analogInputChannels: Math.max(1, Number(studioRigProfile.analogInputChannels || 1)),
+        hasAnalogPreamps: Boolean(studioRigProfile.hasAnalogPreamps),
+        hasUsbCConnectivity: Boolean(studioRigProfile.hasUsbCConnectivity),
+        hasBluetoothPairing: Boolean(studioRigProfile.hasBluetoothPairing),
+        hasMidiInOut: Boolean(studioRigProfile.hasMidiInOut),
+        hasWifi6Streaming: Boolean(studioRigProfile.hasWifi6Streaming),
+        enableIpProtection: Boolean(studioRigProfile.enableIpProtection),
+        notes: studioRigProfile.notes || '',
+      };
+
+      const response = await apiService.upsertStudioCaptureProfile(payload);
+      const profile = response?.data || payload;
+      setStudioRigProfile((prev) => ({
+        ...prev,
+        id: profile.id || prev.id,
+      }));
+      showNotification('Studio capture profile saved', 'success');
+    } catch (err) {
+      showNotification('Failed to save studio capture profile: ' + (err?.message || 'Unknown error'), 'error');
+    } finally {
+      setIsSavingRigProfile(false);
+    }
+  };
 
   // ─── MIDI Device Enumeration ────────────────────────────────────────
   const onMIDISuccess = (midiAccess) => {
@@ -306,11 +390,39 @@ function InstrumentConnectorPage() {
         }
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const blob = new Blob(chunks, { type: mimeType });
         const url = URL.createObjectURL(blob);
         const timestamp = new Date().toLocaleString();
         const deviceLabel = devices.find(d => d.deviceId === selectedDeviceId)?.label || 'Unknown';
+
+        let captureFingerprint = null;
+        if (studioRigProfile.enableIpProtection) {
+          try {
+            const captureResponse = await apiService.recordStudioCaptureSource({
+              rigProfileId: studioRigProfile.id || null,
+              sourceType: connectionType || 'analog',
+              sourceName: deviceLabel,
+              deviceIdentifier: selectedDeviceId || 'unknown-device',
+              fileName: `instrument-${Date.now()}.webm`,
+              durationSeconds: Number(recordingTime.toFixed(2)),
+              channelCount: 2,
+              capturedAtUtc: new Date().toISOString(),
+              metadataJson: JSON.stringify({
+                transport: connectionType || 'analog',
+                audioBitsPerSecond: 128000,
+                mimeType,
+                userAgent: navigator.userAgent,
+              }),
+            });
+            captureFingerprint = captureResponse?.data || null;
+            if (captureFingerprint) {
+              setSourceCaptures((prev) => [captureFingerprint, ...prev].slice(0, 8));
+            }
+          } catch (captureError) {
+            showNotification('Capture fingerprint logging failed: ' + (captureError?.message || 'Unknown error'), 'warning');
+          }
+        }
 
         const recording = {
           id: Date.now(),
@@ -321,6 +433,8 @@ function InstrumentConnectorPage() {
           deviceLabel,
           connectionType,
           timestamp,
+          fingerprintHash: captureFingerprint?.fingerprintHash || null,
+          fingerprintedAtUtc: captureFingerprint?.fingerprintedAtUtc || null,
         };
 
         setRecordings(prev => [recording, ...prev]);
@@ -674,37 +788,76 @@ function InstrumentConnectorPage() {
       {/* Future Adapter Info */}
       <div className="ic-adapter-info">
         <div className="ic-section-header">
-          <h3>🔧 Future: Custom Adapter Hardware</h3>
+          <h3>🔧 Studio Capture Hardware Profile</h3>
         </div>
         <div className="ic-info-box">
           <p>
-            <strong>Coming Soon:</strong> WiseRavenShare is designing a professional audio adapter
-            for multi-instrument studios. This dedicated hardware will support:
+            Configure your active recording rig so analog/USB-C/Bluetooth/MIDI/WiFi capture paths are saved and
+            every recorded source can be fingerprinted and timestamped for IP protection.
           </p>
-          <ul>
-            <li>
-              <strong>XLR/1/4" analog inputs</strong> with preamps for guitars, keyboards, and mics
-            </li>
-            <li>
-              <strong>USB-C connectivity</strong> for direct computer/tablet integration
-            </li>
-            <li>
-              <strong>Bluetooth pairing</strong> for wireless monitoring and control
-            </li>
-            <li>
-              <strong>MIDI In/Out</strong> for synchronized drum machines, synths, and controllers
-            </li>
-            <li>
-              <strong>Network streaming</strong> (WiFi 6) for multi-room recording sessions
-            </li>
-            <li>
-              <strong>Built-in IP protection</strong> - fingerprint and timestamp each source during
-              capture
-            </li>
-          </ul>
-          <p className="ic-info-cta">
-            Stay tuned for availability. Subscribe to updates in your account settings.
-          </p>
+          <div className="ic-rig-form-grid">
+            <label className="ic-rig-field">
+              <span>Rig Name</span>
+              <input
+                type="text"
+                value={studioRigProfile.rigName}
+                onChange={(e) => updateRigProfileField('rigName', e.target.value)}
+                maxLength={150}
+              />
+            </label>
+            <label className="ic-rig-field">
+              <span>Analog Input Channels (XLR/1/4")</span>
+              <input
+                type="number"
+                min={1}
+                max={32}
+                value={studioRigProfile.analogInputChannels}
+                onChange={(e) => updateRigProfileField('analogInputChannels', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="ic-rig-checks">
+            <label><input type="checkbox" checked={studioRigProfile.hasAnalogPreamps} onChange={(e) => updateRigProfileField('hasAnalogPreamps', e.target.checked)} /> XLR/1/4" analog preamps</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasUsbCConnectivity} onChange={(e) => updateRigProfileField('hasUsbCConnectivity', e.target.checked)} /> USB-C connectivity</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasBluetoothPairing} onChange={(e) => updateRigProfileField('hasBluetoothPairing', e.target.checked)} /> Bluetooth pairing</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasMidiInOut} onChange={(e) => updateRigProfileField('hasMidiInOut', e.target.checked)} /> MIDI In/Out</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasWifi6Streaming} onChange={(e) => updateRigProfileField('hasWifi6Streaming', e.target.checked)} /> WiFi 6 network streaming</label>
+            <label><input type="checkbox" checked={studioRigProfile.enableIpProtection} onChange={(e) => updateRigProfileField('enableIpProtection', e.target.checked)} /> IP fingerprint + timestamp on capture</label>
+          </div>
+
+          <label className="ic-rig-field">
+            <span>Rig Notes</span>
+            <textarea
+              value={studioRigProfile.notes}
+              onChange={(e) => updateRigProfileField('notes', e.target.value)}
+              maxLength={1200}
+              rows={3}
+            />
+          </label>
+
+          <button className="ic-btn ic-btn-primary" onClick={saveRigProfile} disabled={isSavingRigProfile}>
+            {isSavingRigProfile ? 'Saving...' : 'Save Hardware Profile'}
+          </button>
+
+          <div className="ic-capture-log">
+            <h4>Recent IP Fingerprints</h4>
+            {sourceCaptures.length === 0 ? (
+              <p className="ic-info-cta">No fingerprinted captures yet. Start a recording to generate one.</p>
+            ) : (
+              <div className="ic-capture-list">
+                {sourceCaptures.map((item) => (
+                  <div key={item.id} className="ic-capture-item">
+                    <div>
+                      <strong>{item.sourceName}</strong> · {String(item.sourceType || '').toUpperCase()}
+                    </div>
+                    <small>{new Date(item.fingerprintedAtUtc || item.capturedAtUtc).toLocaleString()}</small>
+                    <code>{String(item.fingerprintHash || '').slice(0, 18)}...</code>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
