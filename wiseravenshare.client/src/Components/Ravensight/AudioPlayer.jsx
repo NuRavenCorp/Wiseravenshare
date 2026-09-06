@@ -235,11 +235,23 @@ const AudioPlayer = ({
   // Track end handler is now inline inside the track useEffect above.
 
   // Control handlers
-  const handlePlay = () => {
+  const handlePlay = async () => {
     // AudioContext must be created/resumed inside a user gesture
     initAudioContext();
     if (audioContextRef.current?.state === 'suspended') {
-      audioContextRef.current.resume();
+      try {
+        await audioContextRef.current.resume();
+      } catch (e) {
+        console.warn('Failed to resume AudioContext:', e);
+      }
+    }
+    // Ensure audio element plays
+    if (audioRef.current) {
+      try {
+        await audioRef.current.play();
+      } catch (e) {
+        console.warn('Play failed:', e.message);
+      }
     }
     setIsPlaying(true);
   };

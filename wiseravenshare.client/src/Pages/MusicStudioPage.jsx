@@ -736,13 +736,26 @@ const MusicStudioPage = ({ onNavigate }) => {
   }, [monitorInputEnabled, monitorInputLevel]);
 
   // ── Transport handlers ────────────────────────────────────────────────────────
-  const play = () => {
+  const play = async () => {
     const el = audioRef.current;
     if (!el?.src) return;
     ensureGraph();
-    el.play().then(() => setIsPlaying(true)).catch(e => {
-      console.warn('play failed', e);
-    });
+    // Resume AudioContext if suspended (browser autoplay policy requirement)
+    const ctx = nodesRef.current?.ctx;
+    if (ctx && ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.warn('Failed to resume AudioContext:', e);
+      }
+    }
+    try {
+      await el.play();
+      setIsPlaying(true);
+    } catch (e) {
+      console.warn('Play failed:', e.message);
+      addToast('Playback failed: ' + (e.message || 'Unknown error'), 'error');
+    }
   };
 
   const pause = () => {
