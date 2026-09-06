@@ -519,6 +519,10 @@ export const apiService = {
     registerBluetoothPair: (payload) => api.post('/instrumentconnections/bluetooth/pair', payload),
     instrumentConnectionHeartbeat: (id) => api.post(`/instrumentconnections/${id}/heartbeat`),
     removeInstrumentConnection: (id) => api.delete(`/instrumentconnections/${id}`),
+    getStudioCaptureProfile: () => api.get('/studio-capture/profile'),
+    upsertStudioCaptureProfile: (payload) => api.post('/studio-capture/profile', payload),
+    getStudioCaptureSources: (limit = 20) => api.get(`/studio-capture/sources?limit=${Math.max(1, Math.floor(limit || 20))}`),
+    recordStudioCaptureSource: (payload) => api.post('/studio-capture/sources', payload),
 
     // Posts endpoints
     getPosts: async (params = {}) => {

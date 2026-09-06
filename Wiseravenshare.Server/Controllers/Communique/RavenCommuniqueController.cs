@@ -146,6 +146,60 @@ public class RavenCommuniqueController : ControllerBase
         return Ok(items);
     }
 
+    /// <summary>Start a phone verification using Twilio Verify (sms | whatsapp).</summary>
+    [HttpPost("verify/start")]
+    public async Task<IActionResult> StartVerification([FromBody] StartVerificationRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { error = "Invalid request." });
+
+        var channel = string.IsNullOrWhiteSpace(request.Channel) ? "sms" : request.Channel.Trim().ToLowerInvariant();
+        if (!string.Equals(channel, "sms", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(channel, "whatsapp", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = "Unsupported verification channel. Use sms or whatsapp." });
+        }
+
+        var result = await _messagingService.StartVerificationAsync(request.To, channel);
+        AppendDispatchLog($"verify-{channel}", request.To, "Verification code requested", result.Success
+            ? MessageSendResult.Ok(result.Sid, $"verify-{channel}")
+            : MessageSendResult.Fail(result.ErrorMessage, $"verify-{channel}"));
+
+        if (!result.Success)
+            return BadRequest(new { error = result.ErrorMessage ?? "Failed to start verification." });
+
+        return Ok(new
+        {
+            sid = result.Sid,
+            status = result.Status,
+            channel = result.Channel
+        });
+    }
+
+    /// <summary>Check a phone verification code using Twilio Verify.</summary>
+    [HttpPost("verify/check")]
+    public async Task<IActionResult> CheckVerification([FromBody] CheckVerificationRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { error = "Invalid request." });
+
+        var result = await _messagingService.CheckVerificationAsync(request.To, request.Code);
+        AppendDispatchLog("verify-check", request.To, "Verification code submitted", result.Success
+            ? MessageSendResult.Ok(result.Sid, "verify-check")
+            : MessageSendResult.Fail(result.ErrorMessage, "verify-check"));
+
+        if (!result.Success)
+            return BadRequest(new { error = result.ErrorMessage ?? "Failed to check verification code." });
+
+        return Ok(new
+        {
+            sid = result.Sid,
+            status = result.Status,
+            approved = result.Approved,
+            channel = result.Channel
+        });
+    }
+
     private void AppendDispatchLog(string channel, string to, string message, MessageSendResult result)
     {
         var callerId = User.GetUserId().ToString();
@@ -205,4 +259,23 @@ public class CommuniqueRequest
 
     [MaxLength(1600)]
     public string Message { get; set; } = string.Empty;
+}
+
+public class StartVerificationRequest
+{
+    [Required]
+    public string To { get; set; } = string.Empty;
+
+    [Required]
+    public string Channel { get; set; } = "sms";
+}
+
+public class CheckVerificationRequest
+{
+    [Required]
+    public string To { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(10)]
+    public string Code { get; set; } = string.Empty;
 }

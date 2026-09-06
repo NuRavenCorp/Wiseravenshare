@@ -53,6 +53,14 @@ export const sendWhatsApp = (to, message) =>
 export const sendCommunique = (channel, to, message) =>
     post('/api/communique/send', { channel, to, message });
 
+/** Start phone verification — channel: 'sms' | 'whatsapp' */
+export const startCommuniqueVerification = (to, channel = 'sms') =>
+    post('/api/communique/verify/start', { to, channel });
+
+/** Check a phone verification code */
+export const checkCommuniqueVerification = (to, code) =>
+    post('/api/communique/verify/check', { to, code });
+
 /** Aggregated recent dispatches across SMS/WhatsApp/Voice */
 export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) => {
     const query = new URLSearchParams();

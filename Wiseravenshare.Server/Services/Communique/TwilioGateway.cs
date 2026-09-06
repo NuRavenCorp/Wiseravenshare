@@ -1,5 +1,6 @@
 using Twilio;
 using Twilio.Rest.Api.V2010.Account;
+using Twilio.Rest.Verify.V2.Service;
 using Twilio.Types;
 using Wiseravenshare.Server.Entities.Communique;
 using System.Net.Http.Headers;
@@ -104,12 +105,16 @@ public interface ITwilioMessagingService
 {
     Task<MessageSendResult> SendSmsAsync(string toNumber, string message);
     Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message);
+    Task<CommuniqueVerificationStartResult> StartVerificationAsync(string toNumber, string channel);
+    Task<CommuniqueVerificationCheckResult> CheckVerificationAsync(string toNumber, string code);
 }
 
 public interface ICommuniqueMessagingService
 {
     Task<MessageSendResult> SendSmsAsync(string toNumber, string message);
     Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message);
+    Task<CommuniqueVerificationStartResult> StartVerificationAsync(string toNumber, string channel);
+    Task<CommuniqueVerificationCheckResult> CheckVerificationAsync(string toNumber, string code);
 }
 
 public class TwilioMessagingService : ITwilioMessagingService, ICommuniqueMessagingService
@@ -128,6 +133,67 @@ public class TwilioMessagingService : ITwilioMessagingService, ICommuniqueMessag
 
     public Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message) =>
         SendTwilioMessageAsync(toNumber, message, whatsApp: true);
+
+    public async Task<CommuniqueVerificationStartResult> StartVerificationAsync(string toNumber, string channel)
+    {
+        var normalizedChannel = NormalizeVerifyChannel(channel);
+        if (!TryLoadTwilioVerifyConfig(out var accountSid, out var authToken, out var verifyServiceSid, out var error))
+        {
+            return CommuniqueVerificationStartResult.Fail(error, normalizedChannel);
+        }
+
+        try
+        {
+            TwilioClient.Init(accountSid, authToken);
+
+            var verification = await VerificationResource.CreateAsync(
+                to: toNumber,
+                channel: normalizedChannel,
+                pathServiceSid: verifyServiceSid);
+
+            return CommuniqueVerificationStartResult.Ok(
+                verification.Sid ?? string.Empty,
+                verification.Status ?? string.Empty,
+                normalizedChannel);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Twilio Verify start failed for {To} on channel {Channel}.", toNumber, normalizedChannel);
+            return CommuniqueVerificationStartResult.Fail(ex.Message, normalizedChannel);
+        }
+    }
+
+    public async Task<CommuniqueVerificationCheckResult> CheckVerificationAsync(string toNumber, string code)
+    {
+        var normalizedChannel = "sms";
+        if (!TryLoadTwilioVerifyConfig(out var accountSid, out var authToken, out var verifyServiceSid, out var error))
+        {
+            return CommuniqueVerificationCheckResult.Fail(error, normalizedChannel);
+        }
+
+        try
+        {
+            TwilioClient.Init(accountSid, authToken);
+
+            var verificationCheck = await VerificationCheckResource.CreateAsync(
+                to: toNumber,
+                code: code,
+                pathServiceSid: verifyServiceSid);
+
+            var status = verificationCheck.Status ?? string.Empty;
+            var approved = string.Equals(status, "approved", StringComparison.OrdinalIgnoreCase);
+            return CommuniqueVerificationCheckResult.Ok(
+                verificationCheck.Sid ?? string.Empty,
+                status,
+                normalizedChannel,
+                approved);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Twilio Verify check failed for {To}.", toNumber);
+            return CommuniqueVerificationCheckResult.Fail(ex.Message, normalizedChannel);
+        }
+    }
 
     private async Task<MessageSendResult> SendTwilioMessageAsync(string toNumber, string message, bool whatsApp)
     {
@@ -177,6 +243,45 @@ public class TwilioMessagingService : ITwilioMessagingService, ICommuniqueMessag
             return MessageSendResult.Fail(ex.Message, channel);
         }
     }
+
+    private bool TryLoadTwilioVerifyConfig(
+        out string accountSid,
+        out string authToken,
+        out string verifyServiceSid,
+        out string error)
+    {
+        accountSid = _configuration["Communique:Twilio:AccountSid"] ?? string.Empty;
+        authToken = _configuration["Communique:Twilio:AuthToken"] ?? string.Empty;
+        verifyServiceSid = _configuration["Communique:Twilio:VerifyServiceSid"] ?? string.Empty;
+        error = string.Empty;
+
+        if (!_configuration.GetValue("Communique:Twilio:Enabled", false))
+        {
+            error = "Twilio is disabled.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(accountSid) ||
+            string.IsNullOrWhiteSpace(authToken) ||
+            string.IsNullOrWhiteSpace(verifyServiceSid))
+        {
+            error = "Twilio Verify configuration is incomplete. Expected Communique:Twilio:AccountSid, AuthToken, and VerifyServiceSid.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string NormalizeVerifyChannel(string? channel)
+    {
+        var normalized = (channel ?? "sms").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "sms" => "sms",
+            "whatsapp" => "whatsapp",
+            _ => "sms"
+        };
+    }
 }
 
 public sealed class ZernioMessagingService : ICommuniqueMessagingService
@@ -200,6 +305,21 @@ public sealed class ZernioMessagingService : ICommuniqueMessagingService
 
     public Task<MessageSendResult> SendWhatsAppAsync(string toNumber, string message) =>
         SendZernioMessageAsync(toNumber, message, whatsApp: true);
+
+    public Task<CommuniqueVerificationStartResult> StartVerificationAsync(string toNumber, string channel)
+    {
+        var normalizedChannel = string.IsNullOrWhiteSpace(channel) ? "sms" : channel.Trim().ToLowerInvariant();
+        return Task.FromResult(CommuniqueVerificationStartResult.Fail(
+            "Verification is not supported when Communique provider is set to zernio.",
+            normalizedChannel));
+    }
+
+    public Task<CommuniqueVerificationCheckResult> CheckVerificationAsync(string toNumber, string code)
+    {
+        return Task.FromResult(CommuniqueVerificationCheckResult.Fail(
+            "Verification is not supported when Communique provider is set to zernio.",
+            "sms"));
+    }
 
     private async Task<MessageSendResult> SendZernioMessageAsync(string toNumber, string message, bool whatsApp)
     {
@@ -337,6 +457,20 @@ public sealed class RoutedCommuniqueMessagingService : ICommuniqueMessagingServi
         return UseZernio()
             ? _zernioMessagingService.SendWhatsAppAsync(toNumber, message)
             : _twilioMessagingService.SendWhatsAppAsync(toNumber, message);
+    }
+
+    public Task<CommuniqueVerificationStartResult> StartVerificationAsync(string toNumber, string channel)
+    {
+        return UseZernio()
+            ? _zernioMessagingService.StartVerificationAsync(toNumber, channel)
+            : _twilioMessagingService.StartVerificationAsync(toNumber, channel);
+    }
+
+    public Task<CommuniqueVerificationCheckResult> CheckVerificationAsync(string toNumber, string code)
+    {
+        return UseZernio()
+            ? _zernioMessagingService.CheckVerificationAsync(toNumber, code)
+            : _twilioMessagingService.CheckVerificationAsync(toNumber, code);
     }
 
     private bool UseZernio()

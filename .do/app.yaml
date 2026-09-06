@@ -160,6 +160,24 @@ services:
       - key: ReminderNotifications__Sms__TwilioFromNumber
         value: ${TWILIO_FROM_NUMBER}
         type: SECRET
+      - key: Communique__Twilio__Enabled
+        value: ${COMMUNIQUE_TWILIO_ENABLED}
+        type: SECRET
+      - key: Communique__Twilio__AccountSid
+        value: ${TWILIO_ACCOUNT_SID}
+        type: SECRET
+      - key: Communique__Twilio__AuthToken
+        value: ${TWILIO_AUTH_TOKEN}
+        type: SECRET
+      - key: Communique__Twilio__FromNumber
+        value: ${TWILIO_FROM_NUMBER}
+        type: SECRET
+      - key: Communique__Twilio__WhatsAppFrom
+        value: ${COMMUNIQUE_TWILIO_WHATSAPP_FROM}
+        type: SECRET
+      - key: Communique__Twilio__VerifyServiceSid
+        value: ${TWILIO_VERIFY_SERVICE_SID}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
