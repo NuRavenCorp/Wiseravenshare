@@ -1,27 +1,32 @@
 // wiseravenshare.client/src/Services/communiqueService.js
 // RavenCommunique — Twilio SMS / WhatsApp / Voice API client
 
+import { getAuthToken } from './authStorage';
+
 const COMMUNIQUE_BASE_URL =
     import.meta?.env?.VITE_COMMUNIQUE_URL ||
     'https://communique.wiseravenshare.com';
 
 const getAuthHeader = () => {
     try {
-        const raw = localStorage.getItem('wiseAuthToken') || sessionStorage.getItem('wiseAuthToken');
+        const raw = getAuthToken()
+            || localStorage.getItem('wiseAuthToken')
+            || sessionStorage.getItem('wiseAuthToken');
         return raw ? { Authorization: `Bearer ${raw}` } : {};
     } catch {
         return {};
     }
 };
 
-const post = async (path, body) => {
+const request = async (path, init = {}) => {
     const res = await fetch(`${COMMUNIQUE_BASE_URL}${path}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            ...getAuthHeader()
+            ...getAuthHeader(),
+            ...(init.headers || {})
         },
-        body: JSON.stringify(body)
+        ...init
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -29,6 +34,12 @@ const post = async (path, body) => {
     }
     return data;
 };
+
+const post = async (path, body) =>
+    request(path, {
+        method: 'POST',
+        body: JSON.stringify(body)
+    });
 
 /** Send an SMS via Twilio */
 export const sendSms = (to, message) =>
@@ -41,3 +52,15 @@ export const sendWhatsApp = (to, message) =>
 /** Unified send — channel: 'sms' | 'whatsapp' | 'voice' */
 export const sendCommunique = (channel, to, message) =>
     post('/api/communique/send', { channel, to, message });
+
+/** Aggregated recent dispatches across SMS/WhatsApp/Voice */
+export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) => {
+    const query = new URLSearchParams();
+    if (channel) query.set('channel', channel);
+    if (Number.isFinite(limit) && limit > 0) query.set('limit', String(Math.floor(limit)));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+
+    return request(`/api/communique/messages${suffix}`, {
+        method: 'GET'
+    });
+};
