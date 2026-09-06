@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import aiAssistantService from '../Services/aiAssistantService';
 
+const OLLAMA_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ollama-offline-alerted';
+
 const SUGGESTIONS = [
     'How do I cross-post to all platforms?',
     'Why did my TikTok share fail?',
@@ -28,7 +30,6 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     // Initialize Ollama health check on page load (once only)
     useEffect(() => {
         let cancelled = false;
-        let hasAlerted = false;
         
         const initOllama = async () => {
             setOllamaInitializing(true);
@@ -46,9 +47,10 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                 }
             } else {
                 setOllamaError(health.message);
-                // Only alert once on initial check failure
-                if (addTruthAlert && !hasAlerted) {
-                    hasAlerted = true;
+                // Alert once per browser session to avoid duplicate offline noise.
+                const alreadyAlerted = sessionStorage.getItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY) === '1';
+                if (addTruthAlert && !alreadyAlerted) {
+                    sessionStorage.setItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY, '1');
                     addTruthAlert('error', 'Ollama Offline', health.message);
                 }
             }

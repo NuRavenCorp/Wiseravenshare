@@ -55,6 +55,7 @@ Base configuration with all services defined but optional services disabled by d
 - `api`: Main application (builds and serves both backend + frontend)
 - `postgres`: PostgreSQL database (profile: `local-db`)
 - `ollama`: AI assistant (profile: `with-ai`)
+- `ollama-init`: Pulls default Ollama model at startup (profile: `with-ai`)
 - `redis`: Cache (profile: `with-cache`)
 - `minio`: S3-compatible storage (profile: `with-storage`)
 - `minio-init`: Initializes MinIO buckets (profile: `with-storage`)
@@ -119,6 +120,7 @@ nano .env
 - `EXTERNAL_POSTGRES_CONNECTION`: Use managed database (production)
 
 **AI (Ollama):**
+- `AI_PROVIDER`: AI backend selector (set to `ollama` for Ollama)
 - `OLLAMA_BASE_URL`: Ollama service URL
 - `OLLAMA_DEFAULT_MODEL`: Model to use (default: llama3.2)
 

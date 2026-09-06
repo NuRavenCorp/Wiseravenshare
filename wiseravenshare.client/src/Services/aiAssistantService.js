@@ -52,7 +52,7 @@ export const aiAssistantService = {
         }
         return { 
             online: false, 
-            message: "Ollama is offline. Please ensure Ollama is running on your system.",
+            message: "Ollama is offline. Please ensure the Ollama service/container is running.",
             models: [],
             modelCount: 0
         };
