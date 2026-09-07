@@ -52,17 +52,74 @@ const fmt = (s) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
 
+const toBlobStreamUrl = (relativePath = '') => {
+  const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized) return '';
+  const encoded = normalized
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+};
+
+const normalizePlaybackUrl = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) {
+    return raw;
+  }
+
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return raw;
+    }
+  }
+
+  if (raw.startsWith('/')) {
+    return raw;
+  }
+
+  if (raw.startsWith('api/')) {
+    return `/${raw}`;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  return '';
+};
+
 const normalizeTrack = (track) => {
   if (!track || typeof track !== 'object') return null;
-  const mediaUrl = String(
+  const directMediaUrl = normalizePlaybackUrl(
     track.mediaUrl
     || track.url
     || track.fileUrl
     || track.publicUrl
     || track.MediaUrl
     || track.Url
+    || track.filePath
+    || track.FilePath
+    || ''
+  );
+  const fallbackRelativePath = String(
+    track.relativePath
+    || track.RelativePath
+    || track.objectKey
+    || track.ObjectKey
     || ''
   ).trim();
+  const fileName = String(track.fileName || track.FileName || '').trim();
+
+  const mediaUrl = directMediaUrl
+    || toBlobStreamUrl(fallbackRelativePath)
+    || (fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '');
 
   return {
     id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
@@ -738,7 +795,30 @@ const MusicStudioPage = ({ onNavigate }) => {
   // ── Transport handlers ────────────────────────────────────────────────────────
   const play = async () => {
     const el = audioRef.current;
-    if (!el?.src) return;
+    if (!currentTrack && library.length > 0) {
+      setCurrentTrack(library[0]);
+      setTrackIndex(0);
+      return;
+    }
+
+    if (!el || !currentTrack) {
+      addToast('Select or upload a track first.', 'warning');
+      return;
+    }
+
+    if (!el.src) {
+      const sourceUrl = String(currentTrack.mediaUrl || currentTrack.url || '').trim();
+      if (sourceUrl) {
+        el.src = sourceUrl;
+        el.load();
+      }
+    }
+
+    if (!el.src) {
+      addToast('This track has no playable media URL yet.', 'warning');
+      return;
+    }
+
     ensureGraph();
     // Resume AudioContext if suspended (browser autoplay policy requirement)
     const ctx = nodesRef.current?.ctx;
@@ -912,7 +992,7 @@ const MusicStudioPage = ({ onNavigate }) => {
           <button className="tx-btn" onClick={skipPrev}><FiSkipBack /></button>
           {isPlaying
             ? <button className="tx-btn play-pause" onClick={pause}><FiPause /></button>
-            : <button className="tx-btn play-pause" onClick={play} disabled={!currentTrack}><FiPlay /></button>
+            : <button className="tx-btn play-pause" onClick={play} disabled={!currentTrack && library.length === 0}><FiPlay /></button>
           }
           <button className="tx-btn" onClick={stop}><FiSquare /></button>
           <button className="tx-btn" onClick={skipNext}><FiSkipForward /></button>
