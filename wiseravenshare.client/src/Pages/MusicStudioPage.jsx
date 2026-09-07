@@ -9,6 +9,7 @@ import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
 import FMTunerModule from '../Components/FM/FMTunerModule';
+import FMCreatorStudio from '../Components/FM/FMCreatorStudio';
 import '../Styles/MusicStudio.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -129,6 +130,9 @@ const normalizeTrack = (track) => {
     album: String(track.album || track.Album || '').trim(),
     genre: String(track.genre || track.Genre || '').trim(),
     duration: track.duration || track.Duration || '',
+    relativePath: fallbackRelativePath,
+    fileName,
+    contentType: String(track.contentType || track.ContentType || '').trim(),
     mediaUrl,
     url: mediaUrl
   };
@@ -241,6 +245,8 @@ const MusicStudioPage = ({ onNavigate }) => {
   const libRef     = useRef(library);
   const idxRef     = useRef(trackIndex);
   const playingRef = useRef(isPlaying);
+  const sourceCandidatesRef = useRef([]);
+  const sourceIndexRef = useRef(0);
   useEffect(() => { repeatRef.current  = repeat;     }, [repeat]);
   useEffect(() => { shuffleRef.current = shuffle;    }, [shuffle]);
   useEffect(() => { libRef.current     = library;    }, [library]);
@@ -253,7 +259,24 @@ const MusicStudioPage = ({ onNavigate }) => {
 
     const onMeta  = () => setDuration(el.duration || 0);
     const onTime  = () => setCurrentTime(el.currentTime || 0);
-    const onErr   = () => { addToast('Playback error', 'error'); setIsPlaying(false); };
+    const onErr = () => {
+      const candidates = sourceCandidatesRef.current;
+      const nextIndex = sourceIndexRef.current + 1;
+      if (nextIndex < candidates.length) {
+        const nextUrl = candidates[nextIndex];
+        sourceIndexRef.current = nextIndex;
+        el.src = nextUrl;
+        el.load();
+        if (playingRef.current) {
+          el.play().catch(() => {});
+        }
+        addToast('Primary source failed. Trying backup source...', 'warning');
+        return;
+      }
+
+      addToast('Playback error: this track has no supported source.', 'error');
+      setIsPlaying(false);
+    };
     const onEnded = () => {
       const r = repeatRef.current;
       const lib = libRef.current;
@@ -289,6 +312,18 @@ const MusicStudioPage = ({ onNavigate }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // ← runs once; stale state handled via refs above
 
+  const buildTrackSources = (track) => {
+    if (!track || typeof track !== 'object') return [];
+
+    const sources = [
+      normalizePlaybackUrl(track.mediaUrl || track.url || ''),
+      toBlobStreamUrl(track.relativePath || ''),
+      track.fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(track.fileName)}` : ''
+    ];
+
+    return [...new Set(sources.filter(Boolean))];
+  };
+
   // ── 3. Load new track into <audio> ──────────────────────────────────────────
   useEffect(() => {
     const el = audioRef.current;
@@ -297,7 +332,11 @@ const MusicStudioPage = ({ onNavigate }) => {
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
-    const sourceUrl = String(currentTrack.mediaUrl || currentTrack.url || '').trim();
+    const candidates = buildTrackSources(currentTrack);
+    sourceCandidatesRef.current = candidates;
+    sourceIndexRef.current = 0;
+
+    const sourceUrl = String(candidates[0] || '').trim();
     if (!sourceUrl) {
       addToast('This track has no playable media URL yet.', 'warning');
       return;
@@ -1143,6 +1182,9 @@ const MusicStudioPage = ({ onNavigate }) => {
             <button className={activePanel === 'fm'      ? 'active' : ''} onClick={() => setActivePanel('fm')}>
               <FiActivity /> FM Tuner
             </button>
+            <button className={activePanel === 'radio-creator' ? 'active' : ''} onClick={() => setActivePanel('radio-creator')}>
+              <FiRadio /> Radio Creator
+            </button>
           </div>
 
           {/* ── EQ panel ── */}
@@ -1370,6 +1412,12 @@ const MusicStudioPage = ({ onNavigate }) => {
           {activePanel === 'fm' && (
             <div className="panel fm-panel">
               <FMTunerModule />
+            </div>
+          )}
+
+          {activePanel === 'radio-creator' && (
+            <div className="panel fm-panel">
+              <FMCreatorStudio />
             </div>
           )}
         </div>

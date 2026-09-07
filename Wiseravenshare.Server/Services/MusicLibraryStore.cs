@@ -71,7 +71,7 @@ ORDER BY created_at DESC;";
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var objectKey = reader.GetString(1);
+            var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             var originalFileName = reader.GetString(2);
             var metadata = ParseMetadata(reader.IsDBNull(6) ? null : reader.GetString(6));
             var storedFileName = ReadMetadataString(metadata, "storedFileName", originalFileName);
@@ -191,7 +191,14 @@ INSERT INTO app_data.bucket_objects (
 
     private string ResolveMediaUrl(string? publicUrl, string objectKey, string fileName)
     {
-        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey) ? fileName : objectKey.Replace('\\', '/').Trim('/');
+        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey)
+            ? TryExtractObjectKeyFromUrl(publicUrl)
+            : objectKey.Replace('\\', '/').Trim('/');
+
+        if (string.IsNullOrWhiteSpace(normalizedObjectKey) && !string.IsNullOrWhiteSpace(fileName))
+        {
+            normalizedObjectKey = fileName;
+        }
 
         // Bucket objects are persisted with private ACL, so direct public URLs can be non-playable.
         // Prefer server-side blob streaming whenever an object key is available.
@@ -212,6 +219,34 @@ INSERT INTO app_data.bucket_objects (
         }
 
         return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
+    }
+
+    private string TryExtractObjectKeyFromUrl(string? publicUrl)
+    {
+        var raw = publicUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        {
+            return string.Empty;
+        }
+
+        var path = uri.AbsolutePath.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_bucketName)
+            && path.StartsWith(_bucketName + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[(_bucketName.Length + 1)..];
+        }
+
+        return path.Trim('/');
     }
 
     private static string BuildBlobFallbackUrl(string objectKey)
