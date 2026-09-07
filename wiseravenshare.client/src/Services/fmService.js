@@ -453,6 +453,63 @@ export const scanAllStations = async (perGenre = 5) => {
   return all.sort((a, b) => b.listeners - a.listeners);
 };
 
+// ─── Step 1: Countries ────────────────────────────────────────────────────────
+// GET /json/countries — sorted by stationcount descending.
+export const getCountries = async (limit = 200) => {
+  try {
+    const data = await radioBrowserFetch('countries', {
+      order: 'stationcount',
+      reverse: true,
+      limit,
+      hidebroken: false
+    });
+    return data
+      .filter((c) => c?.name && Number(c.stationcount) > 0)
+      .map((c) => ({
+        name: String(c.name).trim(),
+        iso: String(c.iso_3166_1 || '').trim().toUpperCase(),
+        stationCount: Number(c.stationcount || 0)
+      }));
+  } catch {
+    return [];
+  }
+};
+
+// ─── Step 2: Popular Tags (genres) ───────────────────────────────────────────
+// GET /json/tags — optionally pre-filtered by country when countrycode is set.
+export const getPopularTags = async (countrycode = '', limit = 40) => {
+  const params = { order: 'stationcount', reverse: true, limit, hidebroken: false };
+  if (countrycode) params.countrycode = countrycode;
+  try {
+    const data = await radioBrowserFetch('tags', params);
+    return data
+      .filter((t) => t?.name && Number(t.stationcount) > 0)
+      .map((t) => ({
+        name: String(t.name).trim(),
+        stationCount: Number(t.stationcount || 0)
+      }));
+  } catch {
+    return GENRE_PRESETS
+      .filter((p) => p.id !== 'all')
+      .map((p) => ({ name: p.tags[0] || p.label.toLowerCase(), stationCount: 0 }));
+  }
+};
+
+// ─── Step 3: Stations by region + genre ──────────────────────────────────────
+// GET /json/stations/search — filtered by countrycode and tag.
+export const getStationsByRegionAndGenre = async ({ countrycode = '', tag = '', limit = 30 } = {}) => {
+  const params = { limit, order: 'clickcount', reverse: true, hidebroken: true };
+  if (countrycode) params.countrycode = countrycode;
+  if (tag) params.tag = tag;
+  try {
+    const data = await radioBrowserFetch('stations/search', params);
+    const mapped = data.map(normalizeRadioBrowserStation).filter(Boolean);
+    return mapped.length > 0 ? mapped : sampleStations;
+  } catch {
+    return sampleStations;
+  }
+};
+
 export const fmService = {
   searchStations: async (params = {}) => {
     return await requestList(

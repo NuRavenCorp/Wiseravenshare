@@ -4,11 +4,13 @@ import FMStationList from './FMStationList';
 import FMNowPlaying from './FMNowPlaying';
 import FMPlayer from './FMPlayer';
 import FMCreatorStudio from './FMCreatorStudio';
+import FMBrowser from './FMBrowser';
 import { fmService, GENRE_PRESETS, scanByGenre, scanAllStations, trackRadioBrowserClick } from '../../Services/fmService';
 import '../../Styles/FMTunerModule.css';
 
 const tabs = [
   { id: 'stations', label: 'Stations' },
+  { id: 'browse',   label: '🌍 Browse' },
   { id: 'favorites', label: 'Favorites' },
   { id: 'history', label: 'History' },
   { id: 'discover', label: 'Discover' },
@@ -343,6 +345,12 @@ const FMTunerModule = () => {
 
       {activeTab === 'creator' ? (
         <FMCreatorStudio />
+      ) : activeTab === 'browse' ? (
+        <FMBrowser
+          onPlay={handlePlayStation}
+          onLike={handleLike}
+          onBookmark={handleBookmark}
+        />
       ) : activeTab === 'discover' ? (
         <div className="fm-discover">
           <FMStationList title="Featured Stations" stations={featuredStations} loading={isLoading} onPlay={handlePlayStation} onLike={handleLike} onBookmark={handleBookmark} />
