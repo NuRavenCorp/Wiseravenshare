@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
+import FMTunerModule from '../Components/FM/FMTunerModule';
 import '../Styles/MusicStudio.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1139,6 +1140,9 @@ const MusicStudioPage = ({ onNavigate }) => {
             <button className={activePanel === 'input'   ? 'active' : ''} onClick={() => setActivePanel('input')}>
               <FiRadio /> Input
             </button>
+            <button className={activePanel === 'fm'      ? 'active' : ''} onClick={() => setActivePanel('fm')}>
+              <FiActivity /> FM Tuner
+            </button>
           </div>
 
           {/* ── EQ panel ── */}
@@ -1360,6 +1364,12 @@ const MusicStudioPage = ({ onNavigate }) => {
               {isSavingInputRecording && (
                 <div className="input-saving-note">Saving recorded input to your music library…</div>
               )}
+            </div>
+          )}
+
+          {activePanel === 'fm' && (
+            <div className="panel fm-panel">
+              <FMTunerModule />
             </div>
           )}
         </div>
