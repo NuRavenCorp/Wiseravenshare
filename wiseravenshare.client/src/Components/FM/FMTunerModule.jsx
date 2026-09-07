@@ -4,7 +4,7 @@ import FMStationList from './FMStationList';
 import FMNowPlaying from './FMNowPlaying';
 import FMPlayer from './FMPlayer';
 import FMCreatorStudio from './FMCreatorStudio';
-import { fmService, GENRE_PRESETS, scanByGenre, scanAllStations } from '../../Services/fmService';
+import { fmService, GENRE_PRESETS, scanByGenre, scanAllStations, trackRadioBrowserClick } from '../../Services/fmService';
 import '../../Styles/FMTunerModule.css';
 
 const tabs = [
@@ -190,6 +190,12 @@ const FMTunerModule = () => {
       if (!merged.streamUrl) {
         setErrorMessage('This station has no stream URL configured.');
         return;
+      }
+
+      // Per Radio Browser spec: send a /json/url click event for every play.
+      // This marks the station as popular and helps the community database.
+      if (station.source === 'radio-browser') {
+        trackRadioBrowserClick(station.id);
       }
 
       setCurrentStation(merged);
