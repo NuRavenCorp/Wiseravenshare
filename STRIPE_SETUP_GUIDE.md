@@ -17,10 +17,29 @@ VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID=prod_...
 VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID=prod_...
 ```
 
+### 1b. Stripe CLI Price Creation
+Use the Stripe CLI to create the products and recurring prices, then copy the returned `price_...` IDs into the env vars above:
+```bash
+stripe login
+
+stripe products create --name="Music Rights Studio - Basic Protection"
+stripe prices create --product=prod_basic --currency=usd --unit-amount=499 --recurring[interval]=month
+stripe prices create --product=prod_basic --currency=usd --unit-amount=4999 --recurring[interval]=year
+
+stripe products create --name="Music Rights Studio - Standard Protection"
+stripe prices create --product=prod_standard --currency=usd --unit-amount=1499 --recurring[interval]=month
+stripe prices create --product=prod_standard --currency=usd --unit-amount=14999 --recurring[interval]=year
+
+stripe products create --name="Music Rights Studio - Pro Protection"
+stripe prices create --product=prod_pro --currency=usd --unit-amount=2999 --recurring[interval]=month
+stripe prices create --product=prod_pro --currency=usd --unit-amount=29999 --recurring[interval]=year
+```
+Replace `prod_basic`, `prod_standard`, and `prod_pro` with the product IDs returned by the CLI.
+
 ### 2. Frontend Flow (Ready)
 1. User clicks "Start [Plan]" on MusicRightsStudioPage
 2. `handleStripeCheckout(plan)` is triggered
-3. Frontend calls `/api/stripe/checkout-session` (backend endpoint)
+3. Frontend calls `/api/billing/checkout-session` (backend endpoint)
 4. Backend returns `sessionId`
 5. Frontend redirects to Stripe Checkout via `stripe.redirectToCheckout()`
 6. User completes payment and is redirected to success URL
@@ -44,6 +63,12 @@ Go to [Stripe Dashboard](https://dashboard.stripe.com/products):
 ### 2. Environment Variables (Backend)
 Add to DO dashboard:
 ```
+STRIPE_PRICE_IP_BASIC_MONTHLY_ID=price_...
+STRIPE_PRICE_IP_BASIC_ANNUAL_ID=price_...
+STRIPE_PRICE_IP_STANDARD_MONTHLY_ID=price_...
+STRIPE_PRICE_IP_STANDARD_ANNUAL_ID=price_...
+STRIPE_PRICE_IP_PRO_MONTHLY_ID=price_...
+STRIPE_PRICE_IP_PRO_ANNUAL_ID=price_...
 Stripe_WiseravenShare_MusicStudioRights_BasicProdId=prod_...
 Stripe_WiseravenShare_MusicStudioRights_StandardProdId=prod_...
 Stripe_WiseravenShare_MusicStudioRights_ProProdId=prod_...
@@ -54,9 +79,17 @@ STRIPE_RESTRICTED_API=rk_test_... (optional DO alias)
 STRIPE_SECRET_API=sk_test_... (DO alias)
 ```
 
-### 3. Implement Backend Endpoint ⏳
+### 3. Stripe CLI Checkout Usage
+If you want the backend catalog/checkout endpoint to use the IP Protection plans directly, call `/api/payments/checkout-session` with these plan IDs:
+- `ip_basic`
+- `ip_standard`
+- `ip_pro`
 
-Create `POST /api/stripe/checkout-session`:
+The backend now resolves each plan to the Stripe price IDs above and exposes them in `/api/payments/catalog` and `/api/payments/health`.
+
+### 4. Implement Backend Endpoint ⏳
+
+Create `POST /api/payments/checkout-session`:
 ```csharp
 [HttpPost("checkout-session")]
 [Authorize]
