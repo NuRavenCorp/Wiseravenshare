@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Compartment from '../Components/Common/Compartment';
-import { consumePodcastHandoffDraft } from '../Services/podcastStudioBridge';
+import { consumePodcastHandoffDraft, queueRavensightTab } from '../Services/podcastStudioBridge';
 import { queueCollaborationHandoff } from '../Services/collaborationBridge';
 import { authService } from '../Services/Auth.jsx';
 import { apiService } from '../Services/api';
@@ -234,6 +234,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [videoTitle, setVideoTitle] = useState('');
     const [isSavingRecording, setIsSavingRecording] = useState(false);
     const [hasSavedRecording, setHasSavedRecording] = useState(false);
+    const [savedRecordingMediaUrl, setSavedRecordingMediaUrl] = useState('');
+    const [isPublishingEpisodePost, setIsPublishingEpisodePost] = useState(false);
 
     // Guest & Remote Controls State
     const [guestCamOn, setGuestCamOn] = useState(true);
@@ -653,6 +655,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             setRecordedVideoUrl(null);
             setRecordedBlob(null);
             setHasSavedRecording(false);
+            setSavedRecordingMediaUrl('');
 
             let mimeType = 'video/webm';
             if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported('video/webm')) {
@@ -770,6 +773,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             } else {
                 throw new Error('Local store fallback');
             }
+            setSavedRecordingMediaUrl(uploadedMediaUrl || recordedVideoUrl || '');
             setHasSavedRecording(true);
             broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording successfully saved to Ravensight Library!');
@@ -783,11 +787,55 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 storageMode: 'permanent'
             });
             upsertLocalVideo(fallback);
+            setSavedRecordingMediaUrl(fallback?.mediaUrl || fallback?.videoUrl || recordedVideoUrl || '');
             setHasSavedRecording(true);
             broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording saved locally to Ravensight Library.');
         } finally {
             setIsSavingRecording(false);
+        }
+    };
+
+    const openRavensightTab = (tabId, message) => {
+        queueRavensightTab(tabId);
+        if (typeof onNavigate === 'function') {
+            onNavigate('ravensight');
+        }
+        if (message) {
+            setStatus(message);
+        }
+    };
+
+    const navigateToFeaturePage = (pageId, message) => {
+        if (typeof onNavigate === 'function') {
+            onNavigate(pageId);
+        }
+        if (message) {
+            setStatus(message);
+        }
+    };
+
+    const publishEpisodeToFeed = async () => {
+        const mediaUrl = String(savedRecordingMediaUrl || recordedVideoUrl || '').trim();
+        if (!mediaUrl) {
+            setStatus('Save a recording first so there is a media URL to publish to Feed.');
+            return;
+        }
+
+        setIsPublishingEpisodePost(true);
+        try {
+            await apiService.createPost({
+                content: `🎙 ${videoTitle || title || 'Podcast Episode'}\n\n${storyAngle || 'New episode from Podcast Control Room.'}`.trim(),
+                type: 'Video',
+                mediaUrl,
+                truthDispatch: true
+            });
+            setStatus('Podcast episode published to Feed. Opening Feed now.');
+            navigateToFeaturePage('feed');
+        } catch (error) {
+            setStatus(error?.message || 'Unable to publish podcast episode to Feed right now.');
+        } finally {
+            setIsPublishingEpisodePost(false);
         }
     };
 
@@ -1270,6 +1318,40 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     </div>
                 </div>
 
+                <div style={{
+                    background: 'linear-gradient(160deg, rgba(79, 70, 229, 0.14), rgba(15, 23, 42, 0.85))',
+                    border: '1px solid rgba(129, 140, 248, 0.35)',
+                    borderRadius: '18px',
+                    padding: '20px'
+                }}>
+                    <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c4b5fd', fontWeight: 700 }}>
+                        Site Feature Connections
+                    </div>
+                    <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '6px' }}>
+                        Move this episode through the rest of WiseRavenShare without breaking workflow context.
+                    </div>
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
+                        <button type="button" onClick={() => openRavensightTab('library', 'Opening Ravensight Library for saved podcast review...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(129, 140, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            📚 Open Ravensight Library
+                        </button>
+                        <button type="button" onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload for external distribution...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            📤 Open Ravensight Upload
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video handoff desk...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🎥 Open Newsroom Video
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(147, 51, 234, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🤝 Open Collaboration
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(234, 179, 8, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🗂 Open Planner
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('my-library', 'Opening My Library for related assets...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(14, 165, 233, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🎵 Open Music Library
+                        </button>
+                    </div>
+                </div>
+
                 {/* Tandem Sync Connection Panel (Pairing by Username or Email) */}
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(14, 116, 144, 0.15), rgba(15, 23, 42, 0.8))',
@@ -1578,6 +1660,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         }}
                                     >
                                         {isSavingRecording ? 'Saving...' : '💾 Save to Ravensight Library'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={publishEpisodeToFeed}
+                                        disabled={isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()}
+                                        style={{
+                                            border: '1px solid rgba(16, 185, 129, 0.55)',
+                                            background: 'rgba(16, 185, 129, 0.18)',
+                                            color: 'var(--text-color)',
+                                            padding: '12px 14px',
+                                            borderRadius: '10px',
+                                            fontWeight: 700,
+                                            cursor: (isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()) ? 'not-allowed' : 'pointer',
+                                            opacity: (isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()) ? 0.65 : 1
+                                        }}
+                                    >
+                                        {isPublishingEpisodePost ? 'Publishing...' : '📰 Publish to Feed'}
                                     </button>
                                     <a
                                         href={recordedVideoUrl}

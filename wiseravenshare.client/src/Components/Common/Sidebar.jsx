@@ -47,13 +47,7 @@ const normalizeConnection = (connection, platform) => {
             ? (username ? `https://www.instagram.com/${username}` : '')
             : platform === 'youtube'
                 ? (username ? `https://www.youtube.com/@${username}` : '')
-                : platform === 'twitter'
-                    ? (username ? `https://twitter.com/${username}` : '')
-                    : platform === 'linkedin'
-                        ? (username ? `https://www.linkedin.com/in/${username}` : '')
-                        : platform === 'bluesky'
-                            ? (username ? `https://bsky.app/profile/${username}` : '')
-                        : (username ? `https://www.tiktok.com/@${username}` : '');
+                : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(connection?.enabled),
@@ -77,10 +71,7 @@ const hasConfiguredFeeds = (feeds) => {
         getConnection(source, 'facebook', 'Facebook'),
         getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         getConnection(source, 'instagram', 'Instagram'),
-        getConnection(source, 'youtube', 'YouTube'),
-        getConnection(source, 'twitter', 'Twitter'),
-        getConnection(source, 'linkedin', 'LinkedIn'),
-        getConnection(source, 'bluesky', 'Bluesky')
+        getConnection(source, 'youtube', 'YouTube')
     ];
 
     return entries.some((connection) => {
@@ -198,27 +189,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             icon: 'fab fa-youtube',
             color: '#f87171',
             connection: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'), 'youtube')
-        },
-        {
-            id: 'twitter-feed',
-            label: 'Twitter / X Feed',
-            icon: 'fab fa-twitter',
-            color: '#38bdf8',
-            connection: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter'), 'twitter')
-        },
-        {
-            id: 'linkedin-feed',
-            label: 'LinkedIn Feed',
-            icon: 'fab fa-linkedin',
-            color: '#60a5fa',
-            connection: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'), 'linkedin')
-        },
-        {
-            id: 'bluesky-feed',
-            label: 'Bluesky Feed',
-            icon: 'fas fa-cloud',
-            color: '#60a5fa',
-            connection: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'), 'bluesky')
         }
     ];
 
@@ -274,10 +244,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             'facebook-feed': 'facebook',
             'tiktok-feed': 'tikTok',
             'instagram-feed': 'instagram',
-            'youtube-feed': 'youtube',
-            'twitter-feed': 'twitter',
-            'linkedin-feed': 'linkedin',
-            'bluesky-feed': 'bluesky'
+            'youtube-feed': 'youtube'
         };
 
         const targetKey = platformKeyMap[platformId];

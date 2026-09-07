@@ -4,6 +4,7 @@ import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
+const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'linkedin', 'bluesky']);
 
 const PLATFORMS = [
     { id: 'all', label: 'All Feeds', icon: '🌐', color: '#a855f7' },
@@ -11,9 +12,6 @@ const PLATFORMS = [
     { id: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9' },
     { id: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4' },
     { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
-    { id: 'twitter', label: 'Twitter / X', icon: '🐦', color: '#38bdf8' },
-    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' },
-    { id: 'bluesky', label: 'Bluesky', icon: '🦋', color: '#60a5fa' },
     { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
@@ -51,13 +49,7 @@ const normalizeConnection = (connection, platform) => {
             ? (username ? `https://www.instagram.com/${username}` : '')
             : platform === 'youtube'
                 ? (username ? `https://www.youtube.com/@${username}` : '')
-                : platform === 'twitter'
-                    ? (username ? `https://twitter.com/${username}` : '')
-                    : platform === 'linkedin'
-                        ? (username ? `https://www.linkedin.com/in/${username}` : '')
-                        : platform === 'bluesky'
-                            ? (username ? `https://bsky.app/profile/${username}` : '')
-                            : (username ? `https://www.tiktok.com/@${username}` : '');
+                : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(safeConnection.enabled || username || feedUrl || profileUrl),
@@ -143,10 +135,7 @@ const normalizeFeeds = (feeds) => {
         tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         facebook: getConnection(source, 'facebook', 'Facebook'),
         instagram: getConnection(source, 'instagram', 'Instagram'),
-        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube'),
-        twitter: getConnection(source, 'twitter', 'Twitter', 'X'),
-        linkedin: getConnection(source, 'linkedin', 'LinkedIn'),
-        bluesky: getConnection(source, 'bluesky', 'Bluesky', 'BlueSky')
+        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube')
     };
 };
 
@@ -249,9 +238,6 @@ const getSnapshot = (user) => {
         facebook: normalizeConnection(feeds.facebook, 'facebook'),
         instagram: normalizeConnection(feeds.instagram, 'instagram'),
         youtube: normalizeConnection(feeds.youtube, 'youtube'),
-        twitter: normalizeConnection(feeds.twitter, 'twitter'),
-        linkedin: normalizeConnection(feeds.linkedin, 'linkedin'),
-        bluesky: normalizeConnection(feeds.bluesky, 'bluesky'),
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
@@ -277,10 +263,7 @@ const normalizeFeedConnections = (feeds = {}) => {
         facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
         tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
         instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube')),
-        twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter', 'X')),
-        linkedin: normalizeConn(getFeed(feeds, 'linkedin', 'LinkedIn')),
-        bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky', 'BlueSky'))
+        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube'))
     };
 };
 
@@ -311,8 +294,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishFacebook, setPublishFacebook] = useState(true);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
-    const [publishTwitter, setPublishTwitter] = useState(false);
-    const [publishLinkedIn, setPublishLinkedIn] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
     const [displayTemplate, setDisplayTemplate] = useState('cards');
@@ -327,10 +308,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         facebook: snapshot.facebook.username || '',
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
-        youtube: snapshot.youtube.username || '',
-        twitter: snapshot.twitter.username || '',
-        linkedin: snapshot.linkedin.username || '',
-        bluesky: snapshot.bluesky.username || ''
+        youtube: snapshot.youtube.username || ''
     });
 
     // Demo Guide Expansion
@@ -349,9 +327,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         facebook: 'Facebook',
         tiktok: 'TikTok',
         youtube: 'YouTube',
-        twitter: 'Twitter / X',
-        linkedin: 'LinkedIn',
-        bluesky: 'Bluesky',
         instagram: 'Instagram'
     };
 
@@ -479,8 +454,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         const loadProviderStatuses = async () => {
             try {
                 const statuses = await socialService.getProviderStatuses();
+                const filteredStatuses = (Array.isArray(statuses) ? statuses : []).filter(
+                    (provider) => !DISABLED_SOCIAL_PLATFORMS.has(String(provider?.platform || '').trim().toLowerCase())
+                );
                 if (!cancelled) {
-                    setProviderStatuses(Array.isArray(statuses) ? statuses : []);
+                    setProviderStatuses(filteredStatuses);
                     setProviderStatusError('');
                 }
             } catch (error) {
@@ -526,10 +504,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: loadedFeeds.facebook.username,
                     tiktok: loadedFeeds.tikTok.username,
                     instagram: loadedFeeds.instagram.username,
-                    youtube: loadedFeeds.youtube.username,
-                    twitter: loadedFeeds.twitter.username,
-                    linkedin: loadedFeeds.linkedin.username,
-                    bluesky: loadedFeeds.bluesky.username
+                    youtube: loadedFeeds.youtube.username
                 });
             } catch {
                 if (cancelled) return;
@@ -537,10 +512,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: snapshot.facebook.username || '',
                     tiktok: snapshot.tikTok.username || '',
                     instagram: snapshot.instagram.username || '',
-                    youtube: snapshot.youtube.username || '',
-                    twitter: snapshot.twitter.username || '',
-                    linkedin: snapshot.linkedin.username || '',
-                    bluesky: snapshot.bluesky.username || ''
+                    youtube: snapshot.youtube.username || ''
                 });
             }
         };
@@ -560,8 +532,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 const socialItems = await socialService.getCombinedFeed(
                     compact ? 5 : 15,
                     snapshot.facebook.username || undefined,
-                    snapshot.tikTok.username || undefined,
-                    snapshot.bluesky.username || undefined
+                    snapshot.tikTok.username || undefined
                 );
 
                 const rssResults = await Promise.all(customRssFeeds.map(async (feed) => {
@@ -579,15 +550,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }
                 }));
                 const rssItems = rssResults.flat();
-                const apiSocialItems = Array.isArray(socialItems) ? socialItems : [];
+                const apiSocialItems = (Array.isArray(socialItems) ? socialItems : []).filter((item) => {
+                    const platform = String(item?.platform || '').trim().toLowerCase();
+                    return !DISABLED_SOCIAL_PLATFORMS.has(platform);
+                });
                 const fallbackItems = [
                     buildConnectionFeedItem('facebook', snapshot.facebook, snapshot.checkedAt),
                     buildConnectionFeedItem('tiktok', snapshot.tikTok, snapshot.checkedAt),
                     buildConnectionFeedItem('instagram', snapshot.instagram, snapshot.checkedAt),
-                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt),
-                    buildConnectionFeedItem('twitter', snapshot.twitter, snapshot.checkedAt),
-                    buildConnectionFeedItem('linkedin', snapshot.linkedin, snapshot.checkedAt),
-                    buildConnectionFeedItem('bluesky', snapshot.bluesky, snapshot.checkedAt)
+                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt)
                 ].filter(Boolean);
 
                 const mergedSocialItems = [...apiSocialItems];
@@ -628,7 +599,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, snapshot.twitter?.username, snapshot.linkedin?.username, snapshot.bluesky.username, customRssFeeds]);
+    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, customRssFeeds]);
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
@@ -644,10 +615,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
             tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
             instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
-            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
-            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter),
-            linkedin: keepConnectionMetadata(snapshot.linkedin, handles.linkedin),
-            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky)
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube)
         };
 
         try {
@@ -818,42 +786,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 username: snapshot.youtube?.username,
                 designation: snapshot.youtube?.designation,
                 url: snapshot.youtube?.resolvedUrl
-            });
-        }
-
-        if (snapshot.twitter?.enabled || snapshot.twitter?.resolvedUrl) {
-            items.push({
-                id: 'twitter',
-                platform: 'Twitter / X',
-                icon: '🐦',
-                color: '#38bdf8',
-                username: snapshot.twitter?.username,
-                designation: snapshot.twitter?.designation,
-                url: snapshot.twitter?.resolvedUrl
-            });
-        }
-
-        if (snapshot.linkedin?.enabled || snapshot.linkedin?.resolvedUrl) {
-            items.push({
-                id: 'linkedin',
-                platform: 'LinkedIn',
-                icon: '💼',
-                color: '#60a5fa',
-                username: snapshot.linkedin?.username,
-                designation: snapshot.linkedin?.designation,
-                url: snapshot.linkedin?.resolvedUrl
-            });
-        }
-
-        if (snapshot.bluesky?.enabled || snapshot.bluesky?.resolvedUrl) {
-            items.push({
-                id: 'bluesky',
-                platform: 'Bluesky',
-                icon: '🦋',
-                color: '#60a5fa',
-                username: snapshot.bluesky?.username,
-                designation: snapshot.bluesky?.designation,
-                url: snapshot.bluesky?.resolvedUrl
             });
         }
 
@@ -1291,40 +1223,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             />
                         </label>
 
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🐦 Twitter / X Handle</span>
-                            <input
-                                ref={(node) => { handleInputRefs.current.twitter = node; }}
-                                type="text"
-                                value={handles.twitter}
-                                onChange={(e) => setHandles({ ...handles, twitter: e.target.value })}
-                                placeholder="e.g. twitterhandle"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>💼 LinkedIn Profile/Company ID</span>
-                            <input
-                                ref={(node) => { handleInputRefs.current.linkedin = node; }}
-                                type="text"
-                                value={handles.linkedin}
-                                onChange={(e) => setHandles({ ...handles, linkedin: e.target.value })}
-                                placeholder="e.g. company-name"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🦋 Bluesky Handle</span>
-                            <input
-                                ref={(node) => { handleInputRefs.current.bluesky = node; }}
-                                type="text"
-                                value={handles.bluesky}
-                                onChange={(e) => setHandles({ ...handles, bluesky: e.target.value })}
-                                placeholder="e.g. wiseravenshare.bsky.social"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -1389,7 +1287,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         type="url"
                         value={linkUrlInput}
                         onChange={(e) => setLinkUrlInput(e.target.value)}
-                        placeholder="Link URL (optional for Facebook/LinkedIn)"
+                        placeholder="Link URL (optional for Facebook)"
                         style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                 </div>
