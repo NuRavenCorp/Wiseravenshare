@@ -41,23 +41,38 @@ public class TwilioService : ITwilioService
         _configuration = configuration;
         _logger = logger;
 
-        _enabled = configuration["COMMUNIQUE_TWILIO_ENABLED"] == "true";
-        _accountSid = configuration["TWILIO_ACCOUNT_SID"] ?? string.Empty;
-        _authToken = configuration["TWILIO_AUTH_TOKEN"] ?? string.Empty;
-        _fromPhoneNumber = configuration["TWILIO_FROM_NUMBER"] ?? string.Empty;
-        _whatsAppFromNumber = configuration["COMMUNIQUE_TWILIO_WHATSAPP_FROM"] ?? string.Empty;
-        _verifyServiceSid = configuration["TWILIO_VERIFY_SERVICE_SID"] ?? string.Empty;
+        // Try both hierarchical and flat env var naming conventions
+        _enabled = GetConfigValue(configuration, "COMMUNIQUE_TWILIO_ENABLED", "Communique:Twilio:Enabled") == "true";
+        _accountSid = GetConfigValue(configuration, "TWILIO_ACCOUNT_SID", "Communique:Twilio:AccountSid") ?? string.Empty;
+        _authToken = GetConfigValue(configuration, "TWILIO_AUTH_TOKEN", "Communique:Twilio:AuthToken") ?? string.Empty;
+        _fromPhoneNumber = GetConfigValue(configuration, "TWILIO_FROM_NUMBER", "Communique:Twilio:FromNumber") ?? string.Empty;
+        _whatsAppFromNumber = GetConfigValue(configuration, "COMMUNIQUE_TWILIO_WHATSAPP_FROM", "Communique:Twilio:WhatsAppFrom") ?? string.Empty;
+        _verifyServiceSid = GetConfigValue(configuration, "TWILIO_VERIFY_SERVICE_SID", "Communique:Twilio:VerifyServiceSid") ?? string.Empty;
 
         if (_enabled && (!string.IsNullOrEmpty(_accountSid) && !string.IsNullOrEmpty(_authToken)))
         {
             TwilioClient.Init(_accountSid, _authToken);
             _twilioClient = new TwilioRestClient(_accountSid, _authToken);
-            _logger.LogInformation("Twilio service initialized successfully");
+            _logger.LogInformation("Twilio service initialized successfully with credentials from {ConfigSource}", 
+                !string.IsNullOrEmpty(configuration["Communique:Twilio:Enabled"]) ? "hierarchical config" : "flat env vars");
         }
         else if (_enabled)
         {
-            _logger.LogError("Twilio is enabled but credentials are missing");
+            _logger.LogError("Twilio is enabled but credentials are missing. " +
+                "Expected: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER or " +
+                "Communique:Twilio:AccountSid, Communique:Twilio:AuthToken, Communique:Twilio:FromNumber");
         }
+    }
+
+    private static string? GetConfigValue(IConfiguration config, string flatKey, string hierarchicalKey)
+    {
+        // Try hierarchical key first (from .do/app.yaml)
+        var value = config[hierarchicalKey];
+        if (!string.IsNullOrEmpty(value))
+            return value;
+
+        // Fall back to flat env var key (for local dev)
+        return config[flatKey];
     }
 
     /// <summary>
