@@ -435,6 +435,8 @@ public sealed class FMTunerController : ControllerBase
     /// <summary>
     /// Proxies an external radio stream through the server to bypass CORS and mixed-content
     /// browser restrictions. Only http:// and https:// audio stream URLs are accepted.
+    /// The timeout on the HttpClient is intentionally removed — live radio streams run
+    /// indefinitely and are only terminated when the client disconnects.
     /// </summary>
     [HttpGet("stream-proxy")]
     [AllowAnonymous]
@@ -457,10 +459,14 @@ public sealed class FMTunerController : ControllerBase
 
         try
         {
-            using var httpClient = new System.Net.Http.HttpClient();
+            // Use IHttpClientFactory so connections are properly pooled.
+            // Timeout.InfiniteTimeSpan is required — live radio streams never end;
+            // the request is only terminated when the browser disconnects.
+            var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
             httpClient.DefaultRequestHeaders.Add("User-Agent", "WiseRavenFMProxy/1.0");
             httpClient.DefaultRequestHeaders.Add("Accept", "audio/*,*/*");
-            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            httpClient.DefaultRequestHeaders.Add("Icy-MetaData", "1");
 
             using var upstream = await httpClient.GetAsync(
                 uri,
@@ -478,6 +484,15 @@ public sealed class FMTunerController : ControllerBase
             Response.ContentType = contentType;
             Response.Headers["Cache-Control"] = "no-cache, no-store";
             Response.Headers["Access-Control-Allow-Origin"] = "*";
+
+            // Forward any ICY metadata headers so clients can read song/station info.
+            foreach (var header in upstream.Headers)
+            {
+                if (header.Key.StartsWith("icy-", StringComparison.OrdinalIgnoreCase))
+                {
+                    Response.Headers[header.Key] = string.Join(",", header.Value);
+                }
+            }
 
             await using var upstreamStream = await upstream.Content.ReadAsStreamAsync(cancellationToken);
             await upstreamStream.CopyToAsync(Response.Body, cancellationToken);
