@@ -10,24 +10,43 @@ import { GENRE_PRESETS } from '../../Services/fmService';
 // 4. The dial needle and frequency display animate to give a visual tuning feel.
 // 5. The user can "Tune In" to any live station while the scan is still running.
 
-const PROBE_TIMEOUT_MS = 4000;
+const PROBE_TIMEOUT_MS = 3000;
 
 // Try to confirm a stream is reachable by fetching a tiny chunk with an abort timeout.
+// Accept 200, 206 (partial content), 416 (range not satisfiable), or 302 (redirect).
 const probeStream = async (url) => {
   if (!url) return false;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
-      method: 'GET',
+      method: 'HEAD',
       signal: ctrl.signal,
-      headers: { Range: 'bytes=0-1023' }
+      headers: { 'User-Agent': 'WiseRavenFM/1.0' },
+      mode: 'cors',
+      cache: 'no-cache'
     });
     clearTimeout(timer);
-    return res.ok || res.status === 206 || res.status === 416;
+    // Accept 200, 206, 301/302 (redirects), 400+ for streams that reject HEAD
+    return res.ok || res.status === 206 || res.status === 416 || (res.status >= 300 && res.status < 400);
   } catch {
     clearTimeout(timer);
-    return false;
+    // Try GET if HEAD fails (some streams don't support HEAD)
+    try {
+      const getCtrl = new AbortController();
+      const getTimer = setTimeout(() => getCtrl.abort(), PROBE_TIMEOUT_MS / 2);
+      const res = await fetch(url, {
+        method: 'GET',
+        signal: getCtrl.signal,
+        headers: { Range: 'bytes=0-1023', 'User-Agent': 'WiseRavenFM/1.0' },
+        mode: 'cors',
+        cache: 'no-cache'
+      });
+      clearTimeout(getTimer);
+      return res.ok || res.status === 206 || res.status === 416;
+    } catch {
+      return false;
+    }
   }
 };
 
@@ -87,10 +106,17 @@ const FMScanner = ({ onTuneIn, onClose }) => {
 
         try {
           // Use our backend proxy endpoints so User-Agent is set correctly.
-          const params = new URLSearchParams({ tag, limit: 12, countryCode: '' });
+          const params = new URLSearchParams({ tag, limit: 20 });
           const res = await fetch(`/api/fmtuner/rb/stations?${params}`);
-          if (!res.ok) continue;
+          if (!res.ok) {
+            console.warn(`Station query failed for tag "${tag}": ${res.status}`);
+            continue;
+          }
           const raw = await res.json();
+          if (!Array.isArray(raw) || raw.length === 0) {
+            console.warn(`No stations returned for tag "${tag}"`);
+            continue;
+          }
 
           for (const rb of raw) {
             if (abortRef.current) break;
@@ -137,8 +163,9 @@ const FMScanner = ({ onTuneIn, onClose }) => {
             });
             setFound((n) => n + 1);
           }
-        } catch {
+        } catch (err) {
           // Skip this tag; continue to next.
+          console.warn(`Error scanning tag "${tag}":`, err);
         }
       }
     }
