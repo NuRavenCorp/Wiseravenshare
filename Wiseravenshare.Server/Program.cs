@@ -101,7 +101,11 @@ static string ResolvePrimaryConnectionString(IConfiguration configuration)
         return NormalizeConnectionString(databaseUrl);
     }
 
-    return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+    var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+        ?? configuration.GetConnectionString("DatabaseConnection")
+        ?? string.Empty;
+
+    return NormalizeConnectionString(defaultConnection);
 }
 
 static string ResolveExpectedDatabaseName(IConfiguration configuration)

@@ -200,11 +200,20 @@ INSERT INTO app_data.bucket_objects (
             normalizedObjectKey = fileName;
         }
 
-        // Bucket objects are persisted with private ACL, so direct public URLs can be non-playable.
-        // Prefer server-side blob streaming whenever an object key is available.
+        // Bucket objects are typically private and should be streamed through the API when blob
+        // credentials are configured. If blob storage is unavailable, fall back to the stored
+        // public URL so playback can continue for objects that are publicly readable.
         if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
         {
-            return BuildBlobFallbackUrl(normalizedObjectKey);
+            if (_blobStorageService.IsConfigured)
+            {
+                return BuildBlobFallbackUrl(normalizedObjectKey);
+            }
+
+            if (!string.IsNullOrWhiteSpace(publicUrl))
+            {
+                return publicUrl;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(publicUrl))
@@ -314,7 +323,11 @@ INSERT INTO app_data.bucket_objects (
             return NormalizeConnectionString(databaseUrl);
         }
 
-        return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+        var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+            ?? configuration.GetConnectionString("DatabaseConnection")
+            ?? string.Empty;
+
+        return NormalizeConnectionString(defaultConnection);
     }
 
     private static string NormalizeConnectionString(string value)
