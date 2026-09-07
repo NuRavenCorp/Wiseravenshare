@@ -3,6 +3,13 @@
   gap: 14px;
 }
 
+.fm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 .fm-header h3 {
   margin: 0;
   font-size: 1.1rem;
@@ -13,6 +20,67 @@
   margin: 4px 0 0;
   font-size: 0.82rem;
   color: var(--ms-muted);
+}
+
+/* ── Scan button ── */
+.fm-btn-scan {
+  flex-shrink: 0;
+  font-weight: 700;
+  border-color: var(--ms-accent2);
+  color: #93c5fd;
+  transition: background 0.15s, transform 0.15s;
+}
+.fm-btn-scan.scanning {
+  animation: fm-scan-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes fm-scan-pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.55; }
+}
+
+/* ── Scan progress bar ── */
+.fm-scan-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.fm-scan-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ms-accent2), var(--ms-accent));
+  transition: width 0.18s linear;
+}
+
+/* ── Genre preset pills ── */
+.fm-genre-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fm-genre-pill {
+  border: 1px solid var(--ms-border);
+  background: var(--ms-card);
+  color: var(--ms-muted);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.fm-genre-pill:hover:not(:disabled) {
+  background: var(--ms-border);
+  color: var(--ms-text);
+}
+.fm-genre-pill.active {
+  background: rgba(59,130,246,0.18);
+  border-color: var(--ms-accent2);
+  color: #93c5fd;
+  font-weight: 700;
+}
+.fm-genre-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .fm-btn {
