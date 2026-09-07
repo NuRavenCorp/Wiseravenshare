@@ -293,7 +293,14 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
 
     const handleSubmit = async () => {
         const trimmedContent = content.trim();
-        const contentForPayload = trimmedContent || (mediaFile ? ' ' : trimmedContent);
+        const mediaLabel = mediaType === 'photo'
+            ? 'Photo upload'
+            : mediaType === 'video'
+                ? 'Video upload'
+                : mediaType === 'audio'
+                    ? 'Audio upload'
+                    : 'Media upload';
+        const contentForPayload = trimmedContent || (mediaFile ? mediaLabel : trimmedContent);
 
         if (!trimmedContent && !mediaFile) {
             addTruthAlert('warning', 'Add text or upload media before publishing.', null);
