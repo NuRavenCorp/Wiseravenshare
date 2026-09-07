@@ -1,33 +1,32 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FiPlay, FiPause, FiSkipForward, FiSkipBack, FiVolume2, FiVolumeX, FiHeart, FiBookmark, FiAlertCircle } from 'react-icons/fi';
+import { FiPlay, FiPause, FiSkipForward, FiSkipBack, FiVolume2, FiVolumeX, FiHeart, FiBookmark, FiAlertCircle, FiWifi } from 'react-icons/fi';
 import { buildProxyStreamUrl } from '../../Services/fmService';
 
-// Classify the HTMLMediaError code into a user-friendly message.
 const classifyMediaError = (audio, rawUrl) => {
   const err = audio?.error;
-  const isHttp = String(rawUrl || '').startsWith('http://');
-  const isMixed = isHttp && typeof window !== 'undefined' && window.location.protocol === 'https:';
-
-  if (isMixed) {
-    return 'Stream is HTTP but the page is HTTPS — routed through secure proxy. Retry.';
-  }
-
-  if (!err) {
-    return 'Stream could not be started. The station may be offline.';
-  }
-
+  if (!err) return 'Stream could not be started. The station may be offline.';
   switch (err.code) {
     case MediaError.MEDIA_ERR_ABORTED:
       return 'Playback was cancelled.';
     case MediaError.MEDIA_ERR_NETWORK:
-      return 'Network error — check your connection or the station may be down.';
+      return 'Network error — station may be down. Try a different station.';
     case MediaError.MEDIA_ERR_DECODE:
       return 'Audio format not supported by this browser.';
     case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return 'Stream format or CORS policy blocked playback. Try a different station.';
+      return 'CORS or unsupported format. Retrying via proxy…';
     default:
       return `Stream error (code ${err.code}). Station may be offline.`;
   }
+};
+
+// Build candidate URL list: try direct first, then backend proxy.
+const buildCandidates = (rawUrl) => {
+  const direct = String(rawUrl || '').trim();
+  if (!direct) return [];
+  if (direct.startsWith('/api/fmtuner/stream-proxy')) return [direct];
+  const proxy = buildProxyStreamUrl(direct);
+  // Always include proxy as a fallback — CORS may block direct even for HTTPS streams.
+  return direct === proxy ? [direct] : [direct, proxy];
 };
 
 const FMPlayer = ({
@@ -40,32 +39,23 @@ const FMPlayer = ({
   onLike,
   onBookmark
 }) => {
-  const audioRef = useRef(null);
-  const [volume, setVolume] = useState(80);
-  const [isMuted, setIsMuted] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const audioRef        = useRef(null);
+  const candidatesRef   = useRef([]);
+  const candidateIdxRef = useRef(0);
+  const playIntentRef   = useRef(false);
 
-  // Build ordered list of candidate URLs: direct first, proxy fallback.
-  const buildCandidates = (rawUrl) => {
-    const direct = String(rawUrl || '').trim();
-    if (!direct) return [];
-    const proxy = buildProxyStreamUrl(direct);
-    const candidates = [direct];
-    if (proxy !== direct) candidates.push(proxy);
-    return [...new Set(candidates)];
-  };
+  const [volume, setVolume]         = useState(80);
+  const [isMuted, setIsMuted]       = useState(false);
+  const [errorMessage, setError]    = useState('');
+  const [isLoading, setIsLoading]   = useState(false);
 
-  const candidatesRef = useRef([]);
-  const candidateIndexRef = useRef(0);
-
-  // Re-create Audio node when station changes. Never auto-play on mount.
+  // ── Build / tear down the Audio element whenever the station stream changes ──
   useEffect(() => {
     const rawUrl = String(station?.streamUrl || '').trim();
-    setErrorMessage('');
+    setError('');
     setIsLoading(false);
+    playIntentRef.current = false;
 
-    // Tear down existing element.
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
@@ -75,72 +65,89 @@ const FMPlayer = ({
     if (!rawUrl) return undefined;
 
     const candidates = buildCandidates(rawUrl);
-    candidatesRef.current = candidates;
-    candidateIndexRef.current = 0;
+    candidatesRef.current   = candidates;
+    candidateIdxRef.current = 0;
 
     const audio = new Audio();
-    audio.preload = 'none';
-    audio.volume = (isMuted ? 0 : volume) / 100;
-    audioRef.current = audio;
+    // crossOrigin must be set BEFORE src for CORS-gated streams.
+    audio.crossOrigin = 'anonymous';
+    audio.preload     = 'none';
+    audio.volume      = (isMuted ? 0 : volume) / 100;
+    audioRef.current  = audio;
 
-    const onError = () => {
-      // Try next candidate before giving up.
-      const next = candidateIndexRef.current + 1;
-      if (next < candidatesRef.current.length) {
-        candidateIndexRef.current = next;
-        audio.src = candidatesRef.current[next];
+    const tryNextCandidate = () => {
+      const nextIdx = candidateIdxRef.current + 1;
+      if (nextIdx < candidatesRef.current.length) {
+        candidateIdxRef.current = nextIdx;
+        audio.src = candidatesRef.current[nextIdx];
         audio.load();
-        if (isPlaying) {
+        if (playIntentRef.current) {
           audio.play().catch(() => {});
         }
-        return;
+      } else {
+        setIsLoading(false);
+        setError(classifyMediaError(audio, rawUrl));
+        onPause?.();
       }
-      setIsLoading(false);
-      setErrorMessage(classifyMediaError(audio, rawUrl));
-      onPause?.();
     };
 
+    const onError  = () => tryNextCandidate();
     const onCanPlay = () => setIsLoading(false);
+    const onWaiting = () => setIsLoading(true);
+    const onPlaying = () => { setIsLoading(false); setError(''); };
 
-    audio.addEventListener('error', onError);
+    audio.addEventListener('error',   onError);
     audio.addEventListener('canplay', onCanPlay);
+    audio.addEventListener('waiting', onWaiting);
+    audio.addEventListener('playing', onPlaying);
 
-    // Set src but do NOT call play() — wait for explicit user gesture.
+    // Set src + load() so the browser starts buffering and fires canplay.
     audio.src = candidates[0];
+    audio.load();
 
     return () => {
       audio.pause();
       audio.src = '';
-      audio.removeEventListener('error', onError);
+      audio.removeEventListener('error',   onError);
       audio.removeEventListener('canplay', onCanPlay);
+      audio.removeEventListener('waiting', onWaiting);
+      audio.removeEventListener('playing', onPlaying);
       audioRef.current = null;
     };
   }, [station?.streamUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // React to play / pause state changes driven by the parent.
+  // ── React to play / pause driven by parent ────────────────────────────────
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !station?.streamUrl) return;
+    if (!audio) return;
+
+    playIntentRef.current = isPlaying;
 
     if (isPlaying) {
-      setErrorMessage('');
+      setError('');
       setIsLoading(true);
-      // If no src is set yet (preload=none on fresh element), set it now.
-      if (!audio.src || audio.src === window.location.href) {
-        const candidates = buildCandidates(station.streamUrl);
-        candidatesRef.current = candidates;
-        candidateIndexRef.current = 0;
-        audio.src = candidates[0];
-      }
       audio.play()
         .then(() => setIsLoading(false))
         .catch((err) => {
           setIsLoading(false);
-          const msg = err?.name === 'NotAllowedError'
-            ? 'Browser blocked autoplay — tap Play again to start the stream.'
-            : classifyMediaError(audio, station?.streamUrl);
-          setErrorMessage(msg);
-          onPause?.();
+          if (err?.name === 'NotAllowedError') {
+            setError('Tap Play again — browser requires a user gesture to start audio.');
+          } else {
+            // CORS may have blocked direct play; retry with proxy.
+            const nextIdx = candidateIdxRef.current + 1;
+            if (nextIdx < candidatesRef.current.length) {
+              candidateIdxRef.current = nextIdx;
+              audio.src = candidatesRef.current[nextIdx];
+              audio.load();
+              audio.play().catch(() => {
+                setError(classifyMediaError(audio, station?.streamUrl));
+                onPause?.();
+              });
+            } else {
+              setError(classifyMediaError(audio, station?.streamUrl));
+              onPause?.();
+            }
+          }
         });
     } else {
       audio.pause();
@@ -148,23 +155,26 @@ const FMPlayer = ({
     }
   }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Volume / mute changes.
+  // ── Volume / mute ─────────────────────────────────────────────────────────
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.volume = (isMuted ? 0 : volume) / 100;
+    if (audioRef.current) audioRef.current.volume = (isMuted ? 0 : volume) / 100;
   }, [isMuted, volume]);
 
   return (
     <div className="fm-player">
       <div className="fm-player-left">
         <div className="fm-player-logo">
-          {station?.logoUrl ? <img src={station.logoUrl} alt={station?.name || 'Station'} /> : <span>📻</span>}
+          {station?.logoUrl
+            ? <img src={station.logoUrl} alt={station?.name || 'Station'} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            : <span>📻</span>}
         </div>
         <div className="fm-player-meta">
           <strong>{station?.name || 'FM Station'}</strong>
-          <small>{station?.genre || 'General'} • {station?.frequency || ''}</small>
-          {isLoading && !errorMessage && <small className="fm-loading">Connecting…</small>}
+          <small>{station?.genre || 'General'}{station?.frequency ? ` • ${station.frequency}` : ''}</small>
+          {station?.bitrate > 0 && <small>{station.bitrate} kbps {station.codec || ''}</small>}
+          {isLoading && !errorMessage && (
+            <small className="fm-loading"><FiWifi style={{ marginRight: 4 }} />Connecting…</small>
+          )}
           {errorMessage && (
             <small className="fm-error">
               <FiAlertCircle style={{ marginRight: 4 }} />{errorMessage}
@@ -174,47 +184,37 @@ const FMPlayer = ({
       </div>
 
       <div className="fm-player-controls">
-        <button type="button" className="fm-icon-btn" onClick={onPrevious} aria-label="Previous station"><FiSkipBack /></button>
+        <button type="button" className="fm-icon-btn" onClick={onPrevious} aria-label="Previous"><FiSkipBack /></button>
         <button
           type="button"
           className={`fm-icon-btn play${isLoading ? ' loading' : ''}`}
-          onClick={() => (isPlaying ? onPause?.() : onPlay?.())}
+          onClick={() => isPlaying ? onPause?.() : onPlay?.()}
           aria-label={isPlaying ? 'Pause' : 'Play'}
-          disabled={isLoading}
         >
-          {isPlaying ? <FiPause /> : <FiPlay />}
+          {isPlaying && !isLoading ? <FiPause /> : <FiPlay />}
         </button>
-        <button type="button" className="fm-icon-btn" onClick={onNext} aria-label="Next station"><FiSkipForward /></button>
+        <button type="button" className="fm-icon-btn" onClick={onNext} aria-label="Next"><FiSkipForward /></button>
       </div>
 
       <div className="fm-player-actions">
-        <button type="button" className={`fm-icon-btn ${station?.isLiked ? 'active' : ''}`} onClick={() => station?.id && onLike?.(station.id)} aria-label="Like station">
-          <FiHeart />
-        </button>
-        <button type="button" className={`fm-icon-btn ${station?.isBookmarked ? 'active' : ''}`} onClick={() => station?.id && onBookmark?.(station.id)} aria-label="Bookmark station">
-          <FiBookmark />
-        </button>
+        <button type="button" className={`fm-icon-btn ${station?.isLiked ? 'active' : ''}`} onClick={() => station?.id && onLike?.(station.id)} aria-label="Like"><FiHeart /></button>
+        <button type="button" className={`fm-icon-btn ${station?.isBookmarked ? 'active' : ''}`} onClick={() => station?.id && onBookmark?.(station.id)} aria-label="Bookmark"><FiBookmark /></button>
       </div>
 
       <div className="fm-player-volume">
-        <button type="button" className="fm-icon-btn" onClick={() => setIsMuted((prev) => !prev)} aria-label="Mute toggle">
+        <button type="button" className="fm-icon-btn" onClick={() => setIsMuted((p) => !p)} aria-label="Mute">
           {isMuted || volume === 0 ? <FiVolumeX /> : <FiVolume2 />}
         </button>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={volume}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            setVolume(next);
-            if (next > 0 && isMuted) setIsMuted(false);
-          }}
-        />
+        <input type="range" min="0" max="100" value={volume} onChange={(e) => {
+          const n = Number(e.target.value);
+          setVolume(n);
+          if (n > 0 && isMuted) setIsMuted(false);
+        }} />
       </div>
     </div>
   );
 };
 
 export default FMPlayer;
+
 
