@@ -478,40 +478,67 @@ export const scanAllStations = async (perGenre = 5) => {
 };
 
 // ─── Step 1: Countries ────────────────────────────────────────────────────────
-// GET /json/countries — sorted by stationcount descending.
-export const getCountries = async (limit = 200) => {
-  try {
-    const data = await radioBrowserFetch('countries', {
-      order: 'stationcount',
-      reverse: true,
-      limit,
-      hidebroken: false
-    });
-    return data
-      .filter((c) => c?.name && Number(c.stationcount) > 0)
+// Tries our backend proxy first (proper User-Agent, no CORS); falls back to
+// direct Radio Browser fetch if the backend endpoint is not yet deployed.
+export const getCountries = async (limit = 250) => {
+  const normalize = (data) =>
+    (Array.isArray(data) ? data : [])
+      .filter((c) => c?.name && Number(c.stationcount || c.stationCount) > 0)
       .map((c) => ({
         name: String(c.name).trim(),
-        iso: String(c.iso_3166_1 || '').trim().toUpperCase(),
-        stationCount: Number(c.stationcount || 0)
+        iso: String(c.iso_3166_1 || c.iso || '').trim().toUpperCase(),
+        stationCount: Number(c.stationcount || c.stationCount || 0)
       }));
+
+  // 1) Backend proxy (server sets User-Agent correctly).
+  try {
+    const res = await fetch(`/api/fmtuner/rb/countries`);
+    if (res.ok) {
+      const data = await res.json();
+      const mapped = normalize(data);
+      if (mapped.length > 0) return mapped;
+    }
+  } catch { /* fall through */ }
+
+  // 2) Direct Radio Browser fallback.
+  try {
+    const data = await radioBrowserFetch('countries', {
+      order: 'stationcount', reverse: true, limit, hidebroken: false
+    });
+    return normalize(data);
   } catch {
     return [];
   }
 };
 
 // ─── Step 2: Popular Tags (genres) ───────────────────────────────────────────
-// GET /json/tags — optionally pre-filtered by country when countrycode is set.
-export const getPopularTags = async (countrycode = '', limit = 40) => {
+export const getPopularTags = async (countrycode = '', limit = 60) => {
+  const normalize = (data) =>
+    (Array.isArray(data) ? data : [])
+      .filter((t) => t?.name && Number(t.stationcount || t.stationCount) > 0)
+      .map((t) => ({
+        name: String(t.name).trim(),
+        stationCount: Number(t.stationcount || t.stationCount || 0)
+      }));
+
+  const qsCountry = countrycode ? `?countrycode=${encodeURIComponent(countrycode)}&limit=${limit}` : `?limit=${limit}`;
+
+  // 1) Backend proxy.
+  try {
+    const res = await fetch(`/api/fmtuner/rb/tags${qsCountry}`);
+    if (res.ok) {
+      const data = await res.json();
+      const mapped = normalize(data);
+      if (mapped.length > 0) return mapped;
+    }
+  } catch { /* fall through */ }
+
+  // 2) Direct Radio Browser fallback.
   const params = { order: 'stationcount', reverse: true, limit, hidebroken: false };
   if (countrycode) params.countrycode = countrycode;
   try {
     const data = await radioBrowserFetch('tags', params);
-    return data
-      .filter((t) => t?.name && Number(t.stationcount) > 0)
-      .map((t) => ({
-        name: String(t.name).trim(),
-        stationCount: Number(t.stationcount || 0)
-      }));
+    return normalize(data);
   } catch {
     return GENRE_PRESETS
       .filter((p) => p.id !== 'all')
@@ -520,14 +547,32 @@ export const getPopularTags = async (countrycode = '', limit = 40) => {
 };
 
 // ─── Step 3: Stations by region + genre ──────────────────────────────────────
-// GET /json/stations/search — filtered by countrycode and tag.
+// Backend passes https=true so only HTTPS-capable streams are returned.
 export const getStationsByRegionAndGenre = async ({ countrycode = '', tag = '', limit = 30 } = {}) => {
+  const normalize = (data) =>
+    (Array.isArray(data) ? data : []).map(normalizeRadioBrowserStation).filter(Boolean);
+
+  const qs = new URLSearchParams({ limit });
+  if (countrycode) qs.set('countryCode', countrycode);
+  if (tag)         qs.set('tag', tag);
+
+  // 1) Backend proxy (sets User-Agent + https=true).
+  try {
+    const res = await fetch(`/api/fmtuner/rb/stations?${qs}`);
+    if (res.ok) {
+      const data = await res.json();
+      const mapped = normalize(data);
+      if (mapped.length > 0) return mapped;
+    }
+  } catch { /* fall through */ }
+
+  // 2) Direct Radio Browser fallback.
   const params = { limit, order: 'clickcount', reverse: true, hidebroken: true };
   if (countrycode) params.countrycode = countrycode;
-  if (tag) params.tag = tag;
+  if (tag)         params.tag = tag;
   try {
     const data = await radioBrowserFetch('stations/search', params);
-    const mapped = data.map(normalizeRadioBrowserStation).filter(Boolean);
+    const mapped = normalize(data);
     return mapped.length > 0 ? mapped : sampleStations;
   } catch {
     return sampleStations;
