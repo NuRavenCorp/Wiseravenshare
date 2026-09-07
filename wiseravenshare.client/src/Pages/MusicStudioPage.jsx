@@ -289,23 +289,33 @@ const MusicStudioPage = ({ onNavigate }) => {
       try {
         setIsLoading(true);
         const res = await apiService.getMusicLibrary();
-        const tracks = (Array.isArray(res?.data) ? res.data : [])
+        const normalizedTracks = (Array.isArray(res?.data) ? res.data : [])
           .map(normalizeTrack)
           .filter(Boolean);
+        const tracks = normalizedTracks.filter((track) => Boolean(track.mediaUrl || track.relativePath || track.fileName));
+        const skippedCount = normalizedTracks.length - tracks.length;
         setLibrary(tracks);
         try {
           localStorage.setItem('wiseMusic_library', JSON.stringify(tracks));
         } catch {
           /* ignore storage errors */
         }
+        if (skippedCount > 0) {
+          addToast(`${skippedCount} track(s) were skipped because they have no playable source.`, 'warning');
+        }
         if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
       } catch (e) {
         try {
           const stored = localStorage.getItem('wiseMusic_library');
-          const tracks = (stored ? JSON.parse(stored) : [])
+          const normalizedTracks = (stored ? JSON.parse(stored) : [])
             .map(normalizeTrack)
             .filter(Boolean);
+          const tracks = normalizedTracks.filter((track) => Boolean(track.mediaUrl || track.relativePath || track.fileName));
+          const skippedCount = normalizedTracks.length - tracks.length;
           setLibrary(tracks);
+          if (skippedCount > 0) {
+            addToast(`${skippedCount} local track(s) were skipped because they have no playable source.`, 'warning');
+          }
           if (tracks.length) { setCurrentTrack(tracks[0]); setTrackIndex(0); }
         } catch {
           setLibrary([]);
@@ -416,6 +426,17 @@ const MusicStudioPage = ({ onNavigate }) => {
       }
 
       addToast('Playback error: this track has no supported source.', 'error');
+      const lib = libRef.current;
+      const idx = idxRef.current;
+      if (Array.isArray(lib) && lib.length > 1) {
+        const next = (idx + 1) % lib.length;
+        if (next !== idx) {
+          setTrackIndex(next);
+          setCurrentTrack(lib[next]);
+          addToast('Skipping to the next track.', 'info');
+          return;
+        }
+      }
       setIsPlaying(false);
     };
     const onEnded = () => {
