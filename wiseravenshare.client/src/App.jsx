@@ -476,6 +476,10 @@ const App = () => {
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
                 return <MusicStudioPage onNavigate={setCurrentPage} />;
+            case 'fm-tuner':
+                return <MusicStudioPage onNavigate={setCurrentPage} initialPanel="fm" />;
+            case 'radio-creator':
+                return <MusicStudioPage onNavigate={setCurrentPage} initialPanel="radio-creator" />;
             case 'my-library':
                 return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':
@@ -645,6 +649,8 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'music-player', label: '🎚️ Music Studio' },
+        { id: 'fm-tuner', label: '📻 FM Tuner' },
+        { id: 'radio-creator', label: '🎙️ Radio Creator' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }
