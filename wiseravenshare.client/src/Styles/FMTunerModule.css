@@ -603,6 +603,132 @@
   cursor: not-allowed;
 }
 
+/* ─── FM Player wrap (compact + expanded) ───────────────────────────────────── */
+.fm-player-wrap {
+  border: 1px solid var(--ms-border);
+  border-radius: 10px;
+  background: var(--ms-card);
+  overflow: hidden;
+  outline: none;
+}
+.fm-player-wrap:focus-visible {
+  box-shadow: 0 0 0 2px var(--ms-accent2);
+}
+.fm-player-wrap .fm-player {
+  border: none;
+  border-radius: 0;
+}
+
+/* Live indicator dot on station logo */
+.fm-player-live-dot {
+  position: absolute;
+  top: -3px; right: -3px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse 1.2s infinite;
+}
+.fm-player-logo { position: relative; }
+
+.fm-now-song {
+  color: #93c5fd !important;
+  font-style: italic;
+}
+.fm-vol-pct {
+  font-size: 0.7rem;
+  color: var(--ms-muted);
+  min-width: 32px;
+}
+.fm-expand-btn { margin-left: auto; }
+.fm-inline-reconnect {
+  background: none;
+  border: none;
+  color: var(--ms-accent2);
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* Expanded panel */
+.fm-player-expanded {
+  border-top: 1px solid var(--ms-border);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  background: rgba(0,0,0,0.18);
+}
+
+/* Waveform */
+.fm-waveform {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 60px;
+  padding: 0 4px;
+}
+.fm-waveform-bar {
+  flex: 1;
+  min-width: 3px;
+  background: linear-gradient(180deg, var(--ms-accent2), var(--ms-accent));
+  border-radius: 2px 2px 0 0;
+  transition: height 0.07s ease;
+}
+.fm-waveform-idle {
+  color: var(--ms-muted);
+  font-size: 0.78rem;
+  align-self: center;
+  padding: 10px;
+}
+
+/* Expanded meta */
+.fm-expanded-meta {
+  display: grid;
+  gap: 6px;
+}
+.fm-expanded-song {
+  display: grid;
+  gap: 2px;
+}
+.fm-expanded-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ms-muted);
+}
+.fm-expanded-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.fm-expanded-artist {
+  font-size: 0.78rem;
+  color: var(--ms-muted);
+}
+.fm-expanded-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.72rem;
+  color: var(--ms-muted);
+}
+.fm-expanded-progress input[type=range] {
+  width: 100%;
+  accent-color: var(--ms-accent2);
+  height: 4px;
+}
+.fm-expanded-keys {
+  font-size: 0.7rem;
+  color: var(--ms-muted);
+}
+.fm-expanded-keys kbd {
+  background: var(--ms-card);
+  border: 1px solid var(--ms-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.68rem;
+  font-family: inherit;
+}
+
 /* ─── FMBrowser 3-step explorer ─────────────────────────────────────────────── */
 .fmb-root {
   display: grid;
