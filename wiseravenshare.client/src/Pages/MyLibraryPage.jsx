@@ -129,22 +129,6 @@ const MyLibraryPage = ({ onNavigate }) => {
         setSelectedPlanId(planId);
         addToast(`Selected ${PROTECTION_PLANS.find(p => p.id === planId)?.name || 'plan'} for: ${currentTrack.title}`, 'success');
     };
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('protect')}
-                    style={{
-                        border: activeTab === 'protect' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'protect' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiShield style={{ marginRight: '6px', display: 'inline' }} />
-                    Protect
-                </button>
 
     useEffect(() => {
         let isMounted = true;
@@ -313,6 +297,22 @@ const MyLibraryPage = ({ onNavigate }) => {
                 >
                     <FiVideo style={{ marginRight: '6px', display: 'inline' }} />
                     Videos ({totalItems.videos})
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('protect')}
+                    style={{
+                        border: activeTab === 'protect' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                        background: activeTab === 'protect' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
+                        color: 'var(--text-color)',
+                        borderRadius: '999px',
+                        padding: '8px 14px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                    }}
+                >
+                    <FiShield style={{ marginRight: '6px', display: 'inline' }} />
+                    Protect
                 </button>
             </div>
 
