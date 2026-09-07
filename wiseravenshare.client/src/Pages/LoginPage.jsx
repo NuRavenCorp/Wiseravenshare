@@ -291,7 +291,7 @@ const LoginPage = ({ onAuth }) => {
     const startSocialAuth = (providerId) => {
         if (typeof window === 'undefined') return;
         setError('');
-        const returnUrl = `${window.location.origin}/Oauth`;
+        const returnUrl = `${window.location.origin}/oauth`;
         authService.socialLogin(providerId, returnUrl)
             .then((response) => {
                 if (response?.token) {

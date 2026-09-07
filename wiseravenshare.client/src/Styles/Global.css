@@ -18,6 +18,7 @@
     --app-container-padding: 20px;
     --app-nav-font-size: 12px;
     --app-touch-target-min-height: 36px;
+    --app-touch-target-min-width: 36px;
 }
 
 * {
@@ -29,6 +30,11 @@
 html, body, #root, #app {
     max-width: 100%;
     overflow-x: hidden;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body {
@@ -49,6 +55,21 @@ p, span, div, li, td, th, a, button, input, textarea {
 img, svg, video {
     max-width: 100%;
     display: block;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+    touch-action: manipulation;
+}
+
+button,
+a,
+[role="button"] {
+    -webkit-tap-highlight-color: transparent;
 }
 
 /* Scrollbar Styling */
@@ -199,6 +220,54 @@ img, svg, video {
 
     .left-column {
         display: none;
+    }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    :root {
+        --app-touch-target-min-height: 44px;
+        --app-touch-target-min-width: 44px;
+    }
+
+    /* Apply a universal touch target baseline for interactive controls. */
+    :where(
+        button,
+        [role="button"],
+        a,
+        input,
+        select,
+        textarea,
+        .tx-btn,
+        .fm-btn,
+        .fm-icon-btn,
+        .panel-tabs button,
+        .fm-tabs button
+    ) {
+        min-height: var(--app-touch-target-min-height);
+        min-width: var(--app-touch-target-min-width);
+    }
+
+    /* Prevent iOS zoom-on-focus and improve readability of form controls. */
+    :where(input, select, textarea) {
+        font-size: 16px;
+    }
+
+    /* Avoid accidental horizontal pan captures on interactive rows and controls. */
+    :where(.studio-transport, .panel-tabs, .fm-tabs, .transport-main, .transport-left, .transport-right) {
+        touch-action: pan-y;
+    }
+
+    :where(button, [role="button"], .tx-btn, .fm-btn, .fm-icon-btn):active {
+        filter: brightness(1.08);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }
 

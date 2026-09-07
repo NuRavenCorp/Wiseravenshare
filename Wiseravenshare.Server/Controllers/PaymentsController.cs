@@ -48,6 +48,27 @@ public class PaymentsController : ControllerBase
         var catalog = new[]
         {
             BuildCatalogPlan(
+                planId: "ip_basic",
+                name: "IP Protection Basic",
+                tagline: "Proof-of-creation and DMCA starter protection",
+                badge: "Entry level",
+                defaultMonthlyAmount: 5,
+                defaultAnnualAmount: 50),
+            BuildCatalogPlan(
+                planId: "ip_standard",
+                name: "IP Protection Standard",
+                tagline: "Monitoring and takedown support",
+                badge: "Popular",
+                defaultMonthlyAmount: 15,
+                defaultAnnualAmount: 150),
+            BuildCatalogPlan(
+                planId: "ip_pro",
+                name: "IP Protection Pro",
+                tagline: "Full IP protection and licensing support",
+                badge: "Best value",
+                defaultMonthlyAmount: 30,
+                defaultAnnualAmount: 300),
+            BuildCatalogPlan(
                 planId: "creator_pro",
                 name: "Creator Pro",
                 tagline: "For solo creators shipping consistently",
@@ -87,6 +108,12 @@ public class PaymentsController : ControllerBase
 
         var creatorProMonthly = ResolvePriceIdRaw("creator_pro", "monthly");
         var creatorProAnnual = ResolvePriceIdRaw("creator_pro", "annual");
+        var ipBasicMonthly = ResolvePriceIdRaw("ip_basic", "monthly");
+        var ipBasicAnnual = ResolvePriceIdRaw("ip_basic", "annual");
+        var ipStandardMonthly = ResolvePriceIdRaw("ip_standard", "monthly");
+        var ipStandardAnnual = ResolvePriceIdRaw("ip_standard", "annual");
+        var ipProMonthly = ResolvePriceIdRaw("ip_pro", "monthly");
+        var ipProAnnual = ResolvePriceIdRaw("ip_pro", "annual");
         var growthSuiteMonthly = ResolvePriceIdRaw("growth_suite", "monthly");
         var growthSuiteAnnual = ResolvePriceIdRaw("growth_suite", "annual");
         var studioPlusMonthly = ResolvePriceIdRaw("studio_plus", "monthly");
@@ -103,6 +130,24 @@ public class PaymentsController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(creatorProAnnual)) issues.Add("missing: creator_pro annual price id");
         else if (!IsStripePriceId(creatorProAnnual)) issues.Add("invalid: creator_pro annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipBasicMonthly)) issues.Add("missing: ip_basic monthly price id");
+        else if (!IsStripePriceId(ipBasicMonthly)) issues.Add("invalid: ip_basic monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipBasicAnnual)) issues.Add("missing: ip_basic annual price id");
+        else if (!IsStripePriceId(ipBasicAnnual)) issues.Add("invalid: ip_basic annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipStandardMonthly)) issues.Add("missing: ip_standard monthly price id");
+        else if (!IsStripePriceId(ipStandardMonthly)) issues.Add("invalid: ip_standard monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipStandardAnnual)) issues.Add("missing: ip_standard annual price id");
+        else if (!IsStripePriceId(ipStandardAnnual)) issues.Add("invalid: ip_standard annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipProMonthly)) issues.Add("missing: ip_pro monthly price id");
+        else if (!IsStripePriceId(ipProMonthly)) issues.Add("invalid: ip_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipProAnnual)) issues.Add("missing: ip_pro annual price id");
+        else if (!IsStripePriceId(ipProAnnual)) issues.Add("invalid: ip_pro annual must start with price_");
 
         if (string.IsNullOrWhiteSpace(growthSuiteMonthly)) issues.Add("missing: growth_suite monthly price id");
         else if (!IsStripePriceId(growthSuiteMonthly)) issues.Add("invalid: growth_suite monthly must start with price_");
@@ -127,6 +172,21 @@ public class PaymentsController : ControllerBase
             },
             plans = new
             {
+                ip_basic = new
+                {
+                    monthly = new { value = ipBasicMonthly, validPriceId = IsStripePriceId(ipBasicMonthly) },
+                    annual = new { value = ipBasicAnnual, validPriceId = IsStripePriceId(ipBasicAnnual) }
+                },
+                ip_standard = new
+                {
+                    monthly = new { value = ipStandardMonthly, validPriceId = IsStripePriceId(ipStandardMonthly) },
+                    annual = new { value = ipStandardAnnual, validPriceId = IsStripePriceId(ipStandardAnnual) }
+                },
+                ip_pro = new
+                {
+                    monthly = new { value = ipProMonthly, validPriceId = IsStripePriceId(ipProMonthly) },
+                    annual = new { value = ipProAnnual, validPriceId = IsStripePriceId(ipProAnnual) }
+                },
                 creator_pro = new
                 {
                     monthly = new { value = creatorProMonthly, validPriceId = IsStripePriceId(creatorProMonthly) },
@@ -262,10 +322,24 @@ public class PaymentsController : ControllerBase
 
         var planKey = normalizedPlan.ToLowerInvariant() switch
         {
+            "ip_basic" => "IpBasic",
+            "ip_standard" => "IpStandard",
+            "ip_pro" => "IpPro",
             "creator_pro" => "CreatorPro",
             "growth_suite" => "GrowthSuite",
             "studio_plus" => "StudioPlus",
             _ => "CreatorPro"
+        };
+
+        var envToken = normalizedPlan.ToLowerInvariant() switch
+        {
+            "ip_basic" => "IP_BASIC",
+            "ip_standard" => "IP_STANDARD",
+            "ip_pro" => "IP_PRO",
+            "creator_pro" => "CREATOR_PRO",
+            "growth_suite" => "GROWTH_SUITE",
+            "studio_plus" => "STUDIO_PLUS",
+            _ => "CREATOR_PRO"
         };
 
         var sectionKey = normalizedCycle == "annual"
@@ -273,8 +347,8 @@ public class PaymentsController : ControllerBase
             : $"Stripe:Price{planKey}MonthlyId";
 
         var envKey = normalizedCycle == "annual"
-            ? $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_ANNUAL_ID"
-            : $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_MONTHLY_ID";
+            ? $"STRIPE_PRICE_{envToken}_ANNUAL_ID"
+            : $"STRIPE_PRICE_{envToken}_MONTHLY_ID";
 
         var resolved = ResolveConfig(sectionKey, envKey);
         if (!string.IsNullOrWhiteSpace(resolved))
