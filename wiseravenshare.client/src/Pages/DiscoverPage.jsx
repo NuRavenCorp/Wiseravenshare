@@ -172,6 +172,7 @@ const DiscoverPage = ({ onNavigate }) => {
     const [followingIds, setFollowingIds] = useState([]);
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [focusedTopic, setFocusedTopic] = useState('');
+    const [focusedTopicSource, setFocusedTopicSource] = useState(null);
     const { user } = useAuth();
 
     useEffect(() => {
@@ -189,15 +190,26 @@ const DiscoverPage = ({ onNavigate }) => {
             const storedFocus = JSON.parse(localStorage.getItem('wiseDiscoverFocus') || 'null');
             const nextSection = String(storedFocus?.section || '').trim();
             const nextTopic = normalizeTopicValue(storedFocus?.topic);
+            const nextSource = storedFocus?.source && typeof storedFocus.source === 'object'
+                ? {
+                    postId: String(storedFocus.source.postId || '').trim(),
+                    userId: String(storedFocus.source.userId || '').trim(),
+                    userName: String(storedFocus.source.userName || '').trim(),
+                    userHandle: String(storedFocus.source.userHandle || '').trim(),
+                    preview: String(storedFocus.source.preview || '').trim()
+                }
+                : null;
 
             if (nextSection) {
                 setActiveSection(nextSection);
             }
 
             setFocusedTopic(nextTopic);
+            setFocusedTopicSource(nextSource);
             localStorage.removeItem('wiseDiscoverFocus');
         } catch {
             setFocusedTopic('');
+            setFocusedTopicSource(null);
         }
     }, []);
 
@@ -482,8 +494,62 @@ const DiscoverPage = ({ onNavigate }) => {
 
             case 'topics':
                 return (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                        {discoverBuckets.topics.map((topic) => (
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                        {focusedTopicSource && (
+                            <div
+                                style={{
+                                    border: '1px solid var(--highlight-color)',
+                                    borderRadius: '12px',
+                                    padding: '12px',
+                                    background: 'rgba(79, 116, 214, 0.12)'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                                    <div>
+                                        <div style={{ fontSize: '11px', color: 'var(--highlight-color)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Source context</div>
+                                        <div style={{ fontWeight: 700, marginTop: '4px' }}>{focusedTopicSource.userName || 'Community voice'}</div>
+                                        {focusedTopicSource.userHandle && (
+                                            <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>{focusedTopicSource.userHandle}</div>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!focusedTopicSource.userId) return;
+                                            try {
+                                                localStorage.setItem('wiseProfileFocus', JSON.stringify({
+                                                    id: focusedTopicSource.userId,
+                                                    name: focusedTopicSource.userName,
+                                                    handle: focusedTopicSource.userHandle
+                                                }));
+                                            } catch {
+                                                // Ignore storage failures and still navigate.
+                                            }
+                                            onNavigate?.('profile');
+                                        }}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            background: 'rgba(255,255,255,0.04)',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '999px',
+                                            padding: '6px 10px',
+                                            cursor: 'pointer',
+                                            fontSize: '12px'
+                                        }}
+                                    >
+                                        Open source author
+                                    </button>
+                                </div>
+                                {focusedTopicSource.preview && (
+                                    <div style={{ marginTop: '8px', color: 'var(--text-color)', fontSize: '13px', lineHeight: 1.5 }}>
+                                        {focusedTopicSource.preview}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                            {discoverBuckets.topics.map((topic) => (
                             (() => {
                                 const isFocusedTopic = normalizeTopicValue(topic.label || topic.name) === focusedTopic;
 
@@ -522,7 +588,8 @@ const DiscoverPage = ({ onNavigate }) => {
                             </div>
                                 );
                             })()
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 );
 
@@ -608,6 +675,17 @@ const DiscoverPage = ({ onNavigate }) => {
                     <div>
                         <h2 style={{ marginBottom: '4px' }}>Discover</h2>
                         <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>Browse people, groups, topics, news items, current events, headlines, and political coverage.</div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                            <button type="button" onClick={() => onNavigate?.('music-studio')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open Music Studio
+                            </button>
+                            <button type="button" onClick={() => onNavigate?.('my-library')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open My Library
+                            </button>
+                            <button type="button" onClick={() => onNavigate?.('feed')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open Feed
+                            </button>
+                        </div>
                     </div>
                     <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '6px 10px' }}>
                         {discoverSections.length} lanes

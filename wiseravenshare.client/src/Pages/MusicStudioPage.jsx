@@ -144,25 +144,6 @@ const normalizeTrack = (track) => {
   };
 };
 
-const tokenizeDiscoveryTerms = (...values) => {
-  const stopWords = new Set(['the', 'and', 'or', 'for', 'with', 'from', 'your', 'you', 'are', 'this', 'that', 'into', 'track', 'song', 'mix', 'live']);
-  const counts = new Map();
-
-  values
-    .flatMap((value) => String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [])
-    .forEach((token) => {
-      if (token.length < 3 || stopWords.has(token)) {
-        return;
-      }
-      counts.set(token, (counts.get(token) || 0) + 1);
-    });
-
-  return Array.from(counts.entries())
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 8)
-    .map(([term, count]) => ({ term, count }));
-};
-
 const INSTRUMENT_OPTIONS = [
   { id: 'mic', label: 'Mic' },
   { id: 'camera', label: 'Camera' },
@@ -210,8 +191,6 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   // Library
   const [library,       setLibrary]      = useState([]);
   const [isLoading,     setIsLoading]    = useState(true);
-  const [trendingTopics, setTrendingTopics] = useState([]);
-  const [crawlerStatus, setCrawlerStatus] = useState('Loading discovery signals...');
   const [searchQuery,   setSearchQuery]  = useState('');
   const [currentTrack,  setCurrentTrack] = useState(null);
   const [trackIndex,    setTrackIndex]   = useState(0);
@@ -335,68 +314,6 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     })();
   }, []);
 
-  const discoveryKeywords = useMemo(
-    () => tokenizeDiscoveryTerms(
-      ...library.map((track) => [
-        track.title,
-        track.artist,
-        track.album,
-        track.genre,
-        track.fileName
-      ]).flat()
-    ),
-    [library]
-  );
-
-  const discoveryTopics = useMemo(() => (
-    trendingTopics.map((topic) => {
-      if (typeof topic === 'string') {
-        return { name: topic, description: '' };
-      }
-
-      return {
-        name: String(topic?.name || topic?.title || topic?.topic || 'Trending topic').trim(),
-        description: String(topic?.description || topic?.summary || '').trim()
-      };
-    })
-  ), [trendingTopics]);
-
-  const focusDiscoverTopic = (topicName) => {
-    try {
-      localStorage.setItem('wiseDiscoverFocus', JSON.stringify({
-        section: 'topics',
-        topic: topicName
-      }));
-    } catch {
-      // Ignore storage failures; navigation still works.
-    }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const response = await apiService.getTrending();
-        const topics = Array.isArray(response?.data) ? response.data : [];
-        if (cancelled) return;
-        setTrendingTopics(topics.slice(0, 6));
-        setCrawlerStatus(topics.length
-          ? 'Trending topics synced from the discovery feed.'
-          : 'Discovery feed is available, but no trending topics were returned.');
-      } catch (error) {
-        if (cancelled) return;
-        setTrendingTopics([]);
-        setCrawlerStatus('Trending feed unavailable; using local discovery keywords.');
-        console.warn('Trending discovery load failed', error);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // ── 2. Wire audio element events (stable — never re-registers) ───────────────
   //    handleTrackEnd reads state via refs so it's never stale.
   const repeatRef  = useRef(repeat);
@@ -499,6 +416,8 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     const el = audioRef.current;
     if (!el || !currentTrack) return;
     const shouldAutoplay = playingRef.current || playRequestedRef.current;
+    const autoplayToken = Date.now();
+    let cancelled = false;
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -508,16 +427,23 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
     const sourceUrl = String(candidates[0] || '').trim();
     if (!sourceUrl) {
+      playRequestedRef.current = false;
+      el.pause();
       addToast('This track has no playable media URL yet.', 'warning');
       return;
     }
+    el.pause();
+    el.currentTime = 0;
     el.src = sourceUrl;
     el.load();
 
     // Resume/start playback after load when playback was active or user pressed/touched a track.
     if (shouldAutoplay) {
       playRequestedRef.current = false;
-      el.addEventListener('canplay', () => {
+      const handleCanPlay = () => {
+        if (cancelled) {
+          return;
+        }
         ensureGraph();
         const ctx = nodesRef.current?.ctx;
         if (ctx && ctx.state === 'suspended') {
@@ -527,9 +453,19 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
           .then(() => setIsPlaying(true))
           .catch((error) => {
             setIsPlaying(false);
+            playRequestedRef.current = false;
             addToast(error?.message || 'Playback failed to start.', 'error');
           });
-      }, { once: true });
+      };
+
+      el.addEventListener('canplay', handleCanPlay, { once: true });
+      return () => {
+        cancelled = true;
+        el.removeEventListener('canplay', handleCanPlay);
+        if (playRequestedRef.current && autoplayToken) {
+          playRequestedRef.current = false;
+        }
+      };
     }
   }, [currentTrack]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -807,17 +743,6 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
   const refreshInputDevices = async () => {
     try {
-      let grantedStream = null;
-      try {
-        grantedStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      } catch (permissionError) {
-        console.warn('Audio permission not yet granted for full device labels.', permissionError);
-      }
-
-      if (grantedStream) {
-        grantedStream.getTracks().forEach((track) => track.stop());
-      }
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const inputs = devices.filter((d) => d.kind === 'audioinput');
       setInputDevices(inputs);
@@ -831,17 +756,6 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
   const refreshCameraDevices = async () => {
     try {
-      let grantedStream = null;
-      try {
-        grantedStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
-      } catch (permissionError) {
-        console.warn('Camera permission not yet granted for full device labels.', permissionError);
-      }
-
-      if (grantedStream) {
-        grantedStream.getTracks().forEach((track) => track.stop());
-      }
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cameras = devices.filter((d) => d.kind === 'videoinput');
       setCameraDevices(cameras);
@@ -1194,6 +1108,8 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
       if (sourceUrl) {
         sourceCandidatesRef.current = candidates;
         sourceIndexRef.current = 0;
+        el.pause();
+        el.currentTime = 0;
         el.src = sourceUrl;
         el.load();
       }
@@ -1473,46 +1389,6 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
               {isUploading ? 'Uploading…' : 'Save to Bucket Library'}
             </button>
           </form>
-
-          <div className="lib-discovery">
-            <div className="lib-upload-title"><FiActivity /> Discovery bridge</div>
-            <p className="discovery-status">{crawlerStatus}</p>
-            <div className="discovery-actions">
-              <button type="button" onClick={() => onNavigate?.('discover')}>Open Discover</button>
-              <button type="button" onClick={() => onNavigate?.('feed')}>Open Feed</button>
-              <button type="button" onClick={() => onNavigate?.('my-library')}>Open My Library</button>
-            </div>
-            <div className="discovery-keywords">
-              {(discoveryKeywords.length ? discoveryKeywords : [{ term: 'music', count: 1 }]).map(({ term, count }) => (
-                <button
-                  key={term}
-                  type="button"
-                  className="keyword-chip"
-                  onClick={() => setSearchQuery(term)}
-                >
-                  #{term} <span>{count}</span>
-                </button>
-              ))}
-            </div>
-            <div className="discovery-topics">
-              {discoveryTopics.length > 0 ? discoveryTopics.map((topic) => (
-                <button
-                  key={topic.name}
-                  type="button"
-                  className="topic-chip"
-                  onClick={() => {
-                    focusDiscoverTopic(topic.name);
-                    onNavigate?.('discover');
-                  }}
-                >
-                  <strong>{topic.name}</strong>
-                  {topic.description ? <span>{topic.description}</span> : null}
-                </button>
-              )) : (
-                <p className="discovery-empty">Trending topics will appear here when the feed is available.</p>
-              )}
-            </div>
-          </div>
 
           {library.length === 0 ? (
             <div className="lib-empty">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { computeTrendingTopics } from '../../Services/EngagementAlgorithms';
+import { extractHashtags } from '../../Services/EngagementAlgorithms';
 import { apiService } from '../../Services/api';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
@@ -103,6 +103,66 @@ const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
         })
         .sort((left, right) => right.momentum - left.momentum)
         .slice(0, limit);
+};
+
+const buildHashtagFeed = (posts = [], limit = 6) => {
+    if (!Array.isArray(posts) || posts.length === 0) {
+        return [];
+    }
+
+    const buckets = new Map();
+
+    posts.forEach((post) => {
+        const tags = extractHashtags(post?.content || '');
+        if (tags.length === 0) {
+            return;
+        }
+
+        const likes = Number(post?.likes) || 0;
+        const reposts = Number(post?.reposts) || 0;
+        const comments = Array.isArray(post?.comments) ? post.comments.length : (Number(post?.comments) || 0);
+        const score = (likes * 1.6) + (reposts * 2.4) + (comments * 1.2);
+        const createdAt = new Date(post?.createdAt || 0).getTime() || 0;
+
+        tags.forEach((tag) => {
+            const topic = tag.startsWith('#') ? tag : `#${normalizeTopicValue(tag)}`;
+            if (!topic || topic === '#') {
+                return;
+            }
+
+            const current = buckets.get(topic) || {
+                topic,
+                score: 0,
+                mentions: 0,
+                sourcePost: null,
+                sourceAt: 0
+            };
+
+            current.score += score;
+            current.mentions += 1;
+
+            if (!current.sourcePost || createdAt >= current.sourceAt) {
+                current.sourceAt = createdAt;
+                current.sourcePost = {
+                    id: String(post?.id || ''),
+                    userId: String(post?.userId || ''),
+                    userName: String(post?.user?.name || 'Community voice').trim() || 'Community voice',
+                    userHandle: String(post?.user?.handle || '').trim(),
+                    preview: sanitizeSidebarPreview(post?.content, 'Source post unavailable', 96)
+                };
+            }
+
+            buckets.set(topic, current);
+        });
+    });
+
+    return [...buckets.values()]
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit)
+        .map((item) => ({
+            ...item,
+            posts: formatFollowers(Math.round(item.score + (item.mentions * 12)))
+        }));
 };
 
 const isDispatchReportPost = (post) => {
@@ -373,7 +433,7 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
 };
 
 const RightSidebar = ({ onNavigate }) => {
-    const [trendingTopics, setTrendingTopics] = useState([]);
+    const [hashtagFeed, setHashtagFeed] = useState([]);
     const [trendingPostAnnouncements, setTrendingPostAnnouncements] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
     const [followingIds, setFollowingIds] = useState([]);
@@ -470,7 +530,7 @@ const RightSidebar = ({ onNavigate }) => {
                 const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
                 const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
-                setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
+                setHashtagFeed(buildHashtagFeed(mergedPosts, 6));
                 const announcements = buildTrendingPostAnnouncements(mergedPosts, 4);
                 setTrendingPostAnnouncements(announcements.length > 0 ? announcements : FALLBACK_ANNOUNCEMENTS);
                 const dispatches = mergedPosts
@@ -480,7 +540,7 @@ const RightSidebar = ({ onNavigate }) => {
                     .map(toDispatchReportPreview);
                 setDispatchReports(dispatches.length > 0 ? dispatches : FALLBACK_DISPATCHES);
             } catch (error) {
-                setTrendingTopics(computeTrendingTopics([], 6));
+                setHashtagFeed([]);
                 setTrendingPostAnnouncements(FALLBACK_ANNOUNCEMENTS);
                 setDispatchReports(FALLBACK_DISPATCHES);
             }
@@ -652,7 +712,7 @@ const RightSidebar = ({ onNavigate }) => {
         window.dispatchEvent(new Event('wiseraven:social-updated'));
     };
 
-    const handleTrendingClick = (topicLabel) => {
+    const handleTrendingClick = (topicLabel, sourcePost = null) => {
         const normalized = normalizeTopicValue(topicLabel);
         if (!normalized) {
             return;
@@ -663,6 +723,11 @@ const RightSidebar = ({ onNavigate }) => {
                 section: 'topics',
                 topic: normalized,
                 source: 'sidebar-trending',
+                sourcePostId: sourcePost?.id || '',
+                sourceUserId: sourcePost?.userId || '',
+                sourceUserName: sourcePost?.userName || '',
+                sourceUserHandle: sourcePost?.userHandle || '',
+                sourcePreview: sourcePost?.preview || '',
                 updatedAt: Date.now()
             }));
         } catch {
@@ -675,6 +740,10 @@ const RightSidebar = ({ onNavigate }) => {
         }
 
         onNavigate?.('discover');
+    };
+
+    const openHashtagSource = (topic, sourcePost) => {
+        handleTrendingClick(topic, sourcePost);
     };
 
     return (
@@ -777,10 +846,10 @@ const RightSidebar = ({ onNavigate }) => {
                 border: '1px solid var(--border-color)'
             }}>
                 <h3 style={{ marginBottom: '12px', color: 'var(--light-color)' }}>
-                    <i className="fas fa-bullhorn"></i> Trending Announcements
+                    <i className="fas fa-hashtag"></i> Hashtag Feed
                 </h3>
                 <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '12px' }}>
-                    Live callouts for trending posts and topics.
+                    Live hashtags with the source post attached for more context.
                 </div>
 
                 {trendingPostAnnouncements.length > 0 && (
@@ -813,12 +882,17 @@ const RightSidebar = ({ onNavigate }) => {
                 )}
 
                 <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Topic Signals
+                    Trending Tags
                 </div>
-                {trendingTopics.map(topic => (
+                {hashtagFeed.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                        No hashtags detected yet. Source-linked tags will appear here as posts are added.
+                    </div>
+                )}
+                {hashtagFeed.map((topic) => (
                     <div
                         key={topic.topic}
-                        onClick={() => handleTrendingClick(topic.topic)}
+                        onClick={() => handleTrendingClick(topic.topic, topic.sourcePost)}
                         style={{
                             padding: '10px 0',
                             borderBottom: '1px solid var(--border-color)',
@@ -828,8 +902,41 @@ const RightSidebar = ({ onNavigate }) => {
                         onMouseEnter={(e) => e.currentTarget.style.paddingLeft = '10px'}
                         onMouseLeave={(e) => e.currentTarget.style.paddingLeft = '0'}
                     >
-                        <div style={{ fontWeight: 'bold' }}>{topic.topic}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{topic.posts} posts</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                            <div style={{ fontWeight: 'bold' }}>{topic.topic}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--highlight-color)', whiteSpace: 'nowrap' }}>{topic.posts} posts</div>
+                        </div>
+                        {topic.sourcePost ? (
+                            <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.45, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                Source: {topic.sourcePost.userName}
+                                {topic.sourcePost.userHandle ? ` ${topic.sourcePost.userHandle}` : ''}
+                                <div style={{ color: 'var(--text-color)', marginTop: '3px' }}>{topic.sourcePost.preview}</div>
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        openHashtagSource(topic.topic, topic.sourcePost);
+                                    }}
+                                    style={{
+                                        marginTop: '6px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '4px 10px',
+                                        cursor: 'pointer',
+                                        fontSize: '11px',
+                                        fontWeight: 700
+                                    }}
+                                >
+                                    Open source
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
+                                Tap to view related source context.
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
