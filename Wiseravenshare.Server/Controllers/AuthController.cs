@@ -440,7 +440,7 @@ public class AuthController : ControllerBase
                 $"{normalizedProvider} sign-in is not configured. Add OAuth credentials in Authentication:OAuthProviders."));
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             return Redirect(BuildOAuthErrorRedirect(normalizedReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL."));
@@ -533,7 +533,7 @@ public class AuthController : ControllerBase
             return Redirect(missingCodeUrl);
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             var callbackErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL.");
@@ -1530,17 +1530,34 @@ public class AuthController : ControllerBase
         {
             ClientId = (section["ClientId"] ?? string.Empty).Trim(),
             ClientSecret = (section["ClientSecret"] ?? string.Empty).Trim(),
-            TenantId = (section["TenantId"] ?? string.Empty).Trim()
+            TenantId = (section["TenantId"] ?? string.Empty).Trim(),
+            RedirectUri = (section["RedirectUri"] ?? string.Empty).Trim()
         };
     }
 
-    private string BuildOAuthCallbackUrl(string provider)
+    private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
     {
         var callbackPath = $"/api/auth/oauth/{provider}/callback";
-        var apiOrigin = Request.Host.HasValue
+
+        var configuredRedirectUri = providerConfig?.RedirectUri ?? string.Empty;
+        if (Uri.TryCreate(configuredRedirectUri, UriKind.Absolute, out var explicitRedirectUri)
+            && (string.Equals(explicitRedirectUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(explicitRedirectUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)))
+        {
+            return explicitRedirectUri.ToString();
+        }
+
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
+        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var publicBaseUri))
+        {
+            var configuredOrigin = publicBaseUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+            return $"{configuredOrigin}{callbackPath}";
+        }
+
+        var requestOrigin = Request.Host.HasValue
             ? $"{Request.Scheme}://{Request.Host}".TrimEnd('/')
             : ResolvePublicAppOrigin();
-        return $"{apiOrigin}{callbackPath}";
+        return $"{requestOrigin}{callbackPath}";
     }
 
     private string ResolveOAuthReturnUrl(string? returnUrl)
@@ -2257,6 +2274,7 @@ public class AuthController : ControllerBase
         public string ClientId { get; set; } = string.Empty;
         public string ClientSecret { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
+        public string RedirectUri { get; set; } = string.Empty;
         public bool IsEnabled => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
     }
 
