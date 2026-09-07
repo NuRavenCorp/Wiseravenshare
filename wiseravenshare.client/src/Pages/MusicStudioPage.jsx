@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FiPlay, FiPause, FiSquare, FiSkipBack, FiSkipForward, FiUpload,
   FiRepeat, FiShuffle, FiVolume2, FiVolumeX,
   FiMusic, FiSearch, FiX, FiList, FiSliders,
-  FiRadio, FiMic, FiMicOff, FiActivity
+  FiRadio, FiMic, FiMicOff, FiActivity, FiCamera, FiLink
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
@@ -144,6 +144,64 @@ const normalizeTrack = (track) => {
   };
 };
 
+const tokenizeDiscoveryTerms = (...values) => {
+  const stopWords = new Set(['the', 'and', 'or', 'for', 'with', 'from', 'your', 'you', 'are', 'this', 'that', 'into', 'track', 'song', 'mix', 'live']);
+  const counts = new Map();
+
+  values
+    .flatMap((value) => String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [])
+    .forEach((token) => {
+      if (token.length < 3 || stopWords.has(token)) {
+        return;
+      }
+      counts.set(token, (counts.get(token) || 0) + 1);
+    });
+
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 8)
+    .map(([term, count]) => ({ term, count }));
+};
+
+const INSTRUMENT_OPTIONS = [
+  { id: 'mic', label: 'Mic' },
+  { id: 'camera', label: 'Camera' },
+  { id: 'piano', label: 'Piano' },
+  { id: 'keyboard', label: 'Keyboard' },
+  { id: 'guitar', label: 'Guitar' },
+  { id: 'sound-creator', label: 'Sound Creator' },
+];
+
+const RIGHTS_PLANS = [
+  {
+    id: 'basic',
+    name: 'Basic Protection',
+    monthlyPrice: '$4.99 / mo',
+    annualPrice: '$49.99 / yr',
+    monthlyPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_PRICE_ID || '',
+    annualPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_PRICE_ID || '',
+    features: ['Proof-of-creation timestamp', 'SHA-256 fingerprint', 'Rights registration record']
+  },
+  {
+    id: 'standard',
+    name: 'Standard Protection',
+    monthlyPrice: '$14.99 / mo',
+    annualPrice: '$149.99 / yr',
+    monthlyPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_PRICE_ID || '',
+    annualPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_PRICE_ID || '',
+    features: ['Everything in Basic', 'Cross-platform monitoring', 'Automated takedown support']
+  },
+  {
+    id: 'pro',
+    name: 'Pro Protection',
+    monthlyPrice: '$29.99 / mo',
+    annualPrice: '$299.99 / yr',
+    monthlyPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_PRICE_ID || '',
+    annualPriceId: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_PRICE_ID || '',
+    features: ['Everything in Standard', 'PRO registration guidance', 'Priority legal escalation']
+  }
+];
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const MusicStudioPage = ({ onNavigate }) => {
   const { user } = useAuth();
@@ -152,6 +210,8 @@ const MusicStudioPage = ({ onNavigate }) => {
   // Library
   const [library,       setLibrary]      = useState([]);
   const [isLoading,     setIsLoading]    = useState(true);
+  const [trendingTopics, setTrendingTopics] = useState([]);
+  const [crawlerStatus, setCrawlerStatus] = useState('Loading discovery signals...');
   const [searchQuery,   setSearchQuery]  = useState('');
   const [currentTrack,  setCurrentTrack] = useState(null);
   const [trackIndex,    setTrackIndex]   = useState(0);
@@ -194,6 +254,18 @@ const MusicStudioPage = ({ onNavigate }) => {
   const [monitorInputEnabled, setMonitorInputEnabled] = useState(false);
   const [monitorInputLevel, setMonitorInputLevel] = useState(0.8);
   const [inputRecordingTitle, setInputRecordingTitle] = useState('');
+  const [cameraDevices, setCameraDevices] = useState([]);
+  const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState('');
+  const [cameraStatus, setCameraStatus] = useState('disconnected');
+  const [manualInstrumentLinks, setManualInstrumentLinks] = useState({
+    mic: false,
+    camera: false,
+    piano: false,
+    keyboard: false,
+    guitar: false,
+    'sound-creator': false,
+  });
+  const [rightsCheckoutKey, setRightsCheckoutKey] = useState('');
 
   // DOM / Audio refs
   const audioRef   = useRef(null);
@@ -209,6 +281,7 @@ const MusicStudioPage = ({ onNavigate }) => {
   const inputRecorderRef = useRef(null);
   const inputChunksRef = useRef([]);
   const inputTimerRef = useRef(null);
+  const cameraStreamRef = useRef(null);
 
   // ── 1. Library load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -242,6 +315,68 @@ const MusicStudioPage = ({ onNavigate }) => {
         setIsLoading(false);
       }
     })();
+  }, []);
+
+  const discoveryKeywords = useMemo(
+    () => tokenizeDiscoveryTerms(
+      ...library.map((track) => [
+        track.title,
+        track.artist,
+        track.album,
+        track.genre,
+        track.fileName
+      ]).flat()
+    ),
+    [library]
+  );
+
+  const discoveryTopics = useMemo(() => (
+    trendingTopics.map((topic) => {
+      if (typeof topic === 'string') {
+        return { name: topic, description: '' };
+      }
+
+      return {
+        name: String(topic?.name || topic?.title || topic?.topic || 'Trending topic').trim(),
+        description: String(topic?.description || topic?.summary || '').trim()
+      };
+    })
+  ), [trendingTopics]);
+
+  const focusDiscoverTopic = (topicName) => {
+    try {
+      localStorage.setItem('wiseDiscoverFocus', JSON.stringify({
+        section: 'topics',
+        topic: topicName
+      }));
+    } catch {
+      // Ignore storage failures; navigation still works.
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await apiService.getTrending();
+        const topics = Array.isArray(response?.data) ? response.data : [];
+        if (cancelled) return;
+        setTrendingTopics(topics.slice(0, 6));
+        setCrawlerStatus(topics.length
+          ? 'Trending topics synced from the discovery feed.'
+          : 'Discovery feed is available, but no trending topics were returned.');
+      } catch (error) {
+        if (cancelled) return;
+        setTrendingTopics([]);
+        setCrawlerStatus('Trending feed unavailable; using local discovery keywords.');
+        console.warn('Trending discovery load failed', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── 2. Wire audio element events (stable — never re-registers) ───────────────
@@ -623,6 +758,14 @@ const MusicStudioPage = ({ onNavigate }) => {
     setMonitorInputEnabled(false);
   };
 
+  const disconnectCameraDevice = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    setCameraStatus('disconnected');
+  };
+
   const refreshInputDevices = async () => {
     try {
       let grantedStream = null;
@@ -644,6 +787,30 @@ const MusicStudioPage = ({ onNavigate }) => {
       }
     } catch (error) {
       addToast(error?.message || 'Unable to load audio input devices.', 'error');
+    }
+  };
+
+  const refreshCameraDevices = async () => {
+    try {
+      let grantedStream = null;
+      try {
+        grantedStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      } catch (permissionError) {
+        console.warn('Camera permission not yet granted for full device labels.', permissionError);
+      }
+
+      if (grantedStream) {
+        grantedStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((d) => d.kind === 'videoinput');
+      setCameraDevices(cameras);
+      if (!selectedCameraDeviceId && cameras.length > 0) {
+        setSelectedCameraDeviceId(cameras[0].deviceId);
+      }
+    } catch (error) {
+      addToast(error?.message || 'Unable to load camera devices.', 'error');
     }
   };
 
@@ -718,6 +885,102 @@ const MusicStudioPage = ({ onNavigate }) => {
     } catch (error) {
       setInputStatus('error');
       addToast(error?.message || 'Failed to connect selected audio input.', 'error');
+    }
+  };
+
+  const connectCameraDevice = async () => {
+    const targetId = selectedCameraDeviceId || cameraDevices[0]?.deviceId;
+    if (!targetId) {
+      addToast('No camera selected.', 'warning');
+      return;
+    }
+
+    if (cameraStatus === 'connected') {
+      disconnectCameraDevice();
+      return;
+    }
+
+    setCameraStatus('connecting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: targetId } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setCameraStatus('connected');
+      const selectedCamera = cameraDevices.find((device) => device.deviceId === targetId);
+      addToast(`${selectedCamera?.label || 'Camera'} connected.`, 'success');
+    } catch (error) {
+      setCameraStatus('error');
+      addToast(error?.message || 'Failed to connect selected camera.', 'error');
+    }
+  };
+
+  const detectInstrumentHints = (...labels) => {
+    const text = labels.join(' ').toLowerCase();
+    const hints = [];
+    if (/mic|microphone|headset|interface/.test(text)) hints.push('mic');
+    if (/camera|webcam|usb video/.test(text)) hints.push('camera');
+    if (/piano|keys|keylab/.test(text)) hints.push('piano');
+    if (/keyboard|midi|controller|synth/.test(text)) hints.push('keyboard');
+    if (/guitar|line\s*in|amp|pickup/.test(text)) hints.push('guitar');
+    if (/creator|beat|drum\s*pad|sampler|groovebox/.test(text)) hints.push('sound-creator');
+    return Array.from(new Set(hints));
+  };
+
+  const toggleInstrumentLink = (instrumentId) => {
+    setManualInstrumentLinks((prev) => ({
+      ...prev,
+      [instrumentId]: !prev[instrumentId],
+    }));
+  };
+
+  const handleRightsCheckout = async (plan, interval = 'monthly') => {
+    if (!user) {
+      addToast('Please sign in to activate a Music Rights plan.', 'warning');
+      return;
+    }
+
+    const selectedPriceId = interval === 'annual' ? plan.annualPriceId : plan.monthlyPriceId;
+    if (!selectedPriceId || !String(selectedPriceId).startsWith('price_')) {
+      addToast(`Billing is not configured yet for ${plan.name} ${interval}.`, 'info');
+      return;
+    }
+
+    const checkoutKey = `${plan.id}-${interval}`;
+    setRightsCheckoutKey(checkoutKey);
+    try {
+      const origin = window.location.origin;
+      const response = await fetch('/api/billing/checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
+        },
+        body: JSON.stringify({
+          priceId: selectedPriceId,
+          successUrl: `${origin}/?subscription=success`,
+          cancelUrl: `${origin}/?subscription=cancelled`
+        })
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        addToast(payload?.message || payload?.error || 'Unable to start checkout right now.', 'error');
+        return;
+      }
+
+      const payload = await response.json();
+      if (payload?.url) {
+        window.location.assign(payload.url);
+        return;
+      }
+
+      addToast('Checkout session was created but no redirect URL was returned.', 'error');
+    } catch (error) {
+      addToast(error?.message || 'Unable to open checkout right now.', 'error');
+    } finally {
+      setRightsCheckoutKey('');
     }
   };
 
@@ -824,15 +1087,48 @@ const MusicStudioPage = ({ onNavigate }) => {
 
   useEffect(() => {
     refreshInputDevices();
-    const onDeviceChange = () => refreshInputDevices();
+    refreshCameraDevices();
+    const onDeviceChange = () => {
+      refreshInputDevices();
+      refreshCameraDevices();
+    };
     navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
 
     return () => {
       navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
       disconnectInputDevice();
+      disconnectCameraDevice();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedInputLabel = useMemo(
+    () => inputDevices.find((d) => d.deviceId === selectedInputDeviceId)?.label || '',
+    [inputDevices, selectedInputDeviceId]
+  );
+
+  const selectedCameraLabel = useMemo(
+    () => cameraDevices.find((d) => d.deviceId === selectedCameraDeviceId)?.label || '',
+    [cameraDevices, selectedCameraDeviceId]
+  );
+
+  const autoInstrumentHints = useMemo(
+    () => detectInstrumentHints(selectedInputLabel, selectedCameraLabel),
+    [selectedInputLabel, selectedCameraLabel]
+  );
+
+  const linkedInstruments = useMemo(
+    () => INSTRUMENT_OPTIONS.map((opt) => {
+      const isLinkedByDevice = autoInstrumentHints.includes(opt.id);
+      const isLiveConnected = (opt.id === 'mic' && (inputStatus === 'connected' || inputStatus === 'recording'))
+        || (opt.id === 'camera' && cameraStatus === 'connected');
+      return {
+        ...opt,
+        connected: Boolean(manualInstrumentLinks[opt.id] || isLinkedByDevice || isLiveConnected),
+      };
+    }),
+    [autoInstrumentHints, manualInstrumentLinks, inputStatus, cameraStatus]
+  );
 
   useEffect(() => {
     if (!inputMonitorGainRef.current) return;
@@ -1138,6 +1434,46 @@ const MusicStudioPage = ({ onNavigate }) => {
             </button>
           </form>
 
+          <div className="lib-discovery">
+            <div className="lib-upload-title"><FiActivity /> Discovery bridge</div>
+            <p className="discovery-status">{crawlerStatus}</p>
+            <div className="discovery-actions">
+              <button type="button" onClick={() => onNavigate?.('discover')}>Open Discover</button>
+              <button type="button" onClick={() => onNavigate?.('feed')}>Open Feed</button>
+              <button type="button" onClick={() => onNavigate?.('my-library')}>Open My Library</button>
+            </div>
+            <div className="discovery-keywords">
+              {(discoveryKeywords.length ? discoveryKeywords : [{ term: 'music', count: 1 }]).map(({ term, count }) => (
+                <button
+                  key={term}
+                  type="button"
+                  className="keyword-chip"
+                  onClick={() => setSearchQuery(term)}
+                >
+                  #{term} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+            <div className="discovery-topics">
+              {discoveryTopics.length > 0 ? discoveryTopics.map((topic) => (
+                <button
+                  key={topic.name}
+                  type="button"
+                  className="topic-chip"
+                  onClick={() => {
+                    focusDiscoverTopic(topic.name);
+                    onNavigate?.('discover');
+                  }}
+                >
+                  <strong>{topic.name}</strong>
+                  {topic.description ? <span>{topic.description}</span> : null}
+                </button>
+              )) : (
+                <p className="discovery-empty">Trending topics will appear here when the feed is available.</p>
+              )}
+            </div>
+          </div>
+
           {library.length === 0 ? (
             <div className="lib-empty">
               <FiMusic size={32} />
@@ -1187,6 +1523,9 @@ const MusicStudioPage = ({ onNavigate }) => {
             </button>
             <button className={activePanel === 'input'   ? 'active' : ''} onClick={() => setActivePanel('input')}>
               <FiRadio /> Input
+            </button>
+            <button className={activePanel === 'rights' ? 'active' : ''} onClick={() => setActivePanel('rights')}>
+              <FiLink /> Rights
             </button>
             <button className={activePanel === 'fm'      ? 'active' : ''} onClick={() => setActivePanel('fm')}>
               <FiActivity /> FM Tuner
@@ -1322,8 +1661,8 @@ const MusicStudioPage = ({ onNavigate }) => {
           {activePanel === 'input' && (
             <div className="panel input-panel">
               <p className="input-desc">
-                Connect paired Bluetooth microphones, USB interfaces, home amplifier inputs, and other system audio inputs.
-                Your device must already be paired/available in your OS audio settings.
+                Connect mic and camera devices, then map instrument connectors for piano, keyboard, guitar, and sound creators.
+                Keep devices paired and enabled in your OS settings.
               </p>
 
               <div className="input-device-row">
@@ -1358,6 +1697,54 @@ const MusicStudioPage = ({ onNavigate }) => {
                 {isInputRecording && (
                   <span className="input-rec-time">● REC {fmt(inputRecordingTime)}</span>
                 )}
+              </div>
+
+              <div className="input-device-row compact-row">
+                <select
+                  className="input-select compact"
+                  value={selectedCameraDeviceId}
+                  onChange={(e) => setSelectedCameraDeviceId(e.target.value)}
+                >
+                  {cameraDevices.length === 0 && (
+                    <option value="">No camera devices detected</option>
+                  )}
+                  {cameraDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `Camera ${device.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+                <button className="input-btn compact" onClick={refreshCameraDevices}>
+                  Camera Refresh
+                </button>
+                <button
+                  className={`input-btn compact ${cameraStatus === 'connected' ? 'danger' : 'primary'}`}
+                  onClick={connectCameraDevice}
+                >
+                  {cameraStatus === 'connected' ? 'Camera Disconnect' : 'Camera Connect'}
+                </button>
+              </div>
+
+              <div className="input-status-line compact-status">
+                <span className={`input-status-badge ${cameraStatus}`}>{cameraStatus.toUpperCase()}</span>
+                <span className="input-type">Camera</span>
+                <span className="input-type">{selectedCameraLabel || 'No camera label yet'}</span>
+              </div>
+
+              <div className="connector-wrap">
+                <div className="connector-title">Instrument connectors</div>
+                <div className="connector-grid">
+                  {linkedInstruments.map((instrument) => (
+                    <button
+                      key={instrument.id}
+                      type="button"
+                      className={`connector-chip ${instrument.connected ? 'connected' : ''}`}
+                      onClick={() => toggleInstrumentLink(instrument.id)}
+                    >
+                      {instrument.label} · {instrument.connected ? 'linked' : 'idle'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="input-meter-wrap">
@@ -1415,6 +1802,59 @@ const MusicStudioPage = ({ onNavigate }) => {
               {isSavingInputRecording && (
                 <div className="input-saving-note">Saving recorded input to your music library…</div>
               )}
+            </div>
+          )}
+
+          {activePanel === 'rights' && (
+            <div className="panel rights-panel">
+              <div className="rights-sticky-banner">
+                <div className="rights-banner-title">Music Rights Access</div>
+                <div className="rights-banner-sub">
+                  All users can create music in this studio. Rights protection, registration records, and legal support are unlocked via plan access.
+                </div>
+                <div className="rights-banner-actions">
+                  <button className="input-btn" onClick={() => setActivePanel('radio-creator')}>
+                    Create New Music
+                  </button>
+                  <button className="input-btn" onClick={() => setActivePanel('input')}>
+                    Capture Live Instrument
+                  </button>
+                  <button className="input-btn primary" onClick={() => onNavigate?.('music-rights-studio')}>
+                    Open Full Rights Studio
+                  </button>
+                </div>
+              </div>
+
+              <div className="rights-plan-grid">
+                {RIGHTS_PLANS.map((plan) => (
+                  <div key={plan.id} className="rights-plan-card">
+                    <div className="rights-plan-name">{plan.name}</div>
+                    <div className="rights-plan-price">{plan.monthlyPrice}</div>
+                    <div className="rights-plan-price-muted">or {plan.annualPrice}</div>
+                    <ul className="rights-plan-features">
+                      {plan.features.map((feature) => (
+                        <li key={feature}>{feature}</li>
+                      ))}
+                    </ul>
+                    <div className="rights-plan-actions">
+                      <button
+                        className="input-btn primary"
+                        disabled={rightsCheckoutKey.length > 0}
+                        onClick={() => handleRightsCheckout(plan, 'monthly')}
+                      >
+                        {rightsCheckoutKey === `${plan.id}-monthly` ? 'Opening...' : 'Unlock Monthly'}
+                      </button>
+                      <button
+                        className="input-btn"
+                        disabled={rightsCheckoutKey.length > 0}
+                        onClick={() => handleRightsCheckout(plan, 'annual')}
+                      >
+                        {rightsCheckoutKey === `${plan.id}-annual` ? 'Opening...' : 'Unlock Annual'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
