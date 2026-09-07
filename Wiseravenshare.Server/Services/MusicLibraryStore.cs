@@ -191,22 +191,24 @@ INSERT INTO app_data.bucket_objects (
 
     private string ResolveMediaUrl(string? publicUrl, string objectKey, string fileName)
     {
+        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey) ? fileName : objectKey.Replace('\\', '/').Trim('/');
+
+        // Bucket objects are persisted with private ACL, so direct public URLs can be non-playable.
+        // Prefer server-side blob streaming whenever an object key is available.
+        if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
+        {
+            return BuildBlobFallbackUrl(normalizedObjectKey);
+        }
+
         if (!string.IsNullOrWhiteSpace(publicUrl))
         {
             return publicUrl;
         }
 
-        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey) ? fileName : objectKey.Replace('\\', '/').Trim('/');
-
         var resolved = _blobStorageService.ResolvePublicUrl(normalizedObjectKey);
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             return resolved;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
-        {
-            return BuildBlobFallbackUrl(normalizedObjectKey);
         }
 
         return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
