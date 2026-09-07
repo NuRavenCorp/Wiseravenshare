@@ -1,5 +1,50 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile } from 'react-icons/fi';
+import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward } from 'react-icons/fi';
+
+// ─── IP Protection Plans ──────────────────────────────────────────────────────
+const PROTECTION_PLANS = [
+    {
+        id: 'basic',
+        name: 'Basic Protection',
+        price: '$4.99 / mo',
+        color: '#22c55e',
+        features: [
+            'Timestamped proof of creation',
+            'SHA-256 cryptographic fingerprint',
+            'WiseRavenShare rights registration',
+            'DMCA takedown template',
+        ],
+    },
+    {
+        id: 'standard',
+        name: 'Standard Protection',
+        price: '$14.99 / mo',
+        badge: 'Popular',
+        color: '#3b82f6',
+        features: [
+            'Everything in Basic',
+            'Cross-platform monitoring (FB, TikTok, YouTube)',
+            'Automated takedown support',
+            'Licensing agreement templates',
+            'Revenue split tracking',
+        ],
+    },
+    {
+        id: 'pro',
+        name: 'Pro Protection',
+        price: '$29.99 / mo',
+        badge: 'Best Value',
+        color: '#a855f7',
+        features: [
+            'Everything in Standard',
+            'PRO registration guidance (ASCAP/BMI)',
+            'Master + publishing documentation',
+            'Priority legal support',
+            'Custom licensing templates',
+            'Dedicated IP advisor',
+        ],
+    },
+];
 import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
@@ -75,6 +120,31 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [videoSearch, setVideoSearch] = useState('');
     const [photoSearch, setPhotoSearch] = useState('');
     const [currentTrack, setCurrentTrack] = useState(null);
+    const [selectedPlanId, setSelectedPlanId] = useState(null);
+    const handleProtectTrack = (planId) => {
+        if (!currentTrack) {
+            addToast('Please select a music track first', 'info');
+            return;
+        }
+        setSelectedPlanId(planId);
+        addToast(`Selected ${PROTECTION_PLANS.find(p => p.id === planId)?.name || 'plan'} for: ${currentTrack.title}`, 'success');
+    };
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('protect')}
+                    style={{
+                        border: activeTab === 'protect' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                        background: activeTab === 'protect' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
+                        color: 'var(--text-color)',
+                        borderRadius: '999px',
+                        padding: '8px 14px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                    }}
+                >
+                    <FiShield style={{ marginRight: '6px', display: 'inline' }} />
+                    Protect
+                </button>
 
     useEffect(() => {
         let isMounted = true;
@@ -482,3 +552,103 @@ const MyLibraryPage = ({ onNavigate }) => {
 };
 
 export default MyLibraryPage;
+
+                    {/* Music Rights Protection View */}
+                    {activeTab === 'protect' && (
+                        <div style={{ display: 'grid', gap: '16px' }}>
+                            {!currentTrack ? (
+                                <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px', background: 'var(--card-bg)', textAlign: 'center', color: 'var(--light-color)' }}>
+                                    🎵 Select a music track from the Music tab to protect your intellectual property
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                                            <FiMusic style={{ fontSize: '24px', color: 'var(--highlight-color)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 700 }}>{currentTrack.title}</div>
+                                                {currentTrack.artist && (
+                                                    <div style={{ fontSize: '13px', color: 'var(--light-color)' }}>
+                                                        by {currentTrack.artist}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '8px' }}>
+                                            Protect your music with IP registration, proof-of-creation, monitoring, and legal support.
+                                        </div>
+                                    </div>
+
+                                    {/* Protection Plans Grid */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+                                        {PROTECTION_PLANS.map((plan) => (
+                                            <div
+                                                key={plan.id}
+                                                style={{
+                                                    border: selectedPlanId === plan.id ? `2px solid ${plan.color}` : '1px solid var(--border-color)',
+                                                    borderRadius: '12px',
+                                                    padding: '16px',
+                                                    background: 'var(--card-bg)',
+                                                    position: 'relative'
+                                                }}
+                                            >
+                                                {plan.badge && (
+                                                    <div style={{
+                                                        position: 'absolute',
+                                                        top: '-12px',
+                                                        right: '12px',
+                                                        background: plan.color,
+                                                        color: '#000',
+                                                        padding: '4px 10px',
+                                                        borderRadius: '999px',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700
+                                                    }}>
+                                                        {plan.badge}
+                                                    </div>
+                                                )}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                                    <FiAward style={{ fontSize: '18px', color: plan.color }} />
+                                                    <div style={{ fontWeight: 700, fontSize: '16px' }}>{plan.name}</div>
+                                                </div>
+                                                <div style={{ fontSize: '18px', fontWeight: 700, color: plan.color, marginBottom: '12px' }}>
+                                                    {plan.price}
+                                                </div>
+                                                <div style={{ display: 'grid', gap: '6px', marginBottom: '12px' }}>
+                                                    {plan.features.map((feature, idx) => (
+                                                        <div key={idx} style={{ display: 'flex', gap: '8px', fontSize: '13px', color: 'var(--light-color)' }}>
+                                                            <FiCheck style={{ color: plan.color, flexShrink: 0, marginTop: '2px' }} />
+                                                            <span>{feature}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleProtectTrack(plan.id)}
+                                                    style={{
+                                                        width: '100%',
+                                                        border: `1px solid ${plan.color}`,
+                                                        background: selectedPlanId === plan.id ? plan.color : 'transparent',
+                                                        color: selectedPlanId === plan.id ? '#000' : 'var(--text-color)',
+                                                        padding: '10px',
+                                                        borderRadius: '8px',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 600,
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                >
+                                                    {selectedPlanId === plan.id ? '✓ Selected' : 'Select Plan'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.03)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--light-color)', lineHeight: '1.6' }}>
+                                            <strong>What's included:</strong> Proof-of-creation timestamping, SHA-256 fingerprinting, cross-platform monitoring, DMCA support, and licensing templates. All plans help protect your music rights and provide documentation for registration with PROs like ASCAP, BMI, and SESAC.
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
