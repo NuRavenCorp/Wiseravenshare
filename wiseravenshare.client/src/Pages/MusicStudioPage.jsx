@@ -3,11 +3,12 @@ import {
   FiPlay, FiPause, FiSquare, FiSkipBack, FiSkipForward, FiUpload,
   FiRepeat, FiShuffle, FiVolume2, FiVolumeX,
   FiMusic, FiSearch, FiX, FiList, FiSliders,
-  FiRadio, FiMic, FiMicOff, FiActivity, FiCamera, FiLink
+  FiRadio, FiMic, FiMicOff, FiActivity, FiCamera, FiLink, FiAward, FiShield
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
+import { subscriptionService } from '../Services/subscriptionService';
 import FMTunerModule from '../Components/FM/FMTunerModule';
 import FMCreatorStudio from '../Components/FM/FMCreatorStudio';
 import '../Styles/MusicStudio.css';
@@ -188,6 +189,18 @@ const RIGHTS_PLANS = [
   }
 ];
 
+const FREE_MARKETPLACE_TIER = {
+  id: 'free',
+  name: 'Free Preview',
+  monthlyPrice: 'Free',
+  annualPrice: 'Free',
+  features: [
+    'Preview uploads locally in this session',
+    'No marketplace persistence',
+    'Upgrade to save tracks to your library'
+  ]
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const { user } = useAuth();
@@ -227,6 +240,8 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const [uploadAlbum,   setUploadAlbum]   = useState('');
   const [uploadGenre,   setUploadGenre]   = useState('');
   const [isUploading,   setIsUploading]   = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+  const [isSubscriptionLoading, setIsSubscriptionLoading] = useState(true);
   const [inputDevices,  setInputDevices]  = useState([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
   const [inputStatus, setInputStatus] = useState('disconnected');
@@ -252,11 +267,107 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const [rightsCheckoutKey, setRightsCheckoutKey] = useState('');
 
   useEffect(() => {
-    const allowedPanels = new Set(['eq', 'effects', 'vocal', 'input', 'rights', 'fm', 'radio-creator']);
+    const allowedPanels = new Set(['eq', 'effects', 'vocal', 'input', 'rights', 'marketplace', 'fm', 'radio-creator']);
     if (allowedPanels.has(String(initialPanel || '').trim())) {
       setActivePanel(String(initialPanel).trim());
     }
   }, [initialPanel]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSubscriptionStatus = async () => {
+      try {
+        const response = await subscriptionService.getSubscriptionStatus();
+        if (!cancelled) {
+          setSubscriptionStatus(response?.data || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSubscriptionStatus({ hasActiveSubscription: false, status: 'inactive' });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSubscriptionLoading(false);
+        }
+      }
+    };
+
+    void loadSubscriptionStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isMarketplaceUnlocked = Boolean(subscriptionStatus?.hasActiveSubscription);
+  const matchedTier = RIGHTS_PLANS.find((plan) =>
+    plan.monthlyPriceId === subscriptionStatus?.priceId || plan.annualPriceId === subscriptionStatus?.priceId
+  );
+  const marketplaceStatusLabel = isSubscriptionLoading
+    ? 'Checking subscription...'
+    : isMarketplaceUnlocked
+      ? (matchedTier?.name || subscriptionStatus?.status || 'Active subscription')
+      : 'Free preview mode';
+
+  const buildLocalPreviewTrack = async (file, metadata = {}) => {
+    const [durationValue, fingerprintValue] = await Promise.all([
+      metadata.duration ? Promise.resolve(metadata.duration) : readDuration(file),
+      metadata.fingerprint ? Promise.resolve(metadata.fingerprint) : fingerprint(file)
+    ]);
+    const objectUrl = URL.createObjectURL(file);
+
+    return {
+      id: `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      title: String(metadata.title || file.name.replace(/\.[^/.]+$/, '') || 'Untitled track').trim(),
+      artist: String(metadata.artist || '').trim(),
+      album: String(metadata.album || '').trim(),
+      genre: String(metadata.genre || '').trim(),
+      duration: durationValue,
+      fingerprint: fingerprintValue,
+      mediaUrl: objectUrl,
+      url: objectUrl,
+      fileName: file.name,
+      localOnly: true,
+      previewOnly: true,
+      persisted: false
+    };
+  };
+
+  const saveTrackToMarketplace = async (file, metadata = {}) => {
+    const uploadPayload = {
+      title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
+      artist: metadata.artist || '',
+      album: metadata.album || '',
+      genre: metadata.genre || '',
+      destinationFolder: metadata.destinationFolder || '/wiseravenshare/ravensight/music'
+    };
+
+    const [durationValue, fingerprintValue] = await Promise.all([
+      readDuration(file),
+      fingerprint(file)
+    ]);
+    uploadPayload.fingerprint = fingerprintValue || '';
+
+    if (!isMarketplaceUnlocked) {
+      const previewTrack = await buildLocalPreviewTrack(file, { ...uploadPayload, duration: durationValue });
+      return { track: previewTrack, persisted: false };
+    }
+
+    try {
+      const response = await apiService.uploadMusicTrack(file, uploadPayload);
+      const track = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
+      if (track) {
+        return { track, persisted: true };
+      }
+    } catch (error) {
+      if (Number(error?.response?.status || error?.status || 0) !== 402) {
+        throw error;
+      }
+    }
+
+    const previewTrack = await buildLocalPreviewTrack(file, { ...uploadPayload, duration: durationValue });
+    return { track: previewTrack, persisted: false };
+  };
 
   // DOM / Audio refs
   const audioRef   = useRef(null);
@@ -957,7 +1068,7 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
     setIsSavingInputRecording(true);
     try {
-      const response = await apiService.uploadMusicTrack(file, {
+      const { track: uploadedTrack, persisted } = await saveTrackToMarketplace(file, {
         title,
         artist: `${deviceLabel} (${inputConnectionType})`,
         album: 'Live Input',
@@ -965,21 +1076,27 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
         destinationFolder: '/wiseravenshare/ravensight/music'
       });
 
-      const uploadedTrack = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
       if (uploadedTrack) {
         setLibrary((prev) => {
           const next = [uploadedTrack, ...prev];
-          try {
-            localStorage.setItem('wiseMusic_library', JSON.stringify(next));
-          } catch {
-            /* ignore storage errors */
+          if (persisted) {
+            try {
+              localStorage.setItem('wiseMusic_library', JSON.stringify(next));
+            } catch {
+              /* ignore storage errors */
+            }
           }
           return next;
         });
         setCurrentTrack(uploadedTrack);
         setTrackIndex(0);
       }
-      addToast('Recorded input saved to your music library.', 'success');
+      addToast(
+        persisted
+          ? 'Recorded input saved to your music marketplace library.'
+          : 'Recorded preview saved locally. Upgrade to keep it in your marketplace library.',
+        'success'
+      );
     } catch (error) {
       addToast(error?.message || 'Failed to save recorded input.', 'error');
     } finally {
@@ -1177,7 +1294,7 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
     setIsUploading(true);
     try {
-      const response = await apiService.uploadMusicTrack(queuedFile, {
+      const { track: uploadedTrack, persisted } = await saveTrackToMarketplace(queuedFile, {
         title: uploadTitle || queuedFile.name.replace(/\.[^/.]+$/, ''),
         artist: uploadArtist,
         album: uploadAlbum,
@@ -1185,14 +1302,15 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
         destinationFolder: '/wiseravenshare/ravensight/music'
       });
 
-      const uploadedTrack = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
       if (uploadedTrack) {
         setLibrary((prev) => {
           const next = [uploadedTrack, ...prev];
-          try {
-            localStorage.setItem('wiseMusic_library', JSON.stringify(next));
-          } catch {
-            /* ignore storage errors */
+          if (persisted) {
+            try {
+              localStorage.setItem('wiseMusic_library', JSON.stringify(next));
+            } catch {
+              /* ignore storage errors */
+            }
           }
           return next;
         });
@@ -1208,7 +1326,12 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
       if (uploadInputRef.current) {
         uploadInputRef.current.value = '';
       }
-      addToast('Track uploaded to your music library.', 'success');
+      addToast(
+        persisted
+          ? 'Track uploaded to your music marketplace library.'
+          : 'Preview saved locally. Upgrade to keep it in your marketplace library.',
+        'success'
+      );
     } catch (error) {
       addToast(error?.message || 'Music upload failed.', 'error');
     } finally {
@@ -1354,6 +1477,11 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
 
           <form className="lib-upload" onSubmit={handleUploadTrack}>
             <div className="lib-upload-title"><FiUpload /> Upload music to your library</div>
+            <div className={`library-access-banner ${isMarketplaceUnlocked ? 'active' : 'preview'}`}>
+              {isMarketplaceUnlocked
+                ? 'Marketplace saving is unlocked for this account.'
+                : 'Free preview mode: uploads play locally for this session only.'}
+            </div>
             <input
               type="file"
               ref={uploadInputRef}
@@ -1396,7 +1524,11 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
               />
             </div>
             <button className="upload-btn" type="submit" disabled={isUploading || !uploadFile}>
-              {isUploading ? 'Uploading…' : 'Save to Bucket Library'}
+              {isUploading
+                ? 'Uploading…'
+                : isMarketplaceUnlocked
+                  ? 'Save to Marketplace'
+                  : 'Preview Locally'}
             </button>
           </form>
 
@@ -1430,6 +1562,7 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
                     <div className="lt-info">
                       <span className="lt-title">{t.title || 'Untitled'}</span>
                       <span className="lt-artist">{t.artist || 'Unknown'}</span>
+                      {t.previewOnly && <span className="lt-badge">Preview</span>}
                     </div>
                     <span className="lt-dur">{t.duration || '—'}</span>
                   </div>
@@ -1456,6 +1589,9 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
             </button>
             <button className={activePanel === 'rights' ? 'active' : ''} onClick={() => setActivePanel('rights')}>
               <FiLink /> Rights
+            </button>
+            <button className={activePanel === 'marketplace' ? 'active' : ''} onClick={() => setActivePanel('marketplace')}>
+              <FiAward /> Marketplace
             </button>
             <button className={activePanel === 'fm'      ? 'active' : ''} onClick={() => setActivePanel('fm')}>
               <FiActivity /> FM Tuner
@@ -1498,6 +1634,62 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
               </div>
 
               <button className="reset-btn" onClick={() => applyPreset('flat')}>Reset EQ</button>
+            </div>
+          )}
+
+          {activePanel === 'marketplace' && (
+            <div className="panel marketplace-panel">
+              <div className="marketplace-banner">
+                <div>
+                  <div className="marketplace-title">
+                    <FiShield /> Music Marketplace
+                  </div>
+                  <div className="marketplace-subtitle">
+                    {isSubscriptionLoading
+                      ? 'Checking your subscription tier...'
+                      : isMarketplaceUnlocked
+                        ? `Your tier is active: ${marketplaceStatusLabel}. Uploads save to the marketplace library.`
+                        : 'Free users get a local preview only. Upgrade to persist uploads in your marketplace library.'}
+                  </div>
+                </div>
+                <button className="marketplace-cta" onClick={() => onNavigate?.('music-rights-studio')}>
+                  Open Rights Studio
+                </button>
+              </div>
+
+              <div className="rights-plan-grid">
+                <div className="rights-plan-card">
+                  <div className="rights-plan-name">{FREE_MARKETPLACE_TIER.name}</div>
+                  <div className="rights-plan-price">{FREE_MARKETPLACE_TIER.monthlyPrice}</div>
+                  <div className="rights-plan-price-muted">Local session preview only</div>
+                  <ul className="rights-plan-features">
+                    {FREE_MARKETPLACE_TIER.features.map((feature) => (
+                      <li key={feature}>{feature}</li>
+                    ))}
+                  </ul>
+                </div>
+                {RIGHTS_PLANS.map((plan) => {
+                  const planActive = matchedTier?.id === plan.id;
+                  return (
+                    <div key={plan.id} className={`rights-plan-card${planActive ? ' marketplace-active' : ''}`}>
+                      <div className="rights-plan-name">{plan.name}</div>
+                      <div className="rights-plan-price">{plan.monthlyPrice}</div>
+                      <div className="rights-plan-price-muted">{plan.annualPrice}</div>
+                      <ul className="rights-plan-features">
+                        {plan.features.map((feature) => (
+                          <li key={feature}>{feature}</li>
+                        ))}
+                      </ul>
+                      <div className="marketplace-plan-actions">
+                        <button type="button" className="marketplace-plan-btn" onClick={() => onNavigate?.('music-rights-studio')}>
+                          Upgrade
+                        </button>
+                        <span className="marketplace-plan-state">{planActive ? 'Current tier' : 'Available'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

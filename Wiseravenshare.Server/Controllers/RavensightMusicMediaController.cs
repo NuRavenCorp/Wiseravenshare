@@ -12,10 +12,12 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class RavensightMusicMediaController : ControllerBase
 {
     private readonly IMusicLibraryStore _musicLibraryStore;
+    private readonly ISubscriptionService _subscriptionService;
 
-    public RavensightMusicMediaController(IMusicLibraryStore musicLibraryStore)
+    public RavensightMusicMediaController(IMusicLibraryStore musicLibraryStore, ISubscriptionService subscriptionService)
     {
         _musicLibraryStore = musicLibraryStore;
+        _subscriptionService = subscriptionService;
     }
 
     [HttpGet]
@@ -44,6 +46,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
         if (!TryResolveUserId(out var userId))
         {
             return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var subscription = await _subscriptionService.GetSubscriptionStatusAsync(userId);
+        if (!subscription.HasActiveSubscription)
+        {
+            return StatusCode(StatusCodes.Status402PaymentRequired, new
+            {
+                message = "A paid subscription is required to save music to the marketplace. Free uploads can still be previewed locally."
+            });
         }
 
         var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, cancellationToken);

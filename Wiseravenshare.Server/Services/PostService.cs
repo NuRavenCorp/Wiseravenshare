@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.DTOs.User;
@@ -10,6 +11,7 @@ using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Services.Currency;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -39,6 +41,8 @@ public class PostService : IPostService
     private readonly ISocialPublishDispatcher _socialPublishDispatcher;
     private readonly ICrossPlatformPublishService _crossPlatformPublishService;
     private readonly IEngagementNotificationService _engagementNotificationService;
+    private readonly IWiseCoinService _wiseCoinService;
+    private readonly IEngagementMultiplierService _engagementMultiplierService;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -48,6 +52,8 @@ public class PostService : IPostService
         ISocialPublishDispatcher socialPublishDispatcher,
         ICrossPlatformPublishService crossPlatformPublishService,
         IEngagementNotificationService engagementNotificationService,
+        IWiseCoinService wiseCoinService,
+        IEngagementMultiplierService engagementMultiplierService,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -56,6 +62,8 @@ public class PostService : IPostService
         _socialPublishDispatcher = socialPublishDispatcher;
         _crossPlatformPublishService = crossPlatformPublishService;
         _engagementNotificationService = engagementNotificationService;
+        _wiseCoinService = wiseCoinService;
+        _engagementMultiplierService = engagementMultiplierService;
         _logger = logger;
     }
 
@@ -187,6 +195,15 @@ public class PostService : IPostService
             }
         }
 
+        try
+        {
+            await AwardCreationRewardAsync(post, user);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
+        }
+
         if (!persisted)
         {
             return BuildPostDto(post, user);
@@ -237,6 +254,62 @@ public class PostService : IPostService
                 _logger.LogWarning(ex, "Cross-platform publish task failed for post {PostId}.", post.Id);
             }
         });
+    }
+
+    private async Task AwardCreationRewardAsync(Post post, User user)
+    {
+        if (post == null || user == null)
+        {
+            return;
+        }
+
+        if ((user.Email ?? string.Empty).StartsWith("local-", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var baseReward = post.Type switch
+        {
+            PostType.Video => 1.5m,
+            PostType.Audio => 1.4m,
+            PostType.Image => 1.2m,
+            PostType.Podcast => 1.35m,
+            PostType.TruthClaim => 1.25m,
+            _ => 1.0m
+        };
+
+        if (post.IsTruthDispatch)
+        {
+            baseReward += 0.25m;
+        }
+
+        var engagementMultiplier = await _engagementMultiplierService.GetPostEngagementMultiplierAsync(post.Id, user.Id);
+        var rewardAmount = decimal.Round(baseReward * engagementMultiplier, 2);
+
+        if (rewardAmount <= 0)
+        {
+            return;
+        }
+
+        var result = await _wiseCoinService.EarnWSCAsync(
+            user.Id,
+            rewardAmount,
+            TransactionType.ContentCreation,
+            $"Post reward for {post.Type} post",
+            applyMultipliers: true);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning("WiseCoin reward declined for post {PostId}: {Error}", post.Id, result.ErrorMessage);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Awarded {Amount} WSC for post {PostId} (base={BaseReward}, engagementMultiplier={Multiplier})",
+            result.Amount,
+            post.Id,
+            baseReward,
+            engagementMultiplier);
     }
 
     private void DispatchSocialPublish(Post post)
@@ -691,5 +764,3 @@ public class PostService : IPostService
         };
     }
 }
-
-

@@ -1572,6 +1572,7 @@ builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IEngagementMultiplierService, Wiseravenshare.Server.Services.Currency.EngagementMultiplierService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
 // Daily ledger anchor + integrity check (hash chain tamper-evidence).
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LedgerAnchorBackgroundService>();
