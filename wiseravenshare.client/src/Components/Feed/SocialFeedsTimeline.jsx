@@ -1613,8 +1613,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             </div>
 
                             {item.mediaUrl && (
-                                <div style={{ marginTop: '8px' }}>
-                                    <img src={item.mediaUrl} alt="Feed Media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
+                                <div style={{ marginTop: '8px', width: '100%', display: 'block' }}>
+                                    <img src={item.mediaUrl} alt="Feed Media" style={{ width: '100%', maxHeight: '300px', objectFit: 'cover', display: 'block', borderRadius: '8px' }} />
                                 </div>
                             )}
 
