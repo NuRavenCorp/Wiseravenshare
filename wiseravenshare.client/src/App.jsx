@@ -92,7 +92,7 @@ const resolveInitialPublicPage = () => {
         return 'terms';
     }
 
-    if (normalizedPath === '/login' || normalizedPath === '/social/access') {
+    if (normalizedPath === '/login' || normalizedPath === '/social/access' || normalizedPath === '/oauth') {
         return 'login';
     }
 
