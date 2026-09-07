@@ -99,6 +99,15 @@ const normalizePlaybackUrl = (value = '') => {
 
 const normalizeTrack = (track) => {
   if (!track || typeof track !== 'object') return null;
+  const fallbackRelativePath = String(
+    track.relativePath
+    || track.RelativePath
+    || track.objectKey
+    || track.ObjectKey
+    || ''
+  ).trim();
+  const fileName = String(track.fileName || track.FileName || '').trim();
+
   const directMediaUrl = normalizePlaybackUrl(
     track.mediaUrl
     || track.url
@@ -110,18 +119,15 @@ const normalizeTrack = (track) => {
     || track.FilePath
     || ''
   );
-  const fallbackRelativePath = String(
-    track.relativePath
-    || track.RelativePath
-    || track.objectKey
-    || track.ObjectKey
-    || ''
-  ).trim();
-  const fileName = String(track.fileName || track.FileName || '').trim();
+  const blobStreamUrl = toBlobStreamUrl(fallbackRelativePath);
+  const fileNameStreamUrl = fileName
+    ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
+    : '';
 
-  const mediaUrl = directMediaUrl
-    || toBlobStreamUrl(fallbackRelativePath)
-    || (fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '');
+  // Prefer durable server-side stream routes over transient blob: URLs.
+  const mediaUrl = blobStreamUrl
+    || fileNameStreamUrl
+    || directMediaUrl;
 
   return {
     id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
@@ -848,8 +854,11 @@ const MusicStudioPage = ({ onNavigate }) => {
     }
 
     if (!el.src) {
-      const sourceUrl = String(currentTrack.mediaUrl || currentTrack.url || '').trim();
+      const candidates = buildTrackSources(currentTrack);
+      const sourceUrl = String(candidates[0] || '').trim();
       if (sourceUrl) {
+        sourceCandidatesRef.current = candidates;
+        sourceIndexRef.current = 0;
         el.src = sourceUrl;
         el.load();
       }

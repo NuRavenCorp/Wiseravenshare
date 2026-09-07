@@ -119,6 +119,84 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const getBaseFileName = (n = '') => n.replace(/\.[^/.]+$/, '').trim();
   const normalizeText   = (v = '') => v.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
 
+  const toBlobStreamUrl = (relativePath = '') => {
+    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return '';
+    const encoded = normalized
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+  };
+
+  const normalizePlaybackUrl = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) {
+      return raw;
+    }
+
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+      try {
+        const parsed = new URL(raw);
+        return `${parsed.pathname}${parsed.search}`;
+      } catch {
+        return raw;
+      }
+    }
+
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return '';
+  };
+
+  const normalizeMusicTrack = (track) => {
+    if (!track || typeof track !== 'object') return null;
+
+    const fileName = String(track.fileName || track.FileName || '').trim();
+    const relativePath = String(
+      track.relativePath
+      || track.RelativePath
+      || track.objectKey
+      || track.ObjectKey
+      || ''
+    ).trim();
+    const directMediaUrl = normalizePlaybackUrl(
+      track.mediaUrl
+      || track.MediaUrl
+      || track.url
+      || track.Url
+      || track.fileUrl
+      || track.FileUrl
+      || ''
+    );
+
+    const blobStreamUrl = toBlobStreamUrl(relativePath);
+    const fileNameStreamUrl = fileName
+      ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
+      : '';
+    const mediaUrl = blobStreamUrl || fileNameStreamUrl || directMediaUrl;
+
+    return {
+      id: String(track.id || track.Id || `music_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+      title: String(track.title || track.Title || 'Untitled').trim(),
+      artist: String(track.artist || track.Artist || '').trim(),
+      album: String(track.album || track.Album || '').trim(),
+      genre: String(track.genre || track.Genre || '').trim(),
+      mediaUrl,
+      url: mediaUrl,
+      fileName,
+      relativePath,
+      uploadedAt: track.uploadedAt || track.UploadedAt || new Date().toISOString(),
+      duration: String(track.duration || track.Duration || '0:00'),
+      fingerprint: track.fingerprint || track.Fingerprint || null,
+      protected: track.protected !== false,
+    };
+  };
+
   const inferFromFileName = (fileName = '') => {
     const base  = normalizeText(getBaseFileName(fileName));
     const parts = base.split(/\s*[-–—]\s*/).map(p => normalizeText(p)).filter(Boolean);
@@ -253,25 +331,18 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           });
           if (res.ok) {
             const data = await res.json();
-            const tracks = Array.isArray(data) ? data.map(t => ({
-              id: t.id,
-              title: t.title || 'Untitled',
-              artist: t.artist || '',
-              album: t.album || '',
-              genre: t.genre || '',
-              mediaUrl: t.mediaUrl,
-              fileName: t.fileName,
-              uploadedAt: t.uploadedAt,
-              duration: '0:00',
-              fingerprint: t.fingerprint,
-              protected: true,
-            })) : [];
+            const tracks = Array.isArray(data)
+              ? data.map(normalizeMusicTrack).filter(Boolean)
+              : [];
             setMusicLibrary(tracks);
             return;
           }
         } else {
           const stored = localStorage.getItem('wiseMusic_library');
-          if (stored) setMusicLibrary(JSON.parse(stored));
+          if (stored) {
+            const tracks = JSON.parse(stored).map(normalizeMusicTrack).filter(Boolean);
+            setMusicLibrary(tracks);
+          }
         }
       } catch { setMusicLibrary([]); }
     })();
@@ -329,14 +400,17 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
 
       if (res.ok) {
         const result = await res.json();
+        const normalizedUploadedTrack = normalizeMusicTrack(result?.track || result?.file || result || {});
         const newTrack = {
-          id:          result.mediaAssetId || `music_${Date.now()}`,
-          title:       uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
-          artist:      uploadFormData.artist || '',
-          album:       uploadFormData.album  || '',
-          genre:       uploadFormData.genre  || '',
-          mediaUrl:    result.file?.mediaUrl || URL.createObjectURL(uploadFormData.file),
-          fileName:    result.file?.fileName || uploadFormData.file.name,
+          id:          normalizedUploadedTrack?.id || result.mediaAssetId || `music_${Date.now()}`,
+          title:       normalizedUploadedTrack?.title || uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
+          artist:      normalizedUploadedTrack?.artist || uploadFormData.artist || '',
+          album:       normalizedUploadedTrack?.album || uploadFormData.album  || '',
+          genre:       normalizedUploadedTrack?.genre || uploadFormData.genre  || '',
+          mediaUrl:    normalizedUploadedTrack?.mediaUrl || URL.createObjectURL(uploadFormData.file),
+          url:         normalizedUploadedTrack?.mediaUrl || URL.createObjectURL(uploadFormData.file),
+          relativePath: normalizedUploadedTrack?.relativePath || '',
+          fileName:    normalizedUploadedTrack?.fileName || result.file?.fileName || uploadFormData.file.name,
           uploadedAt:  new Date().toISOString(),
           duration:    detectedDuration,
           fingerprint: fp,
@@ -655,7 +729,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
                 <div className="track-actions">
                   {/* Play */}
                   <button className="action-btn"
-                    onClick={() => { setSelectedTrack(track); setPlayingTrackId(track.id); }}
+                    onClick={() => { setSelectedTrack(normalizeMusicTrack(track)); setPlayingTrackId(track.id); }}
                     title="Preview">
                     {playingTrackId === track.id && selectedTrack?.id === track.id
                       ? <FiPause /> : <FiPlay />}
