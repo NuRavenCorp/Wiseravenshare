@@ -129,14 +129,32 @@ public class VideoStreamingController : ControllerBase
 
     private IEnumerable<string> BuildObjectKeyCandidates(string fileName)
     {
-        var normalizedFileName = Path.GetFileName(fileName);
+        var normalizedFileName = Path.GetFileName(fileName.Replace('\\', '/'));
+        var rawPath = fileName.Replace('\\', '/').Trim('/');
         var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
         var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(rawPath))
+        {
+            candidates.Add(rawPath);
+            candidates.Add(rawPath.TrimStart('/'));
+            candidates.Add(rawPath.Replace("//", "/"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedFileName))
+        {
+            candidates.Add(normalizedFileName);
+        }
 
         foreach (var defaultDestination in ResolveDefaultDestinations())
         {
             candidates.Add($"{projectFolder}/{defaultDestination}/{normalizedFileName}".Replace("//", "/"));
             candidates.Add($"{defaultDestination}/{normalizedFileName}".Replace("//", "/"));
+            if (!string.IsNullOrWhiteSpace(rawPath))
+            {
+                candidates.Add($"{projectFolder}/{rawPath}".Replace("//", "/"));
+                candidates.Add($"{rawPath}".Replace("//", "/"));
+            }
         }
 
         candidates.Add($"{projectFolder}/{normalizedFileName}".Replace("//", "/"));

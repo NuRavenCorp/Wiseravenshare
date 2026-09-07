@@ -196,13 +196,35 @@ INSERT INTO app_data.bucket_objects (
             return publicUrl;
         }
 
-        var resolved = _blobStorageService.ResolvePublicUrl(objectKey);
+        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey) ? fileName : objectKey.Replace('\\', '/').Trim('/');
+
+        var resolved = _blobStorageService.ResolvePublicUrl(normalizedObjectKey);
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             return resolved;
         }
 
+        if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
+        {
+            return BuildBlobFallbackUrl(normalizedObjectKey);
+        }
+
         return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
+    }
+
+    private static string BuildBlobFallbackUrl(string objectKey)
+    {
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "/api/videostreaming/stream";
+        }
+
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Uri.EscapeDataString);
+
+        return $"/api/videostreaming/blob/{string.Join("/", segments)}";
     }
 
     private static JsonElement? ParseMetadata(string? metadataJson)
