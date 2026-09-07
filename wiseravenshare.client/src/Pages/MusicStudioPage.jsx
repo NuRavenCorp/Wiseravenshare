@@ -107,6 +107,9 @@ const normalizeTrack = (track) => {
     || ''
   ).trim();
   const fileName = String(track.fileName || track.FileName || '').trim();
+  const mediaUrls = Array.isArray(track.mediaUrls || track.MediaUrls)
+    ? (track.mediaUrls || track.MediaUrls).filter(Boolean).map((value) => String(value).trim())
+    : [];
 
   const directMediaUrl = normalizePlaybackUrl(
     track.mediaUrl
@@ -115,6 +118,7 @@ const normalizeTrack = (track) => {
     || track.publicUrl
     || track.MediaUrl
     || track.Url
+    || mediaUrls[0]
     || track.filePath
     || track.FilePath
     || ''
@@ -138,6 +142,7 @@ const normalizeTrack = (track) => {
     duration: track.duration || track.Duration || '',
     relativePath: fallbackRelativePath,
     fileName,
+    mediaUrls,
     contentType: String(track.contentType || track.ContentType || '').trim(),
     mediaUrl,
     url: mediaUrl
@@ -402,10 +407,15 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const buildTrackSources = (track) => {
     if (!track || typeof track !== 'object') return [];
 
+    const mediaUrls = Array.isArray(track.mediaUrls || track.MediaUrls)
+      ? (track.mediaUrls || track.MediaUrls).map((value) => normalizePlaybackUrl(value))
+      : [];
+
     const sources = [
       normalizePlaybackUrl(track.mediaUrl || track.url || ''),
       toBlobStreamUrl(track.relativePath || ''),
-      track.fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(track.fileName)}` : ''
+      track.fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(track.fileName)}` : '',
+      ...mediaUrls
     ];
 
     return [...new Set(sources.filter(Boolean))];
