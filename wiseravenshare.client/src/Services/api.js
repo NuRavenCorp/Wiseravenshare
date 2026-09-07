@@ -1109,7 +1109,9 @@ export const apiService = {
 
         try {
             return await api.post('/ravensight/media/music/save', formData, {
-                headers: {}
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
         } catch (error) {
             throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
