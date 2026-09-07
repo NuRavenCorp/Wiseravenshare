@@ -103,7 +103,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return fallback;
 }
 
-async function getCombinedFeed(limit = 10, pageId?: string, username?: string, blueskyHandle?: string): Promise<SocialFeedItem[]> {
+async function getCombinedFeed(limit = 10, pageId?: string, username?: string): Promise<SocialFeedItem[]> {
   const query = new URLSearchParams({ limit: String(limit) });
   if (pageId && pageId.trim().length > 0) {
     query.append('pageId', pageId.trim());
@@ -111,10 +111,6 @@ async function getCombinedFeed(limit = 10, pageId?: string, username?: string, b
   if (username && username.trim().length > 0) {
     query.append('username', username.trim());
   }
-  if (blueskyHandle && blueskyHandle.trim().length > 0) {
-    query.append('blueskyHandle', blueskyHandle.trim());
-  }
-
   const response = await fetch(`${apiBase}/api/social/feed?${query.toString()}`, { method: 'GET' });
   if (!response.ok) {
     throw new Error(await parseError(response, `Failed to load social feed (${response.status})`));

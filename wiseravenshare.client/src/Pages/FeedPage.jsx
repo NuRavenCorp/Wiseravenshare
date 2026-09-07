@@ -498,7 +498,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                             </button>
 
                             {isExpanded && (
-                                <div style={{ padding: '0 10px 10px 10px' }}>
+                                <div style={{ padding: '0 10px 10px 10px', position: 'relative', zIndex: 10 }}>
                                     {group.items.map((post) => (
                                         <PostCard
                                             key={post.id}

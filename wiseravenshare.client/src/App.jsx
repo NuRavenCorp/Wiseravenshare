@@ -452,9 +452,6 @@ const App = () => {
             case 'tiktok-feed':
             case 'instagram-feed':
             case 'youtube-feed':
-            case 'twitter-feed':
-            case 'linkedin-feed':
-            case 'bluesky-feed':
             case 'social-feeds':
                 return canAccessPlatformAggregator
                     ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
@@ -476,9 +473,7 @@ const App = () => {
             case 'team-launchpad':
                 return <TeamLaunchpadPage user={user} onNavigate={setCurrentPage} isAdminUser={isAdminUser} />;
             case 'music-rights-studio':
-                return isAdminUser
-                    ? <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />
-                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+                return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
                 return <MusicStudioPage onNavigate={setCurrentPage} />;
             case 'my-library':
@@ -602,7 +597,7 @@ const App = () => {
                     <div>
                         <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>Can I connect social media accounts?</h3>
                         <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
-                            Yes. Authenticated users can connect and manage accounts on Facebook, TikTok, Instagram, YouTube, Twitter, LinkedIn, and Bluesky to directly distribute content from WiseRavenShare to those platforms.
+                            Yes. Authenticated users can connect and manage accounts on Facebook, TikTok, Instagram, and YouTube to directly distribute content from WiseRavenShare to those platforms.
                         </p>
                     </div>
                 </div>
