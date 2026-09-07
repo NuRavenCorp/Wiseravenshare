@@ -27,6 +27,8 @@ const AudioPlayer = ({
   const analyserRef = useRef(null);
   const audioContextRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const sourceCandidatesRef = useRef([]);
+  const sourceIndexRef = useRef(0);
 
   // State management
   const [isPlaying, setIsPlaying] = useState(false);
@@ -53,6 +55,70 @@ const AudioPlayer = ({
     'audio/aac': ['aac'],
     'audio/flac': ['flac'],
     'audio/ogg': ['ogg', 'oga']
+  };
+
+  const toBlobStreamUrl = (relativePath = '') => {
+    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return '';
+    const encoded = normalized
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+  };
+
+  const normalizePlaybackUrl = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) {
+      return raw;
+    }
+
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+      try {
+        const parsed = new URL(raw);
+        return `${parsed.pathname}${parsed.search}`;
+      } catch {
+        return raw;
+      }
+    }
+
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return '';
+  };
+
+  const buildTrackSources = (currentTrack) => {
+    if (!currentTrack || typeof currentTrack !== 'object') return [];
+
+    const fileName = String(currentTrack.fileName || currentTrack.FileName || '').trim();
+    const relativePath = String(
+      currentTrack.relativePath
+      || currentTrack.RelativePath
+      || currentTrack.objectKey
+      || currentTrack.ObjectKey
+      || ''
+    ).trim();
+
+    const direct = normalizePlaybackUrl(
+      currentTrack.mediaUrl
+      || currentTrack.MediaUrl
+      || currentTrack.url
+      || currentTrack.Url
+      || currentTrack.fileUrl
+      || currentTrack.FileUrl
+      || ''
+    );
+
+    const blobStream = toBlobStreamUrl(relativePath);
+    const fileStream = fileName
+      ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
+      : '';
+
+    return [...new Set([blobStream, fileStream, direct].filter(Boolean))];
   };
 
   // Initialize Web Audio API on first user interaction (required by browsers)
@@ -151,7 +217,10 @@ const AudioPlayer = ({
     setCurrentTime(0);
     setDuration(0);
 
-    audioRef.current.src = track.mediaUrl || track.url || '';
+    const candidates = buildTrackSources(track);
+    sourceCandidatesRef.current = candidates;
+    sourceIndexRef.current = 0;
+    audioRef.current.src = String(candidates[0] || '');
 
     const handleLoadedMetadata = () => {
       setDuration(audioRef.current.duration);
@@ -162,6 +231,19 @@ const AudioPlayer = ({
     };
 
     const handleError = (e) => {
+      const nextIndex = sourceIndexRef.current + 1;
+      const candidates = sourceCandidatesRef.current;
+
+      if (nextIndex < candidates.length && audioRef.current) {
+        sourceIndexRef.current = nextIndex;
+        audioRef.current.src = candidates[nextIndex];
+        audioRef.current.load();
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+        return;
+      }
+
       console.error('Audio loading error:', e);
       setIsLoading(false);
       if (onError) onError(e);
