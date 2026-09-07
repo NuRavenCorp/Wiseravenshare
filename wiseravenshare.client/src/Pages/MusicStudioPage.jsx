@@ -289,6 +289,7 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const inputChunksRef = useRef([]);
   const inputTimerRef = useRef(null);
   const cameraStreamRef = useRef(null);
+  const playRequestedRef = useRef(false);
 
   // ── 1. Library load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -497,7 +498,7 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   useEffect(() => {
     const el = audioRef.current;
     if (!el || !currentTrack) return;
-    const wasPlaying = playingRef.current;
+    const shouldAutoplay = playingRef.current || playRequestedRef.current;
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -512,12 +513,22 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     }
     el.src = sourceUrl;
     el.load();
-    // Resume playback after load if we were playing before
-    if (wasPlaying) {
+
+    // Resume/start playback after load when playback was active or user pressed/touched a track.
+    if (shouldAutoplay) {
+      playRequestedRef.current = false;
       el.addEventListener('canplay', () => {
         ensureGraph();
-        el.play().catch(() => {});
-        setIsPlaying(true);
+        const ctx = nodesRef.current?.ctx;
+        if (ctx && ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
+        }
+        el.play()
+          .then(() => setIsPlaying(true))
+          .catch((error) => {
+            setIsPlaying(false);
+            addToast(error?.message || 'Playback failed to start.', 'error');
+          });
       }, { once: true });
     }
   }, [currentTrack]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1279,7 +1290,8 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     }
   };
 
-  const selectTrack = (track, idx) => {
+  const selectTrack = (track, idx, shouldPlay = true) => {
+    playRequestedRef.current = shouldPlay;
     setCurrentTrack(track);
     setTrackIndex(idx);
   };
@@ -1518,7 +1530,11 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
                 return (
                   <div key={t.id}
                     className={`lib-track ${active ? 'active' : ''}`}
-                    onClick={() => selectTrack(t, i)}
+                    onClick={() => selectTrack(t, i, true)}
+                    onTouchEnd={(event) => {
+                      event.preventDefault();
+                      selectTrack(t, i, true);
+                    }}
                   >
                     <div className="lt-num">
                       {active && isPlaying
