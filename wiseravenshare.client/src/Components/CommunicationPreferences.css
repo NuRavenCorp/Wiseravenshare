@@ -1,0 +1,403 @@
+.communication-preferences {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.preferences-header {
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 1.5rem;
+}
+
+.preferences-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 0.5rem 0;
+}
+
+.preferences-subtitle {
+  color: #666;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Alerts */
+.preferences-alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.preferences-alert.error {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  color: #c33;
+}
+
+.preferences-alert.success {
+  background-color: #efe;
+  border: 1px solid #cfc;
+  color: #3a3;
+}
+
+.alert-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+/* Sections */
+.preferences-section {
+  margin-bottom: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.preferences-section:last-of-type {
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 1rem 0;
+}
+
+.section-description {
+  color: #666;
+  font-size: 0.9rem;
+  margin: 0 0 1rem 0;
+}
+
+/* Phone Number Section */
+.phone-verified,
+.phone-not-verified {
+  background-color: #f9f9f9;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.phone-verified {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.phone-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.phone-icon {
+  font-size: 1.5rem;
+}
+
+.phone-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.phone-number {
+  font-weight: 500;
+  color: #333;
+  font-family: 'Courier New', monospace;
+}
+
+.phone-status {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.phone-status.verified {
+  color: #3a3;
+  font-weight: 500;
+}
+
+.phone-not-verified {
+  text-align: center;
+}
+
+.phone-message {
+  color: #666;
+  margin: 0 0 1rem 0;
+  font-size: 0.95rem;
+}
+
+/* Preference Items */
+.preference-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.preference-info {
+  flex: 1;
+}
+
+.preference-label {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #333;
+  margin: 0 0 0.5rem 0;
+}
+
+.preference-description {
+  color: #666;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.preference-hint {
+  margin-top: 0.5rem;
+  color: #999;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.toggle-switch input {
+  display: none;
+}
+
+.toggle-slider {
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  background-color: #ccc;
+  border-radius: 14px;
+  transition: background-color 0.3s;
+  position: relative;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: white;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #4a90e2;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(22px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Channel Selector */
+.channel-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.channel-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.channel-radio input[type="radio"] {
+  cursor: pointer;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+}
+
+.channel-name {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.channel-radio input[type="radio"]:checked + .channel-name {
+  color: #4a90e2;
+}
+
+.channel-radio:has(input[type="radio"]:checked) {
+  background-color: #e8f2ff;
+  border-color: #4a90e2;
+}
+
+.channel-radio input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Info Box */
+.preferences-info-box {
+  background-color: #f0f8ff;
+  border: 1px solid #c0e0ff;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.info-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 1rem 0;
+}
+
+.info-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.info-list li {
+  color: #666;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-bottom: 0.5rem;
+}
+
+.info-list li:last-child {
+  margin-bottom: 0;
+}
+
+.info-list a {
+  color: #4a90e2;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.info-list a:hover {
+  text-decoration: underline;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.btn-primary {
+  background-color: #4a90e2;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #357abd;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background-color: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-small {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+/* Loading and Error States */
+.preferences-loading,
+.preferences-error {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+.preferences-error {
+  color: #c33;
+  background-color: #fee;
+  border-radius: 8px;
+  border: 1px solid #fcc;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .communication-preferences {
+    padding: 1.5rem;
+  }
+
+  .preferences-title {
+    font-size: 1.3rem;
+  }
+
+  .phone-verified {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .preference-item {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .toggle-switch {
+    align-self: flex-start;
+  }
+
+  .channel-selector {
+    grid-template-columns: 1fr;
+  }
+}
