@@ -48,7 +48,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, cancellationToken);
         var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)
-            ? $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(track.FileName)}"
+            ? $"{Request.Scheme}://{Request.Host}/api/videostreaming/blob/{Uri.EscapeDataString(track.FileName)}"
             : track.MediaUrl;
 
         return Ok(new
