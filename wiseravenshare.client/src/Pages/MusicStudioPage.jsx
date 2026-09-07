@@ -203,7 +203,7 @@ const RIGHTS_PLANS = [
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const MusicStudioPage = ({ onNavigate }) => {
+const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
   const { user } = useAuth();
   const { addToast } = useNotification();
 
@@ -266,6 +266,13 @@ const MusicStudioPage = ({ onNavigate }) => {
     'sound-creator': false,
   });
   const [rightsCheckoutKey, setRightsCheckoutKey] = useState('');
+
+  useEffect(() => {
+    const allowedPanels = new Set(['eq', 'effects', 'vocal', 'input', 'rights', 'fm', 'radio-creator']);
+    if (allowedPanels.has(String(initialPanel || '').trim())) {
+      setActivePanel(String(initialPanel).trim());
+    }
+  }, [initialPanel]);
 
   // DOM / Audio refs
   const audioRef   = useRef(null);

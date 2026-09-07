@@ -220,17 +220,18 @@
 
 .panel-tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--ms-border);
   background: var(--ms-surface);
 }
 .panel-tabs button {
-  flex: 1;
+  flex: 1 1 140px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--ms-muted);
   padding: 10px;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   cursor: pointer;
   display: flex;
   align-items: center;
