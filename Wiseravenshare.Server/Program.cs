@@ -17,6 +17,7 @@ using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Middleware;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.Communication;
+using Wiseravenshare.Server.Services.FM;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -961,7 +962,289 @@ CREATE TABLE IF NOT EXISTS app_data.""MediaBookmarks"" (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_media_bookmarks_media_user
-    ON app_data.""MediaBookmarks"" (""MediaId"", ""UserId"");";
+    ON app_data.""MediaBookmarks"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'FM',
+    ""City"" VARCHAR(255) NULL,
+    ""Country"" VARCHAR(255) NULL,
+    ""State"" VARCHAR(50) NULL,
+    ""Latitude"" DOUBLE PRECISION NULL,
+    ""Longitude"" DOUBLE PRECISION NULL,
+    ""StreamUrl"" VARCHAR(500) NOT NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""Genre"" VARCHAR(50) NOT NULL DEFAULT 'General',
+    ""Language"" VARCHAR(100) NOT NULL DEFAULT 'English',
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsFeatured"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Bitrate"" INTEGER NOT NULL DEFAULT 128,
+    ""Codec"" VARCHAR(50) NULL,
+    ""CreatedBy"" UUID NULL,
+    ""IsVerified"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""VerifiedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequency_band
+    ON app_data.""FMStations"" (""Frequency"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequencykey_band
+    ON app_data.""FMStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_featured
+    ON app_data.""FMStations"" (""IsFeatured"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_listeners
+    ON app_data.""FMStations"" (""Listeners"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_likes_station_user
+    ON app_data.""FMStationLikes"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_bookmarks_station_user
+    ON app_data.""FMStationBookmarks"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationHistory"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ListenedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fm_station_history_user_time
+    ON app_data.""FMStationHistory"" (""UserId"", ""ListenedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMUserPreferences"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""FavoriteGenres"" TEXT[] NULL,
+    ""FavoriteLanguages"" TEXT[] NULL,
+    ""RecentStations"" JSONB NULL,
+    ""Volume"" INTEGER NOT NULL DEFAULT 80,
+    ""AutoPlay"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowLyrics"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowAlbumArt"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LowQualityMode"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_user_preferences_user
+    ON app_data.""FMUserPreferences"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""CreatorRadioStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""Genre"" VARCHAR(255) NULL,
+    ""SubGenre"" VARCHAR(255) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""StreamUrl"" VARCHAR(500) NULL,
+    ""StreamKey"" VARCHAR(500) NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""SocialLinks"" VARCHAR(500) NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""LastLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledEndAt"" TIMESTAMPTZ NULL,
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""TotalListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""PeakListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""FollowerCount"" INTEGER NOT NULL DEFAULT 0,
+    ""AllowChat"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowRequests"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowShoutouts"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""RequireApproval"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Schedule"" JSONB NULL,
+    ""Playlist"" JSONB NULL,
+    ""Settings"" JSONB NULL,
+    ""IsMonetized"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""SubscriptionPrice"" NUMERIC(18,2) NULL,
+    ""AllowDonations"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DonationLink"" TEXT NULL,
+    ""IsProprietaryFrequency"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""FrequencyLockedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_creator_radio_creator
+    ON app_data.""CreatorRadioStations"" (""CreatorId"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_frequencykey_band
+    ON app_data.""CreatorRadioStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_live_status
+    ON app_data.""CreatorRadioStations"" (""IsLive"", ""Status"", ""Visibility"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationSchedules"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""DayOfWeek"" INTEGER NOT NULL,
+    ""StartTime"" INTERVAL NOT NULL,
+    ""EndTime"" INTERVAL NOT NULL,
+    ""Timezone"" VARCHAR(64) NOT NULL DEFAULT 'UTC',
+    ""IsRecurring"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""SpecificDate"" TIMESTAMPTZ NULL,
+    ""HostName"" VARCHAR(255) NULL,
+    ""Genre"" VARCHAR(255) NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_schedule_station_day_start
+    ON app_data.""RadioStationSchedules"" (""StationId"", ""DayOfWeek"", ""StartTime"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationEpisodes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""ScheduleId"" UUID NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""AudioUrl"" VARCHAR(500) NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""BroadcastDate"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ListenCount"" INTEGER NOT NULL DEFAULT 0,
+    ""LikeCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CommentCount"" INTEGER NOT NULL DEFAULT 0,
+    ""ShareCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLiveRecording"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsPublished"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_episode_station_broadcast
+    ON app_data.""RadioStationEpisodes"" (""StationId"", ""BroadcastDate"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFollows"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""FollowedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsNotified"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_follows_station_user
+    ON app_data.""RadioStationFollows"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationListens"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""StartedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""EndedAt"" TIMESTAMPTZ NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""DeviceInfo"" VARCHAR(255) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_listens_station_started
+    ON app_data.""RadioStationListens"" (""StationId"", ""StartedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationRequests"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""SongTitle"" VARCHAR(255) NOT NULL,
+    ""ArtistName"" VARCHAR(255) NULL,
+    ""Message"" VARCHAR(500) NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PlayedAt"" TIMESTAMPTZ NULL,
+    ""PlayedBy"" UUID NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_requests_station_status_time
+    ON app_data.""RadioStationRequests"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationShoutouts"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Message"" VARCHAR(500) NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ReadAt"" TIMESTAMPTZ NULL,
+    ""AcknowledgedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_shoutouts_station_status_time
+    ON app_data.""RadioStationShoutouts"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFrequencyClaims"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""IsLocked"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LockedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_freq_claims_key_band
+    ON app_data.""RadioStationFrequencyClaims"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_station
+    ON app_data.""RadioStationFrequencyClaims"" (""StationId"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_creator
+    ON app_data.""RadioStationFrequencyClaims"" (""CreatorId"");";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
@@ -1143,6 +1426,9 @@ builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageSer
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddScoped<IFrequencyIntegrityService, FrequencyIntegrityService>();
+builder.Services.AddScoped<IFMStationService, FMStationService>();
+builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationService>();
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
