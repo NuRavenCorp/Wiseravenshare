@@ -545,13 +545,6 @@ const MyLibraryPage = ({ onNavigate }) => {
                             )}
                         </div>
                     )}
-                </>
-            )}
-        </section>
-    );
-};
-
-export default MyLibraryPage;
 
                     {/* Music Rights Protection View */}
                     {activeTab === 'protect' && (
@@ -652,3 +645,10 @@ export default MyLibraryPage;
                             )}
                         </div>
                     )}
+                </>
+            )}
+        </section>
+    );
+};
+
+export default MyLibraryPage;
