@@ -548,6 +548,12 @@ input[type="range"][orient="vertical"] {
   letter-spacing: 0.08em;
   color: var(--ms-accent2);
 }
+.upload-queue-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--ms-accent);
+}
 .lib-upload input[type="file"],
 .lib-upload input[type="text"] {
   width: 100%;

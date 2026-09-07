@@ -186,6 +186,7 @@ const MusicStudioPage = ({ onNavigate }) => {
 
   // DOM / Audio refs
   const audioRef   = useRef(null);
+  const uploadInputRef = useRef(null);
   const canvasRef  = useRef(null);
   const nodesRef   = useRef(null);   // null = graph not yet built
   const vizRafRef  = useRef(null);
@@ -858,15 +859,16 @@ const MusicStudioPage = ({ onNavigate }) => {
 
   const handleUploadTrack = async (e) => {
     e?.preventDefault();
-    if (!uploadFile) {
+    const queuedFile = uploadFile || uploadInputRef.current?.files?.[0] || null;
+    if (!queuedFile) {
       addToast('Choose a music file first.', 'warning');
       return;
     }
 
     setIsUploading(true);
     try {
-      const response = await apiService.uploadMusicTrack(uploadFile, {
-        title: uploadTitle || uploadFile.name.replace(/\.[^/.]+$/, ''),
+      const response = await apiService.uploadMusicTrack(queuedFile, {
+        title: uploadTitle || queuedFile.name.replace(/\.[^/.]+$/, ''),
         artist: uploadArtist,
         album: uploadAlbum,
         genre: uploadGenre,
@@ -893,6 +895,9 @@ const MusicStudioPage = ({ onNavigate }) => {
       setUploadArtist('');
       setUploadAlbum('');
       setUploadGenre('');
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = '';
+      }
       addToast('Track uploaded to your music library.', 'success');
     } catch (error) {
       addToast(error?.message || 'Music upload failed.', 'error');
@@ -1040,6 +1045,7 @@ const MusicStudioPage = ({ onNavigate }) => {
             <div className="lib-upload-title"><FiUpload /> Upload music to your library</div>
             <input
               type="file"
+              ref={uploadInputRef}
               accept="audio/*"
               onChange={(e) => {
                 const file = e.target.files?.[0] || null;
@@ -1049,6 +1055,9 @@ const MusicStudioPage = ({ onNavigate }) => {
                 }
               }}
             />
+            {uploadFile && (
+              <small className="upload-queue-hint">Queued: {uploadFile.name}</small>
+            )}
             <div className="lib-upload-grid">
               <input
                 type="text"
