@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --logLevel error",
     "preview": "vite preview",
     "android:assets": "npx @capacitor/assets generate --android",
     "android:sync": "npm run build && npx cap sync android",
@@ -18,7 +18,7 @@
     "android:release:win": "powershell -ExecutionPolicy Bypass -File ./scripts/build-android-release.ps1"
   },
   "dependencies": {
-    "@microsoft/signalr": "^9.0.8",
+    "@microsoft/signalr": "^10.0.11",
     "axios": "^1.18.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

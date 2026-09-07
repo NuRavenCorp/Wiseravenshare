@@ -9,7 +9,8 @@ export default defineConfig({
     plugins: [plugin()],
     resolve: {
         alias: {
-            '@': fileURLToPath(new URL('./src', import.meta.url))
+            '@': fileURLToPath(new URL('./src', import.meta.url)),
+            '@microsoft/signalr': '@microsoft/signalr/dist/cjs/index.js'
         }
     },
     build: {
@@ -20,6 +21,9 @@ export default defineConfig({
                     if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
                         return 'vendor-react';
                     }
+                    if (id.includes('node_modules/@microsoft/signalr')) {
+                        return 'vendor-realtime';
+                    }
                     if (id.includes('node_modules/react-icons')) {
                         return 'vendor-icons';
                     }
@@ -29,7 +33,7 @@ export default defineConfig({
                 }
             }
         },
-        chunkSizeWarningLimit: 600
+        chunkSizeWarningLimit: 900
     },
     server: {
         port: parseInt(env.DEV_SERVER_PORT || '5173'),
