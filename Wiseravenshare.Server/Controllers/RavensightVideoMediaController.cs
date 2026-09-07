@@ -67,9 +67,9 @@ public sealed class RavensightVideoMediaController : ControllerBase
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
         var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(dto.StorageMode, dto.IsPermanent, hasActiveSubscription);
 
-        var mediaUrl = !string.IsNullOrWhiteSpace(saved.File.PublicUrl)
-            ? saved.File.PublicUrl
-            : $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(saved.File.FileName)}";
+        var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
+            saved.File.PublicUrl,
+            StreamingUrlHelper.StreamByFileName(saved.File.FileName));
         var persistenceStatus = "ready";
         var response = new RavensightSavedMediaDto
         {

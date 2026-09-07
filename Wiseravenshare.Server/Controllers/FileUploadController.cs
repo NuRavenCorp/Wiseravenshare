@@ -122,7 +122,7 @@ public class MediaController : ControllerBase
 
         if (wantsSocialCrossPost)
         {
-            var mediaUrlForShare = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+            var mediaUrlForShare = StreamingUrlHelper.StreamByFileName(uniqueFileName);
             var shareUserId = Guid.TryParse(
                 User.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? User.FindFirstValue("sub")
@@ -180,7 +180,7 @@ public class MediaController : ControllerBase
                 return Unauthorized("Unable to determine current user for video library save.");
             }
 
-            var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+            var absoluteVideoUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
             try
             {
                 video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
@@ -208,7 +208,7 @@ public class MediaController : ControllerBase
             }
         }
 
-        var mediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        var mediaUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
         await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
 
         return Ok(new
