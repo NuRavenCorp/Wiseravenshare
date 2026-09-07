@@ -121,7 +121,7 @@ public class RavensightController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
-        var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        var absoluteVideoUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
         if (_blobStorageService.IsConfigured)
         {
             var publicUrl = await TryUploadToBlobStorageAsync(file, uniqueFileName, upload.DestinationFolder, cancellationToken);

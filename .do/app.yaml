@@ -50,6 +50,21 @@ services:
         value: wiseravenshare/
       - key: Storage__Blob__BucketName
         value: bucket-wrs-01010
+      - key: Storage__Blob__Endpoint
+        value: ${DO_SPACES_ENDPOINT}
+        type: SECRET
+      - key: Storage__Blob__Region
+        value: ${DO_SPACES_REGION}
+        type: SECRET
+      - key: Storage__Blob__AccessKey
+        value: ${DO_SPACES_ACCESS_KEY}
+        type: SECRET
+      - key: Storage__Blob__SecretKey
+        value: ${DO_SPACES_SECRET_KEY}
+        type: SECRET
+      - key: Storage__Blob__PublicBaseUrl
+        value: ${DO_SPACES_PUBLIC_BASE_URL}
+        type: SECRET
       - key: Persistence__RequireDatabase
         value: "true"
       - key: STRIPE_PUBLISHABLE_API
