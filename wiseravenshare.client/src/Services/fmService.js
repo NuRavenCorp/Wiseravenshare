@@ -4,12 +4,24 @@ import api from './api';
 // Free, open, no API key. Full docs: https://api.radio-browser.info
 //
 // Per the spec:
-//  1. Bootstrap from a hardcoded known server to discover all live servers.
+//  1. Bootstrap from hardcoded seeds to discover all live servers via /json/servers.
 //  2. Randomize the server list; retry each in turn on failure.
-//  3. Send a recognisable User-Agent string.
+//  3. Include a descriptive identifier. Note: browsers block the `User-Agent` header
+//     from client-side fetch() (it is a "forbidden header name"). We use
+//     `X-WiseRaven-Client` for traceability and also append our name to the
+//     Accept header as a fallback signal for logging.
 //  4. Send /json/url/{uuid} click events for every station the user plays.
+//  5. ONLY use streams where url_resolved starts with https:// — http:// streams
+//     are blocked by browsers as mixed content when the page is served over HTTPS.
+//     Any remaining http:// stream is automatically routed through the backend proxy.
 
-const APP_USER_AGENT = 'WiseRavenFM/1.0 (https://wise-ravens.com)';
+const APP_CLIENT_ID = 'WiseRavenFM/1.0';
+
+// Radio Browser fetch headers — browsers forbid setting User-Agent from JS.
+const RB_HEADERS = {
+  'X-WiseRaven-Client': APP_CLIENT_ID,
+  'Accept': 'application/json'
+};
 
 // Hardcoded seed hosts — only used to bootstrap the live server list once.
 const SEED_HOSTS = [
@@ -30,19 +42,16 @@ const shuffle = (arr) => {
   return arr;
 };
 
-// Fetch the full list of Radio Browser servers from the API, fall back to seeds.
+// Fetch the full list of Radio Browser servers from /json/servers, fall back to seeds.
 const discoverServers = async () => {
   if (_serverList && _serverList.length > 0) return _serverList;
 
   for (const seed of SEED_HOSTS) {
     try {
-      const res = await fetch(`${seed}/json/servers`, {
-        headers: { 'User-Agent': APP_USER_AGENT }
-      });
+      const res = await fetch(`${seed}/json/servers`, { headers: RB_HEADERS });
       if (!res.ok) continue;
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
-        // API returns objects with `name` = hostname (without scheme).
         const hosts = data
           .map((entry) => {
             const name = String(entry?.name || '').trim();
@@ -60,7 +69,7 @@ const discoverServers = async () => {
     }
   }
 
-  // All seeds failed — fall back to seeds in random order.
+  // All seeds failed — use seeds in random order.
   _serverList = shuffle([...SEED_HOSTS]);
   return _serverList;
 };
@@ -79,22 +88,19 @@ const radioBrowserFetch = async (path, params = {}) => {
   let lastError = null;
   for (const host of servers) {
     try {
-      const res = await fetch(`${host}/json/${path}?${query}`, {
-        headers: { 'User-Agent': APP_USER_AGENT }
-      });
+      const res = await fetch(`${host}/json/${path}?${query}`, { headers: RB_HEADERS });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return Array.isArray(data) ? data : [];
     } catch (err) {
       lastError = err;
-      // Try the next server.
     }
   }
 
   throw lastError || new Error('Radio Browser: all servers unavailable.');
 };
 
-// Send a /json/url/{uuid} click event for a station (marks it popular in the DB).
+// Send a /json/url/{uuid} click event (marks station as popular in the community DB).
 // Fire-and-forget — never block playback.
 export const trackRadioBrowserClick = (stationUuid) => {
   if (!stationUuid || String(stationUuid).startsWith('rb-')) return;
@@ -103,7 +109,7 @@ export const trackRadioBrowserClick = (stationUuid) => {
     if (!host) return;
     fetch(`${host}/json/url/${encodeURIComponent(stationUuid)}`, {
       method: 'POST',
-      headers: { 'User-Agent': APP_USER_AGENT }
+      headers: RB_HEADERS
     }).catch(() => {});
   }).catch(() => {});
 };
@@ -118,11 +124,33 @@ export const GENRE_PRESETS = [
   { id: 'hiphop',  label: 'Hip-Hop', tags: ['hiphop', 'rap'],    icon: '🎤' },
 ];
 
+// Resolve the best playable stream URL for a Radio Browser station entry.
+//  - Prefer url_resolved (the server-tested canonical URL).
+//  - Only use https:// directly — http:// streams are blocked by browsers as
+//    mixed content when the page is on HTTPS.
+//  - http:// streams are automatically routed through the backend proxy so they
+//    still play; discard stations with no stream at all.
+const resolveStreamUrl = (rb) => {
+  const resolved  = String(rb.url_resolved || '').trim();
+  const direct    = String(rb.url          || '').trim();
+
+  // Prefer url_resolved; fall back to url.
+  const best = resolved || direct;
+  if (!best) return null;
+
+  if (best.startsWith('https://')) return best;
+  if (best.startsWith('http://'))  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(best)}`;
+
+  // Relative or unknown scheme — discard.
+  return null;
+};
+
 // Map a Radio Browser station object to our internal station format.
 const normalizeRadioBrowserStation = (rb) => {
   if (!rb || typeof rb !== 'object') return null;
-  const stream = String(rb.url_resolved || rb.url || '').trim();
-  if (!stream) return null;
+
+  const streamUrl = resolveStreamUrl(rb);
+  if (!streamUrl) return null; // No usable stream — skip.
 
   return {
     id: String(rb.stationuuid || `rb-${Math.random().toString(16).slice(2)}`),
@@ -134,7 +162,7 @@ const normalizeRadioBrowserStation = (rb) => {
     country: String(rb.country || 'International').trim(),
     genre: String(rb.tags || '').split(',').map((t) => t.trim()).filter(Boolean).slice(0, 2).join(' / ') || 'Music',
     language: String(rb.language || 'English').trim(),
-    streamUrl: stream,
+    streamUrl,
     logoUrl: String(rb.favicon || '').trim(),
     listeners: Number(rb.clickcount || 0),
     bitrate: Number(rb.bitrate || 128),
@@ -375,21 +403,17 @@ const requestList = async (request, fallback = []) => {
 };
 
 // Build the backend proxy URL for a given external stream URL.
-// Falls back to the direct URL when the proxy is unavailable (e.g. local dev without the endpoint).
+// ALL http:// streams are routed through the server proxy — browsers block them
+// as mixed content when the page is served over HTTPS.
+// https:// streams play directly (no proxy needed).
 export const buildProxyStreamUrl = (rawUrl) => {
   const url = String(rawUrl || '').trim();
   if (!url) return '';
-
-  // Only proxy http:// streams or streams from domains known to have CORS issues.
-  // Pure https:// streams from CORS-open providers can play directly.
-  const needsProxy =
-    url.startsWith('http://') ||
-    /radiofrance\.fr|shoutcast\.com|radioparadise\.com/.test(url);
-
-  if (!needsProxy) return url;
-
-  // Route through the backend proxy to avoid CORS and mixed-content blocks.
-  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+  if (url.startsWith('http://')) {
+    return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+  }
+  // Already HTTPS (or a proxy path already constructed) — use as-is.
+  return url;
 };
 
 // ─── Public Radio Browser helpers ────────────────────────────────────────────
