@@ -3,6 +3,7 @@ using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Entities.FM;
+using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
 using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
@@ -86,6 +87,13 @@ public class AppDbContext : DbContext
     public DbSet<Wiseravenshare.Server.Entities.Roles.UserRole> UserRoles => Set<Wiseravenshare.Server.Entities.Roles.UserRole>();
     public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
+    // Personalization & Learning
+    public DbSet<UserPersonalizationProfile> UserPersonalizationProfiles => Set<UserPersonalizationProfile>();
+    public DbSet<UserInteractionEvent>       UserInteractionEvents        => Set<UserInteractionEvent>();
+    public DbSet<PersonalizationTag>         PersonalizationTags          => Set<PersonalizationTag>();
+    public DbSet<PersonalizationTagMapping>  PersonalizationTagMappings   => Set<PersonalizationTagMapping>();
+    public DbSet<RegionalTrendSnapshot>      RegionalTrendSnapshots       => Set<RegionalTrendSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

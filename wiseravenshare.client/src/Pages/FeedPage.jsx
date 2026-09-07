@@ -12,8 +12,10 @@ import OnboardingCard from '../Components/Common/OnboardingCard';
 import ShortFormFeed from '../Components/Feed/ShortFormFeed';
 import { apiService } from '../Services/api';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
+import { usePersonalization } from '../hooks/usePersonalization';
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
+    const { track } = usePersonalization();
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
@@ -59,6 +61,13 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
         const mediaUrl = String(post?.mediaUrl || post?.imageUrl || '').toLowerCase();
         return /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaUrl);
+    };
+
+    // Extract hashtag tokens from a post for personalization tracking.
+    const extractPostTags = (post) => {
+        const content = String(post?.content || '');
+        const matches = content.match(/#[a-zA-Z0-9_]+/g) || [];
+        return matches.map((t) => t.slice(1).toLowerCase()).slice(0, 10);
     };
 
     const buildIntegrityReport = (post, mode = 'manual') => {
@@ -164,6 +173,14 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const handleLike = async (postId) => {
         try {
             const updated = await apiService.likePost(postId);
+            // Track the like interaction for personalization.
+            const post = posts.find((p) => p.id === postId);
+            if (post) {
+                track('Like', 'Post', postId, {
+                    title: post.content?.slice(0, 100) || '',
+                    tags: extractPostTags(post),
+                });
+            }
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId

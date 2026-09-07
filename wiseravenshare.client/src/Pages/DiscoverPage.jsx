@@ -4,6 +4,7 @@ import { apiService } from '../Services/api';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
+import { usePersonalization } from '../hooks/usePersonalization';
 
 const MAX_STORED_POSTS = 120;
 
@@ -173,7 +174,18 @@ const DiscoverPage = ({ onNavigate }) => {
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [focusedTopic, setFocusedTopic] = useState('');
     const [focusedTopicSource, setFocusedTopicSource] = useState(null);
+    const [personalizedTrends, setPersonalizedTrends] = useState([]);
     const { user } = useAuth();
+    const { getTrending, track } = usePersonalization();
+
+    // Load personalized regional trends to supplement the topic list.
+    useEffect(() => {
+        getTrending('General').then((items) => {
+            if (Array.isArray(items) && items.length > 0) {
+                setPersonalizedTrends(items);
+            }
+        }).catch(() => {});
+    }, []);
 
     useEffect(() => {
         loadDiscoverContent();
@@ -294,17 +306,37 @@ const DiscoverPage = ({ onNavigate }) => {
             });
         });
 
-        const topicBuckets = (Array.isArray(topics) ? topics : [])
-            .slice(0, 12)
-            .map((topic, index) => ({
-                id: topic.id || `topic-${index}`,
-                name: normalizeTopicValue(topic.name || topic.topic || `topic${index + 1}`),
-                label: toTrendTopicLabel(topic),
-                count: Number(topic.count) || Number(topic.posts) || 0,
-                description: `Explore the latest activity around ${toTrendTopicLabel(topic)}.`,
-                externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
-                    || buildSearchUrl(toTrendTopicLabel(topic))
-            }));
+        // Merge platform topics with personalized regional trends.
+        const personalizedBuckets = (Array.isArray(personalizedTrends) ? personalizedTrends : [])
+            .map((t, index) => ({
+                id: `persona-trend-${index}`,
+                name: normalizeTopicValue(String(t.topic || '')),
+                label: `#${normalizeTopicValue(String(t.topic || 'trend'))}`,
+                count: Number(t.score) || 0,
+                description: `Trending in your region · ${t.source || 'WiseRaven'}`,
+                externalUrl: buildSearchUrl(String(t.topic || '')),
+                isPersonalized: true
+            }))
+            .filter((t) => t.name.length > 1);
+
+        const topicBuckets = [
+            ...(Array.isArray(topics) ? topics : [])
+                .slice(0, 8)
+                .map((topic, index) => ({
+                    id: topic.id || `topic-${index}`,
+                    name: normalizeTopicValue(topic.name || topic.topic || `topic${index + 1}`),
+                    label: toTrendTopicLabel(topic),
+                    count: Number(topic.count) || Number(topic.posts) || 0,
+                    description: `Explore the latest activity around ${toTrendTopicLabel(topic)}.`,
+                    externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
+                        || buildSearchUrl(toTrendTopicLabel(topic))
+                })),
+            ...personalizedBuckets.filter((pb) =>
+                !(Array.isArray(topics) ? topics : []).some(
+                    (t) => normalizeTopicValue(t.name || t.topic) === pb.name
+                )
+            )
+        ].slice(0, 16);
 
         let storedNews = [];
         try {
@@ -354,7 +386,7 @@ const DiscoverPage = ({ onNavigate }) => {
             political: political.length > 0 ? political : mergedNews.filter((item) => item.category === 'Politics').slice(0, 6),
             posts: posts.slice(0, 8)
         };
-    }, [followingIds, posts, topics]);
+    }, [followingIds, posts, topics, personalizedTrends]);
 
     useEffect(() => {
         const availableSections = ['people', 'groups', 'topics', 'news', 'currentEvents', 'headlines', 'political'];
