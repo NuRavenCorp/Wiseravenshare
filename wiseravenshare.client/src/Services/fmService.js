@@ -1,12 +1,112 @@
 import api from './api';
 
-// ─── Radio Browser API (free, no key, community maintained) ──────────────────
-// Used for live station scan and genre preset search.
-const RADIO_BROWSER_HOSTS = [
+// ─── Radio Browser API ────────────────────────────────────────────────────────
+// Free, open, no API key. Full docs: https://api.radio-browser.info
+//
+// Per the spec:
+//  1. Bootstrap from a hardcoded known server to discover all live servers.
+//  2. Randomize the server list; retry each in turn on failure.
+//  3. Send a recognisable User-Agent string.
+//  4. Send /json/url/{uuid} click events for every station the user plays.
+
+const APP_USER_AGENT = 'WiseRavenFM/1.0 (https://wise-ravens.com)';
+
+// Hardcoded seed hosts — only used to bootstrap the live server list once.
+const SEED_HOSTS = [
   'https://de1.api.radio-browser.info',
   'https://nl1.api.radio-browser.info',
   'https://at1.api.radio-browser.info'
 ];
+
+// Runtime server list (populated once, then randomized per-session).
+let _serverList = null;
+
+// Shuffle an array in-place (Fisher-Yates).
+const shuffle = (arr) => {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
+// Fetch the full list of Radio Browser servers from the API, fall back to seeds.
+const discoverServers = async () => {
+  if (_serverList && _serverList.length > 0) return _serverList;
+
+  for (const seed of SEED_HOSTS) {
+    try {
+      const res = await fetch(`${seed}/json/servers`, {
+        headers: { 'User-Agent': APP_USER_AGENT }
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        // API returns objects with `name` = hostname (without scheme).
+        const hosts = data
+          .map((entry) => {
+            const name = String(entry?.name || '').trim();
+            return name ? `https://${name}` : null;
+          })
+          .filter(Boolean);
+
+        if (hosts.length > 0) {
+          _serverList = shuffle(hosts);
+          return _serverList;
+        }
+      }
+    } catch {
+      // Try next seed.
+    }
+  }
+
+  // All seeds failed — fall back to seeds in random order.
+  _serverList = shuffle([...SEED_HOSTS]);
+  return _serverList;
+};
+
+// Make a request to the Radio Browser API, rotating through servers on failure.
+const radioBrowserFetch = async (path, params = {}) => {
+  const servers = await discoverServers();
+  const query = new URLSearchParams({
+    limit: 20,
+    order: 'clickcount',
+    reverse: true,
+    hidebroken: true,
+    ...params
+  });
+
+  let lastError = null;
+  for (const host of servers) {
+    try {
+      const res = await fetch(`${host}/json/${path}?${query}`, {
+        headers: { 'User-Agent': APP_USER_AGENT }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      lastError = err;
+      // Try the next server.
+    }
+  }
+
+  throw lastError || new Error('Radio Browser: all servers unavailable.');
+};
+
+// Send a /json/url/{uuid} click event for a station (marks it popular in the DB).
+// Fire-and-forget — never block playback.
+export const trackRadioBrowserClick = (stationUuid) => {
+  if (!stationUuid || String(stationUuid).startsWith('rb-')) return;
+  discoverServers().then((servers) => {
+    const host = servers[0];
+    if (!host) return;
+    fetch(`${host}/json/url/${encodeURIComponent(stationUuid)}`, {
+      method: 'POST',
+      headers: { 'User-Agent': APP_USER_AGENT }
+    }).catch(() => {});
+  }).catch(() => {});
+};
 
 // Genre tag mappings → Radio Browser tag queries.
 export const GENRE_PRESETS = [
@@ -25,7 +125,7 @@ const normalizeRadioBrowserStation = (rb) => {
   if (!stream) return null;
 
   return {
-    id: String(rb.stationuuid || rb.changeuuid || `rb-${Math.random().toString(16).slice(2)}`),
+    id: String(rb.stationuuid || `rb-${Math.random().toString(16).slice(2)}`),
     name: String(rb.name || 'Radio Station').trim(),
     description: '',
     frequency: '',
@@ -45,25 +145,6 @@ const normalizeRadioBrowserStation = (rb) => {
     isBookmarked: false,
     source: 'radio-browser'
   };
-};
-
-// Fetch from Radio Browser, trying hosts until one responds.
-const radioBrowserFetch = async (path, params = {}) => {
-  const query = new URLSearchParams({ limit: 20, order: 'clickcount', reverse: true, hidebroken: true, ...params });
-  let lastError = null;
-  for (const host of RADIO_BROWSER_HOSTS) {
-    try {
-      const res = await fetch(`${host}/json/${path}?${query}`, {
-        headers: { 'User-Agent': 'WiseRavenFM/1.0' }
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return Array.isArray(data) ? data : [];
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error('Radio Browser unavailable.');
 };
 
 // ─── Sample stations (built-in fallback — globally accessible HTTPS streams) ──
