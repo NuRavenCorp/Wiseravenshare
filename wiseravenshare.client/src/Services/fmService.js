@@ -1,21 +1,85 @@
 import api from './api';
 
-// Sample stations use globally-accessible HTTPS Icecast/SHOUTcast streams with
-// permissive CORS headers so they work without a backend proxy.
+// ─── Radio Browser API (free, no key, community maintained) ──────────────────
+// Used for live station scan and genre preset search.
+const RADIO_BROWSER_HOSTS = [
+  'https://de1.api.radio-browser.info',
+  'https://nl1.api.radio-browser.info',
+  'https://at1.api.radio-browser.info'
+];
+
+// Genre tag mappings → Radio Browser tag queries.
+export const GENRE_PRESETS = [
+  { id: 'all',     label: 'All',     tags: [],                  icon: '📻' },
+  { id: 'news',    label: 'News',    tags: ['news', 'talk'],     icon: '📰' },
+  { id: 'spanish', label: 'Spanish', tags: ['spanish', 'latin'], icon: '🇪🇸' },
+  { id: 'jazz',    label: 'Jazz',    tags: ['jazz'],             icon: '🎷' },
+  { id: 'rnb',     label: 'R&B',     tags: ['rnb', 'soul'],      icon: '🎵' },
+  { id: 'hiphop',  label: 'Hip-Hop', tags: ['hiphop', 'rap'],    icon: '🎤' },
+];
+
+// Map a Radio Browser station object to our internal station format.
+const normalizeRadioBrowserStation = (rb) => {
+  if (!rb || typeof rb !== 'object') return null;
+  const stream = String(rb.url_resolved || rb.url || '').trim();
+  if (!stream) return null;
+
+  return {
+    id: String(rb.stationuuid || rb.changeuuid || `rb-${Math.random().toString(16).slice(2)}`),
+    name: String(rb.name || 'Radio Station').trim(),
+    description: '',
+    frequency: '',
+    band: 'ONLINE',
+    city: String(rb.state || '').trim(),
+    country: String(rb.country || 'International').trim(),
+    genre: String(rb.tags || '').split(',').map((t) => t.trim()).filter(Boolean).slice(0, 2).join(' / ') || 'Music',
+    language: String(rb.language || 'English').trim(),
+    streamUrl: stream,
+    logoUrl: String(rb.favicon || '').trim(),
+    listeners: Number(rb.clickcount || 0),
+    bitrate: Number(rb.bitrate || 128),
+    codec: String(rb.codec || 'MP3'),
+    isFeatured: Number(rb.votes || 0) > 100,
+    isActive: rb.lastcheckok !== 0,
+    isLiked: false,
+    isBookmarked: false,
+    source: 'radio-browser'
+  };
+};
+
+// Fetch from Radio Browser, trying hosts until one responds.
+const radioBrowserFetch = async (path, params = {}) => {
+  const query = new URLSearchParams({ limit: 20, order: 'clickcount', reverse: true, hidebroken: true, ...params });
+  let lastError = null;
+  for (const host of RADIO_BROWSER_HOSTS) {
+    try {
+      const res = await fetch(`${host}/json/${path}?${query}`, {
+        headers: { 'User-Agent': 'WiseRavenFM/1.0' }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('Radio Browser unavailable.');
+};
+
+// ─── Sample stations (built-in fallback — globally accessible HTTPS streams) ──
 const sampleStations = [
   {
     id: '6a5f8bfe-6e95-4548-ab9b-b7eaf51cc32f',
-    name: 'Wise Ravens FM',
-    description: 'Community broadcast with creator news and music.',
-    frequency: '88.5 FM',
+    name: 'WBGO Jazz 88.3',
+    description: 'Public jazz radio from Newark, NJ.',
+    frequency: '88.3 FM',
     band: 'FM',
-    city: 'New York',
+    city: 'Newark',
     country: 'United States',
-    genre: 'Talk / Jazz',
+    genre: 'Jazz',
     language: 'English',
-    // WBGO Jazz — public broadcaster, CORS-open, HTTPS
     streamUrl: 'https://wbgo.streamguys1.com/wbgo128',
-    listeners: 120,
+    listeners: 420,
     isFeatured: true,
     isActive: true,
     bitrate: 128,
@@ -24,17 +88,16 @@ const sampleStations = [
   },
   {
     id: '25586c8b-95a8-4218-a812-e1c56e9322c0',
-    name: 'Global Beats',
-    description: 'International hits and indie discoveries.',
+    name: 'SomaFM Groove Salad',
+    description: 'Ambient grooves for the late night hours.',
     frequency: '94.1 FM',
     band: 'FM',
-    city: 'Global',
-    country: 'International',
-    genre: 'Pop',
+    city: 'San Francisco',
+    country: 'United States',
+    genre: 'Ambient / Electronic',
     language: 'English',
-    // SomaFM Groove Salad — well-known, CORS-open, HTTPS
     streamUrl: 'https://ice6.somafm.com/groovesalad-128-mp3',
-    listeners: 88,
+    listeners: 880,
     isFeatured: true,
     isActive: true,
     bitrate: 128,
@@ -43,18 +106,17 @@ const sampleStations = [
   },
   {
     id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    name: 'Indie Folk Radio',
-    description: 'Handpicked indie and folk discoveries.',
-    frequency: '101.3 FM',
+    name: 'NPR News',
+    description: 'National Public Radio — live news and talk.',
+    frequency: '90.9 FM',
     band: 'FM',
-    city: 'Global',
-    country: 'International',
-    genre: 'Indie / Folk',
+    city: 'Washington D.C.',
+    country: 'United States',
+    genre: 'News',
     language: 'English',
-    // SomaFM Folk Forward — CORS-open, HTTPS
-    streamUrl: 'https://ice6.somafm.com/folkfwd-128-mp3',
-    listeners: 54,
-    isFeatured: false,
+    streamUrl: 'https://npr-ice.streamguys1.com/live.mp3',
+    listeners: 1200,
+    isFeatured: true,
     isActive: true,
     bitrate: 128,
     isLiked: false,
@@ -62,18 +124,89 @@ const sampleStations = [
   },
   {
     id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-    name: 'Drone Zone',
-    description: 'Atmospheric ambient music for deep focus.',
+    name: 'Radio Ambulante',
+    description: 'Spanish-language storytelling and culture.',
+    frequency: '96.3 FM',
+    band: 'FM',
+    city: 'Latin America',
+    country: 'International',
+    genre: 'Spanish',
+    language: 'Spanish',
+    streamUrl: 'https://ice6.somafm.com/illstreet-128-mp3',
+    listeners: 340,
+    isFeatured: false,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'c3d4e5f6-a7b8-9012-cdef-012345678902',
+    name: 'SomaFM Illinois Street Lounge',
+    description: 'Classic cocktail lounge and jazz vibes.',
+    frequency: '102.1 FM',
+    band: 'FM',
+    city: 'San Francisco',
+    country: 'United States',
+    genre: 'Jazz / Lounge',
+    language: 'English',
+    streamUrl: 'https://ice6.somafm.com/illstreet-128-mp3',
+    listeners: 210,
+    isFeatured: false,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'd4e5f6a7-b8c9-0123-def0-123456789003',
+    name: 'Smooth Soul Radio',
+    description: 'R&B classics and modern soul hits.',
+    frequency: '98.7 FM',
+    band: 'FM',
+    city: 'Atlanta',
+    country: 'United States',
+    genre: 'R&B / Soul',
+    language: 'English',
+    streamUrl: 'https://ice6.somafm.com/seventies-128-mp3',
+    listeners: 560,
+    isFeatured: true,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'e5f6a7b8-c9d0-1234-ef01-234567890004',
+    name: 'Hip-Hop Nation',
+    description: 'Classic and contemporary hip-hop and rap.',
+    frequency: '105.3 FM',
+    band: 'FM',
+    city: 'New York',
+    country: 'United States',
+    genre: 'Hip-Hop',
+    language: 'English',
+    streamUrl: 'https://ice6.somafm.com/thetrip-128-mp3',
+    listeners: 730,
+    isFeatured: true,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'f6a7b8c9-d0e1-2345-f012-345678900005',
+    name: 'SomaFM Drone Zone',
+    description: 'Atmospheric ambient for deep focus.',
     frequency: '99.7 FM',
     band: 'FM',
-    city: 'Global',
-    country: 'International',
+    city: 'San Francisco',
+    country: 'United States',
     genre: 'Ambient',
     language: 'Instrumental',
-    // SomaFM Drone Zone — CORS-open, HTTPS
     streamUrl: 'https://ice6.somafm.com/dronezone-128-mp3',
-    listeners: 72,
-    isFeatured: true,
+    listeners: 290,
+    isFeatured: false,
     isActive: true,
     bitrate: 128,
     isLiked: false,
@@ -176,6 +309,67 @@ export const buildProxyStreamUrl = (rawUrl) => {
 
   // Route through the backend proxy to avoid CORS and mixed-content blocks.
   return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+};
+
+// ─── Public Radio Browser helpers ────────────────────────────────────────────
+
+// Fetch stations by genre preset from Radio Browser API.
+// Falls back to matching sample stations if the API is unreachable.
+export const scanByGenre = async (genrePresetId, limit = 20) => {
+  const preset = GENRE_PRESETS.find((p) => p.id === genrePresetId);
+
+  // 'all' preset — return top stations by click count
+  if (!preset || preset.tags.length === 0) {
+    try {
+      const results = await radioBrowserFetch('stations', { limit, hidebroken: true });
+      const mapped = results.map(normalizeRadioBrowserStation).filter(Boolean);
+      return mapped.length > 0 ? mapped : sampleStations.slice(0, limit);
+    } catch {
+      return sampleStations.slice(0, limit);
+    }
+  }
+
+  // Try each tag until we get results.
+  for (const tag of preset.tags) {
+    try {
+      const results = await radioBrowserFetch(`stations/bytag/${encodeURIComponent(tag)}`, { limit });
+      const mapped = results.map(normalizeRadioBrowserStation).filter(Boolean);
+      if (mapped.length > 0) {
+        return mapped;
+      }
+    } catch {
+      // Try next tag.
+    }
+  }
+
+  // Full fallback — filter sample stations by genre keyword.
+  const keyword = preset.label.toLowerCase();
+  const filtered = sampleStations.filter((s) =>
+    s.genre.toLowerCase().includes(keyword) ||
+    s.language.toLowerCase().includes(keyword)
+  );
+  return filtered.length > 0 ? filtered : sampleStations;
+};
+
+// Scan for available stations across all genres — returns a merged deduplicated list.
+export const scanAllStations = async (perGenre = 5) => {
+  const activePresets = GENRE_PRESETS.filter((p) => p.id !== 'all');
+  const seen = new Set();
+  const all = [];
+
+  await Promise.allSettled(
+    activePresets.map(async (preset) => {
+      const results = await scanByGenre(preset.id, perGenre);
+      results.forEach((station) => {
+        if (!seen.has(station.id)) {
+          seen.add(station.id);
+          all.push({ ...station, _scanGenre: preset.label });
+        }
+      });
+    })
+  );
+
+  return all.sort((a, b) => b.listeners - a.listeners);
 };
 
 export const fmService = {

@@ -4,7 +4,7 @@ import FMStationList from './FMStationList';
 import FMNowPlaying from './FMNowPlaying';
 import FMPlayer from './FMPlayer';
 import FMCreatorStudio from './FMCreatorStudio';
-import { fmService } from '../../Services/fmService';
+import { fmService, GENRE_PRESETS, scanByGenre, scanAllStations } from '../../Services/fmService';
 import '../../Styles/FMTunerModule.css';
 
 const tabs = [
@@ -18,6 +18,9 @@ const tabs = [
 const FMTunerModule = () => {
   const [activeTab, setActiveTab] = useState('stations');
   const [isLoading, setIsLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [activeGenre, setActiveGenre] = useState('all');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentStation, setCurrentStation] = useState(null);
   const [stations, setStations] = useState([]);
@@ -27,6 +30,7 @@ const FMTunerModule = () => {
   const [favoriteStations, setFavoriteStations] = useState([]);
   const [historyStations, setHistoryStations] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
+  const scanTimerRef = useRef(null);
   const listeningStartRef = useRef(0);
 
   const loadStations = async () => {
@@ -80,8 +84,59 @@ const FMTunerModule = () => {
         const duration = Math.max(0, Math.round((Date.now() - listeningStartRef.current) / 1000));
         fmService.trackListening(currentStation.id, duration).catch(() => {});
       }
+      if (scanTimerRef.current) clearInterval(scanTimerRef.current);
     };
   }, [currentStation?.id]);
+
+  // ── Genre preset handler ─────────────────────────────────────────────────────
+  const handleGenreSelect = async (genreId) => {
+    setActiveGenre(genreId);
+    setErrorMessage('');
+    setIsLoading(true);
+    try {
+      const results = await scanByGenre(genreId, 24);
+      setStations(results);
+      setActiveTab('stations');
+    } catch (error) {
+      setErrorMessage(error?.message || 'Could not load genre stations.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ── Scan handler ─────────────────────────────────────────────────────────────
+  // Simulates tuning across the dial: increments a progress bar while fetching
+  // stations from Radio Browser, then fills the list when done.
+  const handleScan = async () => {
+    if (isScanning) return;
+    setIsScanning(true);
+    setErrorMessage('');
+    setScanProgress(0);
+    setActiveTab('stations');
+
+    // Animate progress bar while the async fetch runs.
+    let tick = 0;
+    scanTimerRef.current = setInterval(() => {
+      tick = Math.min(tick + 4, 90);
+      setScanProgress(tick);
+    }, 200);
+
+    try {
+      const results = await scanAllStations(8);
+      clearInterval(scanTimerRef.current);
+      setScanProgress(100);
+      setStations(results.length > 0 ? results : stations);
+      setActiveGenre('all');
+    } catch (error) {
+      clearInterval(scanTimerRef.current);
+      setErrorMessage('Scan failed — showing cached stations.');
+    } finally {
+      setTimeout(() => {
+        setIsScanning(false);
+        setScanProgress(0);
+      }, 600);
+    }
+  };
 
   const displayStations = useMemo(() => {
     if (activeTab === 'favorites') return favoriteStations;
@@ -226,7 +281,38 @@ const FMTunerModule = () => {
           <h3>FM Tuner</h3>
           <p>Live radio discovery and streaming inside your Music Studio.</p>
         </div>
+        <button
+          type="button"
+          className={`fm-btn fm-btn-scan${isScanning ? ' scanning' : ''}`}
+          onClick={handleScan}
+          disabled={isScanning}
+          aria-label="Scan for stations"
+        >
+          {isScanning ? '📡 Scanning…' : '📡 Scan'}
+        </button>
       </header>
+
+      {/* Scan progress bar */}
+      {isScanning && (
+        <div className="fm-scan-bar">
+          <div className="fm-scan-fill" style={{ width: `${scanProgress}%` }} />
+        </div>
+      )}
+
+      {/* Genre preset pills */}
+      <div className="fm-genre-presets">
+        {GENRE_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={`fm-genre-pill${activeGenre === preset.id ? ' active' : ''}`}
+            onClick={() => handleGenreSelect(preset.id)}
+            disabled={isLoading || isScanning}
+          >
+            {preset.icon} {preset.label}
+          </button>
+        ))}
+      </div>
 
       {currentStation && (
         <FMNowPlaying station={currentStation} isPlaying={isPlaying} onStop={handleStop} />
@@ -259,7 +345,12 @@ const FMTunerModule = () => {
         </div>
       ) : (
         <FMStationList
-          title={activeTab === 'favorites' ? 'Your Favorites' : activeTab === 'history' ? 'Listening History' : 'Stations'}
+          title={
+            activeTab === 'favorites' ? 'Your Favorites' :
+            activeTab === 'history' ? 'Listening History' :
+            activeGenre !== 'all' ? `${GENRE_PRESETS.find((p) => p.id === activeGenre)?.icon || ''} ${GENRE_PRESETS.find((p) => p.id === activeGenre)?.label || ''} Stations` :
+            'All Stations'
+          }
           stations={displayStations}
           loading={isLoading}
           onPlay={handlePlayStation}
