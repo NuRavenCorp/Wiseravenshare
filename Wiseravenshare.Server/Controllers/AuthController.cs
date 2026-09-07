@@ -1526,13 +1526,34 @@ public class AuthController : ControllerBase
         };
 
         var section = _configuration.GetSection($"Authentication:OAuthProviders:{sectionName}");
+        var clientId = NormalizeConfiguredValue(section["ClientId"]);
+        var clientSecret = NormalizeConfiguredValue(section["ClientSecret"]);
+
         return new OAuthProviderConfig
         {
-            ClientId = (section["ClientId"] ?? string.Empty).Trim(),
-            ClientSecret = (section["ClientSecret"] ?? string.Empty).Trim(),
-            TenantId = (section["TenantId"] ?? string.Empty).Trim(),
-            RedirectUri = (section["RedirectUri"] ?? string.Empty).Trim()
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            TenantId = NormalizeConfiguredValue(section["TenantId"]),
+            RedirectUri = NormalizeConfiguredValue(section["RedirectUri"]),
+            IsEnabled = !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret)
         };
+    }
+
+    private static string NormalizeConfiguredValue(string? raw)
+    {
+        var value = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        // Some deployments accidentally keep template placeholders verbatim.
+        if (value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith("}", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        return value;
     }
 
     private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
@@ -2275,7 +2296,7 @@ public class AuthController : ControllerBase
         public string ClientSecret { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
         public string RedirectUri { get; set; } = string.Empty;
-        public bool IsEnabled => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+        public bool IsEnabled { get; set; }
     }
 
     private sealed class TokenExchangePayload
