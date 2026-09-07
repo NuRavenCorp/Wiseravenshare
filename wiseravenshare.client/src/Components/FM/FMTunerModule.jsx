@@ -114,18 +114,29 @@ const FMTunerModule = () => {
 
   const handlePlayStation = async (station) => {
     if (!station?.id) return;
+    setErrorMessage('');
     try {
+      // Log listening time for the previous station if one was running.
       if (currentStation?.id && listeningStartRef.current > 0) {
         const duration = Math.max(0, Math.round((Date.now() - listeningStartRef.current) / 1000));
-        await fmService.trackListening(currentStation.id, duration);
+        fmService.trackListening(currentStation.id, duration).catch(() => {});
       }
 
-      const playbackInfo = await fmService.getPlaybackInfo(station.id);
+      // getPlaybackInfo may return {} for sample/unseeded stations — that's fine;
+      // we always preserve the station's own streamUrl as the authoritative source.
+      const playbackInfo = await fmService.getPlaybackInfo(station.id).catch(() => ({}));
       const merged = {
         ...station,
         ...playbackInfo,
+        // Never let an empty playbackInfo wipe out the station's known stream URL.
         streamUrl: playbackInfo?.streamUrl || station.streamUrl
       };
+
+      if (!merged.streamUrl) {
+        setErrorMessage('This station has no stream URL configured.');
+        return;
+      }
+
       setCurrentStation(merged);
       setIsPlaying(true);
       listeningStartRef.current = Date.now();

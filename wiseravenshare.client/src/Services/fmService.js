@@ -147,11 +147,15 @@ const normalizeCreatorStation = (station) => {
 const requestList = async (request, fallback = []) => {
   try {
     const response = await request();
-    return normalizeCollection(response?.data).map(normalizeStation).filter(Boolean);
+    const results = normalizeCollection(response?.data).map(normalizeStation).filter(Boolean);
+    // If the API is live but has no seeded stations, use the sample fallback so the
+    // tuner is never empty on a fresh deployment.
+    return results.length > 0 ? results : fallback;
   } catch (error) {
     if (isRouteMissing(error)) {
       return fallback;
     }
+    // Auth errors (401/403) should still surface upstream.
     throw error;
   }
 };
@@ -204,8 +208,18 @@ export const fmService = {
   },
 
   getPlaybackInfo: async (id) => {
-    const response = await api.get(`/fmtuner/${encodeURIComponent(id)}/play`);
-    return normalizeStation(response?.data) || response?.data || {};
+    try {
+      const response = await api.get(`/fmtuner/${encodeURIComponent(id)}/play`);
+      return normalizeStation(response?.data) || response?.data || {};
+    } catch (error) {
+      // Sample / unseeded station IDs won't exist in the DB — return empty so
+      // the caller can fall back to the station's own streamUrl.
+      const status = Number(error?.response?.status || 0);
+      if (status === 404 || status === 405 || status === 0) {
+        return {};
+      }
+      throw error;
+    }
   },
 
   likeStation: async (id) => {
