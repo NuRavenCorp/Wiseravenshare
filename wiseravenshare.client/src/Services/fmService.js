@@ -1,5 +1,7 @@
 import api from './api';
 
+// Sample stations use globally-accessible HTTPS Icecast/SHOUTcast streams with
+// permissive CORS headers so they work without a backend proxy.
 const sampleStations = [
   {
     id: '6a5f8bfe-6e95-4548-ab9b-b7eaf51cc32f',
@@ -9,9 +11,10 @@ const sampleStations = [
     band: 'FM',
     city: 'New York',
     country: 'United States',
-    genre: 'Talk',
+    genre: 'Talk / Jazz',
     language: 'English',
-    streamUrl: 'https://icecast.radiofrance.fr/fip-midfi.mp3',
+    // WBGO Jazz — public broadcaster, CORS-open, HTTPS
+    streamUrl: 'https://wbgo.streamguys1.com/wbgo128',
     listeners: 120,
     isFeatured: true,
     isActive: true,
@@ -25,12 +28,51 @@ const sampleStations = [
     description: 'International hits and indie discoveries.',
     frequency: '94.1 FM',
     band: 'FM',
-    city: 'London',
-    country: 'United Kingdom',
+    city: 'Global',
+    country: 'International',
     genre: 'Pop',
     language: 'English',
-    streamUrl: 'https://icecast.radiofrance.fr/franceinter-midfi.mp3',
+    // SomaFM Groove Salad — well-known, CORS-open, HTTPS
+    streamUrl: 'https://ice6.somafm.com/groovesalad-128-mp3',
     listeners: 88,
+    isFeatured: true,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    name: 'Indie Folk Radio',
+    description: 'Handpicked indie and folk discoveries.',
+    frequency: '101.3 FM',
+    band: 'FM',
+    city: 'Global',
+    country: 'International',
+    genre: 'Indie / Folk',
+    language: 'English',
+    // SomaFM Folk Forward — CORS-open, HTTPS
+    streamUrl: 'https://ice6.somafm.com/folkfwd-128-mp3',
+    listeners: 54,
+    isFeatured: false,
+    isActive: true,
+    bitrate: 128,
+    isLiked: false,
+    isBookmarked: false
+  },
+  {
+    id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+    name: 'Drone Zone',
+    description: 'Atmospheric ambient music for deep focus.',
+    frequency: '99.7 FM',
+    band: 'FM',
+    city: 'Global',
+    country: 'International',
+    genre: 'Ambient',
+    language: 'Instrumental',
+    // SomaFM Drone Zone — CORS-open, HTTPS
+    streamUrl: 'https://ice6.somafm.com/dronezone-128-mp3',
+    listeners: 72,
     isFeatured: true,
     isActive: true,
     bitrate: 128,
@@ -112,6 +154,24 @@ const requestList = async (request, fallback = []) => {
     }
     throw error;
   }
+};
+
+// Build the backend proxy URL for a given external stream URL.
+// Falls back to the direct URL when the proxy is unavailable (e.g. local dev without the endpoint).
+export const buildProxyStreamUrl = (rawUrl) => {
+  const url = String(rawUrl || '').trim();
+  if (!url) return '';
+
+  // Only proxy http:// streams or streams from domains known to have CORS issues.
+  // Pure https:// streams from CORS-open providers can play directly.
+  const needsProxy =
+    url.startsWith('http://') ||
+    /radiofrance\.fr|shoutcast\.com|radioparadise\.com/.test(url);
+
+  if (!needsProxy) return url;
+
+  // Route through the backend proxy to avoid CORS and mixed-content blocks.
+  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
 };
 
 export const fmService = {

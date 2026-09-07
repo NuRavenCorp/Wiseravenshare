@@ -514,6 +514,25 @@
 
 .fm-error {
   color: #fca5a5 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: normal !important;
+}
+
+.fm-loading {
+  color: #93c5fd !important;
+  font-style: italic;
+}
+
+.fm-icon-btn.loading {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fm-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 @media (max-width: 920px) {
