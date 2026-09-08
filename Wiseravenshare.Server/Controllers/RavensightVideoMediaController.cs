@@ -61,6 +61,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
             dto.Title,
             dto.Description,
             dto.DestinationFolder,
+            ResolveUserStorageIdentity(userId),
             privacy,
             cancellationToken);
 
@@ -241,5 +242,12 @@ public sealed class RavensightVideoMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
+    }
+
+    private string ResolveUserStorageIdentity(Guid userId)
+    {
+        var displayName = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
     }
 }

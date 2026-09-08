@@ -13,6 +13,7 @@ public interface IMusicLibraryStore
         Guid userId,
         IFormFile file,
         SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default);
 }
 
@@ -99,6 +100,7 @@ ORDER BY created_at DESC;";
         Guid userId,
         IFormFile file,
         SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default)
     {
         if (file is null || file.Length == 0)
@@ -106,7 +108,7 @@ ORDER BY created_at DESC;";
             throw new InvalidOperationException("No music file uploaded.");
         }
 
-        var saved = await _musicService.SaveMusicAsync(file, dto.DestinationFolder, cancellationToken);
+        var saved = await _musicService.SaveMusicAsync(file, dto.DestinationFolder, userStorageIdentity, cancellationToken);
         var bucketObjectId = Guid.NewGuid().ToString("N");
         var metadata = new Dictionary<string, object?>
         {

@@ -1,10 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { apiService } from '../../Services/api';
 import '../../Styles/PhotoCube.css';
-
-// ─── Face metadata ────────────────────────────────────────────────────────────
-const FACE_KEYS = ['front', 'right', 'back', 'left', 'top', 'bottom'];
-const FACE_ICONS = ['🖼️', '📸', '🌅', '🌄', '🌟', '🎨'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const normPhotoUrl = (photo) => {
@@ -20,40 +16,33 @@ const normPhotoUrl = (photo) => {
   return null;
 };
 
+const MAX_VISIBLE = 9;   // 3 × 3 grid
+
 // ─── Component ────────────────────────────────────────────────────────────────
 /**
- * PhotoCube — a CSS-3D rotating cube that shows up to 6 user photos.
+ * PhotoLibrary — compact sidebar photo grid pulling images from feed posts.
  *
  * Props:
- *   onNavigate  — sidebar navigation callback (opens my-library on CTA click)
- *   userId      — used when fetching photos (optional)
+ *   onNavigate  — sidebar nav callback (opens my-library)
+ *   userId      — refresh trigger when user changes
  */
 const PhotoCube = ({ onNavigate, userId }) => {
-  const [photos, setPhotos] = useState([]);
-  const [step, setStep]     = useState(0);          // 0..3 — side faces only
-  const [isSpinning, setIsSpinning] = useState(false);
-  const innerRef = useRef(null);
+  const [photos, setPhotos]     = useState([]);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(true);
 
-  // ── Load user photos ────────────────────────────────────────────────────────
+  // ── Load photos from feed posts ────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
 
     const load = async () => {
       try {
-        // 1. Try /api/ravensight/media/photos (same pattern as music)
-        const res = await apiService.getMusicLibrary?.()
-          .catch(() => null);
-        // We only have a music helper wired up; fall back to feed posts for images.
-        void res; // unused — see approach 2 below
-
-        // 2. Filter feed posts for image media
-        const feedRes = await apiService.getPosts({ pageSize: 30 });
+        const feedRes = await apiService.getPosts({ pageSize: 50 });
         const posts   = Array.isArray(feedRes?.data) ? feedRes.data : [];
         const urls    = [];
 
         for (const post of posts) {
-          if (urls.length >= 6) break;
-          // Pull the first image from each image/photo post
           const mediaUrls = Array.isArray(post?.mediaUrls) ? post.mediaUrls : [];
           const directUrl = post?.mediaUrl || '';
           const type      = String(post?.type || '').toLowerCase();
@@ -66,15 +55,18 @@ const PhotoCube = ({ onNavigate, userId }) => {
           }
 
           for (const u of mediaUrls) {
-            if (urls.length >= 6) break;
             const norm = normPhotoUrl({ url: u });
             if (norm && !urls.includes(norm)) urls.push(norm);
           }
         }
 
-        if (!cancelled) setPhotos(urls);
+        if (!cancelled) {
+          setTotal(urls.length);
+          setPhotos(urls.slice(0, MAX_VISIBLE));
+          setLoading(false);
+        }
       } catch {
-        // Silently keep placeholders.
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -82,108 +74,68 @@ const PhotoCube = ({ onNavigate, userId }) => {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // ── Rotation ─────────────────────────────────────────────────────────────────
-  const rotate = useCallback(() => {
-    setStep((s) => (s + 1) % 4);
-    setIsSpinning(true);
-  }, []);
+  const goToLibrary = useCallback(() => {
+    if (typeof onNavigate === 'function') onNavigate('my-library');
+  }, [onNavigate]);
 
-  // Clear spinning class once animation ends
-  const handleAnimEnd = useCallback(() => {
-    setIsSpinning(false);
-  }, []);
-
-  // Touch handler — fire once on touchstart to feel snappy
-  const handleTouch = useCallback((e) => {
-    e.preventDefault();
-    rotate();
-  }, [rotate]);
-
-  // Keyboard: Space / Enter
-  const handleKey = useCallback((e) => {
-    if (e.key === ' ' || e.key === 'Enter') {
-      e.preventDefault();
-      rotate();
-    }
-  }, [rotate]);
-
-  // The Y angle for the whole cube — clockwise = increasing positive Y degrees
-  const yDeg = step * 90;
-
-  const cubeStyle = {
-    transform: `rotateX(-18deg) rotateY(${yDeg}deg)`
-  };
-
-  // Build face data (6 faces, cycle photos)
-  const faceSrc = (i) => (photos.length > 0 ? photos[i % photos.length] : null);
+  const overflow = total - MAX_VISIBLE;
 
   return (
-    <div className="photo-cube-widget">
-      {/* Header row */}
-      <div className="photo-cube-label">
-        <span>📷 My Photos</span>
-        <span className="photo-cube-hint">tap to spin</span>
+    <div className="photo-library-widget">
+      {/* Header */}
+      <div className="photo-library-header">
+        <span className="photo-library-title">📷 My Photos</span>
+        {total > 0 && (
+          <span className="photo-library-count">{total}</span>
+        )}
       </div>
 
-      {/* Cube */}
-      <div
-        className="photo-cube-scene"
-        role="button"
-        tabIndex={0}
-        aria-label="Photo cube — click or press Enter to rotate"
-        onClick={rotate}
-        onTouchStart={handleTouch}
-        onKeyDown={handleKey}
-      >
-        <div
-          ref={innerRef}
-          className={`photo-cube-inner${isSpinning ? ' spinning' : ''}`}
-          style={cubeStyle}
-          onAnimationEnd={handleAnimEnd}
-        >
-          {FACE_KEYS.map((face, i) => {
-            const src = faceSrc(i);
+      {/* Grid */}
+      {loading ? (
+        <div className="photo-library-loading">
+          <span className="photo-lib-spinner" />
+        </div>
+      ) : photos.length === 0 ? (
+        <div className="photo-library-empty">
+          <span>🖼️</span>
+          <p>No photos yet</p>
+        </div>
+      ) : (
+        <div className="photo-library-grid">
+          {photos.map((src, i) => {
+            const isLast = i === photos.length - 1 && overflow > 0;
             return (
-              <div key={face} className={`cube-face cube-face--${face}`}>
-                {src ? (
-                  <img
-                    src={src}
-                    alt={`Photo ${i + 1}`}
-                    loading="lazy"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="cube-face-placeholder">
-                    {FACE_ICONS[i]}
-                  </div>
+              <button
+                key={src}
+                type="button"
+                className="photo-lib-cell"
+                onClick={goToLibrary}
+                aria-label={isLast ? `View all ${total} photos` : `Photo ${i + 1}`}
+              >
+                <img
+                  src={src}
+                  alt=""
+                  loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.parentElement.style.display = 'none';
+                  }}
+                />
+                {isLast && (
+                  <div className="photo-lib-overflow">+{overflow}</div>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
-      </div>
-
-      {/* Step dots */}
-      <div className="photo-cube-dots" aria-hidden="true">
-        {[0, 1, 2, 3].map((i) => (
-          <span key={i} className={`cube-dot${step === i ? ' active' : ''}`} />
-        ))}
-      </div>
-
-      {/* CTA */}
-      {typeof onNavigate === 'function' && (
-        <button
-          type="button"
-          className="photo-cube-nav"
-          onClick={() => onNavigate('my-library')}
-        >
-          View all photos →
-        </button>
       )}
+
+      {/* Footer CTA */}
+      <button type="button" className="photo-library-nav" onClick={goToLibrary}>
+        {photos.length > 0 ? 'Open library →' : 'Upload photos →'}
+      </button>
     </div>
   );
 };
 
 export default PhotoCube;
+

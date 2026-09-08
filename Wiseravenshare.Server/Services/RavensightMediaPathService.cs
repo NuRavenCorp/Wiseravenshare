@@ -8,6 +8,7 @@ public interface IRavensightMediaPathService
         IFormFile file,
         RavensightMediaType mediaType,
         string? requestedDestinationFolder,
+    string? userStorageIdentity,
         CancellationToken cancellationToken = default);
 }
 
@@ -41,6 +42,7 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
         IFormFile file,
         RavensightMediaType mediaType,
         string? requestedDestinationFolder,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default)
     {
         if (file is null || file.Length == 0)
@@ -56,7 +58,12 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
 
         var rootFolder = ResolveRootFolder(mediaType);
         var defaultDestination = ResolveDefaultDestination(mediaType);
-        var destinationFolder = NormalizeDestinationFolder(requestedDestinationFolder, defaultDestination);
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        var resolvedIdentity = StoragePathResolver.ResolveUserStorageIdentity(userStorageIdentity);
+        var destinationFolder = StoragePathResolver.EnsureUserScopedDestination(
+            NormalizeDestinationFolder(requestedDestinationFolder, defaultDestination),
+            resolvedIdentity,
+            projectFolder);
         var destinationParts = destinationFolder.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
         var fileName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
@@ -78,7 +85,7 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
                 await using var stream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None);
                 await file.CopyToAsync(stream, cancellationToken);
 
-                var objectKey = BuildBlobObjectKey(destinationFolder, fileName);
+                var objectKey = BuildBlobObjectKey(destinationFolder, fileName, projectFolder);
                 string? publicUrl = null;
                 if (_blobStorageService.IsConfigured)
                 {
@@ -132,16 +139,15 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
         var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
         return mediaType switch
         {
-            RavensightMediaType.Video => $"{projectFolder}/videos",
-            RavensightMediaType.Photo => $"{projectFolder}/photos",
+            RavensightMediaType.Video => $"{projectFolder}/video",
+            RavensightMediaType.Photo => $"{projectFolder}/photo",
             RavensightMediaType.Music => $"{projectFolder}/music",
             _ => $"{projectFolder}/media"
         };
     }
 
-    private string BuildBlobObjectKey(string destinationFolder, string fileName)
+    private string BuildBlobObjectKey(string destinationFolder, string fileName, string projectFolder)
     {
-        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
         var normalizedDestination = destinationFolder.Replace('\\', '/').Trim('/');
         if (string.IsNullOrWhiteSpace(projectFolder))
         {

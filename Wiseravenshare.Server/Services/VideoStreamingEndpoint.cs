@@ -177,10 +177,10 @@ public class VideoStreamingController : ControllerBase
     {
         var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "wiseravenshare/videos",
             "wiseravenshare/video",
-            "wiseravenshare/photos",
+            "wiseravenshare/videos",
             "wiseravenshare/photo",
+            "wiseravenshare/photos",
             "wiseravenshare/music",
             "wiseravenshare/Ravevesight/Video",
             "wiseravenshare/Ravevesight/photo",
@@ -193,10 +193,10 @@ public class VideoStreamingController : ControllerBase
         if (!string.IsNullOrWhiteSpace(projectFolder))
         {
             aliases.Add(projectFolder.Trim('/'));
-            aliases.Add($"{projectFolder.Trim('/')}/videos");
             aliases.Add($"{projectFolder.Trim('/')}/video");
-            aliases.Add($"{projectFolder.Trim('/')}/photos");
+            aliases.Add($"{projectFolder.Trim('/')}/videos");
             aliases.Add($"{projectFolder.Trim('/')}/photo");
+            aliases.Add($"{projectFolder.Trim('/')}/photos");
             aliases.Add($"{projectFolder.Trim('/')}/music");
             aliases.Add($"{projectFolder.Trim('/')}/Ravevesight/Video");
             aliases.Add($"{projectFolder.Trim('/')}/Ravevesight/photo");
@@ -231,13 +231,15 @@ public class VideoStreamingController : ControllerBase
         var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
         var configuredVideo = NormalizeDestinationFolder(
             _configuration["Storage:Video:DefaultFolder"],
-            $"{projectFolder}/videos");
+            $"{projectFolder}/video");
 
         var defaults = new[]
         {
             configuredVideo,
-            $"{projectFolder}/photos",
+            $"{projectFolder}/photo",
             $"{projectFolder}/music",
+            $"{projectFolder}/videos",
+            $"{projectFolder}/photos",
             $"{projectFolder}/Ravevesight/Video",
             $"{projectFolder}/Ravevesight/photo",
             $"{projectFolder}/Ravevesight/music",
@@ -247,7 +249,7 @@ public class VideoStreamingController : ControllerBase
         };
 
         return defaults
-            .Select(value => NormalizeDestinationFolder(value, $"{projectFolder}/videos"))
+            .Select(value => NormalizeDestinationFolder(value, $"{projectFolder}/video"))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 import WiseRavenLogo from './WiseRavenLogo';
-import PhotoCube from './PhotoCube';
 
 const parseAdminEmails = () => {
     const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
@@ -339,9 +338,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                     <span><i className="fas fa-user-friends"></i> {profile.following.toLocaleString()} following</span>
                 </div>
             </div>
-
-            {/* ── 3-D Photo Cube ── */}
-            <PhotoCube onNavigate={onNavigate} userId={user?.id} />
 
             <ul style={{
                 listStyle: 'none',

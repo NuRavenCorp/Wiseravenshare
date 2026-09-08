@@ -11,12 +11,15 @@ import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
 import ShortFormFeed from '../Components/Feed/ShortFormFeed';
 import { apiService } from '../Services/api';
+import { ravensightAPI } from '../Services/RavensightAPI';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
 import { usePersonalization } from '../hooks/usePersonalization';
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
     const [posts, setPosts] = useState([]);
+    const [recentMedia, setRecentMedia] = useState([]);
+    const [recentMediaLoading, setRecentMediaLoading] = useState(true);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
     const [feedScope, setFeedScope] = useState('local');
@@ -100,6 +103,99 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             checkedAt: new Date().toISOString()
         };
     };
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadRecentMedia = async () => {
+            setRecentMediaLoading(true);
+
+            try {
+                const [musicResult, videoResult, photoResult] = await Promise.allSettled([
+                    apiService.getMusicLibrary(),
+                    ravensightAPI.getUserVideos(user?.id || null),
+                    apiService.getPosts({ page: 1, pageSize: 25 })
+                ]);
+
+                if (!isMounted) {
+                    return;
+                }
+
+                const normalizeMusic = (track) => {
+                    const url = String(track?.mediaUrl || track?.url || track?.fileUrl || '').trim();
+                    if (!url) return null;
+
+                    return {
+                        id: `music-${track?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'music',
+                        title: String(track?.title || track?.name || 'Recent music').trim() || 'Recent music',
+                        url,
+                        createdAt: track?.createdAt || track?.uploadedAt || new Date().toISOString()
+                    };
+                };
+
+                const normalizeVideo = (video) => {
+                    const url = String(video?.videoUrl || video?.mediaUrl || video?.url || '').trim();
+                    if (!url) return null;
+
+                    return {
+                        id: `video-${video?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'video',
+                        title: String(video?.title || video?.name || 'Recent video').trim() || 'Recent video',
+                        url,
+                        createdAt: video?.createdAt || video?.uploadedAt || new Date().toISOString()
+                    };
+                };
+
+                const normalizePhoto = (post) => {
+                    const mediaUrl = String(post?.mediaUrl || post?.imageUrl || post?.url || '').trim();
+                    if (!mediaUrl || !isPhotoPost(post)) {
+                        return null;
+                    }
+
+                    return {
+                        id: `photo-${post?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'photo',
+                        title: String(post?.content || 'Recent photo').trim() || 'Recent photo',
+                        url: mediaUrl,
+                        createdAt: post?.createdAt || new Date().toISOString()
+                    };
+                };
+
+                const musicTracks = musicResult.status === 'fulfilled'
+                    ? (Array.isArray(musicResult.value?.data) ? musicResult.value.data : [])
+                    : [];
+                const videoTracks = videoResult.status === 'fulfilled'
+                    ? (Array.isArray(videoResult.value?.videos) ? videoResult.value.videos : [])
+                    : [];
+                const photoPosts = photoResult.status === 'fulfilled'
+                    ? (Array.isArray(photoResult.value?.data) ? photoResult.value.data : [])
+                    : [];
+
+                const mergedMedia = [...
+                    musicTracks.map(normalizeMusic).filter(Boolean),
+                    videoTracks.map(normalizeVideo).filter(Boolean),
+                    photoPosts.map(normalizePhoto).filter(Boolean)
+                ]
+                    .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
+                    .slice(0, 8);
+
+                setRecentMedia(mergedMedia);
+            } catch {
+                setRecentMedia([]);
+            } finally {
+                if (isMounted) {
+                    setRecentMediaLoading(false);
+                }
+            }
+        };
+
+        void loadRecentMedia();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [user?.id]);
 
     useEffect(() => {
         const samplePosts = [
@@ -469,6 +565,96 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         : 'Local feed is active, but no signup location is available yet.')
                     : 'National feed is active.'}
             </div>
+
+            {recentMedia.length > 0 && (
+                <div
+                    style={{
+                        marginBottom: '16px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '14px',
+                        background: 'rgba(17, 24, 39, 0.55)',
+                        padding: '12px',
+                        boxShadow: '0 10px 30px rgba(15, 23, 42, 0.3)'
+                    }}
+                >
+                    <div
+                        style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '10px',
+                            gap: '8px',
+                            flexWrap: 'wrap'
+                        }}
+                    >
+                        <div style={{ fontSize: '12px', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--highlight-color)' }}>
+                            Recent media
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                            {recentMediaLoading ? 'Loading…' : `${recentMedia.length} items`}
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+                        {recentMedia.map((item) => {
+                            const isPhoto = item.type === 'photo';
+                            const isVideo = item.type === 'video';
+                            const previewLabel = isPhoto ? '📷' : isVideo ? '🎬' : '🎵';
+
+                            return (
+                                <a
+                                    key={item.id}
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                        minWidth: '160px',
+                                        width: '160px',
+                                        display: 'block',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '12px',
+                                        overflow: 'hidden',
+                                        background: 'rgba(255,255,255,0.03)',
+                                        textDecoration: 'none',
+                                        color: 'var(--text-color)'
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            height: '96px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            fontSize: '30px',
+                                            background: isPhoto
+                                                ? 'linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(168, 85, 247, 0.18))'
+                                                : isVideo
+                                                    ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(34, 197, 94, 0.18))'
+                                                    : 'linear-gradient(135deg, rgba(251, 146, 60, 0.18), rgba(244, 63, 94, 0.18))',
+                                            borderBottom: '1px solid var(--border-color)'
+                                        }}
+                                    >
+                                        {previewLabel}
+                                    </div>
+
+                                    <div style={{ padding: '10px 10px 12px', display: 'grid', gap: '6px' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--highlight-color)' }}>
+                                            {item.type}
+                                        </div>
+                                        <div style={{ fontSize: '13px', fontWeight: 700, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {item.title}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'var(--light-color)' }}>
+                                            {new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                        </div>
+                                    </div>
+                                </a>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
                 {photoPostsByDay.map((group) => {

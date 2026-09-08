@@ -43,7 +43,8 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var saved = await _photoService.SavePhotoAsync(dto.File, dto.DestinationFolder, cancellationToken);
+        var userStorageIdentity = ResolveUserStorageIdentity(userId);
+        var saved = await _photoService.SavePhotoAsync(dto.File, dto.DestinationFolder, userStorageIdentity, cancellationToken);
         RavensightMediaUserPreference? preference = null;
         RavensightMediaAssetRecord? mediaRecord = null;
         var persistenceStatus = "ready";
@@ -125,5 +126,12 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
+    }
+
+    private string ResolveUserStorageIdentity(Guid userId)
+    {
+        var displayName = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
     }
 }
