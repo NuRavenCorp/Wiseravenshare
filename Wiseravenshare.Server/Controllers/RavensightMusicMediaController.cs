@@ -48,6 +48,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
+        var userStorageIdentity = ResolveUserStorageIdentity(userId);
+
         var subscription = await _subscriptionService.GetSubscriptionStatusAsync(userId);
         if (!subscription.HasActiveSubscription)
         {
@@ -57,7 +59,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
             });
         }
 
-        var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, cancellationToken);
+        var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, userStorageIdentity, cancellationToken);
         var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)
             ? StreamingUrlHelper.StreamByFileName(track.FileName)
             : track.MediaUrl;
@@ -90,5 +92,12 @@ public sealed class RavensightMusicMediaController : ControllerBase
             ?? User.FindFirstValue("id");
 
         return Guid.TryParse(userIdRaw, out userId) && userId != Guid.Empty;
+    }
+
+    private string ResolveUserStorageIdentity(Guid userId)
+    {
+        var displayName = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
     }
 }

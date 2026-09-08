@@ -111,9 +111,10 @@ public class RavensightController : ControllerBase
         }
 
         string uniqueFileName;
+        var userStorageIdentity = ResolveUserStorageIdentity(userId);
         try
         {
-            uniqueFileName = await SaveVideoFileAsync(file, extension, upload.DestinationFolder, cancellationToken);
+            uniqueFileName = await SaveVideoFileAsync(file, extension, upload.DestinationFolder, userStorageIdentity, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -124,7 +125,7 @@ public class RavensightController : ControllerBase
         var absoluteVideoUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
         if (_blobStorageService.IsConfigured)
         {
-            var publicUrl = await TryUploadToBlobStorageAsync(file, uniqueFileName, upload.DestinationFolder, cancellationToken);
+            var publicUrl = await TryUploadToBlobStorageAsync(file, uniqueFileName, upload.DestinationFolder, userStorageIdentity, cancellationToken);
             if (!string.IsNullOrWhiteSpace(publicUrl))
             {
                 absoluteVideoUrl = publicUrl;
@@ -253,8 +254,9 @@ public class RavensightController : ControllerBase
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Blob storage is not configured. Cannot persist this video to library storage." });
         }
 
-        var destinationFolder = NormalizeDestinationFolder(request.DestinationFolder, _defaultVideoDestination);
-        var persisted = await PersistExternalVideoToBlobAsync(request.VideoUrl, destinationFolder, cancellationToken);
+        var userStorageIdentity = ResolveUserStorageIdentity(userId);
+        var destinationFolder = ResolveUserScopedDestination(request.DestinationFolder, userStorageIdentity);
+        var persisted = await PersistExternalVideoToBlobAsync(request.VideoUrl, destinationFolder, userStorageIdentity, cancellationToken);
         if (string.IsNullOrWhiteSpace(persisted.PublicUrl))
         {
             return StatusCode(StatusCodes.Status502BadGateway, new
@@ -338,10 +340,10 @@ public class RavensightController : ControllerBase
         });
     }
 
-    private async Task<string> SaveVideoFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, CancellationToken cancellationToken)
+    private async Task<string> SaveVideoFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, string userStorageIdentity, CancellationToken cancellationToken)
     {
         var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
-        var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
+        var normalizedDestination = ResolveUserScopedDestination(requestedDestinationFolder, userStorageIdentity);
         var destinationParts = normalizedDestination.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
         var candidateFolders = new List<string>
@@ -378,14 +380,14 @@ public class RavensightController : ControllerBase
         throw new InvalidOperationException("Unable to write uploaded video to any configured storage path.", lastFailure);
     }
 
-    private async Task<string?> TryUploadToBlobStorageAsync(IFormFile file, string uniqueFileName, string? requestedDestinationFolder, CancellationToken cancellationToken)
+    private async Task<string?> TryUploadToBlobStorageAsync(IFormFile file, string uniqueFileName, string? requestedDestinationFolder, string userStorageIdentity, CancellationToken cancellationToken)
     {
         if (!_blobStorageService.IsConfigured)
         {
             return null;
         }
 
-        var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
+        var normalizedDestination = ResolveUserScopedDestination(requestedDestinationFolder, userStorageIdentity);
         var objectKey = BuildBlobObjectKey(normalizedDestination, uniqueFileName);
 
         try
@@ -410,10 +412,11 @@ public class RavensightController : ControllerBase
         }
     }
 
-    private async Task<(string? PublicUrl, string? Error)> PersistExternalVideoToBlobAsync(string sourceVideoUrl, string destinationFolder, CancellationToken cancellationToken)
+    private async Task<(string? PublicUrl, string? Error)> PersistExternalVideoToBlobAsync(string sourceVideoUrl, string destinationFolder, string userStorageIdentity, CancellationToken cancellationToken)
     {
         try
         {
+            destinationFolder = ResolveUserScopedDestination(destinationFolder, userStorageIdentity);
             var blobObjectKey = _blobStorageService.ResolveObjectKey(sourceVideoUrl);
             if (!string.IsNullOrWhiteSpace(blobObjectKey))
             {
@@ -546,6 +549,20 @@ public class RavensightController : ControllerBase
         }
 
         return string.Join('/', safeSegments);
+    }
+
+    private string ResolveUserScopedDestination(string? requestedDestinationFolder, string userStorageIdentity)
+    {
+        var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        return StoragePathResolver.EnsureUserScopedDestination(normalizedDestination, userStorageIdentity, projectFolder);
+    }
+
+    private string ResolveUserStorageIdentity(string userId)
+    {
+        var displayName = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId);
     }
 
     [HttpGet("feed")]

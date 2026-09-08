@@ -45,7 +45,7 @@ public static class StoragePathResolver
         }
 
         var projectFolder = ResolveProjectFolder(configuration, contentRootPath, fallbackProjectFolder);
-        return NormalizeFolderPath($"{projectFolder}/ravensight/video");
+        return NormalizeFolderPath($"{projectFolder}/video");
     }
 
     public static string NormalizeFolderPath(string? value, string fallbackValue = "wiseravenshare")
@@ -60,6 +60,51 @@ public static class StoragePathResolver
         normalized = Regex.Replace(normalized, @"[^a-zA-Z0-9._-]+", "-");
         normalized = normalized.Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? fallbackValue : normalized;
+    }
+
+    public static string ResolveUserStorageIdentity(string? preferredIdentity, string? email = null, string? userId = null, string fallbackIdentity = "anonymous")
+    {
+        var candidates = new[]
+        {
+            preferredIdentity,
+            !string.IsNullOrWhiteSpace(email)
+                ? email.Split('@', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
+                : null,
+            userId
+        };
+
+        var identity = candidates.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? fallbackIdentity;
+        return NormalizeFolderPath(identity, fallbackIdentity);
+    }
+
+    public static string EnsureUserScopedDestination(string destinationFolder, string userStorageIdentity, string? projectFolder = null)
+    {
+        var normalizedDestination = NormalizeFolderPath(destinationFolder);
+        var normalizedIdentity = NormalizeFolderPath(userStorageIdentity, "anonymous");
+        var normalizedProject = string.IsNullOrWhiteSpace(projectFolder)
+            ? string.Empty
+            : NormalizeFolderPath(projectFolder);
+
+        if (normalizedDestination.Equals(normalizedIdentity, StringComparison.OrdinalIgnoreCase)
+            || normalizedDestination.StartsWith($"{normalizedIdentity}/", StringComparison.OrdinalIgnoreCase)
+            || normalizedDestination.Contains($"/{normalizedIdentity}/", StringComparison.OrdinalIgnoreCase)
+            || normalizedDestination.EndsWith($"/{normalizedIdentity}", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedDestination;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedProject)
+            && normalizedDestination.StartsWith(normalizedProject + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            var remainder = normalizedDestination[normalizedProject.Length..].Trim('/');
+            return string.IsNullOrWhiteSpace(remainder)
+                ? $"{normalizedProject}/{normalizedIdentity}"
+                : $"{normalizedProject}/{normalizedIdentity}/{remainder}";
+        }
+
+        return string.IsNullOrWhiteSpace(normalizedDestination)
+            ? normalizedIdentity
+            : $"{normalizedIdentity}/{normalizedDestination}";
     }
 
     private static string? InferSiteSlugFromPath(string contentRootPath)

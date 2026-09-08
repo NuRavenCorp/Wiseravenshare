@@ -7,6 +7,7 @@ public interface IRavensightMusicService
     Task<RavensightSavedMediaFile> SaveMusicAsync(
         IFormFile file,
         string? destinationFolder,
+    string? userStorageIdentity,
         CancellationToken cancellationToken = default);
 }
 
@@ -22,12 +23,14 @@ public sealed class RavensightMusicService : IRavensightMusicService
     public Task<RavensightSavedMediaFile> SaveMusicAsync(
         IFormFile file,
         string? destinationFolder,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default)
     {
         return _mediaPathService.SaveFileAsync(
             file,
             RavensightMediaType.Music,
             destinationFolder,
+            userStorageIdentity,
             cancellationToken);
     }
 }
