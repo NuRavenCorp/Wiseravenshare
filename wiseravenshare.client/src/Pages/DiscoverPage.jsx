@@ -5,6 +5,7 @@ import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import { usePersonalization } from '../hooks/usePersonalization';
+import { crawlerService } from '../Services/crawlerService';
 
 const MAX_STORED_POSTS = 120;
 
@@ -175,6 +176,7 @@ const DiscoverPage = ({ onNavigate }) => {
     const [focusedTopic, setFocusedTopic] = useState('');
     const [focusedTopicSource, setFocusedTopicSource] = useState(null);
     const [personalizedTrends, setPersonalizedTrends] = useState([]);
+    const [crawlerTrending, setCrawlerTrending] = useState(null);
     const { user } = useAuth();
     const { getTrending, track } = usePersonalization();
 
@@ -185,6 +187,30 @@ const DiscoverPage = ({ onNavigate }) => {
                 setPersonalizedTrends(items);
             }
         }).catch(() => {});
+    }, []);
+
+    // Load crawler trending features to enhance discovery.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCrawlerTrending = async () => {
+            try {
+                const summary = await crawlerService.getSummary();
+                if (!cancelled) {
+                    setCrawlerTrending(summary);
+                }
+            } catch (err) {
+                console.error('Failed to load crawler trending:', err);
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+            }
+        };
+
+        void loadCrawlerTrending();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     useEffect(() => {
@@ -846,31 +872,76 @@ const DiscoverPage = ({ onNavigate }) => {
             )}
 
             {topics.length > 0 && (
-                <div
-                    style={{
-                        background: 'var(--card-bg)',
-                        borderRadius: '12px',
-                        padding: '20px',
-                        marginBottom: '20px',
-                        border: '1px solid var(--border-color)'
-                    }}
-                >
-                    <h3 style={{ marginBottom: '12px' }}>Trending Topics</h3>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                        {topics.map((topic) => (
-                            <span
-                                key={topic.id || topic.name || topic.topic}
-                                style={{
-                                    padding: '6px 14px',
-                                    background: 'rgba(255,255,255,0.05)',
-                                    borderRadius: '20px'
-                                }}
-                            >
-                                {toTrendTopicLabel(topic)} <span style={{ color: 'var(--highlight-color)' }}>{Number(topic.count) || Number(topic.posts) || 0}</span>
-                            </span>
-                        ))}
+                <>
+                    <div
+                        style={{
+                            background: 'var(--card-bg)',
+                            borderRadius: '12px',
+                            padding: '20px',
+                            marginBottom: '20px',
+                            border: '1px solid var(--border-color)'
+                        }}
+                    >
+                        <h3 style={{ marginBottom: '12px' }}>Trending Topics</h3>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                            {topics.map((topic) => (
+                                <span
+                                    key={topic.id || topic.name || topic.topic}
+                                    style={{
+                                        padding: '6px 14px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '20px'
+                                    }}
+                                >
+                                    {toTrendTopicLabel(topic)} <span style={{ color: 'var(--highlight-color)' }}>{Number(topic.count) || Number(topic.posts) || 0}</span>
+                                </span>
+                            ))}
+                        </div>
                     </div>
-                </div>
+
+                    {crawlerTrending?.topConnectedPages && crawlerTrending.topConnectedPages.length > 0 && (
+                        <div
+                            style={{
+                                background: 'var(--card-bg)',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                marginBottom: '20px',
+                                border: '1px solid rgba(34, 197, 94, 0.3)',
+                                backgroundImage: 'linear-gradient(135deg, rgba(34, 197, 94, 0.05) 0%, transparent 100%)'
+                            }}
+                        >
+                            <h3 style={{ marginBottom: '12px', color: 'rgba(34, 197, 94, 1)' }}>🎯 Trending Features</h3>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                                {crawlerTrending.topConnectedPages.slice(0, 8).map((page) => (
+                                    <button
+                                        key={page.pageId}
+                                        onClick={() => onNavigate?.(page.pageId)}
+                                        style={{
+                                            padding: '6px 14px',
+                                            background: 'rgba(34, 197, 94, 0.1)',
+                                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                                            borderRadius: '20px',
+                                            color: 'var(--text-color)',
+                                            cursor: 'pointer',
+                                            fontSize: '13px',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = 'rgba(34, 197, 94, 0.2)';
+                                            e.currentTarget.style.transform = 'scale(1.05)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'rgba(34, 197, 94, 0.1)';
+                                            e.currentTarget.style.transform = 'scale(1)';
+                                        }}
+                                    >
+                                        {page.label} <span style={{ color: 'rgba(34, 197, 94, 0.8)', fontSize: '11px', marginLeft: '4px' }}>•{page.score}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );
