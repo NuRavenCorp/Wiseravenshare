@@ -14,6 +14,7 @@ public interface ISiteCrawlerService
     Task<IReadOnlyList<SiteCrawlerEdgeDto>> GetEdgesAsync(string? countryCode = null, CancellationToken ct = default);
     Task<SiteCrawlerOverviewDto> GetOverviewAsync(string? countryCode = null, CancellationToken ct = default);
     Task<IReadOnlyList<SiteCrawlerApiEndpointDto>> GetApiEndpointsAsync(CancellationToken ct = default);
+    Task<SiteCrawlerValidationReportDto> GetValidationReportAsync(string? countryCode = null, CancellationToken ct = default);
 }
 
 public sealed class SiteCrawlerService : ISiteCrawlerService
@@ -177,12 +178,114 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
             .ToList());
     }
 
+    public async Task<SiteCrawlerValidationReportDto> GetValidationReportAsync(string? countryCode = null, CancellationToken ct = default)
+    {
+        await EnsureCrawlerCatalogTableAsync(ct);
+
+        var rows = await LoadCrawlerRowsAsync(countryCode, ct);
+        var parsedNodes = rows
+            .Select(MapRowToNode)
+            .Where(node => !string.IsNullOrWhiteSpace(node.PageId))
+            .ToList();
+
+        var issues = new List<SiteCrawlerValidationIssueDto>();
+        var duplicatePageIds = parsedNodes
+            .GroupBy(node => node.PageId, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1);
+
+        foreach (var duplicate in duplicatePageIds)
+        {
+            issues.Add(new SiteCrawlerValidationIssueDto
+            {
+                Severity = "warning",
+                Type = "duplicate-page-id",
+                PageId = duplicate.Key,
+                Message = $"Page '{duplicate.Key}' has {duplicate.Count()} catalog entries."
+            });
+        }
+
+        var latestNodes = parsedNodes
+            .GroupBy(node => node.PageId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(item => item.UpdatedAtUtc).First())
+            .ToList();
+
+        var nodeIds = latestNodes
+            .Select(node => node.PageId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in latestNodes)
+        {
+            if (node.RelatedPageIds.Any(related => string.Equals(related, node.PageId, StringComparison.OrdinalIgnoreCase)))
+            {
+                issues.Add(new SiteCrawlerValidationIssueDto
+                {
+                    Severity = "warning",
+                    Type = "self-reference",
+                    PageId = node.PageId,
+                    Message = $"Page '{node.PageId}' includes itself in related pages."
+                });
+            }
+
+            foreach (var related in node.RelatedPageIds)
+            {
+                if (!nodeIds.Contains(related))
+                {
+                    issues.Add(new SiteCrawlerValidationIssueDto
+                    {
+                        Severity = "error",
+                        Type = "dangling-related-reference",
+                        PageId = node.PageId,
+                        TargetPageId = related,
+                        Message = $"Page '{node.PageId}' references missing related page '{related}'."
+                    });
+                }
+            }
+        }
+
+        var orphanPages = latestNodes
+            .Where(node => node.RelatedPageIds.Count == 0)
+            .Select(node => node.PageId)
+            .OrderBy(page => page, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var orphan in orphanPages)
+        {
+            issues.Add(new SiteCrawlerValidationIssueDto
+            {
+                Severity = "info",
+                Type = "orphan-page",
+                PageId = orphan,
+                Message = $"Page '{orphan}' has no related page links."
+            });
+        }
+
+        var score = 100;
+        score -= issues.Count(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase)) * 10;
+        score -= issues.Count(issue => string.Equals(issue.Severity, "warning", StringComparison.OrdinalIgnoreCase)) * 4;
+        score -= issues.Count(issue => string.Equals(issue.Severity, "info", StringComparison.OrdinalIgnoreCase)) * 1;
+        score = Math.Clamp(score, 0, 100);
+
+        return new SiteCrawlerValidationReportDto
+        {
+            Score = score,
+            IsHealthy = !issues.Any(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase)),
+            TotalNodes = latestNodes.Count,
+            TotalIssues = issues.Count,
+            Issues = issues
+                .OrderByDescending(issue => SeverityRank(issue.Severity))
+                .ThenBy(issue => issue.Type, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(issue => issue.PageId, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            GeneratedAtUtc = DateTime.UtcNow
+        };
+    }
+
     private async Task<List<SiteCrawlerRow>> LoadCrawlerRowsAsync(string? countryCode, CancellationToken ct)
     {
         var normalizedCountry = string.IsNullOrWhiteSpace(countryCode) ? null : countryCode.Trim().ToUpperInvariant();
 
         const string sql = @"
-SELECT content_id, content_type, content, tags::text, country_code, updated_at
+SELECT content_id, content_type, content, content_json::text, tags::text, country_code, updated_at, crawler_schema_version, content_hash
 FROM app_data.site_crawler_catalog
 WHERE (@country_code IS NULL OR country_code = @country_code)
 ORDER BY updated_at DESC;";
@@ -200,9 +303,12 @@ ORDER BY updated_at DESC;";
                 ContentId = reader.GetGuid(0),
                 ContentType = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
                 Content = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                TagsJson = reader.IsDBNull(3) ? "[]" : reader.GetString(3),
-                CountryCode = reader.IsDBNull(4) ? "GLOBAL" : reader.GetString(4),
-                UpdatedAtUtc = reader.IsDBNull(5) ? DateTime.UtcNow : reader.GetDateTime(5).ToUniversalTime()
+                ContentJson = reader.IsDBNull(3) ? null : reader.GetString(3),
+                TagsJson = reader.IsDBNull(4) ? "[]" : reader.GetString(4),
+                CountryCode = reader.IsDBNull(5) ? "GLOBAL" : reader.GetString(5),
+                UpdatedAtUtc = reader.IsDBNull(6) ? DateTime.UtcNow : reader.GetDateTime(6).ToUniversalTime(),
+                SchemaVersion = reader.IsDBNull(7) ? 1 : reader.GetInt32(7),
+                ContentHash = reader.IsDBNull(8) ? string.Empty : reader.GetString(8)
             });
         }
 
@@ -211,7 +317,7 @@ ORDER BY updated_at DESC;";
 
     private static SiteCrawlerNodeDto MapRowToNode(SiteCrawlerRow row)
     {
-        var parsedContent = ParseContent(row.Content);
+        var parsedContent = ParseContent(row.ContentJson, row.Content);
         var pageId = ReadSegment(parsedContent, "page");
         var label = ReadSegment(parsedContent, "label");
         var category = ReadSegment(parsedContent, "category");
@@ -234,9 +340,44 @@ ORDER BY updated_at DESC;";
         };
     }
 
-    private static Dictionary<string, string> ParseContent(string content)
+    private static Dictionary<string, string> ParseContent(string? contentJson, string content)
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(contentJson))
+        {
+            try
+            {
+                var map = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(contentJson);
+                if (map is { Count: > 0 })
+                {
+                    var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (key, value) in map)
+                    {
+                        if (string.IsNullOrWhiteSpace(key))
+                        {
+                            continue;
+                        }
+
+                        normalized[key] = value.ValueKind switch
+                        {
+                            JsonValueKind.String => value.GetString() ?? string.Empty,
+                            JsonValueKind.Array => string.Join('|', value.EnumerateArray().Select(item => item.ToString()).Where(item => !string.IsNullOrWhiteSpace(item))),
+                            _ => value.ToString()
+                        };
+                    }
+
+                    if (normalized.Count > 0)
+                    {
+                        return normalized;
+                    }
+                }
+            }
+            catch
+            {
+                // Fall back to legacy content parsing.
+            }
+        }
+
+        var legacyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var parts = (content ?? string.Empty)
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -252,11 +393,11 @@ ORDER BY updated_at DESC;";
             var value = part[(separator + 1)..].Trim();
             if (!string.IsNullOrWhiteSpace(key))
             {
-                map[key] = value;
+                legacyMap[key] = value;
             }
         }
 
-        return map;
+        return legacyMap;
     }
 
     private static string ReadSegment(IReadOnlyDictionary<string, string> contentMap, string key)
@@ -308,6 +449,9 @@ CREATE TABLE IF NOT EXISTS app_data.site_crawler_catalog (
     content_id UUID PRIMARY KEY,
     content_type TEXT NOT NULL,
     content TEXT NOT NULL,
+    content_json JSONB,
+    content_hash TEXT,
+    crawler_schema_version INTEGER NOT NULL DEFAULT 1,
     tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     country_code TEXT NOT NULL DEFAULT 'GLOBAL',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -318,11 +462,26 @@ CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_country_updated
     ON app_data.site_crawler_catalog (country_code, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
-    ON app_data.site_crawler_catalog USING GIN (tags);";
+    ON app_data.site_crawler_catalog USING GIN (tags);
+
+CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_content_hash
+    ON app_data.site_crawler_catalog (content_hash);";
+
+        const string migrationSql = @"
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS content_json JSONB;
+
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS crawler_schema_version INTEGER NOT NULL DEFAULT 1;";
 
         await using var connection = await OpenNewConnectionAsync(ct);
         await using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(ct);
+        await using var migrationCommand = new NpgsqlCommand(migrationSql, connection);
+        await migrationCommand.ExecuteNonQueryAsync(ct);
     }
 
     private async Task<NpgsqlConnection> OpenNewConnectionAsync(CancellationToken ct)
@@ -343,9 +502,21 @@ CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
         public Guid ContentId { get; set; }
         public string ContentType { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
+        public string? ContentJson { get; set; }
         public string TagsJson { get; set; } = "[]";
         public string CountryCode { get; set; } = "GLOBAL";
         public DateTime UpdatedAtUtc { get; set; }
+        public int SchemaVersion { get; set; } = 1;
+        public string ContentHash { get; set; } = string.Empty;
+    }
+
+    private static int SeverityRank(string severity)
+    {
+        return string.Equals(severity, "error", StringComparison.OrdinalIgnoreCase)
+            ? 3
+            : string.Equals(severity, "warning", StringComparison.OrdinalIgnoreCase)
+                ? 2
+                : 1;
     }
 }
 
@@ -394,4 +565,23 @@ public sealed class SiteCrawlerOverviewDto
     public List<SiteCrawlerConnectionStatDto> TopConnectedPages { get; set; } = new();
     public List<string> OrphanPages { get; set; } = new();
     public DateTime GeneratedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class SiteCrawlerValidationReportDto
+{
+    public int Score { get; set; }
+    public bool IsHealthy { get; set; }
+    public int TotalNodes { get; set; }
+    public int TotalIssues { get; set; }
+    public List<SiteCrawlerValidationIssueDto> Issues { get; set; } = new();
+    public DateTime GeneratedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class SiteCrawlerValidationIssueDto
+{
+    public string Severity { get; set; } = "info";
+    public string Type { get; set; } = string.Empty;
+    public string PageId { get; set; } = string.Empty;
+    public string TargetPageId { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
 }

@@ -122,12 +122,12 @@ export const pageMapService = {
     return PAGE_NODES.map((node) => ({
       contentType: 'PageMap',
       contentId: toGuid(node.id),
-      content: [
-        `page:${node.id}`,
-        `label:${node.label}`,
-        `category:${node.category || 'general'}`,
-        `related:${(node.related || []).join('|')}`
-      ].join(';'),
+      content: JSON.stringify({
+        page: node.id,
+        label: node.label,
+        category: node.category || 'general',
+        related: Array.isArray(node.related) ? node.related : []
+      }),
       tags: ['page-map', node.id, node.category || 'general', ...(node.tags || [])],
       countryCode: normalizedCountry
     }));
