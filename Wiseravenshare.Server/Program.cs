@@ -1391,6 +1391,17 @@ var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
+var fallbackClientOrigins = new[]
+{
+    "https://wise-ravens.com",
+    "https://www.wise-ravens.com",
+    "https://wiseravenshare.com",
+    "https://www.wiseravenshare.com"
+};
+var allowedClientOrigins = configuredClientOrigins
+    .Concat(fallbackClientOrigins)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
 var requireDatabase = builder.Configuration.GetValue("Persistence:RequireDatabase", true);
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
@@ -1666,9 +1677,9 @@ builder.Services.AddCors(options =>
     {
         policy.AllowAnyHeader().AllowAnyMethod();
 
-        if (configuredClientOrigins.Length > 0)
+        if (allowedClientOrigins.Length > 0)
         {
-            policy.WithOrigins(configuredClientOrigins)
+            policy.WithOrigins(allowedClientOrigins)
                   .AllowCredentials();
         }
         else if (builder.Environment.IsDevelopment())
