@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
+import { pageMapService } from '../../Services/pageMapService';
 import WiseRavenLogo from './WiseRavenLogo';
 
 const parseAdminEmails = () => {
@@ -119,38 +120,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         };
     }, [user?.id]);
 
-    const menuItems = [
-        { id: 'feed', icon: 'fas fa-home', label: 'Feed' },
-        { id: 'discover', icon: 'fas fa-compass', label: 'Discover' },
-        { id: 'bookmarks', icon: 'fas fa-bookmark', label: 'Bookmarks' },
-        { id: 'notifications', icon: 'fas fa-bell', label: 'Notifications' },
-        { id: 'messages', icon: 'fas fa-envelope', label: 'Messages' },
-        { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
-        { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
-        { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
-        { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
-        { id: 'music-player', icon: 'fas fa-sliders-h', label: 'Music Studio' },
-        { id: 'fm-tuner', icon: 'fas fa-broadcast-tower', label: 'FM Tuner' },
-        { id: 'radio-creator', icon: 'fas fa-podcast', label: 'Radio Creator' },
-        { id: 'my-library', icon: 'fas fa-book-open', label: 'My Library' },
-        { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
-        { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
-        { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
-        { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
-        { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
-        { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
-        { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
-        { id: 'profile', icon: 'fas fa-user', label: 'Profile' }
-    ];
-
-    if (isAdminUser) {
-        menuItems.splice(
-            8,
-            0,
-            { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
-            { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' }
-        );
-    }
+    const menuItems = pageMapService.getSidebarMenu({ isAdminUser });
 
     const profile = {
         name: user?.name || user?.displayName || 'Alex Raven',

@@ -38,7 +38,9 @@ import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
+import { usePersonalization } from './hooks/usePersonalization';
 import { apiService } from './Services/api';
+import { pageMapService } from './Services/pageMapService';
 import aiAssistantService from './Services/aiAssistantService';
 import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
@@ -118,6 +120,7 @@ const App = () => {
     const [articleBackPage, setArticleBackPage] = useState('ainews');
     const { user, isAuthenticated, loading, login, register, acceptTeamInvite, logout } = useAuth();
     const { addToast } = useNotification();
+    const { submitCrawledContent, submitCrawledBatch } = usePersonalization();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
@@ -237,6 +240,61 @@ const App = () => {
             // Warm-up is best-effort; AI page handles user-visible errors.
         });
     }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        const crawlKey = 'wisePageMapCrawlV1';
+        const currentSignature = pageMapService
+            .getPageMap()
+            .map((node) => `${node.id}:${node.category}`)
+            .join('|');
+
+        if (localStorage.getItem(crawlKey) === currentSignature) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const countryCode = (() => {
+            try {
+                const locale = Intl.DateTimeFormat().resolvedOptions().locale || '';
+                const parts = locale.split('-');
+                if (parts.length > 1 && parts[1]) {
+                    return String(parts[1]).toUpperCase();
+                }
+            } catch {
+                // Ignore locale detection failures.
+            }
+            return 'GLOBAL';
+        })();
+
+        const payload = pageMapService.toCrawlerPayload({ countryCode });
+
+        (async () => {
+            try {
+                await submitCrawledBatch(payload, countryCode);
+            } catch {
+                for (const item of payload) {
+                    if (cancelled) {
+                        return;
+                    }
+
+                    await submitCrawledContent(item.contentType, item.contentId, item.content, item.tags);
+                }
+            }
+
+            if (!cancelled) {
+                localStorage.setItem(crawlKey, currentSignature);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isAuthenticated, submitCrawledBatch, submitCrawledContent]);
 
     useEffect(() => {
         const perfTrimKey = 'wisePerfTrimV2';

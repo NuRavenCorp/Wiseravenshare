@@ -12,11 +12,16 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class RavensightMusicMediaController : ControllerBase
 {
     private readonly IMusicLibraryStore _musicLibraryStore;
+    private readonly IMusicPlaybackStateStore _musicPlaybackStateStore;
     private readonly ISubscriptionService _subscriptionService;
 
-    public RavensightMusicMediaController(IMusicLibraryStore musicLibraryStore, ISubscriptionService subscriptionService)
+    public RavensightMusicMediaController(
+        IMusicLibraryStore musicLibraryStore,
+        IMusicPlaybackStateStore musicPlaybackStateStore,
+        ISubscriptionService subscriptionService)
     {
         _musicLibraryStore = musicLibraryStore;
+        _musicPlaybackStateStore = musicPlaybackStateStore;
         _subscriptionService = subscriptionService;
     }
 
@@ -31,6 +36,83 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
         return Ok(tracks);
+    }
+
+    [HttpGet("player-state")]
+    [ProducesResponseType(typeof(MusicPlayerStateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPlayerState(CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var state = await _musicPlaybackStateStore.GetStateAsync(userId, cancellationToken);
+        return Ok(state);
+    }
+
+    [HttpPut("player-state")]
+    [ProducesResponseType(typeof(MusicPlayerStateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpsertPlayerState(
+        [FromBody] MusicPlayerStateUpsertRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var state = await _musicPlaybackStateStore.UpsertStateAsync(userId, request, cancellationToken);
+        return Ok(state);
+    }
+
+    [HttpPost("favorites/{trackId}")]
+    [ProducesResponseType(typeof(MusicPlayerStateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> AddFavorite(string trackId, CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var state = await _musicPlaybackStateStore.ToggleFavoriteAsync(userId, trackId, true, cancellationToken);
+        return Ok(state);
+    }
+
+    [HttpDelete("favorites/{trackId}")]
+    [ProducesResponseType(typeof(MusicPlayerStateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RemoveFavorite(string trackId, CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var state = await _musicPlaybackStateStore.ToggleFavoriteAsync(userId, trackId, false, cancellationToken);
+        return Ok(state);
+    }
+
+    [HttpPost("history/{trackId}")]
+    [ProducesResponseType(typeof(MusicPlayerStateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RecordHistory(
+        string trackId,
+        [FromQuery] double positionSeconds = 0,
+        [FromQuery] bool completed = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var state = await _musicPlaybackStateStore.AppendHistoryAsync(
+            userId,
+            trackId,
+            positionSeconds,
+            completed,
+            cancellationToken);
+
+        return Ok(state);
     }
 
     [HttpPost("save")]

@@ -1129,6 +1129,51 @@ export const apiService = {
             return { data: [] };
         }
     },
+    getMusicPlayerState: async () => {
+        try {
+            return await api.get('/ravensight/media/music/player-state');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load music player state. Please try again.');
+            }
+
+            return { data: null };
+        }
+    },
+    saveMusicPlayerState: async (state) => {
+        try {
+            return await api.put('/ravensight/media/music/player-state', state || {});
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to save music player state. Please try again.');
+        }
+    },
+    addMusicFavorite: async (trackId) => {
+        try {
+            return await api.post(`/ravensight/media/music/favorites/${encodeURIComponent(trackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to add track to favorites. Please try again.');
+        }
+    },
+    removeMusicFavorite: async (trackId) => {
+        try {
+            return await api.delete(`/ravensight/media/music/favorites/${encodeURIComponent(trackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove track from favorites. Please try again.');
+        }
+    },
+    recordMusicPlay: async (trackId, options = {}) => {
+        const params = {
+            positionSeconds: Math.max(0, Number(options.positionSeconds || 0)),
+            completed: Boolean(options.completed)
+        };
+
+        try {
+            return await api.post(`/ravensight/media/music/history/${encodeURIComponent(trackId)}`, null, { params });
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to save play history. Please try again.');
+        }
+    },
 
     // Search endpoints
     search: async (query, type) => {

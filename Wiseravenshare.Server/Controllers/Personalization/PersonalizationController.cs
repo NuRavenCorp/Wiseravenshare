@@ -86,6 +86,29 @@ public sealed class PersonalizationController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("crawled/batch")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> CrawledContentBatch([FromBody] CrawledContentBatchRequest req, CancellationToken ct)
+    {
+        if (req?.Items is null || req.Items.Count == 0)
+        {
+            return NoContent();
+        }
+
+        var items = req.Items
+            .Where(item => item is not null)
+            .Select(item => new CrawledContentIngestItem(
+                item!.ContentType,
+                item.ContentId,
+                item.Content,
+                item.Tags,
+                item.CountryCode))
+            .ToList();
+
+        await _svc.ProcessCrawledContentBatchAsync(items, req.CountryCode, ct);
+        return NoContent();
+    }
+
     // ── GET /api/personalization/embedding ────────────────────────────────────
     /// <summary>Return the current user's interest embedding vector (tag → weight map).</summary>
     [HttpGet("embedding")]
@@ -112,4 +135,9 @@ public record CrawledContentRequest(
     [property: System.ComponentModel.DataAnnotations.Required] string Content,
     string[]? Tags,
     string?   CountryCode
+);
+
+public record CrawledContentBatchRequest(
+    List<CrawledContentRequest> Items,
+    string? CountryCode
 );
