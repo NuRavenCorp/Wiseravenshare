@@ -13,6 +13,7 @@ import ShortFormFeed from '../Components/Feed/ShortFormFeed';
 import { apiService } from '../Services/api';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
 import { usePersonalization } from '../hooks/usePersonalization';
+import { crawlerService } from '../Services/crawlerService';
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
@@ -21,6 +22,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [integrityReports, setIntegrityReports] = useState({});
     const [feedScope, setFeedScope] = useState('local');
     const [expandedPhotoDayKeys, setExpandedPhotoDayKeys] = useState({});
+    const [crawlerTrending, setCrawlerTrending] = useState(null);
+    const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
@@ -165,6 +168,34 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         writeStoredFeedPosts(posts);
         window.dispatchEvent(new Event('wiseraven:posts-updated'));
     }, [posts]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCrawlerTrending = async () => {
+            try {
+                setIsCrawlerLoading(true);
+                const summary = await crawlerService.getSummary(null, 'core');
+                if (!cancelled) {
+                    setCrawlerTrending(summary);
+                }
+            } catch (err) {
+                console.error('Failed to load crawler trending:', err);
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsCrawlerLoading(false);
+                }
+            }
+        };
+
+        void loadCrawlerTrending();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const handlePostCreate = (newPost) => {
         setPosts(prev => mergeFeedPosts([normalizePost(newPost)], prev));
@@ -564,6 +595,57 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                 <div style={{ marginBottom: '12px', fontSize: '12px', fontWeight: 700, color: 'var(--highlight-color)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                     Explore More
                 </div>
+
+                {crawlerTrending?.topConnectedPages && crawlerTrending.topConnectedPages.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                        background: 'rgba(34, 197, 94, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(34, 197, 94, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            🎯 Trending Features
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {crawlerTrending.topConnectedPages.slice(0, 6).map((page) => (
+                                <button
+                                    key={page.pageId}
+                                    onClick={() => onNavigate?.(page.pageId)}
+                                    style={{
+                                        padding: '10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(34, 197, 94, 0.4)',
+                                        background: 'rgba(34, 197, 94, 0.08)',
+                                        color: 'var(--text-color)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        textAlign: 'left',
+                                        fontSize: '12px'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.15)';
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.08)';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                    }}
+                                >
+                                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{page.label}</div>
+                                    <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                        {page.score} connections
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 <OnboardingCard onNavigate={onNavigate} />
                 <ShortFormFeed posts={rankedFeedPosts} />
                 <VideoFeedMini posts={rankedFeedPosts} />

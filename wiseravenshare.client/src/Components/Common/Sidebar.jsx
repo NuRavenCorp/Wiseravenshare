@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
-import { pageMapService } from '../../Services/pageMapService';
 import WiseRavenLogo from './WiseRavenLogo';
 
 const parseAdminEmails = () => {
@@ -11,20 +9,6 @@ const parseAdminEmails = () => {
         .filter(Boolean);
 
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
-};
-
-const hasPrivilegedAggregatorRole = (user) => {
-    const roleCandidates = [
-        user?.teamRole,
-        user?.role,
-        user?.effectiveRole,
-        user?.accessScope,
-        user?.access_scope
-    ]
-        .map((value) => String(value || '').trim().toLowerCase())
-        .filter(Boolean);
-
-    return roleCandidates.includes('privileged') || roleCandidates.includes('priveledged');
 };
 
 const getConnection = (feeds, ...keys) => {
@@ -48,7 +32,11 @@ const normalizeConnection = (connection, platform) => {
             ? (username ? `https://www.instagram.com/${username}` : '')
             : platform === 'youtube'
                 ? (username ? `https://www.youtube.com/@${username}` : '')
-                : (username ? `https://www.tiktok.com/@${username}` : '');
+                : platform === 'twitter'
+                    ? (username ? `https://twitter.com/${username}` : '')
+                    : platform === 'linkedin'
+                        ? (username ? `https://www.linkedin.com/in/${username}` : '')
+                        : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(connection?.enabled),
@@ -72,7 +60,9 @@ const hasConfiguredFeeds = (feeds) => {
         getConnection(source, 'facebook', 'Facebook'),
         getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         getConnection(source, 'instagram', 'Instagram'),
-        getConnection(source, 'youtube', 'YouTube')
+        getConnection(source, 'youtube', 'YouTube'),
+        getConnection(source, 'twitter', 'Twitter'),
+        getConnection(source, 'linkedin', 'LinkedIn')
     ];
 
     return entries.some((connection) => {
@@ -99,10 +89,8 @@ const isImageSource = (value) => {
 
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
-    const { updateProfile } = useAuth();
     const adminEmails = parseAdminEmails();
     const isAdminUser = adminEmails.has(String(user?.email || '').trim().toLowerCase());
-    const canAccessPlatformAggregator = isAdminUser || hasPrivilegedAggregatorRole(user);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -120,7 +108,34 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         };
     }, [user?.id]);
 
-    const menuItems = pageMapService.getSidebarMenu({ isAdminUser });
+    const menuItems = [
+        { id: 'feed', icon: 'fas fa-home', label: 'Feed' },
+        { id: 'discover', icon: 'fas fa-compass', label: 'Discover' },
+        { id: 'bookmarks', icon: 'fas fa-bookmark', label: 'Bookmarks' },
+        { id: 'notifications', icon: 'fas fa-bell', label: 'Notifications' },
+        { id: 'messages', icon: 'fas fa-envelope', label: 'Messages' },
+        { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
+        { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
+        { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
+        { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
+        { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
+        { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
+        { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
+        { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
+        { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
+        { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
+        { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
+        { id: 'profile', icon: 'fas fa-user', label: 'Profile' }
+    ];
+
+    if (isAdminUser) {
+        menuItems.splice(
+            8,
+            0,
+            { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
+            { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' }
+        );
+    }
 
     const profile = {
         name: user?.name || user?.displayName || 'Alex Raven',
@@ -162,93 +177,22 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             icon: 'fab fa-youtube',
             color: '#f87171',
             connection: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'), 'youtube')
+        },
+        {
+            id: 'twitter-feed',
+            label: 'Twitter / X Feed',
+            icon: 'fab fa-twitter',
+            color: '#38bdf8',
+            connection: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter'), 'twitter')
+        },
+        {
+            id: 'linkedin-feed',
+            label: 'LinkedIn Feed',
+            icon: 'fab fa-linkedin',
+            color: '#60a5fa',
+            connection: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'), 'linkedin')
         }
     ];
-
-    const openAggregator = (platformId) => {
-        if (!canAccessPlatformAggregator) {
-            return;
-        }
-
-        if (!platformId) {
-            onNavigate('social-feeds');
-            return;
-        }
-
-        onNavigate(platformId);
-        window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
-            detail: { page: platformId, platform: platformId.replace('-feed', '') }
-        }));
-    };
-
-    const openConnectAccounts = (platformId) => {
-        if (!canAccessPlatformAggregator) {
-            return;
-        }
-
-        const platform = String(platformId || '').replace('-feed', '');
-        try {
-            localStorage.setItem('wiseSocialAggregatorIntent', JSON.stringify({
-                page: platformId || 'social-feeds',
-                platform,
-                openConfig: true,
-                createdAt: Date.now()
-            }));
-        } catch {
-            /* ignore storage failures */
-        }
-
-        onNavigate(platformId || 'social-feeds');
-
-        // Delay dispatch so the destination page has time to mount listeners.
-        window.setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
-                detail: {
-                    page: platformId || 'social-feeds',
-                    platform,
-                    openConfig: true
-                }
-            }));
-        }, 75);
-    };
-
-    const disconnectFeed = async (platformId) => {
-        const platformKeyMap = {
-            'facebook-feed': 'facebook',
-            'tiktok-feed': 'tikTok',
-            'instagram-feed': 'instagram',
-            'youtube-feed': 'youtube'
-        };
-
-        const targetKey = platformKeyMap[platformId];
-        if (!targetKey) {
-            return;
-        }
-
-        if (typeof window !== 'undefined' && !window.confirm('Delete this connected social feed?')) {
-            return;
-        }
-
-        const currentFeeds = user?.socialFeeds || {};
-        const nextFeeds = {
-            ...currentFeeds,
-            [targetKey]: {
-                enabled: false,
-                username: '',
-                profileUrl: '',
-                feedUrl: ''
-            }
-        };
-
-        await updateProfile({ socialFeeds: nextFeeds });
-        try {
-            localStorage.setItem('wiseSocialFeeds', JSON.stringify(nextFeeds));
-        } catch {
-            /* ignore storage failures */
-        }
-
-        window.dispatchEvent(new Event('wiseraven:social-updated'));
-    };
 
     return (
         <aside className="left-column">
@@ -362,7 +306,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                 ))}
             </ul>
 
-            {canAccessPlatformAggregator && (
             <div style={{
                 marginTop: '14px',
                 background: 'var(--card-bg)',
@@ -401,40 +344,18 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                     </div>
 
                                     {isActive ? (
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                            <button
-                                                type="button"
-                                                onClick={() => openAggregator(item.id)}
-                                                style={{
-                                                    fontSize: '0.75rem',
-                                                    color: item.color,
-                                                    background: 'transparent',
-                                                    border: 'none',
-                                                    cursor: 'pointer',
-                                                    padding: 0
-                                                }}
-                                            >
-                                                Connect
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => disconnectFeed(item.id)}
-                                                style={{
-                                                    fontSize: '0.75rem',
-                                                    color: '#fca5a5',
-                                                    background: 'transparent',
-                                                    border: 'none',
-                                                    cursor: 'pointer',
-                                                    padding: 0
-                                                }}
-                                            >
-                                                Delete
-                                            </button>
-                                        </div>
+                                        <a
+                                            href={item.connection.resolvedUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ color: item.color, fontSize: '0.75rem', textDecoration: 'none' }}
+                                        >
+                                            Open
+                                        </a>
                                     ) : (
                                         <button
                                             type="button"
-                                            onClick={() => openConnectAccounts(item.id)}
+                                            onClick={() => onNavigate({ page: 'profile', editProfile: true })}
                                             style={{
                                                 fontSize: '0.75rem',
                                                 color: 'var(--highlight-color)',
@@ -444,7 +365,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                                 padding: 0
                                             }}
                                         >
-                                            Connect
+                                            Set up
                                         </button>
                                     )}
                                 </div>
@@ -459,7 +380,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                     })}
                 </div>
             </div>
-            )}
         </aside>
     );
 };
