@@ -3,12 +3,13 @@ import {
   FiPlay, FiPause, FiSquare, FiSkipBack, FiSkipForward, FiUpload,
   FiRepeat, FiShuffle, FiVolume2, FiVolumeX,
   FiMusic, FiSearch, FiX, FiList, FiSliders,
-  FiRadio, FiMic, FiMicOff, FiActivity, FiCamera, FiLink, FiAward, FiShield
+  FiRadio, FiMic, FiMicOff, FiActivity, FiCamera, FiLink, FiAward, FiShield, FiTrendingUp
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
 import { subscriptionService } from '../Services/subscriptionService';
+import { crawlerService } from '../Services/crawlerService';
 import FMTunerModule from '../Components/FM/FMTunerModule';
 import FMCreatorStudio from '../Components/FM/FMCreatorStudio';
 import '../Styles/MusicStudio.css';
@@ -326,9 +327,11 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     'sound-creator': false,
   });
   const [rightsCheckoutKey, setRightsCheckoutKey] = useState('');
+  const [crawlerTrending, setCrawlerTrending] = useState(null);
+  const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
 
   useEffect(() => {
-    const allowedPanels = new Set(['eq', 'effects', 'vocal', 'input', 'rights', 'marketplace', 'fm', 'radio-creator']);
+    const allowedPanels = new Set(['eq', 'effects', 'vocal', 'input', 'rights', 'marketplace', 'fm', 'radio-creator', 'trending']);
     if (allowedPanels.has(String(initialPanel || '').trim())) {
       setActivePanel(String(initialPanel).trim());
     }
@@ -359,6 +362,36 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCrawlerTrending = async () => {
+      try {
+        setIsCrawlerLoading(true);
+        const summary = await crawlerService.getSummary(null, 'audio');
+        if (!cancelled) {
+          setCrawlerTrending(summary);
+        }
+      } catch (err) {
+        console.error('Failed to load crawler trending:', err);
+        if (!cancelled) {
+          setCrawlerTrending(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCrawlerLoading(false);
+        }
+      }
+    };
+
+    if (activePanel === 'trending') {
+      void loadCrawlerTrending();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [activePanel]);
 
   const isMarketplaceUnlocked = Boolean(subscriptionStatus?.hasActiveSubscription);
   const matchedTier = RIGHTS_PLANS.find((plan) =>
@@ -1662,6 +1695,9 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
             <button className={activePanel === 'radio-creator' ? 'active' : ''} onClick={() => setActivePanel('radio-creator')}>
               <FiRadio /> Radio Creator
             </button>
+            <button className={activePanel === 'trending' ? 'active' : ''} onClick={() => setActivePanel('trending')}>
+             <FiTrendingUp /> Trending
+            </button>
           </div>
 
           {/* ── EQ panel ── */}
@@ -1753,6 +1789,74 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* ── Trending Features panel ── */}
+          {activePanel === 'trending' && (
+            <div className="panel trending-panel">
+             <div className="trending-header">
+               <FiTrendingUp /> Trending Features in Audio
+             </div>
+              
+             {isCrawlerLoading && (
+               <div className="trending-loading">
+                 <p>Loading trending features...</p>
+               </div>
+             )}
+
+             {!isCrawlerLoading && crawlerTrending?.topConnectedPages && crawlerTrending.topConnectedPages.length > 0 && (
+               <div className="trending-grid">
+                 {crawlerTrending.topConnectedPages.map((page) => (
+                   <div key={page.pageId} className="trending-card">
+                     <div className="trending-card-header">
+                       <h4>{page.label}</h4>
+                       <span className="trending-badge">{page.score} connections</span>
+                     </div>
+                     <p className="trending-category">{page.category}</p>
+                     {page.tags && page.tags.length > 0 && (
+                       <div className="trending-tags">
+                         {page.tags.slice(0, 3).map((tag) => (
+                           <span key={tag} className="tag">{tag}</span>
+                         ))}
+                       </div>
+                     )}
+                     <button 
+                       className="trending-action-btn"
+                       onClick={() => onNavigate?.(page.pageId)}
+                     >
+                       Explore →
+                     </button>
+                   </div>
+                 ))}
+               </div>
+             )}
+
+             {!isCrawlerLoading && (!crawlerTrending?.topConnectedPages || crawlerTrending.topConnectedPages.length === 0) && (
+               <div className="trending-empty">
+                 <p>No trending features available at this time.</p>
+               </div>
+             )}
+
+             {crawlerTrending?.categories && (
+               <div className="trending-stats">
+                 <h5>Catalog Stats</h5>
+                 <div className="stats-grid">
+                   <div className="stat">
+                     <span className="stat-label">Total Pages</span>
+                     <span className="stat-value">{crawlerTrending.totalPages}</span>
+                   </div>
+                   <div className="stat">
+                     <span className="stat-label">Categories</span>
+                     <span className="stat-value">{Object.keys(crawlerTrending.categories).length}</span>
+                   </div>
+                   <div className="stat">
+                     <span className="stat-label">Connections</span>
+                     <span className="stat-value">{crawlerTrending.totalConnections}</span>
+                   </div>
+                 </div>
+               </div>
+             )}
             </div>
           )}
 

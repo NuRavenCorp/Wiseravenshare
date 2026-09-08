@@ -69,6 +69,17 @@ public sealed class SiteCrawlerController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("summary")]
+    [ProducesResponseType(typeof(SiteCrawlerSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSummary(
+        [FromQuery] string? countryCode = null,
+        [FromQuery] string? userCategory = null,
+        CancellationToken ct = default)
+    {
+        var summary = await _siteCrawlerService.GetSummaryAsync(countryCode, userCategory, ct);
+        return Ok(summary);
+    }
+
     private bool IsAdminRequest()
     {
         var email = User.FindFirstValue(ClaimTypes.Email)
