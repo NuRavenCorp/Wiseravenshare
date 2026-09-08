@@ -59,6 +59,16 @@ public sealed class SiteCrawlerController : ControllerBase
         return Ok(apis);
     }
 
+    [HttpGet("validate")]
+    [ProducesResponseType(typeof(SiteCrawlerValidationReportDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ValidateCrawlerMap([FromQuery] string? countryCode = null, CancellationToken ct = default)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var report = await _siteCrawlerService.GetValidationReportAsync(countryCode, ct);
+        return Ok(report);
+    }
+
     private bool IsAdminRequest()
     {
         var email = User.FindFirstValue(ClaimTypes.Email)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Npgsql;
@@ -478,17 +479,23 @@ public sealed class PersonalizationService : IPersonalizationService
 
         const string sql = @"
 INSERT INTO app_data.site_crawler_catalog (
-    content_id, content_type, content, tags, country_code, created_at, updated_at
+    content_id, content_type, content, content_json, content_hash, crawler_schema_version, tags, country_code, created_at, updated_at
 ) VALUES (
-    @content_id, @content_type, @content, CAST(@tags AS jsonb), @country_code, NOW(), NOW()
+    @content_id, @content_type, @content, CAST(@content_json AS jsonb), @content_hash, @crawler_schema_version, CAST(@tags AS jsonb), @country_code, NOW(), NOW()
 )
 ON CONFLICT (content_id)
 DO UPDATE SET
     content_type = EXCLUDED.content_type,
     content = EXCLUDED.content,
+    content_json = EXCLUDED.content_json,
+    content_hash = EXCLUDED.content_hash,
+    crawler_schema_version = EXCLUDED.crawler_schema_version,
     tags = EXCLUDED.tags,
     country_code = EXCLUDED.country_code,
-    updated_at = NOW();";
+    updated_at = NOW()
+WHERE app_data.site_crawler_catalog.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+   OR app_data.site_crawler_catalog.country_code IS DISTINCT FROM EXCLUDED.country_code
+   OR app_data.site_crawler_catalog.content_type IS DISTINCT FROM EXCLUDED.content_type;";
 
         var connectionString = _db.Database.GetConnectionString();
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -502,9 +509,14 @@ DO UPDATE SET
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var normalizedPayload = NormalizeCrawlerContentPayload(content);
+        var normalizedPayloadJson = JsonSerializer.Serialize(normalizedPayload);
+
         var normalizedCountry = string.IsNullOrWhiteSpace(countryCode)
             ? "GLOBAL"
             : countryCode.Trim().ToUpperInvariant();
+
+        var payloadHash = ComputeCrawlerPayloadHash(contentType.Trim(), normalizedPayloadJson, normalizedTags, normalizedCountry);
 
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(ct);
@@ -512,6 +524,9 @@ DO UPDATE SET
         command.Parameters.AddWithValue("content_id", contentId);
         command.Parameters.AddWithValue("content_type", contentType.Trim());
         command.Parameters.AddWithValue("content", content.Trim());
+        command.Parameters.AddWithValue("content_json", normalizedPayloadJson);
+        command.Parameters.AddWithValue("content_hash", payloadHash);
+        command.Parameters.AddWithValue("crawler_schema_version", 2);
         command.Parameters.AddWithValue("tags", JsonSerializer.Serialize(normalizedTags));
         command.Parameters.AddWithValue("country_code", normalizedCountry);
         await command.ExecuteNonQueryAsync(ct);
@@ -526,6 +541,9 @@ CREATE TABLE IF NOT EXISTS app_data.site_crawler_catalog (
     content_id UUID PRIMARY KEY,
     content_type TEXT NOT NULL,
     content TEXT NOT NULL,
+    content_json JSONB,
+    content_hash TEXT,
+    crawler_schema_version INTEGER NOT NULL DEFAULT 1,
     tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     country_code TEXT NOT NULL DEFAULT 'GLOBAL',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -536,7 +554,19 @@ CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_country_updated
     ON app_data.site_crawler_catalog (country_code, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
-    ON app_data.site_crawler_catalog USING GIN (tags);";
+    ON app_data.site_crawler_catalog USING GIN (tags);
+
+CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_content_hash
+    ON app_data.site_crawler_catalog (content_hash);
+
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS content_json JSONB;
+
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+ALTER TABLE app_data.site_crawler_catalog
+    ADD COLUMN IF NOT EXISTS crawler_schema_version INTEGER NOT NULL DEFAULT 1;";
 
         var connectionString = _db.Database.GetConnectionString();
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -548,5 +578,89 @@ CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
         await connection.OpenAsync(ct);
         await using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static Dictionary<string, object> NormalizeCrawlerContentPayload(string content)
+    {
+        var raw = string.IsNullOrWhiteSpace(content) ? string.Empty : content.Trim();
+
+        if (raw.StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw);
+                if (parsed is { Count: > 0 })
+                {
+                    var normalized = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (key, value) in parsed)
+                    {
+                        if (string.IsNullOrWhiteSpace(key))
+                        {
+                            continue;
+                        }
+
+                        normalized[key] = value.ValueKind switch
+                        {
+                            JsonValueKind.Array => value.EnumerateArray().Select(item => item.ToString()).Where(item => !string.IsNullOrWhiteSpace(item)).ToArray(),
+                            JsonValueKind.String => value.GetString() ?? string.Empty,
+                            JsonValueKind.Null => string.Empty,
+                            _ => value.ToString()
+                        };
+                    }
+
+                    if (normalized.Count > 0)
+                    {
+                        return normalized;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to legacy parsing below.
+            }
+        }
+
+        var map = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var segments = raw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var segment in segments)
+        {
+            var separator = segment.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = segment[..separator].Trim();
+            var value = segment[(separator + 1)..].Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            map[key] = key.Equals("related", StringComparison.OrdinalIgnoreCase)
+                ? value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : value;
+        }
+
+        if (map.Count == 0 && raw.Length > 0)
+        {
+            map["raw"] = raw;
+        }
+
+        return map;
+    }
+
+    private static string ComputeCrawlerPayloadHash(string contentType, string payloadJson, IReadOnlyList<string> tags, string countryCode)
+    {
+        var canonical = string.Join("|", new[]
+        {
+            contentType,
+            payloadJson,
+            string.Join(",", tags.OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)),
+            countryCode
+        });
+
+        var bytes = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }
