@@ -25,6 +25,15 @@ const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').t
 
 const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
 
+const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'wiseravenshare.com'];
+
+const isFirstPartyHost = (host = '') => {
+    const normalized = String(host || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return FIRST_PARTY_HOSTS.some((root) => normalized === root || normalized.endsWith(`.${root}`));
+};
+
 const getAbsoluteHost = (value = '') => {
     try {
         return new URL(String(value || '').trim()).hostname.toLowerCase();
@@ -53,6 +62,11 @@ const resolveApiBaseUrl = () => {
         && isDigitalOceanAppHost(host)
         && configuredHost
         && configuredHost !== host;
+    const shouldPreferSameOriginOnFirstPartyDomain = configuredIsAbsolute
+        && configuredHost
+        && configuredHost !== host
+        && isFirstPartyHost(host)
+        && isFirstPartyHost(configuredHost);
 
     // Hybrid runtimes do not host the API at localhost from the device perspective.
     if (isHybridRuntime) {
@@ -68,6 +82,11 @@ const resolveApiBaseUrl = () => {
     }
 
     if (shouldPreferSameOriginOnDoPreview) {
+        return `${window.location.origin}/api`;
+    }
+
+    // Avoid cross-domain auth/session edge cases between first-party aliases.
+    if (shouldPreferSameOriginOnFirstPartyDomain) {
         return `${window.location.origin}/api`;
     }
 
