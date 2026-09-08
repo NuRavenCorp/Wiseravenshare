@@ -233,7 +233,7 @@ const App = () => {
             return;
         }
 
-        aiAssistantService.healthCheck(8, 750).catch(() => {
+        aiAssistantService.healthCheck(1, 750).catch(() => {
             // Warm-up is best-effort; AI page handles user-visible errors.
         });
     }, [isAuthenticated]);

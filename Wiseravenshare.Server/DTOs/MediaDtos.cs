@@ -127,6 +127,9 @@ public sealed class MediaStreamDto
     public string MimeType { get; set; } = "application/octet-stream";
     public long FileSize { get; set; }
     public DateTime LastModified { get; set; }
+    public string? Url { get; set; }
+    public string? ObjectKey { get; set; }
+    public string? PublicUrl { get; set; }
     public string? ContentRange { get; set; }
     public long? StartByte { get; set; }
     public long? EndByte { get; set; }

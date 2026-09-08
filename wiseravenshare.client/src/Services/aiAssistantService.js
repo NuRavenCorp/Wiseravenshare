@@ -40,14 +40,20 @@ export const aiAssistantService = {
                 }
             } catch (error) {
                 const status = error?.response?.status;
-                if (status === 503) {
-                    // Service unavailable - Ollama is starting. Retry with backoff
+                const isNetworkOrTimeout = !status;
+                const isWarmup = status === 503;
+                const isTransientGateway = status === 502 || status === 504;
+
+                // Retry only transient states; avoid hammering persistent failures.
+                if (isNetworkOrTimeout || isWarmup || isTransientGateway) {
                     if (attempt < maxRetries - 1) {
-                        const delayMs = initialDelayMs * Math.pow(2, attempt); // exponential backoff
-                        await new Promise(r => setTimeout(r, delayMs));
+                        const delayMs = initialDelayMs * Math.pow(2, attempt);
+                        await new Promise((r) => setTimeout(r, delayMs));
                         continue;
                     }
                 }
+
+                break;
             }
         }
         return { 
