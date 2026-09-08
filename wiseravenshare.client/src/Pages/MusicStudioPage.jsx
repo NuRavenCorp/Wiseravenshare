@@ -51,8 +51,52 @@ function makeReverbIR(ctx, duration = 1.5, decay = 2.5) {
 }
 
 const fmt = (s) => {
-  if (!s || isNaN(s)) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const value = Number(s);
+  if (!Number.isFinite(value) || value <= 0) return '0:00';
+  return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+};
+
+const fmtDuration = (seconds) => {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return '0:00';
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const remainder = Math.floor(value % 60);
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+    : `${minutes}:${String(remainder).padStart(2, '0')}`;
+};
+
+const readDuration = (file) => new Promise((resolve) => {
+  if (!file) {
+    resolve('0:00');
+    return;
+  }
+
+  const audio = document.createElement('audio');
+  const objectUrl = URL.createObjectURL(file);
+  audio.preload = 'metadata';
+  audio.onloadedmetadata = () => {
+    URL.revokeObjectURL(objectUrl);
+    audio.src = '';
+    resolve(fmtDuration(audio.duration));
+  };
+  audio.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    audio.src = '';
+    resolve('0:00');
+  };
+  audio.src = objectUrl;
+});
+
+const fingerprint = async (file) => {
+  try {
+    const buffer = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(hash)).map((value) => value.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
 };
 
 const toBlobStreamUrl = (relativePath = '') => {
@@ -95,6 +139,19 @@ const normalizePlaybackUrl = (value = '') => {
     return raw;
   }
 
+  // Treat raw object-key style values as blob paths.
+  const objectPath = raw
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  if (objectPath) {
+    return `/api/videostreaming/blob/${objectPath}`;
+  }
+
   return '';
 };
 
@@ -128,11 +185,15 @@ const normalizeTrack = (track) => {
   const fileNameStreamUrl = fileName
     ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
     : '';
+  const mediaLibraryStreamUrl = track.id || track.Id
+    ? `/api/media-library/${encodeURIComponent(String(track.id || track.Id))}/stream`
+    : '';
 
-  // Prefer durable server-side stream routes over transient blob: URLs.
-  const mediaUrl = blobStreamUrl
-    || fileNameStreamUrl
-    || directMediaUrl;
+  // Prefer canonical DB URL first when available; legacy fileName stream can 404.
+  const mediaUrl = mediaLibraryStreamUrl
+    || directMediaUrl
+    || blobStreamUrl
+    || fileNameStreamUrl;
 
   return {
     id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
@@ -522,7 +583,9 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
       ? (track.mediaUrls || track.MediaUrls).map((value) => normalizePlaybackUrl(value))
       : [];
 
+    const trackId = track.id || track.Id;
     const sources = [
+      trackId ? `/api/media-library/${encodeURIComponent(String(trackId))}/stream` : '',
       normalizePlaybackUrl(track.mediaUrl || track.url || ''),
       toBlobStreamUrl(track.relativePath || ''),
       track.fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(track.fileName)}` : '',

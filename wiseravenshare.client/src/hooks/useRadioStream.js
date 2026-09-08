@@ -16,13 +16,22 @@ import { buildProxyStreamUrl } from '../Services/fmService';
 
 const MAX_RECONNECTS = 6;
 const WAVEFORM_FFT = 256;
+const FALLBACK_AUDIO_CANDIDATES = [
+  'https://ice6.somafm.com/groovesalad-128-mp3',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
+];
 
 const buildCandidates = (rawUrl) => {
   const direct = String(rawUrl || '').trim();
   if (!direct) return [];
-  if (direct.startsWith('/api/fmtuner/stream-proxy')) return [direct];
+  if (direct.startsWith('/api/fmtuner/stream-proxy')) {
+    return [...new Set([direct, ...FALLBACK_AUDIO_CANDIDATES])];
+  }
   const proxy = buildProxyStreamUrl(direct);
-  return direct === proxy ? [direct] : [direct, proxy];
+  return [...new Set(direct === proxy
+    ? [direct, ...FALLBACK_AUDIO_CANDIDATES]
+    : [direct, proxy, ...FALLBACK_AUDIO_CANDIDATES])];
 };
 
 export const useRadioStream = (streamUrl, {
@@ -141,7 +150,14 @@ export const useRadioStream = (streamUrl, {
     candidateIdxRef.current = 0;
 
     const audio = new Audio();
-    audio.crossOrigin = 'anonymous';
+    const firstCandidate = String(candidates[0] || '');
+    const isProxyCandidate = firstCandidate.startsWith('/api/fmtuner/stream-proxy');
+    const isSameOriginCandidate = firstCandidate.startsWith(window.location.origin);
+    // Only require CORS when we know we are on our own origin/proxy route.
+    // Direct third-party streams often omit CORS and will fail playback if forced.
+    if (isProxyCandidate || isSameOriginCandidate) {
+      audio.crossOrigin = 'anonymous';
+    }
     audio.preload     = 'none';
     audio.volume      = (isMuted ? 0 : volume) / 100;
     audioRef.current  = audio;

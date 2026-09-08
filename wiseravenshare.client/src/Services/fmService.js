@@ -131,15 +131,16 @@ export const GENRE_PRESETS = [
 //  - http:// streams are automatically routed through the backend proxy so they
 //    still play; discard stations with no stream at all.
 const resolveStreamUrl = (rb) => {
-  const resolved  = String(rb.url_resolved || '').trim();
-  const direct    = String(rb.url          || '').trim();
+  const resolved = String(rb.url_resolved || '').trim();
+  const direct = String(rb.url || '').trim();
+  const candidates = [resolved, direct].filter(Boolean);
+  if (candidates.length === 0) return null;
 
-  // Prefer url_resolved; fall back to url.
-  const best = resolved || direct;
-  if (!best) return null;
+  const hasLikelyHls = (value) => /\.m3u8(\?|#|$)/i.test(String(value || ''));
+  const preferred = candidates.find((value) => !hasLikelyHls(value)) || candidates[0];
 
-  if (best.startsWith('https://')) return best;
-  if (best.startsWith('http://'))  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(best)}`;
+  if (preferred.startsWith('https://')) return preferred;
+  if (preferred.startsWith('http://')) return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(preferred)}`;
 
   // Relative or unknown scheme — discard.
   return null;
@@ -193,7 +194,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: '25586c8b-95a8-4218-a812-e1c56e9322c0',
@@ -211,7 +213,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
@@ -229,7 +232,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
@@ -247,7 +251,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'c3d4e5f6-a7b8-9012-cdef-012345678902',
@@ -265,7 +270,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'd4e5f6a7-b8c9-0123-def0-123456789003',
@@ -283,7 +289,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'e5f6a7b8-c9d0-1234-ef01-234567890004',
@@ -301,7 +308,8 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   },
   {
     id: 'f6a7b8c9-d0e1-2345-f012-345678900005',
@@ -319,9 +327,110 @@ const sampleStations = [
     isActive: true,
     bitrate: 128,
     isLiked: false,
-    isBookmarked: false
+    isBookmarked: false,
+    source: 'sample'
   }
 ];
+
+const PIN_REGION_ALIASES = {
+  NYC: 'NYC',
+  'NEW YORK': 'NYC',
+  'NEW YORK CITY': 'NYC',
+  NY: 'NYC',
+  BROOKLYN: 'NYC',
+  QUEENS: 'NYC',
+  BRONX: 'NYC',
+  MANHATTAN: 'NYC',
+  STATENISLAND: 'NYC',
+  'STATEN ISLAND': 'NYC'
+};
+
+const FREQUENCY_PINSETS = {
+  NYC: {
+    '88.3': {
+      name: 'WBGO Jazz 88.3 NYC',
+      streamUrl: 'https://wbgo.streamguys1.com/wbgo128',
+      genre: 'Jazz',
+      language: 'English'
+    },
+    '93.9': {
+      name: 'iHeart 93.9 NYC Hits',
+      streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WNYLFMAAC.aac',
+      genre: 'Top 40',
+      language: 'English'
+    },
+    '101.1': {
+      name: 'WCBS FM 101.1 NYC',
+      streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
+      genre: 'Classic Hits',
+      language: 'English'
+    },
+    '1010': {
+      name: '1010 WINS NYC',
+      streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WINSAMAAC.aac',
+      genre: 'News',
+      language: 'English'
+    },
+    '107.5': {
+      name: 'WBLS 107.5 NYC',
+      streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac',
+      genre: 'R&B / Hip-Hop',
+      language: 'English'
+    }
+  }
+};
+
+const normalizeRegionKey = (region = '') => {
+  const cleaned = String(region || '').trim().toUpperCase();
+  if (!cleaned) return 'NYC';
+  const compact = cleaned.replace(/[^A-Z0-9]/g, '');
+  return PIN_REGION_ALIASES[cleaned] || PIN_REGION_ALIASES[compact] || 'NYC';
+};
+
+const normalizeFrequencyKey = (value = '') => {
+  const text = String(value || '').trim().toLowerCase().replace(/mhz/g, '').trim();
+  const numeric = Number.parseFloat(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  const fixed = Number.isInteger(numeric) ? `${numeric}` : numeric.toFixed(1);
+  return fixed.replace(/\.0$/, '');
+};
+
+const createPinnedStation = (frequencyKey, regionKey, pin) => ({
+  id: `pin-${regionKey}-${frequencyKey}`,
+  name: pin.name,
+  description: `Pinned ${regionKey} frequency ${frequencyKey}`,
+  frequency: frequencyKey,
+  band: 'FM',
+  city: regionKey === 'NYC' ? 'New York City' : regionKey,
+  country: 'United States',
+  genre: pin.genre || 'Music',
+  language: pin.language || 'English',
+  streamUrl: pin.streamUrl,
+  listeners: 0,
+  bitrate: 128,
+  codec: 'AAC',
+  isFeatured: true,
+  isActive: true,
+  isLiked: false,
+  isBookmarked: false,
+  source: 'frequency-pin'
+});
+
+export const getPinnedStationByFrequency = (frequency, region = 'NYC') => {
+  const regionKey = normalizeRegionKey(region);
+  const frequencyKey = normalizeFrequencyKey(frequency);
+  if (!frequencyKey) {
+    return null;
+  }
+
+  const pinsForRegion = FREQUENCY_PINSETS[regionKey] || FREQUENCY_PINSETS.NYC;
+  const pin = pinsForRegion?.[frequencyKey];
+  if (!pin) {
+    return null;
+  }
+
+  return createPinnedStation(frequencyKey, regionKey, pin);
+};
 
 const isRouteMissing = (error) => {
   const status = Number(error?.response?.status || 0);
@@ -354,6 +463,7 @@ const normalizeStation = (station) => {
     codec: station.codec || station.Codec || '',
     logoUrl: station.logoUrl || station.LogoUrl || '',
     coverImageUrl: station.coverImageUrl || station.CoverImageUrl || '',
+    source: station.source || station.Source || '',
     isLiked: Boolean(station.isLiked ?? station.IsLiked),
     isBookmarked: Boolean(station.isBookmarked ?? station.IsBookmarked)
   };
@@ -717,5 +827,7 @@ export const fmService = {
   getCreatorStationSchedules: async (stationId) => {
     const response = await api.get(`/fmtuner/creator-stations/${encodeURIComponent(stationId)}/schedules`);
     return normalizeCollection(response?.data);
-  }
+  },
+
+  getPinnedStationByFrequency
 };
