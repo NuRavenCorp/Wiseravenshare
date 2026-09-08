@@ -61,3 +61,42 @@ public sealed class UserMusicTrackDto
     public string UploadedAt { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
 }
+
+public sealed class MusicPlayerStateUpsertRequest
+{
+    public string? ActivePlaylistId { get; set; }
+    public string? LastTrackId { get; set; }
+    public double LastPositionSeconds { get; set; }
+    public List<string> QueueTrackIds { get; set; } = new();
+    public List<string> FavoriteTrackIds { get; set; } = new();
+    public List<MusicPlaylistStateDto> Playlists { get; set; } = new();
+    public List<MusicHistoryEntryDto> RecentHistory { get; set; } = new();
+}
+
+public sealed class MusicPlayerStateDto
+{
+    public string? ActivePlaylistId { get; set; }
+    public string? LastTrackId { get; set; }
+    public double LastPositionSeconds { get; set; }
+    public List<string> QueueTrackIds { get; set; } = new();
+    public List<string> FavoriteTrackIds { get; set; } = new();
+    public List<MusicPlaylistStateDto> Playlists { get; set; } = new();
+    public List<MusicHistoryEntryDto> RecentHistory { get; set; } = new();
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class MusicPlaylistStateDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public List<string> TrackIds { get; set; } = new();
+    public string CreatedAt { get; set; } = DateTime.UtcNow.ToString("O");
+}
+
+public sealed class MusicHistoryEntryDto
+{
+    public string TrackId { get; set; } = string.Empty;
+    public string PlayedAt { get; set; } = DateTime.UtcNow.ToString("O");
+    public double PositionSeconds { get; set; }
+    public bool Completed { get; set; }
+}

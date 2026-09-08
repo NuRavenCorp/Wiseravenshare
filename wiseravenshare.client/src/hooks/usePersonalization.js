@@ -125,7 +125,34 @@ export const usePersonalization = () => {
     } catch { /* non-critical */ }
   }, []);
 
-  return { track, getRecommendations, getTrending, submitCrawledContent };
+  const submitCrawledBatch = useCallback(async (items = [], overrideCountryCode = '') => {
+    const normalizedItems = (Array.isArray(items) ? items : [])
+      .filter((item) => item && item.contentType && item.contentId && item.content)
+      .map((item) => ({
+        contentType: item.contentType,
+        contentId: item.contentId,
+        content: item.content,
+        tags: Array.isArray(item.tags) ? item.tags : [],
+        countryCode: item.countryCode || overrideCountryCode || countryCode.current || 'GLOBAL'
+      }));
+
+    if (normalizedItems.length === 0) {
+      return;
+    }
+
+    try {
+      await api.post('/personalization/crawled/batch', {
+        items: normalizedItems,
+        countryCode: overrideCountryCode || countryCode.current || 'GLOBAL'
+      });
+    } catch {
+      for (const item of normalizedItems) {
+        await submitCrawledContent(item.contentType, item.contentId, item.content, item.tags);
+      }
+    }
+  }, [submitCrawledContent]);
+
+  return { track, getRecommendations, getTrending, submitCrawledContent, submitCrawledBatch };
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

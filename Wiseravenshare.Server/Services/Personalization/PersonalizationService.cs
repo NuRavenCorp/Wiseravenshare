@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Npgsql;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Infrastructure.Data;
 
@@ -31,6 +32,14 @@ public record PersonalizedRecommendation(
 
 public record RegionalTrendItem(string Topic, decimal Score, string Source, string Category);
 
+public record CrawledContentIngestItem(
+    string ContentType,
+    Guid ContentId,
+    string Content,
+    string[]? Tags,
+    string? CountryCode
+);
+
 // ─── Interface ────────────────────────────────────────────────────────────────
 public interface IPersonalizationService
 {
@@ -40,6 +49,7 @@ public interface IPersonalizationService
     Task AutoTagContentAsync(string targetType, Guid targetId, string content, CancellationToken ct = default);
     Task<Dictionary<string, float>>                 GetUserEmbeddingAsync(Guid userId, CancellationToken ct = default);
     Task ProcessCrawledContentAsync(string contentType, Guid contentId, string content, string[] tags, string countryCode, CancellationToken ct = default);
+    Task ProcessCrawledContentBatchAsync(IReadOnlyList<CrawledContentIngestItem> items, string? countryCode = null, CancellationToken ct = default);
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
@@ -307,6 +317,8 @@ public sealed class PersonalizationService : IPersonalizationService
         string contentType, Guid contentId, string content,
         string[] tags, string countryCode, CancellationToken ct = default)
     {
+        await UpsertCrawlerCatalogAsync(contentType, contentId, content, tags, countryCode, ct);
+
         // Auto-tag with Gemini if no tags provided.
         if (tags.Length == 0)
         {
@@ -336,6 +348,46 @@ public sealed class PersonalizationService : IPersonalizationService
 
         // Invalidate trend cache for that region.
         _cache.Remove(string.Format(TrendCacheKey, normCountry, "General"));
+    }
+
+    public async Task ProcessCrawledContentBatchAsync(
+        IReadOnlyList<CrawledContentIngestItem> items,
+        string? countryCode = null,
+        CancellationToken ct = default)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return;
+        }
+
+        var fallbackCountry = string.IsNullOrWhiteSpace(countryCode)
+            ? "GLOBAL"
+            : countryCode.Trim().ToUpperInvariant();
+
+        foreach (var item in items)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (item is null
+                || item.ContentId == Guid.Empty
+                || string.IsNullOrWhiteSpace(item.ContentType)
+                || string.IsNullOrWhiteSpace(item.Content))
+            {
+                continue;
+            }
+
+            var resolvedCountry = string.IsNullOrWhiteSpace(item.CountryCode)
+                ? fallbackCountry
+                : item.CountryCode.Trim().ToUpperInvariant();
+
+            await ProcessCrawledContentAsync(
+                item.ContentType,
+                item.ContentId,
+                item.Content,
+                item.Tags ?? Array.Empty<string>(),
+                resolvedCountry,
+                ct);
+        }
     }
 
     // ── Private Helpers ───────────────────────────────────────────────────────
@@ -407,5 +459,94 @@ public sealed class PersonalizationService : IPersonalizationService
             new RegionalTrendItem("technology",    60,  "WiseRaven", category),
             new RegionalTrendItem("entertainment", 50,  "WiseRaven", category)
         };
+    }
+
+    private async Task UpsertCrawlerCatalogAsync(
+        string contentType,
+        Guid contentId,
+        string content,
+        string[] tags,
+        string countryCode,
+        CancellationToken ct)
+    {
+        if (contentId == Guid.Empty || string.IsNullOrWhiteSpace(contentType) || string.IsNullOrWhiteSpace(content))
+        {
+            return;
+        }
+
+        await EnsureCrawlerCatalogTableAsync(ct);
+
+        const string sql = @"
+INSERT INTO app_data.site_crawler_catalog (
+    content_id, content_type, content, tags, country_code, created_at, updated_at
+) VALUES (
+    @content_id, @content_type, @content, CAST(@tags AS jsonb), @country_code, NOW(), NOW()
+)
+ON CONFLICT (content_id)
+DO UPDATE SET
+    content_type = EXCLUDED.content_type,
+    content = EXCLUDED.content,
+    tags = EXCLUDED.tags,
+    country_code = EXCLUDED.country_code,
+    updated_at = NOW();";
+
+        var connectionString = _db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var normalizedTags = (tags ?? Array.Empty<string>())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var normalizedCountry = string.IsNullOrWhiteSpace(countryCode)
+            ? "GLOBAL"
+            : countryCode.Trim().ToUpperInvariant();
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("content_id", contentId);
+        command.Parameters.AddWithValue("content_type", contentType.Trim());
+        command.Parameters.AddWithValue("content", content.Trim());
+        command.Parameters.AddWithValue("tags", JsonSerializer.Serialize(normalizedTags));
+        command.Parameters.AddWithValue("country_code", normalizedCountry);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private async Task EnsureCrawlerCatalogTableAsync(CancellationToken ct)
+    {
+        const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.site_crawler_catalog (
+    content_id UUID PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    country_code TEXT NOT NULL DEFAULT 'GLOBAL',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_country_updated
+    ON app_data.site_crawler_catalog (country_code, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
+    ON app_data.site_crawler_catalog USING GIN (tags);";
+
+        var connectionString = _db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(ct);
     }
 }
