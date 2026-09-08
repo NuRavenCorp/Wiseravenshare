@@ -364,9 +364,15 @@ class RavensightAPI {
 
     // Get User Videos
     async getUserVideos(userId = null) {
-        const targetUrls = userId
-            ? [`/videos/user/${encodeURIComponent(userId)}`, `${this.generalApiBaseUrl}/video/user/${encodeURIComponent(userId)}`, '/videos/user']
-            : ['/videos/user'];
+        const targetUrls = ['/videos/user'];
+
+        // Keep a backward-compatible fallback for true GUID user ids only.
+        // Non-GUID ids cause avoidable failures on /api/video/user/{userId}.
+        const safeUserId = String(userId || '').trim();
+        const isGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeUserId);
+        if (isGuid) {
+            targetUrls.push(`${this.generalApiBaseUrl}/video/user/${encodeURIComponent(safeUserId)}`);
+        }
 
         const response = await this.requestWithFallback('get', targetUrls, {
             params: { page: 1, limit: 50, pageSize: 50 }

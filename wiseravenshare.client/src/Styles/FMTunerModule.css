@@ -22,6 +22,48 @@
   color: var(--ms-muted);
 }
 
+.fm-quick-tune {
+  border: 1px solid var(--ms-border);
+  border-radius: 10px;
+  background: var(--ms-card);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.fm-quick-tune-field {
+  display: grid;
+  gap: 5px;
+}
+
+.fm-quick-tune-field label {
+  font-size: 0.72rem;
+  color: var(--ms-muted);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fm-quick-tune-field input {
+  border: 1px solid var(--ms-border);
+  background: var(--ms-surface);
+  color: var(--ms-text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+
+.fm-pin-feedback {
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+
 /* ── Scan button ── */
 .fm-btn-scan {
   flex-shrink: 0;
@@ -1184,6 +1226,10 @@
 }
 
 @media (max-width: 920px) {
+  .fm-quick-tune {
+    grid-template-columns: 1fr;
+  }
+
   .fm-search-row {
     grid-template-columns: 1fr 1fr;
   }

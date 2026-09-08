@@ -53,7 +53,7 @@ public class MusicMediaUrlResolutionTests
 
     private sealed class StubMusicService : IRavensightMusicService
     {
-        public Task<RavensightSavedMediaFile> SaveMusicAsync(IFormFile file, string? destinationFolder, CancellationToken cancellationToken = default)
+        public Task<RavensightSavedMediaFile> SaveMusicAsync(IFormFile file, string? destinationFolder, string? userStorageIdentity, CancellationToken cancellationToken = default)
             => Task.FromResult(new RavensightSavedMediaFile
             {
                 FileName = file.FileName,

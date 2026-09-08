@@ -73,6 +73,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     const [localSaveRoot, setLocalSaveRoot] = useState(getRavensightLocalSaveRootPreference());
     const autoSavedFilesRef = useRef(new WeakSet());
     const addTruthAlertRef = useRef(addTruthAlert);
+    const mediaInputRef = useRef(null);
     const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
 
     const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
@@ -119,8 +120,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     }, [mediaFile, mediaType, localSaveRoot]);
 
     const handleFileUpload = (type) => {
-        const input = document.createElement('input');
+        const input = mediaInputRef.current || document.createElement('input');
         input.type = 'file';
+        input.value = '';
+        input.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
+        mediaInputRef.current = input;
+
         setPublishToYouTube(false);
         setPublishToTikTok(false);
         setPublishToFacebook(false);
@@ -128,21 +133,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         setTikTokPermissionGranted(false);
         setFacebookPermissionGranted(false);
 
-        switch (type) {
-            case 'photo':
-                input.accept = 'image/*';
-                break;
-            case 'video':
-                input.accept = 'video/*';
-                break;
-            case 'audio':
-                input.accept = 'audio/*';
-                break;
-        }
-
         input.onchange = (e) => {
             const selected = e.target.files?.[0];
-            if (!selected) return;
+            if (!selected) {
+                input.value = '';
+                return;
+            }
 
             setMediaFile(selected);
 
@@ -172,7 +168,10 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 setMediaType(type);
                 setDestinationFolder(resolveRavensightDestination(type));
             }
+
+            input.value = '';
         };
+
         input.click();
     };
 
@@ -585,6 +584,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             </div>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', margin: '15px 0' }}>
+                <input
+                    ref={mediaInputRef}
+                    type="file"
+                    hidden
+                    onChange={() => {}}
+                />
                 {['photo', 'video', 'audio'].map(type => (
                     <button
                         key={type}

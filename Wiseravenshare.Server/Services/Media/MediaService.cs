@@ -118,7 +118,7 @@ public sealed class MediaService : IMediaService
             }
         }
 
-        var metadata = BuildMetadata(request.Metadata, objectKey, request.File.ContentType);
+        var metadata = BuildMetadata(request.Metadata, objectKey, request.File.ContentType, publicUrl);
         var media = new MediaItem
         {
             Title = request.Title.Trim(),
@@ -143,7 +143,8 @@ public sealed class MediaService : IMediaService
         };
 
         await _mediaRepository.AddAsync(media);
-        media.FileUrl = publicUrl ?? $"/api/media-library/{media.Id}/stream";
+        media.FileUrl = MediaUrlResolver.CreateDatabaseMediaUrl(media.Id);
+        media.Metadata = BuildMetadata(request.Metadata, objectKey, request.File.ContentType, publicUrl);
         await _mediaRepository.UpdateAsync(media);
 
         await SyncMediaTagsAsync(media, request.Tags);
@@ -269,7 +270,10 @@ public sealed class MediaService : IMediaService
             FilePath = media.FilePath,
             MimeType = media.MimeType,
             FileSize = media.FileSize,
-            LastModified = media.UpdatedAt
+            LastModified = media.UpdatedAt,
+            Url = media.FileUrl,
+            ObjectKey = TryReadString(media.Metadata, "objectKey"),
+            PublicUrl = TryReadString(media.Metadata, "publicUrl")
         };
 
         if (startByte.HasValue && endByte.HasValue)
@@ -671,13 +675,18 @@ public sealed class MediaService : IMediaService
             : PlaylistVisibility.Private;
     }
 
-    private static JsonDocument? BuildMetadata(JsonDocument? metadata, string objectKey, string? contentType)
+    private static JsonDocument? BuildMetadata(JsonDocument? metadata, string objectKey, string? contentType, string? publicUrl = null)
     {
         var dictionary = new Dictionary<string, object?>
         {
             ["objectKey"] = objectKey,
             ["contentType"] = contentType
         };
+
+        if (!string.IsNullOrWhiteSpace(publicUrl))
+        {
+            dictionary["publicUrl"] = publicUrl;
+        }
 
         if (metadata != null && metadata.RootElement.ValueKind == JsonValueKind.Object)
         {

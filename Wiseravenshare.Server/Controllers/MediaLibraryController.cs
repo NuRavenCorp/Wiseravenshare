@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Exceptions;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.Media;
 using Wiseravenshare.Server.Shared;
 
@@ -13,10 +14,12 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class MediaLibraryController : ControllerBase
 {
     private readonly IMediaService _mediaService;
+    private readonly IBlobStorageService _blobStorageService;
 
-    public MediaLibraryController(IMediaService mediaService)
+    public MediaLibraryController(IMediaService mediaService, IBlobStorageService blobStorageService)
     {
         _mediaService = mediaService;
+        _blobStorageService = blobStorageService;
     }
 
     [HttpPost("upload")]
@@ -151,6 +154,16 @@ public sealed class MediaLibraryController : ControllerBase
         try
         {
             var stream = await _mediaService.GetMediaStreamAsync(mediaId);
+
+            if (!string.IsNullOrWhiteSpace(stream.ObjectKey) && _blobStorageService.IsConfigured)
+            {
+                var blobStream = await _blobStorageService.OpenReadAsync(stream.ObjectKey);
+                if (blobStream is not null)
+                {
+                    return File(blobStream, stream.MimeType, enableRangeProcessing: true);
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(stream.FilePath) || !System.IO.File.Exists(stream.FilePath))
             {
                 return NotFound(new { message = "Media file is not available on this node." });
