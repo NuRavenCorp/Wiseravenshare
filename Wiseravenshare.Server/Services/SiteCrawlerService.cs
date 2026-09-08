@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Npgsql;
 using Wiseravenshare.Server.Infrastructure.Data;
 
@@ -21,24 +22,36 @@ public interface ISiteCrawlerService
 public sealed class SiteCrawlerService : ISiteCrawlerService
 {
     private readonly AppDbContext _db;
+    private readonly IMemoryCache _cache;
+    private const int CacheDurationMinutes = 10;
 
-    public SiteCrawlerService(AppDbContext db)
+    public SiteCrawlerService(AppDbContext db, IMemoryCache cache)
     {
         _db = db;
+        _cache = cache;
     }
 
     public async Task<IReadOnlyList<SiteCrawlerNodeDto>> GetNodesAsync(string? countryCode = null, CancellationToken ct = default)
     {
+        var cacheKey = $"crawler_nodes_{countryCode ?? "GLOBAL"}";
+        if (_cache.TryGetValue(cacheKey, out object? cachedObj) && cachedObj is IReadOnlyList<SiteCrawlerNodeDto> cachedNodes)
+        {
+            return cachedNodes;
+        }
+
         await EnsureCrawlerCatalogTableAsync(ct);
 
         var rows = await LoadCrawlerRowsAsync(countryCode, ct);
-        return rows
+        var nodes = rows
             .Select(MapRowToNode)
             .Where(node => !string.IsNullOrWhiteSpace(node.PageId))
             .GroupBy(node => node.PageId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(item => item.UpdatedAtUtc).First())
             .OrderBy(node => node.PageId, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        _cache.Set(cacheKey, (IReadOnlyList<SiteCrawlerNodeDto>)nodes, TimeSpan.FromMinutes(CacheDurationMinutes));
+        return nodes;
     }
 
     public async Task<IReadOnlyList<SiteCrawlerEdgeDto>> GetEdgesAsync(string? countryCode = null, CancellationToken ct = default)
@@ -283,25 +296,44 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
 
     public async Task<SiteCrawlerSummaryDto> GetSummaryAsync(string? countryCode = null, string? userCategory = null, CancellationToken ct = default)
     {
+        var cacheKey = $"crawler_summary_{countryCode ?? "GLOBAL"}_{userCategory ?? "ALL"}";
+        if (_cache.TryGetValue(cacheKey, out object? cachedObj) && cachedObj is SiteCrawlerSummaryDto cachedSummary)
+        {
+            return cachedSummary;
+        }
+
         var nodes = await GetNodesAsync(countryCode, ct);
         var edges = await GetEdgesAsync(countryCode, ct);
+
+        // Build node dictionary for O(1) lookups
+        var nodeDict = nodes.ToDictionary(n => n.PageId, n => n, StringComparer.OrdinalIgnoreCase);
+
+        // Build edge dictionary for O(1) incoming connection lookups
+        var edgesByTarget = edges
+            .GroupBy(e => e.TargetPageId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
         // Group pages by category
         var categoryCounts = nodes
             .GroupBy(node => node.Category, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
-        // Get top connected pages (trending features)
+        // Get top connected pages (trending features) - avoid repeated lookups
         var topConnected = edges
             .GroupBy(edge => edge.TargetPageId, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new SiteCrawlerPageSummaryDto
+            .Select(group =>
             {
-                PageId = group.Key,
-                Label = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Label ?? group.Key,
-                Category = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Category ?? "general",
-                Tags = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Tags ?? new List<string>(),
-                IncomingConnections = group.Count(),
-                Score = group.Sum(e => e.Weight)
+                var targetPageId = group.Key;
+                nodeDict.TryGetValue(targetPageId, out var nodeInfo);
+                return new SiteCrawlerPageSummaryDto
+                {
+                    PageId = targetPageId,
+                    Label = nodeInfo?.Label ?? targetPageId,
+                    Category = nodeInfo?.Category ?? "general",
+                    Tags = nodeInfo?.Tags ?? new List<string>(),
+                    IncomingConnections = group.Count(),
+                    Score = group.Sum(e => e.Weight)
+                };
             })
             .OrderByDescending(item => item.Score)
             .ThenByDescending(item => item.IncomingConnections)
@@ -314,23 +346,31 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
         {
             relatedInCategory = nodes
                 .Where(node => string.Equals(node.Category, userCategory, StringComparison.OrdinalIgnoreCase))
-                .Select(node => new SiteCrawlerPageSummaryDto
+                .Select(node =>
                 {
-                    PageId = node.PageId,
-                    Label = node.Label,
-                    Category = node.Category,
-                    Tags = node.Tags,
-                    IncomingConnections = edges.Count(e => e.TargetPageId == node.PageId),
-                    Score = edges
-                        .Where(e => e.TargetPageId == node.PageId)
-                        .Sum(e => e.Weight)
+                    var incomingCount = edgesByTarget.TryGetValue(node.PageId, out var incomingEdges)
+                        ? incomingEdges.Count
+                        : 0;
+                    var score = edgesByTarget.TryGetValue(node.PageId, out var edges2)
+                        ? edges2.Sum(e => e.Weight)
+                        : 0;
+
+                    return new SiteCrawlerPageSummaryDto
+                    {
+                        PageId = node.PageId,
+                        Label = node.Label,
+                        Category = node.Category,
+                        Tags = node.Tags,
+                        IncomingConnections = incomingCount,
+                        Score = score
+                    };
                 })
                 .OrderByDescending(item => item.Score)
                 .Take(6)
                 .ToList();
         }
 
-        return new SiteCrawlerSummaryDto
+        var result = new SiteCrawlerSummaryDto
         {
             TotalPages = nodes.Count,
             TotalConnections = edges.Count,
@@ -340,6 +380,9 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
             CountryCode = countryCode ?? "GLOBAL",
             GeneratedAtUtc = DateTime.UtcNow
         };
+
+        _cache.Set(cacheKey, result, TimeSpan.FromMinutes(CacheDurationMinutes));
+        return result;
     }
 
     private async Task<List<SiteCrawlerRow>> LoadCrawlerRowsAsync(string? countryCode, CancellationToken ct)
@@ -520,14 +563,22 @@ CREATE TABLE IF NOT EXISTS app_data.site_crawler_catalog (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Composite index for the primary query (country_code + sorting by updated_at DESC)
 CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_country_updated
     ON app_data.site_crawler_catalog (country_code, updated_at DESC);
 
+-- GIN index for JSON tag searches
 CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_tags_gin
     ON app_data.site_crawler_catalog USING GIN (tags);
 
+-- B-tree index for content_hash lookups
 CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_content_hash
-    ON app_data.site_crawler_catalog (content_hash);";
+    ON app_data.site_crawler_catalog (content_hash);
+
+-- Additional index for efficient deduplication queries
+CREATE INDEX IF NOT EXISTS idx_site_crawler_catalog_updated_desc
+    ON app_data.site_crawler_catalog (updated_at DESC)
+    WHERE country_code IS NOT NULL;";
 
         const string migrationSql = @"
 ALTER TABLE app_data.site_crawler_catalog
