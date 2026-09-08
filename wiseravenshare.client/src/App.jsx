@@ -29,6 +29,7 @@ import CanvasPage from './Pages/CanvasPage';
 import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
+import MusicPlayerPage from './Pages/MusicPlayerPage';
 import MusicStudioPage from './Pages/MusicStudioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
@@ -533,7 +534,7 @@ const App = () => {
             case 'music-rights-studio':
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <MusicStudioPage onNavigate={setCurrentPage} />;
+                return <MusicPlayerPage onNavigate={setCurrentPage} />;
             case 'fm-tuner':
                 return <MusicStudioPage onNavigate={setCurrentPage} initialPanel="fm" />;
             case 'radio-creator':
