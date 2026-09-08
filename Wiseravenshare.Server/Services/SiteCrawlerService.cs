@@ -15,6 +15,7 @@ public interface ISiteCrawlerService
     Task<SiteCrawlerOverviewDto> GetOverviewAsync(string? countryCode = null, CancellationToken ct = default);
     Task<IReadOnlyList<SiteCrawlerApiEndpointDto>> GetApiEndpointsAsync(CancellationToken ct = default);
     Task<SiteCrawlerValidationReportDto> GetValidationReportAsync(string? countryCode = null, CancellationToken ct = default);
+    Task<SiteCrawlerSummaryDto> GetSummaryAsync(string? countryCode = null, string? userCategory = null, CancellationToken ct = default);
 }
 
 public sealed class SiteCrawlerService : ISiteCrawlerService
@@ -276,6 +277,67 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
                 .ThenBy(issue => issue.Type, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(issue => issue.PageId, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
+            GeneratedAtUtc = DateTime.UtcNow
+        };
+    }
+
+    public async Task<SiteCrawlerSummaryDto> GetSummaryAsync(string? countryCode = null, string? userCategory = null, CancellationToken ct = default)
+    {
+        var nodes = await GetNodesAsync(countryCode, ct);
+        var edges = await GetEdgesAsync(countryCode, ct);
+
+        // Group pages by category
+        var categoryCounts = nodes
+            .GroupBy(node => node.Category, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        // Get top connected pages (trending features)
+        var topConnected = edges
+            .GroupBy(edge => edge.TargetPageId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SiteCrawlerPageSummaryDto
+            {
+                PageId = group.Key,
+                Label = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Label ?? group.Key,
+                Category = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Category ?? "general",
+                Tags = nodes.FirstOrDefault(n => n.PageId == group.Key)?.Tags ?? new List<string>(),
+                IncomingConnections = group.Count(),
+                Score = group.Sum(e => e.Weight)
+            })
+            .OrderByDescending(item => item.Score)
+            .ThenByDescending(item => item.IncomingConnections)
+            .Take(12)
+            .ToList();
+
+        // If user category specified, get related pages in that category
+        var relatedInCategory = new List<SiteCrawlerPageSummaryDto>();
+        if (!string.IsNullOrWhiteSpace(userCategory))
+        {
+            relatedInCategory = nodes
+                .Where(node => string.Equals(node.Category, userCategory, StringComparison.OrdinalIgnoreCase))
+                .Select(node => new SiteCrawlerPageSummaryDto
+                {
+                    PageId = node.PageId,
+                    Label = node.Label,
+                    Category = node.Category,
+                    Tags = node.Tags,
+                    IncomingConnections = edges.Count(e => e.TargetPageId == node.PageId),
+                    Score = edges
+                        .Where(e => e.TargetPageId == node.PageId)
+                        .Sum(e => e.Weight)
+                })
+                .OrderByDescending(item => item.Score)
+                .Take(6)
+                .ToList();
+        }
+
+        return new SiteCrawlerSummaryDto
+        {
+            TotalPages = nodes.Count,
+            TotalConnections = edges.Count,
+            Categories = categoryCounts,
+            TopConnectedPages = topConnected,
+            RelatedInCategory = relatedInCategory,
+            CountryCode = countryCode ?? "GLOBAL",
             GeneratedAtUtc = DateTime.UtcNow
         };
     }
@@ -584,4 +646,25 @@ public sealed class SiteCrawlerValidationIssueDto
     public string PageId { get; set; } = string.Empty;
     public string TargetPageId { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class SiteCrawlerPageSummaryDto
+{
+    public string PageId { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Category { get; set; } = "general";
+    public List<string> Tags { get; set; } = new();
+    public int IncomingConnections { get; set; }
+    public int Score { get; set; }
+}
+
+public sealed class SiteCrawlerSummaryDto
+{
+    public int TotalPages { get; set; }
+    public int TotalConnections { get; set; }
+    public Dictionary<string, int> Categories { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<SiteCrawlerPageSummaryDto> TopConnectedPages { get; set; } = new();
+    public List<SiteCrawlerPageSummaryDto> RelatedInCategory { get; set; } = new();
+    public string CountryCode { get; set; } = "GLOBAL";
+    public DateTime GeneratedAtUtc { get; set; } = DateTime.UtcNow;
 }
