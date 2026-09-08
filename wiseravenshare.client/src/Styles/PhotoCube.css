@@ -1,0 +1,148 @@
+/* ─── Photo Cube Widget ────────────────────────────────────────────────────── */
+
+.photo-cube-widget {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 12px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.photo-cube-label {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--light-color);
+  letter-spacing: 0.04em;
+}
+
+.photo-cube-hint {
+  font-size: 0.66rem;
+  font-weight: 400;
+  color: var(--highlight-color);
+  opacity: 0.8;
+}
+
+/* ── 3D scene container ── */
+.photo-cube-scene {
+  width: 120px;
+  height: 120px;
+  perspective: 360px;
+  cursor: pointer;
+  /* allow keyboard focus for a11y */
+  outline: none;
+}
+
+.photo-cube-scene:focus-visible .photo-cube-inner {
+  filter: drop-shadow(0 0 6px var(--highlight-color));
+}
+
+/* ── Rotating cube wrapper ── */
+.photo-cube-inner {
+  width: 120px;
+  height: 120px;
+  position: relative;
+  transform-style: preserve-3d;
+  /* Tilt forward slightly so the top face is always visible */
+  transform: rotateX(-18deg) rotateY(0deg);
+  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Individual faces ── */
+.cube-face {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  overflow: hidden;
+  border: 1.5px solid rgba(79, 116, 214, 0.35);
+}
+
+.cube-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+/* Placeholder face */
+.cube-face-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* Face positions — half-size = 60px */
+.cube-face--front  { transform: rotateY(  0deg) translateZ(60px); }
+.cube-face--right  { transform: rotateY( 90deg) translateZ(60px); }
+.cube-face--back   { transform: rotateY(180deg) translateZ(60px); }
+.cube-face--left   { transform: rotateY(-90deg) translateZ(60px); }
+.cube-face--top    { transform: rotateX( 90deg) translateZ(60px); }
+.cube-face--bottom { transform: rotateX(-90deg) translateZ(60px); }
+
+/* Placeholder gradient colours per face */
+.cube-face--front  .cube-face-placeholder { background: linear-gradient(135deg, #1e2a4a, #4f74d6); }
+.cube-face--right  .cube-face-placeholder { background: linear-gradient(135deg, #2a1a3e, #7c3aed); }
+.cube-face--back   .cube-face-placeholder { background: linear-gradient(135deg, #1a2e2a, #10b981); }
+.cube-face--left   .cube-face-placeholder { background: linear-gradient(135deg, #2e1a24, #a33a5d); }
+.cube-face--top    .cube-face-placeholder { background: linear-gradient(135deg, #1e2a4a, #0ea5e9); }
+.cube-face--bottom .cube-face-placeholder { background: linear-gradient(135deg, #1a1a2e, #f59e0b); }
+
+/* ── Spin animation on click (short highlight pulse) ── */
+@keyframes photo-cube-tap-flash {
+  0%   { filter: brightness(1); }
+  40%  { filter: brightness(1.25); }
+  100% { filter: brightness(1); }
+}
+
+.photo-cube-inner.spinning {
+  animation: photo-cube-tap-flash 0.55s ease;
+}
+
+/* ── Step counter dots ── */
+.photo-cube-dots {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+.cube-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-color);
+  transition: background 0.25s;
+}
+
+.cube-dot.active {
+  background: var(--highlight-color);
+}
+
+/* ── Navigate to library link ── */
+.photo-cube-nav {
+  font-size: 0.68rem;
+  color: var(--highlight-color);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.photo-cube-nav:hover {
+  color: var(--light-color);
+}
