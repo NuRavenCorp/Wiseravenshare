@@ -7,6 +7,7 @@ import FMCreatorStudio from './FMCreatorStudio';
 import FMBrowser from './FMBrowser';
 import FMScanner from './FMScanner';
 import { fmService, GENRE_PRESETS, scanByGenre, trackRadioBrowserClick } from '../../Services/fmService';
+import { useAuth } from '../../Contexts/AuthContext';
 import '../../Styles/FMTunerModule.css';
 
 const tabs = [
@@ -19,7 +20,20 @@ const tabs = [
   { id: 'creator',  label: 'Creator Studio' }
 ];
 
+const resolveDefaultPinRegion = (location) => {
+  const raw = String(location || '').trim();
+  if (!raw) return 'NYC';
+  const upper = raw.toUpperCase();
+  if (upper.includes('NEW YORK') || upper.includes('NYC')) return 'NYC';
+  const firstToken = raw.split(',')[0]?.trim();
+  return firstToken || 'NYC';
+};
+
+const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isGuid = (value) => GUID_REGEX.test(String(value || '').trim());
+
 const FMTunerModule = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('stations');
   const [isLoading, setIsLoading] = useState(false);
   const [activeGenre, setActiveGenre] = useState('all');
@@ -31,22 +45,42 @@ const FMTunerModule = () => {
   const [recommendedStations, setRecommendedStations] = useState([]);
   const [favoriteStations, setFavoriteStations] = useState([]);
   const [historyStations, setHistoryStations] = useState([]);
+  const [pinFrequency, setPinFrequency] = useState('107.5');
+  const [pinRegion, setPinRegion] = useState(() => resolveDefaultPinRegion(user?.location));
+  const [pinFeedback, setPinFeedback] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const listeningStartRef = useRef(0);
+
+  useEffect(() => {
+    setPinRegion((prev) => {
+      if (String(prev || '').trim().length > 0) {
+        return prev;
+      }
+      return resolveDefaultPinRegion(user?.location);
+    });
+  }, [user?.location]);
 
   const loadStations = async () => {
     setIsLoading(true);
     setErrorMessage('');
     try {
-      const [featured, popular, recommended] = await Promise.all([
+      const [featuredResult, popularResult, recommendedResult] = await Promise.allSettled([
         fmService.getFeaturedStations(12),
         fmService.getPopularStations(12),
         fmService.getRecommendedStations(12)
       ]);
+      const featured = featuredResult.status === 'fulfilled' ? featuredResult.value : [];
+      const popular = popularResult.status === 'fulfilled' ? popularResult.value : [];
+      const recommended = recommendedResult.status === 'fulfilled' ? recommendedResult.value : [];
+
       setFeaturedStations(featured);
       setPopularStations(popular);
       setRecommendedStations(recommended);
-      setStations(featured);
+      setStations(featured.length > 0 ? featured : popular);
+
+      if (featured.length === 0 && popular.length === 0) {
+        throw new Error('Failed to load FM stations.');
+      }
     } catch (error) {
       setErrorMessage(error?.message || 'Failed to load FM stations.');
     } finally {
@@ -134,7 +168,19 @@ const FMTunerModule = () => {
   };
 
   const handlePlayStation = async (station) => {
-    if (!station?.id) return;
+    if (!station?.streamUrl) {
+      setErrorMessage('This station has no stream URL configured.');
+      return;
+    }
+
+    const baseKey = String(station.streamUrl || station.name || Date.now())
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+    const stationWithId = {
+      ...station,
+      id: station?.id || `stream-${baseKey || Date.now()}`
+    };
     setErrorMessage('');
     try {
       // Log listening time for the previous station if one was running.
@@ -143,14 +189,15 @@ const FMTunerModule = () => {
         fmService.trackListening(currentStation.id, duration).catch(() => {});
       }
 
-      // getPlaybackInfo may return {} for sample/unseeded stations — that's fine;
-      // we always preserve the station's own streamUrl as the authoritative source.
-      const playbackInfo = await fmService.getPlaybackInfo(station.id).catch(() => ({}));
+      // Station cards already provide authoritative stream URLs.
+      // Avoid DB playback-info lookups here because many external/sample stations
+      // are not catalog-backed and return 404 for /fmtuner/{id}/play.
+      const playbackInfo = {};
       const merged = {
-        ...station,
+        ...stationWithId,
         ...playbackInfo,
         // Never let an empty playbackInfo wipe out the station's known stream URL.
-        streamUrl: playbackInfo?.streamUrl || station.streamUrl
+        streamUrl: playbackInfo?.streamUrl || stationWithId.streamUrl
       };
 
       if (!merged.streamUrl) {
@@ -160,8 +207,8 @@ const FMTunerModule = () => {
 
       // Per Radio Browser spec: send a /json/url click event for every play.
       // This marks the station as popular and helps the community database.
-      if (station.source === 'radio-browser') {
-        trackRadioBrowserClick(station.id);
+      if (stationWithId.source === 'radio-browser') {
+        trackRadioBrowserClick(stationWithId.id);
       }
 
       setCurrentStation(merged);
@@ -246,6 +293,28 @@ const FMTunerModule = () => {
     }
   };
 
+  const handleQuickTune = async () => {
+    setPinFeedback('');
+    setErrorMessage('');
+
+    const station = fmService.getPinnedStationByFrequency(pinFrequency, pinRegion);
+    if (!station) {
+      setErrorMessage(`No pinned station for ${String(pinFrequency || '').trim() || 'that frequency'} in ${String(pinRegion || '').trim() || 'this region'}.`);
+      return;
+    }
+
+    setStations((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      if (!next.some((item) => item.id === station.id)) {
+        next.unshift(station);
+      }
+      return next;
+    });
+    setActiveTab('stations');
+    setPinFeedback(`Pinned tune locked: ${station.frequency} ${pinRegion || 'NYC'} → ${station.name}`);
+    await handlePlayStation(station);
+  };
+
   return (
     <section className="fm-module">
       <header className="fm-header">
@@ -254,6 +323,34 @@ const FMTunerModule = () => {
           <p>Live radio discovery and streaming inside your Music Studio.</p>
         </div>
       </header>
+
+      <div className="fm-quick-tune" role="group" aria-label="Quick frequency tune">
+        <div className="fm-quick-tune-field">
+          <label htmlFor="fm-pin-frequency">Frequency</label>
+          <input
+            id="fm-pin-frequency"
+            type="text"
+            value={pinFrequency}
+            onChange={(event) => setPinFrequency(event.target.value)}
+            placeholder="107.5"
+          />
+        </div>
+        <div className="fm-quick-tune-field">
+          <label htmlFor="fm-pin-region">Region</label>
+          <input
+            id="fm-pin-region"
+            type="text"
+            value={pinRegion}
+            onChange={(event) => setPinRegion(event.target.value)}
+            placeholder="NYC"
+          />
+        </div>
+        <button type="button" className="fm-btn fm-btn-primary" onClick={handleQuickTune}>
+          Pin Tune
+        </button>
+      </div>
+
+      {pinFeedback && <div className="fm-pin-feedback">{pinFeedback}</div>}
 
       {/* Genre preset pills */}
       <div className="fm-genre-presets">
