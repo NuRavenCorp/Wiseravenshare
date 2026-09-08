@@ -132,10 +132,10 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
         var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
         return mediaType switch
         {
-            RavensightMediaType.Video => $"{projectFolder}/ravensight/video",
-            RavensightMediaType.Photo => $"{projectFolder}/ravensight/photo",
-            RavensightMediaType.Music => $"{projectFolder}/ravensight/music",
-            _ => $"{projectFolder}/ravensight/media"
+            RavensightMediaType.Video => $"{projectFolder}/videos",
+            RavensightMediaType.Photo => $"{projectFolder}/photos",
+            RavensightMediaType.Music => $"{projectFolder}/music",
+            _ => $"{projectFolder}/media"
         };
     }
 

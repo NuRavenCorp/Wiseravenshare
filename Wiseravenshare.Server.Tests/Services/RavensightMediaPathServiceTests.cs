@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -30,6 +31,24 @@ public sealed class RavensightMediaPathServiceTests
         Assert.Equal(expectedFilePath, resolvedPath);
     }
 
+    [Fact]
+    public async Task StreamBlob_accepts_live_bucket_layout_aliases()
+    {
+        var controller = new VideoStreamingController(
+            new FakeWebHostEnvironment(Path.GetTempPath()),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Storage:Blob:ProjectFolder"] = "wiseravenshare",
+                ["Storage:Blob:BucketName"] = "bucket-wrs-01010"
+            }).Build(),
+            new FakeBlobStorageService("wiseravenshare/Ravevesight/Video/test456.mp4"));
+
+        var result = await controller.StreamBlob("wiseravenshare/Ravevesight/Video/test456.mp4", CancellationToken.None);
+
+        var fileResult = Assert.IsType<FileStreamResult>(result);
+        Assert.Equal("video/mp4", fileResult.ContentType);
+    }
+
     private static RavensightMediaPathService CreateService(string contentRootPath)
     {
         var environment = new FakeWebHostEnvironment(contentRootPath);
@@ -56,6 +75,26 @@ public sealed class RavensightMediaPathServiceTests
 
         public Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken = default)
             => Task.FromResult<Stream?>(null);
+
+        public Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+    }
+
+    private sealed class FakeBlobStorageService(string matchingKey) : IBlobStorageService
+    {
+        public bool IsConfigured => true;
+
+        public string? ResolvePublicUrl(string objectKey) => objectKey;
+
+        public string? ResolveObjectKey(string location) => location;
+
+        public Task<StoredBlobResult> UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken = default)
+            => Task.FromResult(new StoredBlobResult(objectKey, objectKey));
+
+        public Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken = default)
+            => Task.FromResult<Stream?>(objectKey.Equals(matchingKey, StringComparison.OrdinalIgnoreCase)
+                ? new MemoryStream(new byte[] { 1, 2, 3, 4 })
+                : null);
 
         public Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
