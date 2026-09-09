@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiAlertCircle, FiBookmark, FiChevronDown, FiChevronUp, FiClock, FiHeart,
   FiPause, FiPlay, FiRadio, FiRefreshCw, FiSkipBack, FiSkipForward, FiUsers,
   FiVolume2, FiVolumeX, FiWifi
 } from 'react-icons/fi';
-import { useRadioStream } from '../../hooks/useRadioStream';
 import { fmService } from '../../Services/fmService';
 
 const formatTime = (seconds) => {
@@ -43,28 +42,213 @@ const FMPlayer = ({
   onBookmark
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [error, setError] = useState('');
+  const [volume, setVolume] = useState(80);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [waveform, setWaveform] = useState(new Uint8Array(64));
 
-  const {
-    isPlaying,
-    isBuffering,
-    error,
-    volume,
-    setVolume,
-    isMuted,
-    toggleMute,
-    play,
-    pause,
-    currentTime,
-    duration,
-    progress,
-    seek,
-    reconnect,
-    nowPlaying,
-    setNowPlaying,
-    waveform,
-    startMetaPoll,
-    stopMetaPoll
-  } = useRadioStream(station?.streamUrl, { enableWaveform: isExpanded });
+  const audioRef = useRef(null);
+  const metadataPollRef = useRef(null);
+  const waveformTimerRef = useRef(null);
+
+  const stopWaveform = useCallback(() => {
+    if (waveformTimerRef.current) {
+      clearInterval(waveformTimerRef.current);
+      waveformTimerRef.current = null;
+    }
+  }, []);
+
+  const startWaveform = useCallback(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    stopWaveform();
+    waveformTimerRef.current = setInterval(() => {
+      const values = new Uint8Array(64);
+      for (let index = 0; index < values.length; index += 1) {
+        values[index] = Math.round(30 + Math.random() * 210);
+      }
+      setWaveform(values);
+    }, 140);
+  }, [isExpanded, stopWaveform]);
+
+  const stopMetaPoll = useCallback(() => {
+    if (metadataPollRef.current) {
+      clearInterval(metadataPollRef.current);
+      metadataPollRef.current = null;
+    }
+  }, []);
+
+  const startMetaPoll = useCallback((fn) => {
+    stopMetaPoll();
+    if (!fn) return;
+    fn();
+    metadataPollRef.current = setInterval(fn, 10000);
+  }, [stopMetaPoll]);
+
+  const pause = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.pause();
+    setIsPlaying(false);
+    setIsBuffering(false);
+    stopWaveform();
+  }, [stopWaveform]);
+
+  const play = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    setError('');
+    setIsBuffering(true);
+
+    try {
+      await audio.play();
+      setIsPlaying(true);
+      setIsBuffering(false);
+      startWaveform();
+    } catch (playError) {
+      setIsPlaying(false);
+      setIsBuffering(false);
+      stopWaveform();
+
+      if (playError?.name === 'NotAllowedError') {
+        setError('Tap Play to start this stream.');
+      } else {
+        setError('Unable to start playback for this station.');
+      }
+    }
+  }, [startWaveform, stopWaveform]);
+
+  const toggleMute = useCallback(() => {
+    setIsMuted((previous) => {
+      const next = !previous;
+      if (audioRef.current) {
+        audioRef.current.muted = next;
+      }
+      return next;
+    });
+  }, []);
+
+  const seek = useCallback((nextTime) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(duration) || duration <= 0) return;
+
+    const safeTime = Math.max(0, Math.min(Number(nextTime) || 0, duration));
+    audio.currentTime = safeTime;
+    setCurrentTime(safeTime);
+  }, [duration]);
+
+  const reconnect = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio || !station?.streamUrl) return;
+
+    setError('');
+    setIsBuffering(true);
+    audio.src = station.streamUrl;
+    audio.load();
+    await play();
+  }, [play, station?.streamUrl]);
+
+  const progress = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.volume = (isMuted ? 0 : volume) / 100;
+    audio.muted = isMuted;
+  }, [isMuted, volume]);
+
+  useEffect(() => {
+    if (!station?.streamUrl) {
+      return undefined;
+    }
+
+    const audio = new Audio();
+    audio.preload = 'none';
+    audio.src = station.streamUrl;
+    audio.volume = (isMuted ? 0 : volume) / 100;
+    audio.muted = isMuted;
+    audioRef.current = audio;
+
+    const onLoadedMetadata = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+    };
+
+    const onWaiting = () => {
+      setIsBuffering(true);
+    };
+
+    const onCanPlay = () => {
+      setIsBuffering(false);
+    };
+
+    const onPlaying = () => {
+      setError('');
+      setIsPlaying(true);
+      setIsBuffering(false);
+      startWaveform();
+    };
+
+    const onPause = () => {
+      setIsPlaying(false);
+      stopWaveform();
+    };
+
+    const onError = () => {
+      setIsPlaying(false);
+      setIsBuffering(false);
+      stopWaveform();
+      setError('Stream unavailable. Try Retry or another station.');
+    };
+
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('waiting', onWaiting);
+    audio.addEventListener('canplay', onCanPlay);
+    audio.addEventListener('playing', onPlaying);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('error', onError);
+
+    return () => {
+      stopMetaPoll();
+      stopWaveform();
+      audio.pause();
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('waiting', onWaiting);
+      audio.removeEventListener('canplay', onCanPlay);
+      audio.removeEventListener('playing', onPlaying);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('error', onError);
+      audio.src = '';
+      audioRef.current = null;
+      setCurrentTime(0);
+      setDuration(0);
+      setIsPlaying(false);
+      setIsBuffering(false);
+    };
+  }, [station?.streamUrl, isMuted, volume, startWaveform, stopMetaPoll, stopWaveform]);
+
+  useEffect(() => {
+    if (isExpanded && isPlaying) {
+      startWaveform();
+      return;
+    }
+    stopWaveform();
+  }, [isExpanded, isPlaying, startWaveform, stopWaveform]);
 
   useEffect(() => {
     if (parentPlaying && !isPlaying) play();
