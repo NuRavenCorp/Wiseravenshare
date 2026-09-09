@@ -1306,9 +1306,22 @@ public class AuthController : ControllerBase
             return false;
         }
 
-        return IsConfiguredAdminUser(email)
-            || _teamAccessService.IsTeamMemberAllowed(email)
-            || IsSelfRegistrationAllowed();
+        // Admins and team members are always allowed.
+        if (IsConfiguredAdminUser(email) || _teamAccessService.IsTeamMemberAllowed(email))
+        {
+            return true;
+        }
+
+        // Existing users (already registered) are always allowed to log in,
+        // regardless of whether self-registration is currently enabled.
+        // AllowSelfRegistration only gates creation of NEW accounts.
+        if (_userStore.EmailExists(email))
+        {
+            return true;
+        }
+
+        // New users can only authenticate if self-registration is open.
+        return IsSelfRegistrationAllowed();
     }
 
     private string ResolveAccessScope(string? email)
