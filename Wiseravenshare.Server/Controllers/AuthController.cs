@@ -434,6 +434,13 @@ public class AuthController : ControllerBase
         var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
         if (!providerConfig.IsEnabled)
         {
+            _logger.LogWarning(
+                "OAuth provider {Provider} is disabled at runtime. clientIdSet={ClientIdSet}, clientSecretSet={ClientSecretSet}, redirectSet={RedirectSet}.",
+                normalizedProvider,
+                !string.IsNullOrWhiteSpace(providerConfig.ClientId),
+                !string.IsNullOrWhiteSpace(providerConfig.ClientSecret),
+                !string.IsNullOrWhiteSpace(providerConfig.RedirectUri));
+
             return Redirect(BuildOAuthErrorRedirect(
                 normalizedReturnUrl,
                 normalizedProvider,
@@ -480,6 +487,13 @@ public class AuthController : ControllerBase
         var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
         if (!providerConfig.IsEnabled)
         {
+            _logger.LogWarning(
+                "OAuth callback rejected because provider {Provider} is disabled at runtime. clientIdSet={ClientIdSet}, clientSecretSet={ClientSecretSet}, redirectSet={RedirectSet}.",
+                normalizedProvider,
+                !string.IsNullOrWhiteSpace(providerConfig.ClientId),
+                !string.IsNullOrWhiteSpace(providerConfig.ClientSecret),
+                !string.IsNullOrWhiteSpace(providerConfig.RedirectUri));
+
             var unavailableUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), normalizedProvider, $"{normalizedProvider} sign-in is not configured.");
             return Redirect(unavailableUrl);
         }
@@ -1560,24 +1574,28 @@ public class AuthController : ControllerBase
             section["ClientId"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientId"],
             rawClientIdEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientId"),
             _configuration[$"{providerPrefix}_OAUTH_CLIENT_ID"],
             _configuration[$"{providerPrefix}_OAUTH_CLIENTID"]);
         var clientSecret = ResolveOAuthSettingValue(
             section["ClientSecret"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientSecret"],
             rawClientSecretEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientSecret"),
             _configuration[$"{providerPrefix}_OAUTH_CLIENT_SECRET"],
             _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"]);
         var tenantId = ResolveOAuthSettingValue(
             section["TenantId"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:TenantId"],
             rawTenantEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "TenantId"),
             _configuration[$"{providerPrefix}_OAUTH_TENANT_ID"],
             _configuration[$"{providerPrefix}_OAUTH_TENANT"]);
         var redirectUri = ResolveOAuthSettingValue(
             section["RedirectUri"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:RedirectUri"],
             rawRedirectUriEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "RedirectUri"),
             _configuration[$"{providerPrefix}_OAUTH_REDIRECT_URI"],
             _configuration[$"{providerPrefix}_OAUTH_CALLBACK"],
             _configuration[$"{providerPrefix}_OAUTH_CALLBACK_URL"]);
@@ -1626,6 +1644,53 @@ public class AuthController : ControllerBase
     private static string ReadRawEnvironmentOAuthSetting(string key)
     {
         return Environment.GetEnvironmentVariable(key) ?? string.Empty;
+    }
+
+    private string ResolveOAuthSettingBySuffix(string providerPrefix, string sectionName, string fieldName)
+    {
+        var normalizedSection = sectionName.Trim();
+        var normalizedField = fieldName.Trim();
+
+        var configSuffix = $":oauthproviders:{normalizedSection.ToLowerInvariant()}:{normalizedField.ToLowerInvariant()}";
+        foreach (var pair in _configuration.AsEnumerable())
+        {
+            var key = pair.Key ?? string.Empty;
+            if (!key.EndsWith(configSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var resolved = NormalizeConfiguredValue(pair.Value);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        var envSuffix = $"__OAUTHPROVIDERS__{normalizedSection.ToUpperInvariant()}__{normalizedField.ToUpperInvariant()}";
+        var envPrefix = $"{providerPrefix}_OAUTH_{normalizedField.ToUpperInvariant()}";
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            var key = (entry.Key?.ToString() ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (!key.EndsWith(envSuffix, StringComparison.OrdinalIgnoreCase)
+                && !key.StartsWith(envPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var resolved = NormalizeConfiguredValue(entry.Value?.ToString());
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        return string.Empty;
     }
 
     private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
