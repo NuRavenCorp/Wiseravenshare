@@ -131,13 +131,13 @@
   display: flex;
   align-items: center;
   gap: 0.8rem;
-  font-size: clamp(2rem, 4vw, 3.1rem);
+  font-size: clamp(1.35rem, 2.6vw, 2.15rem);
   line-height: 1;
 }
 
 .hero-copy .subtitle {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 0.86rem;
   line-height: 1.6;
   color: var(--mp-light-text);
   max-width: 42rem;
@@ -175,7 +175,7 @@
 }
 
 .stat-value {
-  font-size: 1.6rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: var(--mp-text);
 }
@@ -785,7 +785,7 @@
 
 .tracks-header h2 {
   margin: 0;
-  font-size: clamp(1.4rem, 2vw, 1.8rem);
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
 }
 
 /* Search Box */
@@ -918,7 +918,7 @@
 
 .track-title {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--mp-text);
   overflow: hidden;
@@ -928,7 +928,7 @@
 
 .track-artist {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--mp-light-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -937,11 +937,73 @@
 
 .track-album {
   margin: 0;
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(159, 177, 203, 0.75);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compact-player {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--mp-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.compact-player__play {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(105, 214, 255, 0.5);
+  background: linear-gradient(135deg, rgba(105, 214, 255, 0.22), rgba(66, 201, 161, 0.2));
+  color: var(--mp-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.compact-player__play svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.compact-player__meta {
+  min-width: 0;
+}
+
+.compact-player__meta h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-player__meta p {
+  margin: 0.2rem 0 0;
+  color: var(--mp-light-text);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-player__actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.compact-player__actions .ghost-btn {
+  padding: 0.5rem 0.62rem;
+  min-width: 2rem;
+  min-height: 2rem;
 }
 
 /* Track Actions */
