@@ -70,12 +70,13 @@ else {
 }
 
 # 2) Registration should be blocked by default.
-$badRegister = Invoke-JsonPost -Url $registerUrl -Body @{ name = "x"; email = "x@x.com"; password = "1@Chinchin234" }
+$probeEmail = "auth-probe-{0}@wise-ravens.com" -f ([Guid]::NewGuid().ToString("N"))
+$badRegister = Invoke-JsonPost -Url $registerUrl -Body @{ name = "x"; email = $probeEmail; password = "1@Chinchin234" }
 if ($badRegister.StatusCode -eq 403) {
     Add-Result -Check "self_registration_blocked" -Status "ok" -Details "Status 403"
 }
 else {
-    Add-Result -Check "self_registration_blocked" -Status "fail" -Details "Expected 403, got $($badRegister.StatusCode). $($badRegister.Body)"
+    Add-Result -Check "self_registration_blocked" -Status "fail" -Details "Expected 403, got $($badRegister.StatusCode) for probe $probeEmail. $($badRegister.Body)"
 }
 
 # 3) Optional allowlisted login check.
