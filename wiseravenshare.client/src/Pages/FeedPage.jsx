@@ -15,6 +15,7 @@ import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFee
 import { usePersonalization } from '../hooks/usePersonalization';
 import { crawlerService } from '../Services/crawlerService';
 import { personalizationService } from '../Services/personalizationService';
+import { contentCrawlerService } from '../Services/contentCrawlerService';
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
@@ -27,6 +28,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
     const [personalizedTrending, setPersonalizedTrending] = useState(null);
     const [isPersonalizedLoading, setIsPersonalizedLoading] = useState(false);
+    const [contentTrending, setContentTrending] = useState(null);
+    const [isContentTrendingLoading, setIsContentTrendingLoading] = useState(false);
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
@@ -213,8 +216,31 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             }
         };
 
+        const loadContentTrending = async () => {
+            try {
+                setIsContentTrendingLoading(true);
+                const result = await contentCrawlerService.getTrendingContent({
+                    contentType: 'Post',  // Focus on user-generated posts
+                    topN: 6
+                });
+                if (!cancelled && result?.trendingContent?.length > 0) {
+                    setContentTrending(result);
+                }
+            } catch (err) {
+                console.error('Failed to load content trending:', err);
+                if (!cancelled) {
+                    setContentTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsContentTrendingLoading(false);
+                }
+            }
+        };
+
         void loadCrawlerTrending();
         void loadPersonalizedTrending();
+        void loadContentTrending();
         return () => {
             cancelled = true;
         };
@@ -716,6 +742,62 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                                     </div>
                                 </button>
                             ))}
+                        </div>
+                    </div>
+                )}
+
+                {contentTrending?.trendingContent && contentTrending.trendingContent.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(244, 63, 94, 0.3)',
+                        background: 'rgba(244, 63, 94, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(244, 63, 94, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            🔥 Viral Now
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {contentTrending.trendingContent.slice(0, 6).map((content, idx) => {
+                                const viralBadge = content.viralCoefficient >= 10 ? '🔥🔥🔥' :
+                                                   content.viralCoefficient >= 5 ? '🔥🔥' :
+                                                   content.viralCoefficient >= 2 ? '🔥' : '⬆️';
+                                return (
+                                    <button
+                                        key={idx}
+                                        style={{
+                                            padding: '10px',
+                                            borderRadius: '8px',
+                                            border: '1px solid rgba(244, 63, 94, 0.4)',
+                                            background: 'rgba(244, 63, 94, 0.08)',
+                                            color: 'var(--text-color)',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease',
+                                            textAlign: 'left',
+                                            fontSize: '12px'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = 'rgba(244, 63, 94, 0.15)';
+                                            e.currentTarget.style.transform = 'translateY(-2px)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'rgba(244, 63, 94, 0.08)';
+                                            e.currentTarget.style.transform = 'translateY(0)';
+                                        }}
+                                    >
+                                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                                            {viralBadge} {content.title?.substring(0, 20)}...
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                            {content.likeCount} ❤️ • {content.viewCount} 👁️
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
