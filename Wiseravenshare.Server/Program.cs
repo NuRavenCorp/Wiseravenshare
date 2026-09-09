@@ -1528,6 +1528,7 @@ builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationServi
 builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
 builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
 builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
+builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
