@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart } from 'react-icons/fi';
-import AudioPlayer from '../Components/Ravensight/AudioPlayer';
+import RavenMusicPlayer from '../Components/music/RavenMusicPlayer';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
 import '../Styles/MusicPlayer.css';
@@ -603,14 +603,18 @@ const MusicPlayerPage = ({ onNavigate }) => {
           </div>
 
           {currentTrack && (
-            <AudioPlayer
-              track={currentTrack}
-              showVisualizer={true}
-              onEnded={handleTrackEnded}
-              onError={(error) => {
-                console.error('Playback error:', error);
-                addToast('Error playing audio file', 'error');
+            <RavenMusicPlayer
+              initialTrack={currentTrack}
+              playlist={filteredTracks.length > 0 ? filteredTracks : musicLibrary}
+              autoPlay={false}
+              onTrackChange={(track) => {
+                const nextIndex = filteredTracks.findIndex((item) => item.id === track.id);
+                if (nextIndex >= 0) {
+                  setCurrentTrackIndex(nextIndex);
+                }
+                setCurrentTrack(track);
               }}
+              onClose={() => setCurrentTrack(null)}
             />
           )}
 
