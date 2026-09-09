@@ -400,7 +400,7 @@ public class AuthController : ControllerBase
     {
         var jwtIssuerConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Issuer"]);
         var jwtAudienceConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Audience"]);
-        var jwtKey = _configuration["JWT_highentropykey"] ?? _configuration["Authentication:Jwt:Key"];
+        var jwtKey = ResolveJwtKeyFromConfiguration();
         var jwtKeyConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
 
         var allowSelfRegistration = IsSelfRegistrationAllowed();
@@ -1146,13 +1146,23 @@ public class AuthController : ControllerBase
 
     private string GetJwtKey()
     {
-        var key = _configuration["JWT_highentropykey"] ?? _configuration["Authentication:Jwt:Key"];
+        var key = ResolveJwtKeyFromConfiguration();
         if (string.IsNullOrWhiteSpace(key))
         {
             throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
         }
 
         return key;
+    }
+
+    private string ResolveJwtKeyFromConfiguration()
+    {
+        return ResolveOAuthSettingValue(
+            _configuration["JWT_highentropykey"],
+            _configuration["Authentication:Jwt:Key"],
+            _configuration["Authentication__Jwt__Key"],
+            Environment.GetEnvironmentVariable("JWT_highentropykey"),
+            Environment.GetEnvironmentVariable("Authentication__Jwt__Key"));
     }
 
     private static bool IsValidEmail(string email)
