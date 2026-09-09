@@ -400,7 +400,7 @@ public class AuthController : ControllerBase
     {
         var jwtIssuerConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Issuer"]);
         var jwtAudienceConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Audience"]);
-        var jwtKey = _configuration["Authentication:Jwt:Key"];
+        var jwtKey = _configuration["JWT_highentropykey"] ?? _configuration["Authentication:Jwt:Key"];
         var jwtKeyConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
 
         var allowSelfRegistration = IsSelfRegistrationAllowed();
@@ -1146,10 +1146,10 @@ public class AuthController : ControllerBase
 
     private string GetJwtKey()
     {
-        var key = _configuration["Authentication:Jwt:Key"];
+        var key = _configuration["JWT_highentropykey"] ?? _configuration["Authentication:Jwt:Key"];
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new InvalidOperationException("Authentication:Jwt:Key is not configured.");
+            throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
         }
 
         return key;
@@ -1540,17 +1540,60 @@ public class AuthController : ControllerBase
         };
 
         var section = _configuration.GetSection($"Authentication:OAuthProviders:{sectionName}");
-        var clientId = NormalizeConfiguredValue(section["ClientId"]);
-        var clientSecret = NormalizeConfiguredValue(section["ClientSecret"]);
+        var providerPrefix = provider.ToUpperInvariant();
+        var rawClientIdEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__ClientId");
+        var rawClientSecretEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__ClientSecret");
+        var rawTenantEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__TenantId");
+        var rawRedirectUriEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__RedirectUri");
+
+        var clientId = ResolveOAuthSettingValue(
+            section["ClientId"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientId"],
+            rawClientIdEnv,
+            _configuration[$"{providerPrefix}_OAUTH_CLIENT_ID"],
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTID"]);
+        var clientSecret = ResolveOAuthSettingValue(
+            section["ClientSecret"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientSecret"],
+            rawClientSecretEnv,
+            _configuration[$"{providerPrefix}_OAUTH_CLIENT_SECRET"],
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"]);
+        var tenantId = ResolveOAuthSettingValue(
+            section["TenantId"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:TenantId"],
+            rawTenantEnv,
+            _configuration[$"{providerPrefix}_OAUTH_TENANT_ID"],
+            _configuration[$"{providerPrefix}_OAUTH_TENANT"]);
+        var redirectUri = ResolveOAuthSettingValue(
+            section["RedirectUri"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:RedirectUri"],
+            rawRedirectUriEnv,
+            _configuration[$"{providerPrefix}_OAUTH_REDIRECT_URI"],
+            _configuration[$"{providerPrefix}_OAUTH_CALLBACK"],
+            _configuration[$"{providerPrefix}_OAUTH_CALLBACK_URL"]);
 
         return new OAuthProviderConfig
         {
             ClientId = clientId,
             ClientSecret = clientSecret,
-            TenantId = NormalizeConfiguredValue(section["TenantId"]),
-            RedirectUri = NormalizeConfiguredValue(section["RedirectUri"]),
+            TenantId = tenantId,
+            RedirectUri = redirectUri,
             IsEnabled = !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret)
         };
+    }
+
+    private static string ResolveOAuthSettingValue(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var normalized = NormalizeConfiguredValue(candidate);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static string NormalizeConfiguredValue(string? raw)
@@ -1568,6 +1611,11 @@ public class AuthController : ControllerBase
         }
 
         return value;
+    }
+
+    private static string ReadRawEnvironmentOAuthSetting(string key)
+    {
+        return Environment.GetEnvironmentVariable(key) ?? string.Empty;
     }
 
     private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
@@ -2204,6 +2252,7 @@ public class AuthController : ControllerBase
 
         if (!_userStore.IsDatabasePersistenceAvailable())
         {
+            _userStore.TryAlignUserId(authUser.Email, parsedId.ToString("N"));
             _logger.LogWarning("Skipping domain-user repository operations for {Email} because database persistence is unavailable.", authUser.Email);
             return parsedId;
         }
@@ -2213,6 +2262,7 @@ public class AuthController : ControllerBase
             var existingById = await _userRepository.GetByIdAsync(parsedId);
             if (existingById is not null)
             {
+                _userStore.TryAlignUserId(authUser.Email, existingById.Id.ToString("N"));
                 return existingById.Id;
             }
 
@@ -2225,6 +2275,7 @@ public class AuthController : ControllerBase
                     await _userRepository.UpdateAsync(existingByEmail);
                 }
 
+                _userStore.TryAlignUserId(authUser.Email, existingByEmail.Id.ToString("N"));
                 return existingByEmail.Id;
             }
 
@@ -2257,6 +2308,7 @@ public class AuthController : ControllerBase
             };
 
             await _userRepository.AddAsync(newUser);
+            _userStore.TryAlignUserId(authUser.Email, newUser.Id.ToString("N"));
             _logger.LogInformation("Provisioned EF user record for auth user {Email} ({UserId}).", newUser.Email, newUser.Id);
             return newUser.Id;
         }
