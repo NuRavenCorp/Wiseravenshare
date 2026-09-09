@@ -55,6 +55,8 @@ const FMPlayer = ({
   const audioRef = useRef(null);
   const metadataPollRef = useRef(null);
   const waveformTimerRef = useRef(null);
+  const sourceCandidatesRef = useRef([]);
+  const sourceIndexRef = useRef(0);
 
   const stopWaveform = useCallback(() => {
     if (waveformTimerRef.current) {
@@ -137,6 +139,17 @@ const FMPlayer = ({
     });
   }, []);
 
+  const getStreamCandidates = useCallback((value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+
+    const fallback = raw.startsWith('http://')
+      ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(raw)}`
+      : raw;
+
+    return [...new Set([raw, fallback].filter(Boolean))];
+  }, []);
+
   const seek = useCallback((nextTime) => {
     const audio = audioRef.current;
     if (!audio || !Number.isFinite(duration) || duration <= 0) return;
@@ -152,10 +165,14 @@ const FMPlayer = ({
 
     setError('');
     setIsBuffering(true);
-    audio.src = station.streamUrl;
+
+    const candidates = getStreamCandidates(station.streamUrl);
+    sourceCandidatesRef.current = candidates;
+    sourceIndexRef.current = 0;
+    audio.src = candidates[0] || station.streamUrl;
     audio.load();
     await play();
-  }, [play, station?.streamUrl]);
+  }, [getStreamCandidates, play, station?.streamUrl]);
 
   const progress = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
 
@@ -173,8 +190,12 @@ const FMPlayer = ({
     }
 
     const audio = new Audio();
+    const candidates = getStreamCandidates(station.streamUrl);
+    sourceCandidatesRef.current = candidates;
+    sourceIndexRef.current = 0;
+
     audio.preload = 'none';
-    audio.src = station.streamUrl;
+    audio.src = candidates[0] || station.streamUrl;
     audio.volume = (isMuted ? 0 : volume) / 100;
     audio.muted = isMuted;
     audioRef.current = audio;
@@ -208,6 +229,19 @@ const FMPlayer = ({
     };
 
     const onError = () => {
+      const nextIndex = sourceIndexRef.current + 1;
+      const nextCandidates = sourceCandidatesRef.current;
+
+      if (nextIndex < nextCandidates.length) {
+        sourceIndexRef.current = nextIndex;
+        audio.src = nextCandidates[nextIndex];
+        audio.load();
+        if (parentPlaying || isPlaying) {
+          audio.play().catch(() => {});
+        }
+        return;
+      }
+
       setIsPlaying(false);
       setIsBuffering(false);
       stopWaveform();
@@ -240,7 +274,7 @@ const FMPlayer = ({
       setIsPlaying(false);
       setIsBuffering(false);
     };
-  }, [station?.streamUrl, isMuted, volume, startWaveform, stopMetaPoll, stopWaveform]);
+  }, [getStreamCandidates, isMuted, isPlaying, parentPlaying, station?.streamUrl, startWaveform, stopMetaPoll, stopWaveform, volume]);
 
   useEffect(() => {
     if (isExpanded && isPlaying) {
