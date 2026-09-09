@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart, FiUpload, FiCheckCircle, FiLoader, FiMoreVertical, FiSkipBack, FiSkipForward, FiShuffle } from 'react-icons/fi';
-import RavenMusicPlayer from '../Components/music/RavenMusicPlayer';
+import { FiPauseCircle } from 'react-icons/fi';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
 import '../Styles/MusicPlayer.css';
@@ -56,8 +56,10 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isPlayerPlaying, setIsPlayerPlaying] = useState(false);
   const searchInputRef = useRef(null);
   const uploadInputRef = useRef(null);
+  const playerAudioRef = useRef(null);
   const persistTimeoutRef = useRef(null);
 
   const normalizeTrack = (track) => {
@@ -529,6 +531,31 @@ const MusicPlayerPage = ({ onNavigate }) => {
     handleNextTrack();
   };
 
+  const handleTogglePlayerPlayback = async () => {
+    if (!currentTrack?.mediaUrl) {
+      addToast('Select a playable track first.', 'warning');
+      return;
+    }
+
+    const audio = playerAudioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    try {
+      if (audio.paused) {
+        await audio.play();
+        setIsPlayerPlaying(true);
+      } else {
+        audio.pause();
+        setIsPlayerPlaying(false);
+      }
+    } catch {
+      addToast('Unable to start playback for this track.', 'error');
+      setIsPlayerPlaying(false);
+    }
+  };
+
   const handleRandomTrack = () => {
     if (!playbackTracks.length) {
       return;
@@ -820,6 +847,18 @@ const MusicPlayerPage = ({ onNavigate }) => {
     };
   }, [handleNextTrack, handlePreviousTrack]);
 
+  useEffect(() => {
+    const audio = playerAudioRef.current;
+    if (!audio || !currentTrack?.mediaUrl) {
+      setIsPlayerPlaying(false);
+      return;
+    }
+
+    audio.pause();
+    audio.load();
+    setIsPlayerPlaying(false);
+  }, [currentTrack?.id, currentTrack?.mediaUrl]);
+
   if (isLoading) {
     return (
       <div className="music-player-page">
@@ -925,6 +964,14 @@ const MusicPlayerPage = ({ onNavigate }) => {
               </div>
 
               <div className="upload-actions">
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  Choose file
+                </button>
                 <button className="upload-btn" type="submit" disabled={isUploading || !uploadFile}>
                   {isUploading ? 'Uploading...' : 'Upload to library'}
                 </button>
@@ -941,19 +988,42 @@ const MusicPlayerPage = ({ onNavigate }) => {
           </div>
 
           {currentTrack && (
-            <RavenMusicPlayer
-              initialTrack={currentTrack}
-              playlist={filteredTracks.length > 0 ? filteredTracks : musicLibrary}
-              autoPlay={false}
-              onTrackChange={(track) => {
-                const nextIndex = filteredTracks.findIndex((item) => item.id === track.id);
-                if (nextIndex >= 0) {
-                  setCurrentTrackIndex(nextIndex);
-                }
-                setCurrentTrack(track);
-              }}
-              onClose={() => setCurrentTrack(null)}
-            />
+            <div className="compact-player" role="region" aria-label="Music player">
+              <audio
+                ref={playerAudioRef}
+                src={currentTrack.mediaUrl}
+                onPlay={() => setIsPlayerPlaying(true)}
+                onPause={() => setIsPlayerPlaying(false)}
+                onEnded={handleTrackEnded}
+                onError={() => {
+                  setIsPlayerPlaying(false);
+                  addToast('Audio playback failed for this track.', 'error');
+                }}
+              />
+
+              <button
+                type="button"
+                className="compact-player__play"
+                onClick={handleTogglePlayerPlayback}
+                title={isPlayerPlaying ? 'Pause playback' : 'Play track'}
+              >
+                {isPlayerPlaying ? <FiPauseCircle /> : <FiPlay />}
+              </button>
+
+              <div className="compact-player__meta">
+                <h3>{currentTrack.title}</h3>
+                <p>{currentTrack.artist || 'Unknown artist'}{currentTrack.album ? ` • ${currentTrack.album}` : ''}</p>
+              </div>
+
+              <div className="compact-player__actions">
+                <button type="button" className="ghost-btn" onClick={handlePreviousTrack} title="Previous">
+                  <FiSkipBack />
+                </button>
+                <button type="button" className="ghost-btn" onClick={handleNextTrack} title="Next">
+                  <FiSkipForward />
+                </button>
+              </div>
+            </div>
           )}
 
           {!currentTrack && musicLibrary.length === 0 && (
