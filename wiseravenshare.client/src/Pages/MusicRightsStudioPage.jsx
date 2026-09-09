@@ -7,7 +7,6 @@ import {
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
-import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import '../Styles/MusicRightsStudio.css';
 
 // ─── Stripe Price IDs (from environment) ─────────────────────────────────────
@@ -573,16 +572,6 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── Audio Preview Player ── */}
-      {selectedTrack && (
-        <div className="mrs-player-wrap">
-          <AudioPlayer track={selectedTrack} showVisualizer
-            onEnded={() => setSelectedTrack(null)}
-            onError={() => { addToast('Playback error', 'error'); setSelectedTrack(null); }}
-          />
         </div>
       )}
 

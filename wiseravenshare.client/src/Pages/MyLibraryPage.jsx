@@ -45,7 +45,6 @@ const PROTECTION_PLANS = [
         ],
     },
 ];
-import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
@@ -437,14 +436,6 @@ const MyLibraryPage = ({ onNavigate }) => {
                                     color: 'var(--text-color)'
                                 }}
                             />
-
-                            {currentTrack && (
-                                <AudioPlayer
-                                    track={currentTrack}
-                                    showVisualizer={true}
-                                    onError={() => addToast('Unable to play this track.', 'error')}
-                                />
-                            )}
 
                             {filteredTracks.length === 0 ? (
                                 <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
