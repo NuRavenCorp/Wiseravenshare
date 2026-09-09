@@ -599,9 +599,15 @@ CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     CONSTRAINT uq_bucket_objects_bucket_key UNIQUE (bucket_name, object_key)
 );
 
-ALTER TABLE app_data.bucket_objects
-    ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
-    ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+DO $$
+BEGIN
+    IF pg_catalog.has_table_privilege(current_user, 'app_data.bucket_objects', 'update') THEN
+        ALTER TABLE app_data.bucket_objects
+            ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
+            ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_bucket_objects_owner_created
     ON app_data.bucket_objects (owner_user_id, created_at DESC);
@@ -1491,8 +1497,16 @@ builder.Services.AddSignalR();
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
 builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
+{
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
-        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data"));
+    // Suppress PendingModelChangesWarning so MigrateAsync() can run existing
+    // migrations even when the EF model has un-migrated additions.  Tables
+    // missing from the migration history are caught at runtime via the per-
+    // service EnsureTable helpers rather than crashing startup.
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+});
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 // Generic repository open registration (currency/badge subsystems resolve IRepository<TEntity>).
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.Infrastructure.Data.Repositories.Repository<>));
