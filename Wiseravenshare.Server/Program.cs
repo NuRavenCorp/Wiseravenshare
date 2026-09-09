@@ -1613,7 +1613,7 @@ builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommunique
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
 builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
 
-var jwtKey = builder.Configuration["JWT_highentropykey"] ?? builder.Configuration["Authentication:Jwt:Key"];
+var jwtKey = ResolveJwtKey(builder.Configuration);
 if (string.IsNullOrWhiteSpace(jwtKey))
 {
     throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is required.");
@@ -1625,6 +1625,30 @@ if (jwtKey.Length < 32)
 }
 
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+
+static string ResolveJwtKey(IConfiguration configuration)
+{
+    var candidates = new[]
+    {
+        configuration["JWT_highentropykey"],
+        configuration["Authentication:Jwt:Key"],
+        configuration["Authentication__Jwt__Key"],
+        Environment.GetEnvironmentVariable("JWT_highentropykey"),
+        Environment.GetEnvironmentVariable("Authentication__Jwt__Key")
+    };
+
+    foreach (var candidate in candidates)
+    {
+        var value = (candidate ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+    }
+
+    return string.Empty;
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
