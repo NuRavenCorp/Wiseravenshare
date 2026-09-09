@@ -553,7 +553,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
                 {photoPostsByDay.map((group) => {
-                    const isExpanded = Boolean(expandedPhotoDayKeys[group.dayKey]);
+                    const isExpanded = expandedPhotoDayKeys[group.dayKey] ?? true;
                     const dayLabel = new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(undefined, {
                         weekday: 'short',
                         month: 'short',

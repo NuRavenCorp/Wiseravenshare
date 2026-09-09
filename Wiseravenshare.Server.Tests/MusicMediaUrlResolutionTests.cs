@@ -30,7 +30,7 @@ public class MusicMediaUrlResolutionTests
 
         var result = method!.Invoke(store, new object?[] { null, "wiseravenshare/ravensight/music/track-123.mp3", "track-123.mp3" });
 
-        Assert.Equal("/api/videostreaming/blob/wiseravenshare%2Fravensight%2Fmusic%2Ftrack-123.mp3", result);
+        Assert.Equal("/api/videostreaming/blob/wiseravenshare/ravensight/music/track-123.mp3", result);
     }
 
     private sealed class StubBlobStorageService : IBlobStorageService

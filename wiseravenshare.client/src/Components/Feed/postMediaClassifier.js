@@ -16,10 +16,13 @@ export const classifyPostMedia = (post = {}, resolvedMedia = '') => {
     const fileNameSuggestsImage = /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaFileName);
     const fileNameSuggestsAudio = /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(mediaFileName);
 
+    const looksLikeVideoRoute = /\/videostreaming\//i.test(source);
+
     const isVideoPost = post.type === 'Video'
         || post.mediaType === 'video'
         || /\.(mp4|webm|mov|avi|mkv)$/i.test(source)
         || source.startsWith('data:video/')
+        || looksLikeVideoRoute
         || fileNameSuggestsVideo;
 
     const isImagePost = post.type === 'Image'
