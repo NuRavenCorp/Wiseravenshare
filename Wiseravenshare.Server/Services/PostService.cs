@@ -43,6 +43,7 @@ public class PostService : IPostService
     private readonly IEngagementNotificationService _engagementNotificationService;
     private readonly IWiseCoinService _wiseCoinService;
     private readonly IEngagementMultiplierService _engagementMultiplierService;
+    private readonly IContentCrawlerService _contentCrawler;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -54,6 +55,7 @@ public class PostService : IPostService
         IEngagementNotificationService engagementNotificationService,
         IWiseCoinService wiseCoinService,
         IEngagementMultiplierService engagementMultiplierService,
+        IContentCrawlerService contentCrawler,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -64,6 +66,7 @@ public class PostService : IPostService
         _engagementNotificationService = engagementNotificationService;
         _wiseCoinService = wiseCoinService;
         _engagementMultiplierService = engagementMultiplierService;
+        _contentCrawler = contentCrawler;
         _logger = logger;
     }
 
@@ -202,6 +205,26 @@ public class PostService : IPostService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
+        }
+
+        // Ingest into content crawler for trending detection (fire-and-forget)
+        try
+        {
+            // Extract tags/hashtags from content
+            var tags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
+            _ = _contentCrawler.IngestUserContentAsync(
+                post.Id,
+                "Post",
+                post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "",
+                userId,
+                user.DisplayName ?? user.Username ?? "Unknown",
+                tags,
+                "GLOBAL"
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ingest post {PostId} into content crawler", post.Id);
         }
 
         if (!persisted)
@@ -465,6 +488,21 @@ public class PostService : IPostService
             );
         }
 
+        // Update engagement in content crawler (fire-and-forget)
+        try
+        {
+            _ = _contentCrawler.UpdateEngagementAsync(
+                postId,
+                post.ViewsCount,
+                post.LikesCount + 1,  // Include this new like
+                post.RepostsCount
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
+        }
+
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
@@ -503,6 +541,21 @@ public class PostService : IPostService
                 sharedByName,
                 post.Content ?? "your post"
             );
+        }
+
+        // Update engagement in content crawler (fire-and-forget)
+        try
+        {
+            _ = _contentCrawler.UpdateEngagementAsync(
+                postId,
+                post.ViewsCount,
+                post.LikesCount,
+                post.RepostsCount + 1  // Include this new repost
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
         }
 
         return await BuildPostInteractionDtoAsync(postId, userId);
@@ -762,5 +815,28 @@ public class PostService : IPostService
             CreatedAt = user.CreatedAt,
             LastActiveAt = user.LastActiveAt
         };
+    }
+
+    private static List<string> ExtractHashtags(string content)
+    {
+        var hashtags = new List<string>();
+        if (string.IsNullOrWhiteSpace(content)) return hashtags;
+
+        // Find all words starting with # or patterns like #trending
+        var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var word in words)
+        {
+            if (word.StartsWith('#') && word.Length > 1)
+            {
+                // Remove trailing punctuation
+                var tag = word.Trim('#', '.', ',', '!', '?', ':', ';', '"', '\'');
+                if (!string.IsNullOrWhiteSpace(tag) && tag.Length > 2)
+                {
+                    hashtags.Add(tag);
+                }
+            }
+        }
+
+        return hashtags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
