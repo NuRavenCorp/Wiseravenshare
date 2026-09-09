@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart } from 'react-icons/fi';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart, FiUpload, FiCheckCircle, FiLoader } from 'react-icons/fi';
 import RavenMusicPlayer from '../Components/music/RavenMusicPlayer';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
@@ -48,7 +48,15 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const [showNewPlaylistForm, setShowNewPlaylistForm] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [showPlaylistMenu, setShowPlaylistMenu] = useState(null);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadArtist, setUploadArtist] = useState('');
+  const [uploadAlbum, setUploadAlbum] = useState('');
+  const [uploadGenre, setUploadGenre] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const searchInputRef = useRef(null);
+  const uploadInputRef = useRef(null);
   const persistTimeoutRef = useRef(null);
 
   const normalizeTrack = (track) => {
@@ -120,6 +128,26 @@ const MusicPlayerPage = ({ onNavigate }) => {
       mediaUrl,
       url: mediaUrl
     };
+  };
+
+  const buildLocalPreviewTrack = (file, metadata = {}) => {
+    const previewUrl = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+      ? URL.createObjectURL(file)
+      : '';
+
+    return normalizeTrack({
+      id: `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
+      artist: metadata.artist || '',
+      album: metadata.album || '',
+      genre: metadata.genre || '',
+      fileName: file.name,
+      relativePath: '',
+      contentType: file.type,
+      mediaUrl: previewUrl,
+      fileUrl: previewUrl,
+      url: previewUrl
+    });
   };
 
   const normalizePlayerState = (payload) => {
@@ -418,6 +446,13 @@ const MusicPlayerPage = ({ onNavigate }) => {
     String(track?.album || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const heroStats = useMemo(() => ([
+    { label: 'Tracks', value: musicLibrary.length },
+    { label: 'Playlists', value: playlists.length },
+    { label: 'Favorites', value: favoriteTrackIds.length },
+    { label: 'Recent plays', value: recentHistory.length }
+  ]), [musicLibrary.length, playlists.length, favoriteTrackIds.length, recentHistory.length]);
+
   // Handlers
   const handleTrackSelect = (track, index) => {
     setCurrentTrack(track);
@@ -577,6 +612,94 @@ const MusicPlayerPage = ({ onNavigate }) => {
     }
   };
 
+  const resetUploadForm = () => {
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadArtist('');
+    setUploadAlbum('');
+    setUploadGenre('');
+    setUploadProgress(0);
+
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = '';
+    }
+  };
+
+  const handleUploadTrack = async (event) => {
+    event.preventDefault();
+
+    const file = uploadFile || uploadInputRef.current?.files?.[0] || null;
+    if (!file) {
+      addToast('Choose a music file first.', 'warning');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    const uploadMetadata = {
+      title: uploadTitle || file.name.replace(/\.[^/.]+$/, ''),
+      artist: uploadArtist,
+      album: uploadAlbum,
+      genre: uploadGenre,
+      destinationFolder: '/wiseravenshare/ravensight/music',
+      onProgress: (value) => setUploadProgress(Number(value || 0))
+    };
+
+    const commitTrack = (track, persisted) => {
+      if (!track) {
+        return;
+      }
+
+      setMusicLibrary((prev) => {
+        const next = [track, ...prev.filter((item) => item.id !== track.id)];
+        safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, next);
+        return next;
+      });
+
+      setActivePlaylist(null);
+      setCurrentTrack(track);
+      setCurrentTrackIndex(0);
+      schedulePlayerStatePersist({
+        activePlaylistId: null,
+        lastTrackId: track.id,
+        lastPositionSeconds: 0,
+        queueTrackIds: [track.id, ...musicLibrary.map((item) => item.id)],
+        favoriteTrackIds,
+        playlists: serializePlaylists(playlists),
+        recentHistory
+      });
+
+      addToast(
+        persisted
+          ? `Uploaded ${track.title} to your music library.`
+          : 'Saved a local preview of your upload for this session.',
+        persisted ? 'success' : 'warning'
+      );
+    };
+
+    try {
+      const response = await apiService.uploadMusicTrack(file, uploadMetadata);
+      const track = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
+
+      if (track) {
+        commitTrack(track, true);
+        resetUploadForm();
+        return;
+      }
+
+      throw new Error('The server did not return a playable track.');
+    } catch (error) {
+      const previewTrack = buildLocalPreviewTrack(file, uploadMetadata);
+      commitTrack(previewTrack, false);
+      resetUploadForm();
+      console.warn('Music upload fell back to a local preview:', error);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="music-player-page">
@@ -590,16 +713,108 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
   return (
     <div className="music-player-page">
+      <div className="music-backdrop music-backdrop--one" />
+      <div className="music-backdrop music-backdrop--two" />
+
+      <div className="music-shell">
       <div className="player-container">
         {/* Player Section */}
         <div className="player-section">
-          <div className="player-header">
-            <h1>
-              <FiMusic /> Music Player
-            </h1>
-            <p className="subtitle">
-              {currentTrack ? `Now Playing: ${currentTrack.title}` : 'Select a track to play'}
-            </p>
+          <div className="player-header player-header--hero">
+            <div className="hero-copy">
+              <span className="eyebrow">Raven Soundboard</span>
+              <h1>
+                <FiMusic /> Music Player
+              </h1>
+              <p className="subtitle">
+                {currentTrack
+                  ? `Now Playing: ${currentTrack.title}`
+                  : 'Upload tracks, build playlists, and start playback.'}
+              </p>
+            </div>
+
+            <div className="hero-stats">
+              {heroStats.map((stat) => (
+                <div key={stat.label} className="stat-card">
+                  <span className="stat-value">{stat.value}</span>
+                  <span className="stat-label">{stat.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="upload-panel">
+            <form className="upload-form" onSubmit={handleUploadTrack}>
+              <div className="upload-form__header">
+                <div>
+                  <span className="eyebrow">Library upload</span>
+                  <h2><FiUpload /> Add music</h2>
+                  <p>Upload audio directly into your library and playlists.</p>
+                </div>
+                <div className="upload-status">
+                  {isUploading ? <FiLoader className="spin" /> : <FiCheckCircle />}
+                  <span>{isUploading ? `Uploading ${uploadProgress}%` : 'Ready to upload'}</span>
+                </div>
+              </div>
+
+              <label className="file-dropzone">
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setUploadFile(file);
+                    if (file && !uploadTitle) {
+                      setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+                    }
+                  }}
+                />
+                <FiUpload />
+                <span>{uploadFile ? uploadFile.name : 'Choose an audio file (MP3, WAV, M4A, AAC, FLAC, OGG)'}</span>
+              </label>
+
+              <div className="upload-grid">
+                <input
+                  type="text"
+                  placeholder="Title"
+                  value={uploadTitle}
+                  onChange={(event) => setUploadTitle(event.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Artist"
+                  value={uploadArtist}
+                  onChange={(event) => setUploadArtist(event.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Album"
+                  value={uploadAlbum}
+                  onChange={(event) => setUploadAlbum(event.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Genre"
+                  value={uploadGenre}
+                  onChange={(event) => setUploadGenre(event.target.value)}
+                />
+              </div>
+
+              <div className="upload-actions">
+                <button className="upload-btn" type="submit" disabled={isUploading || !uploadFile}>
+                  {isUploading ? 'Uploading...' : 'Upload to library'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={resetUploadForm}
+                  disabled={isUploading && uploadProgress > 0}
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
           </div>
 
           {currentTrack && (
@@ -717,7 +932,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
                       showPlaylistMenu === playlist.id ? null : playlist.id
                     )}
                   >
-                    ⋮
+                    ...
                   </button>
 
                   {showPlaylistMenu === playlist.id && (
@@ -880,6 +1095,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
