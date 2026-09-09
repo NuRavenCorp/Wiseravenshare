@@ -44,6 +44,26 @@ public sealed class PersonalizationController : ControllerBase
         return Ok(reco);
     }
 
+    // ── GET /api/personalization/trending/personalized ─────────────────────────
+    /// <summary>
+    /// Get crawler-based trending features personalized to the authenticated user.
+    /// Blends platform-wide trending with user interaction history and preferences.
+    /// </summary>
+    [HttpGet("trending/personalized")]
+    [ProducesResponseType(typeof(IReadOnlyList<PersonalizedRecommendation>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PersonalizedTrending(
+        [FromQuery] string? countryCode = null,
+        [FromQuery] string? userCategory = null,
+        [FromQuery] int count = 12,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+        
+        var trending = await _svc.GetPersonalizedTrendingAsync(userId, countryCode, userCategory, count, ct);
+        return Ok(trending);
+    }
+
     // ── GET /api/personalization/trending ─────────────────────────────────────
     /// <summary>
     /// Get trending topics for a country/region.

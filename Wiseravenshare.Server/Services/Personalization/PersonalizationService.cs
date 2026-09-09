@@ -47,6 +47,7 @@ public interface IPersonalizationService
     Task TrackInteractionAsync(Guid userId, TrackInteractionRequest req, CancellationToken ct = default);
     Task<IReadOnlyList<PersonalizedRecommendation>> GetRecommendationsAsync(Guid userId, int count = 20, CancellationToken ct = default);
     Task<IReadOnlyList<RegionalTrendItem>>          GetRegionalTrendsAsync(string countryCode = "GLOBAL", string category = "General", CancellationToken ct = default);
+    Task<IReadOnlyList<PersonalizedRecommendation>> GetPersonalizedTrendingAsync(Guid userId, string? countryCode = null, string? userCategory = null, int count = 12, CancellationToken ct = default);
     Task AutoTagContentAsync(string targetType, Guid targetId, string content, CancellationToken ct = default);
     Task<Dictionary<string, float>>                 GetUserEmbeddingAsync(Guid userId, CancellationToken ct = default);
     Task ProcessCrawledContentAsync(string contentType, Guid contentId, string content, string[] tags, string countryCode, CancellationToken ct = default);
@@ -64,6 +65,7 @@ public sealed class PersonalizationService : IPersonalizationService
     private const string ProfileCacheKey = "persona_profile_{0}";
     private const string RecoCacheKey    = "persona_reco_{0}";
     private const string TrendCacheKey   = "persona_trend_{0}_{1}";
+    private const string PersonalizedTrendingCacheKey = "persona_personalized_trend_{0}_{1}_{2}";
 
     private static readonly JsonSerializerOptions JsonOpts =
         new() { PropertyNameCaseInsensitive = true };
@@ -241,6 +243,232 @@ public sealed class PersonalizationService : IPersonalizationService
 
         _cache.Set(key, items, TimeSpan.FromMinutes(30));
         return items;
+    }
+
+    // ── Personalized Crawler Trending ─────────────────────────────────────────
+    public async Task<IReadOnlyList<PersonalizedRecommendation>> GetPersonalizedTrendingAsync(
+        Guid userId, string? countryCode = null, string? userCategory = null,
+        int count = 12, CancellationToken ct = default)
+    {
+        // Cache key combines user + country + category
+        var cacheKey = string.Format(PersonalizedTrendingCacheKey,
+            userId.ToString("N")[..8],
+            countryCode ?? "GLOBAL",
+            userCategory ?? "ALL");
+
+        if (_cache.TryGetValue(cacheKey, out IReadOnlyList<PersonalizedRecommendation>? cached))
+            return cached!.Take(count).ToList();
+
+        var personalized = new List<PersonalizedRecommendation>();
+
+        // 1. Get user's interaction history to build affinity profile
+        var userHistory = await _db.UserInteractionEvents
+            .Where(e => e.UserId == userId && e.Type != InteractionEventType.View)
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(50)
+            .ToListAsync(ct);
+
+        // Build user category preferences from recent interactions
+        var categoryScores = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var interaction in userHistory)
+        {
+            if (!string.IsNullOrWhiteSpace(interaction.TargetCategory))
+            {
+                var weight = interaction.Type switch
+                {
+                    InteractionEventType.Like => 3.0m,
+                    InteractionEventType.Complete or InteractionEventType.Share or InteractionEventType.Bookmark => 2.0m,
+                    InteractionEventType.Follow => 2.5m,
+                    InteractionEventType.Comment or InteractionEventType.Rate => 1.5m,
+                    _ => 1.0m
+                };
+
+                if (categoryScores.TryGetValue(interaction.TargetCategory, out var current))
+                    categoryScores[interaction.TargetCategory] = current + weight;
+                else
+                    categoryScores[interaction.TargetCategory] = weight;
+            }
+        }
+
+        // Get user's top tags from embedding
+        var embedding = await GetUserEmbeddingAsync(userId, ct);
+        var topUserTags = embedding
+            .OrderByDescending(kv => kv.Value)
+            .Take(8)
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // 2. Get crawler trending from database via raw SQL
+        // This simulates calling the SiteCrawlerService summary endpoint
+        var crawlerTrending = await GetCrawlerTrendingForPersonalizationAsync(
+            countryCode, userCategory, ct);
+
+        if (crawlerTrending is null || crawlerTrending.Count == 0)
+        {
+            _cache.Set(cacheKey, (IReadOnlyList<PersonalizedRecommendation>)personalized,
+                TimeSpan.FromMinutes(10));
+            return personalized;
+        }
+
+        // 3. Score each crawler trending page based on user profile
+        foreach (var trendingPage in crawlerTrending)
+        {
+            var score = 0.8m; // Base score from crawler connection weight
+
+            // Boost if page category matches user preference
+            if (!string.IsNullOrWhiteSpace(trendingPage.Category)
+                && categoryScores.TryGetValue(trendingPage.Category, out var categoryScore))
+            {
+                score += (categoryScore / 10m) * 0.2m; // Up to +0.2 for category match
+            }
+
+            // Boost if page tags overlap with user embedding
+            var tagOverlap = trendingPage.Tags?
+                .Where(t => topUserTags.Contains(t))
+                .Count() ?? 0;
+
+            if (tagOverlap > 0)
+            {
+                score += Math.Min(0.2m, tagOverlap * 0.05m); // Up to +0.2 for tag overlap
+            }
+
+            // Check if user has already interacted with this page (deprioritize)
+            var hasInteracted = userHistory.Any(e =>
+                e.TargetType?.Equals(trendingPage.PageId, StringComparison.OrdinalIgnoreCase) == true);
+
+            if (hasInteracted)
+                score *= 0.5m; // Half score if already interacted
+
+            // Clamp score between 0 and 1
+            score = Math.Min(1m, Math.Max(0m, score));
+
+            personalized.Add(new PersonalizedRecommendation(
+                ContentType: "Page",
+                ContentId: Guid.Empty,  // Note: This is a structural page, not a user-generated content ID
+                Title: trendingPage.Label,
+                Score: score,
+                Reason: BuildRecommendationReason(
+                    trendingPage.Category,
+                    categoryScore: categoryScores.ContainsKey(trendingPage.Category ?? string.Empty),
+                    tagOverlap > 0)
+            ));
+        }
+
+        // Sort by personalized score and take top N
+        var result = personalized
+            .OrderByDescending(p => p.Score)
+            .Take(count)
+            .ToList();
+
+        _cache.Set(cacheKey, (IReadOnlyList<PersonalizedRecommendation>)result,
+            TimeSpan.FromMinutes(10));
+        return result;
+    }
+
+    private async Task<List<(string PageId, string Label, string Category, List<string> Tags, decimal Score)>>
+        GetCrawlerTrendingForPersonalizationAsync(
+            string? countryCode, string? userCategory, CancellationToken ct)
+    {
+        // Query the site_crawler_catalog for trending pages
+        const string sql = @"
+WITH ranked_nodes AS (
+    SELECT DISTINCT ON (content_type)
+        content_id,
+        content_json::text,
+        content,
+        tags::text,
+        country_code
+    FROM app_data.site_crawler_catalog
+    WHERE (@country_code IS NULL OR country_code = @country_code)
+    ORDER BY content_type, updated_at DESC
+)
+SELECT
+    content_json::text as content_json,
+    tags::text as tags_json
+FROM ranked_nodes
+LIMIT 20;";
+
+        try
+        {
+            var connectionString = _db.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                return new List<(string, string, string, List<string>, decimal)>();
+
+            var results = new List<(string, string, string, List<string>, decimal)>();
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(ct);
+
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("country_code",
+                (object?)(countryCode?.ToUpperInvariant()) ?? DBNull.Value);
+
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            var position = 0;
+
+            while (await reader.ReadAsync(ct))
+            {
+                position++;
+                var contentJsonStr = reader.IsDBNull(0) ? "{}" : reader.GetString(0);
+                var tagsJsonStr = reader.IsDBNull(1) ? "[]" : reader.GetString(1);
+
+                try
+                {
+                    var contentMap = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                        contentJsonStr, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        ?? new Dictionary<string, JsonElement>();
+
+                    var pageId = contentMap.TryGetValue("page", out var pageEl)
+                        ? pageEl.GetString() ?? string.Empty : string.Empty;
+                    var label = contentMap.TryGetValue("label", out var labelEl)
+                        ? labelEl.GetString() ?? pageId : pageId;
+                    var category = contentMap.TryGetValue("category", out var catEl)
+                        ? catEl.GetString() ?? "general" : "general";
+
+                    // Filter by user category if specified
+                    if (!string.IsNullOrWhiteSpace(userCategory)
+                        && !category.Equals(userCategory, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var tags = JsonSerializer.Deserialize<List<string>>(tagsJsonStr) ?? new List<string>();
+
+                    // Score based on position (first = higher score)
+                    var score = Math.Max(0.5m, 1m - (position / 20m) * 0.5m);
+
+                    if (!string.IsNullOrWhiteSpace(pageId))
+                        results.Add((pageId, label, category, tags, score));
+                }
+                catch
+                {
+                    // Skip malformed entries
+                }
+            }
+
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to fetch crawler trending for personalization");
+            return new List<(string, string, string, List<string>, decimal)>();
+        }
+    }
+
+    private static string BuildRecommendationReason(
+        string? category, bool categoryScore, bool tagOverlap)
+    {
+        var reasons = new List<string>();
+
+        if (categoryScore)
+            reasons.Add($"Popular in {category}, which you follow");
+
+        if (tagOverlap)
+            reasons.Add("Matches your interests");
+
+        if (reasons.Count == 0)
+            reasons.Add("Trending on the platform");
+
+        return string.Join("; ", reasons);
     }
 
     // ── Auto-Tagging via Gemini ───────────────────────────────────────────────

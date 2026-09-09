@@ -14,6 +14,7 @@ import { apiService } from '../Services/api';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
 import { usePersonalization } from '../hooks/usePersonalization';
 import { crawlerService } from '../Services/crawlerService';
+import { personalizationService } from '../Services/personalizationService';
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
@@ -24,6 +25,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [expandedPhotoDayKeys, setExpandedPhotoDayKeys] = useState({});
     const [crawlerTrending, setCrawlerTrending] = useState(null);
     const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
+    const [personalizedTrending, setPersonalizedTrending] = useState(null);
+    const [isPersonalizedLoading, setIsPersonalizedLoading] = useState(false);
     const { user } = useAuth();
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
@@ -191,7 +194,27 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             }
         };
 
+        const loadPersonalizedTrending = async () => {
+            try {
+                setIsPersonalizedLoading(true);
+                const personalized = await personalizationService.getPersonalizedTrending(null, 'core', 8);
+                if (!cancelled) {
+                    setPersonalizedTrending(personalized);
+                }
+            } catch (err) {
+                console.error('Failed to load personalized trending:', err);
+                if (!cancelled) {
+                    setPersonalizedTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsPersonalizedLoading(false);
+                }
+            }
+        };
+
         void loadCrawlerTrending();
+        void loadPersonalizedTrending();
         return () => {
             cancelled = true;
         };
@@ -639,6 +662,57 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                                     <div style={{ fontWeight: 600, marginBottom: '4px' }}>{page.label}</div>
                                     <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
                                         {page.score} connections
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {personalizedTrending && personalizedTrending.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                        background: 'rgba(168, 85, 247, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(168, 85, 247, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            ⭐ For You (Personalized)
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {personalizedTrending.slice(0, 6).map((item, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => onNavigate?.(item.contentId)}
+                                    title={item.reason}
+                                    style={{
+                                        padding: '10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(168, 85, 247, 0.4)',
+                                        background: 'rgba(168, 85, 247, 0.08)',
+                                        color: 'var(--text-color)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        textAlign: 'left',
+                                        fontSize: '12px'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)';
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.08)';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                    }}
+                                >
+                                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{item.title}</div>
+                                    <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                        Score: {(item.score * 100).toFixed(0)}%
                                     </div>
                                 </button>
                             ))}
