@@ -260,6 +260,13 @@
   background: rgba(105, 214, 255, 0.06);
   color: var(--mp-light-text);
   cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.file-dropzone.is-dragover {
+  border-color: rgba(105, 214, 255, 0.9);
+  background: rgba(105, 214, 255, 0.16);
+  transform: translateY(-1px);
 }
 
 .file-dropzone input {
@@ -605,6 +612,10 @@
 
 .playlist-menu-btn {
   padding: 0.8rem 0.7rem;
+  min-width: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid transparent;
   color: var(--mp-light-text);
@@ -616,6 +627,101 @@
 
 .playlist-menu-btn:hover {
   border-color: var(--mp-border);
+}
+
+.playlist-menu-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.queue-tools {
+  margin-top: 0.95rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid var(--mp-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.queue-tools__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.queue-tools__header h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--mp-text);
+}
+
+.queue-tools__hint {
+  color: var(--mp-light-text);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.queue-tools__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.queue-tools__actions .ghost-btn {
+  padding: 0.65rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+}
+
+.queue-upnext {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.queue-upnext__item {
+  width: 100%;
+  border: 1px solid var(--mp-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--mp-text);
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.queue-upnext__item:hover {
+  border-color: rgba(105, 214, 255, 0.4);
+  background: rgba(105, 214, 255, 0.08);
+}
+
+.queue-upnext__item span {
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-upnext__item small {
+  color: var(--mp-light-text);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-upnext__empty {
+  margin: 0;
+  color: var(--mp-light-text);
+  font-size: 0.78rem;
 }
 
 .playlist-menu {
