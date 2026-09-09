@@ -1537,6 +1537,7 @@ builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();
+builder.Services.AddContentTrendingBackgroundJob(enabled: true);
 builder.Services.AddHttpClient("SocialPublish");
 builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();
 // Cross-platform publishing: one publisher per platform + orchestrator + repository.
