@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart, FiUpload, FiCheckCircle, FiLoader } from 'react-icons/fi';
+import { FiMusic, FiList, FiGrid, FiX, FiPlay, FiPlus, FiSearch, FiHeart, FiUpload, FiCheckCircle, FiLoader, FiMoreVertical, FiSkipBack, FiSkipForward, FiShuffle } from 'react-icons/fi';
 import RavenMusicPlayer from '../Components/music/RavenMusicPlayer';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
@@ -55,6 +55,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const [uploadGenre, setUploadGenre] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragOver, setIsDragOver] = useState(false);
   const searchInputRef = useRef(null);
   const uploadInputRef = useRef(null);
   const persistTimeoutRef = useRef(null);
@@ -453,6 +454,22 @@ const MusicPlayerPage = ({ onNavigate }) => {
     { label: 'Recent plays', value: recentHistory.length }
   ]), [musicLibrary.length, playlists.length, favoriteTrackIds.length, recentHistory.length]);
 
+  const upcomingTracks = useMemo(() => {
+    if (!playbackTracks.length) {
+      return [];
+    }
+
+    const startIndex = ((currentTrackIndex + 1) % playbackTracks.length + playbackTracks.length) % playbackTracks.length;
+    const rotated = [
+      ...playbackTracks.slice(startIndex),
+      ...playbackTracks.slice(0, startIndex)
+    ];
+
+    return rotated
+      .filter((track) => track?.id && track.id !== currentTrack?.id)
+      .slice(0, 5);
+  }, [playbackTracks, currentTrackIndex, currentTrack?.id]);
+
   // Handlers
   const handleTrackSelect = (track, index) => {
     setCurrentTrack(track);
@@ -510,6 +527,18 @@ const MusicPlayerPage = ({ onNavigate }) => {
     }
 
     handleNextTrack();
+  };
+
+  const handleRandomTrack = () => {
+    if (!playbackTracks.length) {
+      return;
+    }
+
+    const randomIndex = Math.floor(Math.random() * playbackTracks.length);
+    const randomTrack = playbackTracks[randomIndex];
+    if (randomTrack) {
+      handleTrackSelect(randomTrack, randomIndex);
+    }
   };
 
   const handleCreatePlaylist = () => {
@@ -623,6 +652,48 @@ const MusicPlayerPage = ({ onNavigate }) => {
     if (uploadInputRef.current) {
       uploadInputRef.current.value = '';
     }
+
+    setIsDragOver(false);
+  };
+
+  const applySelectedUploadFile = (file) => {
+    if (!file) {
+      setUploadFile(null);
+      return;
+    }
+
+    const isAudioMime = String(file.type || '').toLowerCase().startsWith('audio/');
+    const hasAudioExtension = /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(file.name || '');
+    if (!isAudioMime && !hasAudioExtension) {
+      addToast('Only audio files are supported for upload.', 'warning');
+      return;
+    }
+
+    setUploadFile(file);
+    if (!uploadTitle) {
+      setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  const handleUploadDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleUploadDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleUploadDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(false);
+
+    const file = event.dataTransfer?.files?.[0] || null;
+    applySelectedUploadFile(file);
   };
 
   const handleUploadTrack = async (event) => {
@@ -700,6 +771,55 @@ const MusicPlayerPage = ({ onNavigate }) => {
     }
   };
 
+  useEffect(() => {
+    const handleKeyboardShortcuts = (event) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = String(event.key || '').toLowerCase();
+      if (key === '/') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (key === 'n') {
+        event.preventDefault();
+        handleNextTrack();
+        return;
+      }
+
+      if (key === 'p') {
+        event.preventDefault();
+        handlePreviousTrack();
+        return;
+      }
+
+      if (key === 'g') {
+        event.preventDefault();
+        setViewMode('grid');
+        return;
+      }
+
+      if (key === 'l') {
+        event.preventDefault();
+        setViewMode('list');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+    return () => {
+      document.removeEventListener('keydown', handleKeyboardShortcuts);
+    };
+  }, [handleNextTrack, handlePreviousTrack]);
+
   if (isLoading) {
     return (
       <div className="music-player-page">
@@ -717,7 +837,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
       <div className="music-backdrop music-backdrop--two" />
 
       <div className="music-shell">
-      <div className="player-container">
+        <div className="player-container">
         {/* Player Section */}
         <div className="player-section">
           <div className="player-header player-header--hero">
@@ -757,21 +877,24 @@ const MusicPlayerPage = ({ onNavigate }) => {
                 </div>
               </div>
 
-              <label className="file-dropzone">
+              <label
+                className={`file-dropzone ${isDragOver ? 'is-dragover' : ''}`}
+                onDragEnter={handleUploadDragOver}
+                onDragOver={handleUploadDragOver}
+                onDragLeave={handleUploadDragLeave}
+                onDrop={handleUploadDrop}
+              >
                 <input
                   ref={uploadInputRef}
                   type="file"
                   accept="audio/*"
                   onChange={(event) => {
                     const file = event.target.files?.[0] || null;
-                    setUploadFile(file);
-                    if (file && !uploadTitle) {
-                      setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
-                    }
+                    applySelectedUploadFile(file);
                   }}
                 />
                 <FiUpload />
-                <span>{uploadFile ? uploadFile.name : 'Choose an audio file (MP3, WAV, M4A, AAC, FLAC, OGG)'}</span>
+                <span>{uploadFile ? uploadFile.name : 'Drop or choose an audio file (MP3, WAV, M4A, AAC, FLAC, OGG)'}</span>
               </label>
 
               <div className="upload-grid">
@@ -931,8 +1054,10 @@ const MusicPlayerPage = ({ onNavigate }) => {
                     onClick={() => setShowPlaylistMenu(
                       showPlaylistMenu === playlist.id ? null : playlist.id
                     )}
+                    title="Playlist options"
+                    aria-label="Playlist options"
                   >
-                    ...
+                    <FiMoreVertical />
                   </button>
 
                   {showPlaylistMenu === playlist.id && (
@@ -950,6 +1075,46 @@ const MusicPlayerPage = ({ onNavigate }) => {
                   )}
                 </div>
               ))}
+            </div>
+
+            <div className="queue-tools">
+              <div className="queue-tools__header">
+                <h4>Quick queue</h4>
+                <span className="queue-tools__hint">Keyboard: / N P G L</span>
+              </div>
+
+              <div className="queue-tools__actions">
+                <button type="button" onClick={handlePreviousTrack} className="ghost-btn" title="Previous track">
+                  <FiSkipBack /> Prev
+                </button>
+                <button type="button" onClick={handleNextTrack} className="ghost-btn" title="Next track">
+                  <FiSkipForward /> Next
+                </button>
+                <button type="button" onClick={handleRandomTrack} className="ghost-btn" title="Random track">
+                  <FiShuffle /> Random
+                </button>
+              </div>
+
+              <div className="queue-upnext">
+                {upcomingTracks.length === 0 ? (
+                  <p className="queue-upnext__empty">No upcoming tracks yet.</p>
+                ) : (
+                  upcomingTracks.map((track) => {
+                    const trackIndex = playbackTracks.findIndex((item) => item.id === track.id);
+                    return (
+                      <button
+                        key={track.id}
+                        type="button"
+                        className="queue-upnext__item"
+                        onClick={() => handleTrackSelect(track, trackIndex)}
+                      >
+                        <span>{track.title}</span>
+                        <small>{track.artist || 'Unknown artist'}</small>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         </div>
