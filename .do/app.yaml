@@ -103,6 +103,21 @@ services:
       - key: Authentication__OAuthProviders__Google__ClientSecret
         value: ${GOOGLE_OAUTH_CLIENT_SECRET}
         type: SECRET
+      - key: Authentication__OAuthProviders__Google__RedirectUri
+        value: ${GOOGLE_OAUTH_REDIRECT_URI}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__ClientId
+        value: ${MICROSOFT_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__ClientSecret
+        value: ${MICROSOFT_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__TenantId
+        value: ${MICROSOFT_OAUTH_TENANT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__RedirectUri
+        value: ${MICROSOFT_OAUTH_REDIRECT_URI}
+        type: SECRET
       - key: Social__Facebook__PageId
         value: ${SOCIAL_FACEBOOK_PAGE_ID}
         type: SECRET

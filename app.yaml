@@ -1,0 +1,20 @@
+runtime: custom
+env: flex
+
+manual_scaling:
+  instances: 1
+
+resources:
+  cpu: 1
+  memory_gb: 0.9
+  disk_size_gb: 10
+
+network:
+  session_affinity: true
+
+health_check:
+  enable_health_check: true
+  check_interval_sec: 30
+  timeout_sec: 5
+  unhealthy_threshold: 2
+  healthy_threshold: 2

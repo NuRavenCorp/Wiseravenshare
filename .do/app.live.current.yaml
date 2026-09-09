@@ -107,6 +107,26 @@ services:
     scope: RUN_AND_BUILD_TIME
     type: SECRET
     value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+  - key: Authentication__OAuthProviders__Google__RedirectUri
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${GOOGLE_OAUTH_REDIRECT_URI}
+  - key: Authentication__OAuthProviders__Microsoft__ClientId
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_CLIENT_ID}
+  - key: Authentication__OAuthProviders__Microsoft__ClientSecret
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_CLIENT_SECRET}
+  - key: Authentication__OAuthProviders__Microsoft__TenantId
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_TENANT_ID}
+  - key: Authentication__OAuthProviders__Microsoft__RedirectUri
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_REDIRECT_URI}
   - key: Social__Facebook__PageId
     scope: RUN_AND_BUILD_TIME
     type: SECRET

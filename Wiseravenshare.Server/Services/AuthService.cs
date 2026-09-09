@@ -195,7 +195,7 @@ namespace Wiseravenshare.Server.Services
             try
             {
                 var tokenHandler = new JwtSecurityTokenHandler();
-                var key = Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum");
+                var key = Encoding.UTF8.GetBytes(GetJwtKey());
                 var validationParameters = new TokenValidationParameters
                 {
                     ValidateIssuerSigningKey = true,
@@ -301,8 +301,7 @@ namespace Wiseravenshare.Server.Services
 
         private string GenerateJwtToken(User user)
         {
-            var key = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum"));
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey()));
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
@@ -342,6 +341,17 @@ namespace Wiseravenshare.Server.Services
             return Convert.ToBase64String(randomNumber);
         }
 
+        private string GetJwtKey()
+        {
+            var key = _configuration["JWT_highentropykey"] ?? _configuration["Authentication:Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
+            }
+
+            return key;
+        }
+
         private ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
         {
             try
@@ -353,8 +363,7 @@ namespace Wiseravenshare.Server.Services
                     ValidateIssuer = true,
                     ValidIssuer = _configuration["Authentication:Jwt:Issuer"],
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(
-                        Encoding.UTF8.GetBytes(_configuration["Authentication:Jwt:Key"] ?? "default-secret-key-32-chars-minimum")),
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey())),
                     ValidateLifetime = false // Don't validate expiration for refresh
                 };
 

@@ -13,16 +13,13 @@ public sealed class RavensightMusicMediaController : ControllerBase
 {
     private readonly IMusicLibraryStore _musicLibraryStore;
     private readonly IMusicPlaybackStateStore _musicPlaybackStateStore;
-    private readonly ISubscriptionService _subscriptionService;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
-        IMusicPlaybackStateStore musicPlaybackStateStore,
-        ISubscriptionService subscriptionService)
+        IMusicPlaybackStateStore musicPlaybackStateStore)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
-        _subscriptionService = subscriptionService;
     }
 
     [HttpGet]
@@ -131,15 +128,6 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         var userStorageIdentity = ResolveUserStorageIdentity(userId);
-
-        var subscription = await _subscriptionService.GetSubscriptionStatusAsync(userId);
-        if (!subscription.HasActiveSubscription)
-        {
-            return StatusCode(StatusCodes.Status402PaymentRequired, new
-            {
-                message = "A paid subscription is required to save music to the marketplace. Free uploads can still be previewed locally."
-            });
-        }
 
         var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, userStorageIdentity, cancellationToken);
         var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)

@@ -320,6 +320,31 @@ public sealed class UserStore
         return user is not null;
     }
 
+    public bool TryAlignUserId(string email, string userId)
+    {
+        var normalizedEmail = (email ?? string.Empty).Trim();
+        var normalizedUserId = (userId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedEmail) || string.IsNullOrWhiteSpace(normalizedUserId))
+        {
+            return false;
+        }
+
+        if (!_usersByEmail.TryGetValue(normalizedEmail, out var user) || user is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(user.Id, normalizedUserId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        user.Id = normalizedUserId;
+        user.UpdatedAtUtc = DateTime.UtcNow;
+        PersistUsers(user);
+        return true;
+    }
+
     public IReadOnlyList<UserRecord> GetAllUsersSnapshot()
     {
         return _usersByEmail.Values

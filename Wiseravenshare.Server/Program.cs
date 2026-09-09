@@ -1613,10 +1613,10 @@ builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommunique
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
 builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
 
-var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
+var jwtKey = builder.Configuration["JWT_highentropykey"] ?? builder.Configuration["Authentication:Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
 {
-    throw new InvalidOperationException("Authentication:Jwt:Key is required.");
+    throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is required.");
 }
 
 if (jwtKey.Length < 32)

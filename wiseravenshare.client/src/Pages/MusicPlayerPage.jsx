@@ -34,6 +34,12 @@ const safeWriteJson = (key, value) => {
 const MusicPlayerPage = ({ onNavigate }) => {
   const { addToast } = useNotification();
 
+  const isEphemeralTrack = (track) => {
+    const id = String(track?.id || '').trim().toLowerCase();
+    const mediaUrl = String(track?.mediaUrl || track?.url || '').trim().toLowerCase();
+    return id.startsWith('preview-') || mediaUrl.startsWith('blob:');
+  };
+
   // State management
   const [musicLibrary, setMusicLibrary] = useState([]);
   const [currentTrack, setCurrentTrack] = useState(null);
@@ -326,7 +332,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
       const cachedTracks = (safeReadJson(MUSIC_LIBRARY_CACHE_KEY, []) || [])
         .map(normalizeTrack)
-        .filter(Boolean);
+        .filter((track) => Boolean(track) && !isEphemeralTrack(track));
 
       if (cachedTracks.length > 0) {
         setMusicLibrary(cachedTracks);
@@ -356,7 +362,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
       const normalizedRemoteState = normalizePlayerState(rawState);
 
       setMusicLibrary(tracks);
-      safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, tracks);
+      safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, tracks.filter((track) => !isEphemeralTrack(track)));
 
       hydrateFromState(tracks, normalizedRemoteState);
       safeWriteJson(MUSIC_PLAYER_STATE_CACHE_KEY, {
@@ -379,7 +385,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
       try {
         const tracks = (safeReadJson(MUSIC_LIBRARY_CACHE_KEY, []) || [])
           .map(normalizeTrack)
-          .filter(Boolean);
+          .filter((track) => Boolean(track) && !isEphemeralTrack(track));
         setMusicLibrary(tracks);
         const fallbackState = safeReadJson(MUSIC_PLAYER_STATE_CACHE_KEY, null)
           || { playlists: safeReadJson(LEGACY_PLAYLISTS_CACHE_KEY, []) };
@@ -751,22 +757,25 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
       setMusicLibrary((prev) => {
         const next = [track, ...prev.filter((item) => item.id !== track.id)];
-        safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, next);
+        safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, next.filter((item) => !isEphemeralTrack(item)));
         return next;
       });
 
       setActivePlaylist(null);
       setCurrentTrack(track);
       setCurrentTrackIndex(0);
-      schedulePlayerStatePersist({
-        activePlaylistId: null,
-        lastTrackId: track.id,
-        lastPositionSeconds: 0,
-        queueTrackIds: [track.id, ...musicLibrary.map((item) => item.id)],
-        favoriteTrackIds,
-        playlists: serializePlaylists(playlists),
-        recentHistory
-      });
+
+      if (persisted && !isEphemeralTrack(track)) {
+        schedulePlayerStatePersist({
+          activePlaylistId: null,
+          lastTrackId: track.id,
+          lastPositionSeconds: 0,
+          queueTrackIds: [track.id, ...musicLibrary.map((item) => item.id)],
+          favoriteTrackIds,
+          playlists: serializePlaylists(playlists),
+          recentHistory
+        });
+      }
 
       addToast(
         persisted
