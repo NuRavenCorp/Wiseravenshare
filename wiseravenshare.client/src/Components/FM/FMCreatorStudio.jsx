@@ -206,7 +206,28 @@ const FMCreatorStudio = () => {
   const openDetail = async (station) => {
     try {
       const full = await api.get(`/fmtuner/creator-stations/${station.id}`);
-      setSelectedStation(full?.data || station);
+      const normalized = full?.data
+        ? {
+            ...full.data,
+            schedule: Array.isArray(full.data.schedule) ? full.data.schedule : Array.isArray(full.data.Schedule) ? full.data.Schedule : [],
+            streamKey: full.data.streamKey ?? full.data.StreamKey ?? '',
+            status: full.data.status ?? full.data.Status ?? 'Draft',
+            visibility: full.data.visibility ?? full.data.Visibility ?? 'Public',
+            isLive: Boolean(full.data.isLive ?? full.data.IsLive ?? false),
+            followers: Number(full.data.followerCount ?? full.data.FollowerCount ?? 0),
+            followerCount: Number(full.data.followerCount ?? full.data.FollowerCount ?? 0),
+            listeners: Number(full.data.listeners ?? full.data.Listeners ?? 0),
+            totalListeners: Number(full.data.totalListeners ?? full.data.TotalListeners ?? 0),
+            peakListeners: Number(full.data.peakListeners ?? full.data.PeakListeners ?? 0),
+            brandColor: full.data.brandColor ?? full.data.BrandColor ?? '',
+            contentRating: full.data.contentRating ?? full.data.ContentRating ?? 'General',
+            targetLanguage: full.data.targetLanguage ?? full.data.TargetLanguage ?? '',
+            targetRegion: full.data.targetRegion ?? full.data.TargetRegion ?? '',
+            isMonetized: Boolean(full.data.isMonetized ?? full.data.IsMonetized ?? false),
+            subscriptionPrice: full.data.subscriptionPrice ?? full.data.SubscriptionPrice ?? null,
+          }
+        : station;
+      setSelectedStation(normalized);
     } catch { setSelectedStation(station); }
     setView('station-detail');
   };

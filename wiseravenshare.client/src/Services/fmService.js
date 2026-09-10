@@ -471,7 +471,7 @@ const normalizeStation = (station) => {
 
 const normalizeCreatorStation = (station) => {
   if (!station || typeof station !== 'object') return null;
-  return {
+  const normalized = {
     ...station,
     id: station.id || station.Id || '',
     name: station.name || station.Name || 'Creator Station',
@@ -483,6 +483,7 @@ const normalizeCreatorStation = (station) => {
     logoUrl: station.logoUrl || station.LogoUrl || '',
     coverImageUrl: station.coverImageUrl || station.CoverImageUrl || '',
     streamUrl: station.streamUrl || station.StreamUrl || '',
+    streamKey: station.streamKey || station.StreamKey || '',
     website: station.website || station.Website || '',
     socialLinks: station.socialLinks || station.SocialLinks || '',
     status: station.status || station.Status || 'Draft',
@@ -492,8 +493,26 @@ const normalizeCreatorStation = (station) => {
     followerCount: Number(station.followerCount ?? station.FollowerCount ?? 0),
     isProprietaryFrequency: Boolean(station.isProprietaryFrequency ?? station.IsProprietaryFrequency ?? true),
     frequencyLockedAt: station.frequencyLockedAt || station.FrequencyLockedAt || null,
-    createdAt: station.createdAt || station.CreatedAt || null
+    createdAt: station.createdAt || station.CreatedAt || null,
+    isMonetized: Boolean(station.isMonetized ?? station.IsMonetized ?? false),
+    subscriptionPrice: station.subscriptionPrice ?? station.SubscriptionPrice ?? null,
+    allowChat: Boolean(station.allowChat ?? station.AllowChat ?? true),
+    allowRequests: Boolean(station.allowRequests ?? station.AllowRequests ?? true),
+    allowShoutouts: Boolean(station.allowShoutouts ?? station.AllowShoutouts ?? true),
+    isFollowing: Boolean(station.isFollowing ?? station.IsFollowing ?? false),
+    brandColor: station.brandColor || station.BrandColor || '',
+    contentRating: station.contentRating || station.ContentRating || 'General',
+    targetLanguage: station.targetLanguage || station.TargetLanguage || '',
+    targetRegion: station.targetRegion || station.TargetRegion || '',
+    schedule: Array.isArray(station.schedule) ? station.schedule : Array.isArray(station.Schedule) ? station.Schedule : [],
+    episodes: Array.isArray(station.episodes) ? station.episodes : Array.isArray(station.Episodes) ? station.Episodes : [],
+    totalListeners: Number(station.totalListeners ?? station.TotalListeners ?? 0),
+    peakListeners: Number(station.peakListeners ?? station.PeakListeners ?? 0),
+    lastLiveAt: station.lastLiveAt || station.LastLiveAt || null,
+    scheduledLiveAt: station.scheduledLiveAt || station.ScheduledLiveAt || null,
+    scheduledEndAt: station.scheduledEndAt || station.ScheduledEndAt || null
   };
+  return normalized;
 };
 
 const requestList = async (request, fallback = []) => {
