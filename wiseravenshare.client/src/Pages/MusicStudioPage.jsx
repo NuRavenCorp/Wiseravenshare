@@ -12,7 +12,7 @@ import { subscriptionService } from '../Services/subscriptionService';
 import { crawlerService } from '../Services/crawlerService';
 import FMTunerModule from '../Components/FM/FMTunerModule';
 import FMCreatorStudio from '../Components/FM/FMCreatorStudio';
-import StudioPlayerBar from '../Components/Music/StudioPlayerBar';
+import StudioPlayerBar from '../Components/music/StudioPlayerBar';
 import '../Styles/MusicStudio.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
