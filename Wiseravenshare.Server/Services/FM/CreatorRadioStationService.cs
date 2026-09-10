@@ -74,6 +74,13 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             AllowShoutouts = dto.AllowShoutouts,
             IsProprietaryFrequency = dto.ClaimProprietaryFrequency,
             FrequencyLockedAt = dto.ClaimProprietaryFrequency ? DateTime.UtcNow : null,
+            // Monetization
+            IsMonetized = dto.IsMonetized,
+            SubscriptionPrice = dto.SubscriptionPrice,
+            AllowDonations = dto.AllowDonations,
+            DonationLink = TrimOrNull(dto.DonationLink),
+            // Extended metadata serialised into Settings
+            Settings = BuildSettingsJson(dto),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -632,6 +639,14 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             IsProprietaryFrequency = station.IsProprietaryFrequency,
             FrequencyLockedAt = station.FrequencyLockedAt,
             CreatedAt = station.CreatedAt,
+            IsMonetized = station.IsMonetized,
+            SubscriptionPrice = station.SubscriptionPrice,
+            AllowDonations = station.AllowDonations,
+            DonationLink = station.DonationLink,
+            BrandColor = ReadSettingsString(station.Settings, "brandColor"),
+            ContentRating = ReadSettingsString(station.Settings, "contentRating") ?? "General",
+            TargetLanguage = ReadSettingsString(station.Settings, "targetLanguage"),
+            TargetRegion = ReadSettingsString(station.Settings, "targetRegion"),
             Schedule = schedules.Select(ToScheduleDto).ToList(),
             Episodes = episodes.Select(e => new RadioStationEpisodeDto
             {
@@ -669,6 +684,43 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
         };
 
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static System.Text.Json.JsonDocument BuildSettingsJson(CreateCreatorRadioStationDto dto)
+    {
+        var obj = new
+        {
+            brandColor       = dto.BrandColor,
+            contentRating    = dto.ContentRating,
+            targetLanguage   = dto.TargetLanguage,
+            targetRegion     = dto.TargetRegion,
+            bitrate          = dto.Bitrate,
+            streamFormat     = dto.StreamFormat,
+            tagline          = dto.Tagline,
+            licenseNumber    = dto.LicenseNumber,
+            licenseType      = dto.LicenseType,
+            licenseAuthority = dto.LicenseIssuingAuthority,
+            licenseDocUrl    = dto.LicenseDocumentUrl,
+            licenseIssuedAt  = dto.LicenseIssuedAt,
+            licenseExpiresAt = dto.LicenseExpiresAt,
+            licenseCoversMusic  = dto.LicenseCoversMusicBroadcast,
+            licenseCoversTalk   = dto.LicenseCoversTalkContent,
+            licenseCoversLive   = dto.LicenseCoversLiveShows,
+            licensePROs         = dto.LicensePROs
+        };
+        return System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(obj));
+    }
+
+    private static string? ReadSettingsString(System.Text.Json.JsonDocument? doc, string key)
+    {
+        if (doc is null) return null;
+        try
+        {
+            if (doc.RootElement.TryGetProperty(key, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String)
+                return el.GetString();
+        }
+        catch { }
+        return null;
+    }
 
     private static RadioStationVisibility ParseVisibility(string? value)
     {

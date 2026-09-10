@@ -38,6 +38,17 @@ public sealed class CreatorRadioStationsController : ControllerBase
         return Ok(stations);
     }
 
+    [HttpGet("marketplace")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IEnumerable<CreatorRadioStationDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMarketplace([FromQuery] int page = 1, [FromQuery] int pageSize = 24, CancellationToken cancellationToken = default)
+    {
+        // Returns monetized public stations available for subscription
+        var all = await _service.GetPublicStationsAsync(page, pageSize * 3, GetUserIdOrDefault(), cancellationToken);
+        var marketplace = all.Where(s => s.IsMonetized || s.SubscriptionPrice > 0).Take(pageSize);
+        return Ok(marketplace);
+    }
+
     [HttpGet("search")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<CreatorRadioStationDto>), StatusCodes.Status200OK)]
