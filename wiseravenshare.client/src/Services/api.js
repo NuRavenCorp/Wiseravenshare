@@ -107,7 +107,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 
 const isAuthEndpoint = (url = '') => {
     const value = String(url || '').toLowerCase();
-    return value.includes('auth/');
+    return value.includes('auth/') || value.includes('auth-v2/');
 };
 
 const handleUnauthorized = () => {
@@ -567,7 +567,7 @@ async function refreshAccessToken() {
         refreshInFlight = (async () => {
             try {
                 const response = await axios.post(
-                    `${API_BASE_URL.replace(/\/+$/, '')}/auth/refresh-token`,
+                    `${API_BASE_URL.replace(/\/+$/, '')}/auth-v2/refresh-token`,
                     { refreshToken },
                     { timeout: 20000 }
                 );
@@ -652,15 +652,15 @@ export const apiService = {
     // Auth endpoints
     login: (email, password) => {
         const normalizedLogin = String(email || '').trim();
-        return api.post('/auth/login', {
+        return api.post('/auth-v2/login', {
             email: normalizedLogin,
             usernameOrEmail: normalizedLogin,
             password
         });
     },
-    register: (userData) => api.post('/auth/register', userData),
-    logout: () => api.post('/auth/logout'),
-    verifyToken: (token) => api.post('/auth/verify', { token }),
+    register: (userData) => api.post('/auth-v2/register', userData),
+    logout: () => api.post('/auth-v2/logout'),
+    verifyToken: (token) => api.post('/auth-v2/verify', { token }),
     updateProfile: (userId, updates) => api.put(`/users/${userId}`, updates),
     getSocialFeeds: (userId) => api.get(`/users/${userId}/feeds`),
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),

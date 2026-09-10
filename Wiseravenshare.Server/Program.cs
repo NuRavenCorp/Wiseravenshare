@@ -1521,6 +1521,7 @@ builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Interfaces.IAuthV2Service, AuthV2Service>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, Wiseravenshare.Server.Services.Media.MediaService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
