@@ -30,7 +30,6 @@ import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
 import MusicPlayerPage from './Pages/MusicPlayerPage';
-import MusicStudioPage from './Pages/MusicStudioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
@@ -536,9 +535,8 @@ const App = () => {
             case 'music-player':
                 return <MusicPlayerPage onNavigate={setCurrentPage} />;
             case 'fm-tuner':
-                return <MusicStudioPage onNavigate={setCurrentPage} initialPanel="fm" />;
             case 'radio-creator':
-                return <MusicStudioPage onNavigate={setCurrentPage} initialPanel="radio-creator" />;
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
             case 'my-library':
                 return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':
@@ -707,7 +705,6 @@ const App = () => {
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
-        { id: 'music-player', label: '🎚️ Music Studio' },
         { id: 'fm-tuner', label: '📻 FM Tuner' },
         { id: 'radio-creator', label: '🎙️ Radio Creator' },
         { id: 'my-library', label: '📚 My Library' },

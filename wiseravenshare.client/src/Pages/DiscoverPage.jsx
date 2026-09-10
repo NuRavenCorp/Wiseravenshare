@@ -734,8 +734,8 @@ const DiscoverPage = ({ onNavigate }) => {
                         <h2 style={{ marginBottom: '4px' }}>Discover</h2>
                         <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>Browse people, groups, topics, news items, current events, headlines, and political coverage.</div>
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-                            <button type="button" onClick={() => onNavigate?.('music-studio')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
-                                Open Music Studio
+                            <button type="button" onClick={() => onNavigate?.('fm-tuner')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open FM Tuner
                             </button>
                             <button type="button" onClick={() => onNavigate?.('my-library')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
                                 Open My Library
