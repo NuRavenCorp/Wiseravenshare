@@ -1,0 +1,498 @@
+/* ─────────────────────────────────────────────────────────────
+   WISERAVENSHARE  ·  FM RADIO / CASSETTE DECK  ·  WR-77
+   Retro wood-cabinet aesthetic
+   ───────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&family=Bebas+Neue&display=swap');
+
+:root {
+  --wr-wood:        #5c3a21;
+  --wr-wood-dark:   #3a1f0a;
+  --wr-wood-light:  #8b5a2b;
+  --wr-metal-hi:    #d8d8d0;
+  --wr-metal-mid:   #a8a8a0;
+  --wr-metal-lo:    #6a6a62;
+  --wr-metal-shad:  #3a3a34;
+  --wr-amber:       #ffb347;
+  --wr-amber-hot:   #ffd98a;
+  --wr-amber-dim:   #a86b1a;
+  --wr-amber-glow:  rgba(255,179,71,0.55);
+  --wr-red:         #e63946;
+  --wr-green:       #4ade80;
+  --wr-cream:       #f0e6d2;
+  --wr-cream-dark:  #d4c4a8;
+  --wr-black:       #1a1a1a;
+}
+
+/* ── Shell ── */
+.wr-shell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 24px 12px 48px;
+  background: linear-gradient(160deg, #1a1410, #0d0a08);
+  font-family: 'Share Tech Mono', 'Courier New', monospace;
+}
+
+.wr-cabinet {
+  width: 100%;
+  max-width: 860px;
+  border-radius: 14px;
+  padding: 22px;
+  background:
+    repeating-linear-gradient(91deg, transparent 0, transparent 3px, rgba(0,0,0,.15) 3px, rgba(0,0,0,.15) 4px),
+    repeating-linear-gradient(89deg, transparent 0, transparent 8px, rgba(0,0,0,.08) 8px, rgba(0,0,0,.08) 10px),
+    linear-gradient(180deg, var(--wr-wood-light) 0%, var(--wr-wood) 30%, var(--wr-wood-dark) 100%);
+  box-shadow:
+    0 24px 60px rgba(0,0,0,.75),
+    inset 0 2px 0 rgba(255,220,180,.22),
+    inset 0 -3px 0 rgba(0,0,0,.5),
+    0 0 0 1px rgba(0,0,0,.6);
+  position: relative;
+}
+
+/* Corner screws */
+.wr-cabinet::before, .wr-cabinet::after {
+  content: '';
+  position: absolute;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #f0f0f0, #888 60%, #333);
+  box-shadow: inset 0 -1px 1px rgba(0,0,0,.6), 0 1px 2px rgba(0,0,0,.5);
+  top: 10px;
+}
+.wr-cabinet::before { left: 10px; }
+.wr-cabinet::after  { right: 10px; }
+
+/* ── Brand plate ── */
+.wr-brand {
+  text-align: center;
+  margin-bottom: 16px;
+  padding: 7px 0;
+  background: linear-gradient(180deg, var(--wr-metal-hi), var(--wr-metal-mid) 50%, var(--wr-metal-lo));
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), inset 0 -2px 3px rgba(0,0,0,.4), 0 2px 4px rgba(0,0,0,.5);
+}
+.wr-brand h1 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: .5em;
+  color: #2a2a2a;
+  text-shadow: 0 1px 0 rgba(255,255,255,.5), 0 -1px 1px rgba(0,0,0,.4);
+  margin: 0;
+}
+.wr-brand .wr-model {
+  font-size: .55rem;
+  letter-spacing: .3em;
+  color: #555;
+  margin-top: 2px;
+}
+
+/* ── Speaker grille ── */
+.wr-grille {
+  height: 64px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  background:
+    repeating-linear-gradient(45deg, #2a2620 0 2px, #1a1612 2px 4px),
+    repeating-linear-gradient(-45deg, transparent 0 2px, rgba(0,0,0,.4) 2px 4px),
+    #221e18;
+  box-shadow: inset 0 4px 12px rgba(0,0,0,.9), inset 0 -2px 6px rgba(0,0,0,.7), 0 1px 0 rgba(255,200,150,.15);
+  position: relative; overflow: hidden;
+}
+.wr-grille::after {
+  content: 'WISERAVENSHARE  ·  FM STEREO / CASSETTE  ·  WR-77';
+  position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;
+  font-size: .5rem; letter-spacing: .3em; color: rgba(200,180,150,.4);
+}
+
+/* ── Source tabs ── */
+.wr-source-tabs {
+  display: flex; gap: 0;
+  background: #1a1612;
+  border-radius: 5px; padding: 4px;
+  margin-bottom: 16px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.8);
+}
+.wr-source-btn {
+  flex: 1; padding: 9px 12px;
+  background: transparent; border: none;
+  color: #555;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1rem; letter-spacing: .2em;
+  cursor: pointer; border-radius: 3px;
+  transition: all .2s;
+}
+.wr-source-btn.active {
+  background: linear-gradient(180deg, var(--wr-metal-mid), var(--wr-metal-lo));
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  box-shadow: 0 1px 3px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.5);
+}
+
+/* ── FM content area ── */
+.wr-fm-section {
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0,0,0,.25);
+  margin-bottom: 16px;
+}
+
+/* ── Tuner display ── */
+.wr-tuner-display {
+  background: linear-gradient(180deg, #1a1208 0%, #0a0602 100%);
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  border: 2px solid #1a1a1a;
+  box-shadow: inset 0 0 30px rgba(255,179,71,.12), inset 0 3px 10px rgba(0,0,0,.9), 0 2px 0 rgba(255,220,180,.12);
+  position: relative; overflow: hidden;
+}
+.wr-tuner-display::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.22) 2px 3px);
+  pointer-events: none; opacity: .5;
+}
+.wr-freq-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: relative; z-index: 1;
+}
+.wr-freq-val {
+  font-family: 'VT323', monospace; font-size: 3.2rem; line-height: 1;
+  color: var(--wr-amber);
+  text-shadow: 0 0 4px var(--wr-amber-hot), 0 0 14px var(--wr-amber-glow), 0 0 26px rgba(255,179,71,.25);
+  letter-spacing: .06em;
+}
+.wr-freq-unit {
+  font-family: 'VT323', monospace; font-size: 1rem;
+  color: var(--wr-amber-dim);
+  text-shadow: 0 0 6px var(--wr-amber-glow);
+}
+.wr-stereo-led {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .6rem; letter-spacing: .15em; color: var(--wr-amber-dim);
+}
+.wr-led {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #2a1a0a; box-shadow: inset 0 0 3px rgba(0,0,0,.8);
+  transition: all .2s;
+}
+.wr-led.on {
+  background: var(--wr-red);
+  box-shadow: 0 0 6px var(--wr-red), 0 0 12px rgba(230,57,70,.55), inset 0 0 2px rgba(255,255,255,.6);
+  animation: wr-led-pulse 1.6s ease-in-out infinite;
+}
+@keyframes wr-led-pulse { 0%,100%{opacity:1}50%{opacity:.6} }
+
+.wr-station-ticker {
+  margin-top: 8px; padding-top: 6px;
+  border-top: 1px solid rgba(255,179,71,.14);
+  font-family: 'VT323', monospace; font-size: 1rem;
+  color: var(--wr-amber-hot); letter-spacing: .1em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 0 6px var(--wr-amber-glow);
+  min-height: 1.2em; position: relative; z-index: 1;
+}
+
+/* ── Dial assembly ── */
+.wr-dial-assembly {
+  background: linear-gradient(180deg, #2a2420 0%, #1a1612 100%);
+  border-radius: 6px; padding: 14px 18px 18px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.8), 0 1px 0 rgba(0,0,0,.4);
+}
+.wr-dial-scale {
+  position: relative; height: 42px; margin-bottom: 10px;
+  background: linear-gradient(180deg, var(--wr-cream) 0%, var(--wr-cream-dark) 100%);
+  border-radius: 3px; overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.3);
+}
+.wr-dial-ticks {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 13px, #444 13px 14px);
+}
+.wr-dial-numbers {
+  position: absolute; inset: 0;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding: 0 8px 3px;
+}
+.wr-dial-numbers span {
+  font-family: 'VT323', monospace; font-size: .85rem; color: #2a2a2a; font-weight: bold;
+}
+.wr-dial-needle {
+  position: absolute; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(180deg, var(--wr-red) 0%, #8b0a0a 100%);
+  box-shadow: 0 0 6px rgba(230,57,70,.8);
+  transform: translateX(-50%);
+  transition: left .12s cubic-bezier(.34,1.56,.64,1);
+  pointer-events: none; z-index: 2;
+}
+.wr-dial-range {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; z-index: 3;
+}
+.wr-dial-range:disabled { cursor: not-allowed; }
+
+/* ── VU Meter ── */
+.wr-vu {
+  background: linear-gradient(180deg, var(--wr-cream), var(--wr-cream-dark));
+  border-radius: 4px; padding: 8px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 2px 5px rgba(0,0,0,.3), 0 1px 0 rgba(255,255,255,.3);
+  height: 66px; position: relative; overflow: hidden;
+}
+.wr-vu-label {
+  position: absolute; top: 4px; left: 0; right: 0;
+  text-align: center; font-size: .5rem; letter-spacing: .3em; color: #666; font-weight: bold;
+}
+.wr-vu-arc {
+  position: absolute; bottom: 6px; left: 10%; right: 10%; height: 40px;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  border-top: 2px solid #333; border-left: 2px solid transparent; border-right: 2px solid transparent;
+}
+.wr-vu-needle {
+  position: absolute; bottom: 8px; left: 50%;
+  width: 2px; height: 38px;
+  background: #1a1a1a;
+  transform-origin: bottom center;
+  transform: translateX(-50%) rotate(-45deg);
+  transition: transform .14s cubic-bezier(.34,1.56,.64,1);
+}
+.wr-vu-needle::after {
+  content: ''; position: absolute; top: -2px; left: -3px;
+  width: 8px; height: 4px; border-radius: 2px;
+  background: var(--wr-red); box-shadow: 0 0 4px var(--wr-red);
+}
+.wr-vu-pivot {
+  position: absolute; bottom: 2px; left: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #666, #1a1a1a);
+  transform: translateX(-50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,.6); z-index: 3;
+}
+
+/* ── Cassette deck ── */
+.wr-cassette-deck {
+  background: linear-gradient(180deg, #2a2622 0%, #1a1614 100%);
+  border-radius: 8px; padding: 16px; margin-bottom: 14px;
+  border: 2px solid #0a0a0a;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.8), 0 2px 0 rgba(255,200,150,.07);
+}
+.wr-deck-label {
+  font-family: 'VT323', monospace; font-size: .72rem; letter-spacing: .25em;
+  color: var(--wr-amber-dim); text-align: center;
+  margin-bottom: 12px; padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,179,71,.15);
+}
+.wr-cassette-door {
+  background: linear-gradient(180deg, rgba(40,35,30,.95), rgba(20,18,15,.95));
+  border-radius: 6px; padding: 14px 18px; margin-bottom: 14px;
+  border: 2px solid #0a0a0a;
+  box-shadow: inset 0 3px 10px rgba(0,0,0,.9);
+  position: relative; overflow: hidden;
+}
+.wr-cassette-door::before {
+  content: ''; position: absolute; top: -50%; left: -10%; width: 40%; height: 200%;
+  background: linear-gradient(105deg, transparent 0%, rgba(255,255,255,.07) 40%, rgba(255,255,255,.13) 50%, rgba(255,255,255,.07) 60%, transparent 100%);
+  transform: rotate(8deg); pointer-events: none;
+}
+.wr-tape-visual {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+.wr-reel {
+  width: 58px; height: 58px; border-radius: 50%;
+  flex-shrink: 0;
+  background: conic-gradient(
+    from 0deg,
+    #2a2a2a 0 15deg, #1a1a1a 15 30deg, #2a2a2a 30 45deg, #1a1a1a 45 60deg,
+    #2a2a2a 60 75deg, #1a1a1a 75 90deg, #2a2a2a 90 105deg, #1a1a1a 105 120deg,
+    #2a2a2a 120 135deg, #1a1a1a 135 150deg, #2a2a2a 150 165deg, #1a1a1a 165 180deg,
+    #2a2a2a 180 195deg, #1a1a1a 195 210deg, #2a2a2a 210 225deg, #1a1a1a 225 240deg,
+    #2a2a2a 240 255deg, #1a1a1a 255 270deg, #2a2a2a 270 285deg, #1a1a1a 285 300deg,
+    #2a2a2a 300 315deg, #1a1a1a 315 330deg, #2a2a2a 330 345deg, #1a1a1a 345 360deg
+  );
+  border: 3px solid #444;
+  box-shadow: 0 0 12px rgba(0,0,0,.8), inset 0 0 8px rgba(0,0,0,.9);
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.wr-reel.spinning { animation: wr-reel-spin 2.4s linear infinite; }
+.wr-reel.left.spinning  { animation-duration: 2.8s; }
+.wr-reel.right.spinning { animation-duration: 2.0s; }
+@keyframes wr-reel-spin { from{transform:rotate(0)}to{transform:rotate(360deg)} }
+.wr-reel::after {
+  content: ''; width: 18px; height: 18px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ccc, #666 70%, #333);
+  box-shadow: inset 0 -2px 3px rgba(0,0,0,.6), 0 0 0 2px #222;
+}
+.wr-tape-ribbon {
+  flex: 1; height: 4px;
+  background: linear-gradient(180deg, #3a2a1a, #1a1008);
+  border-radius: 2px; box-shadow: inset 0 1px 1px rgba(0,0,0,.8);
+}
+.wr-cassette-label {
+  margin-top: 10px; padding: 5px 10px;
+  background: linear-gradient(180deg, var(--wr-cream), var(--wr-cream-dark));
+  border-radius: 2px;
+  font-family: 'VT323', monospace; font-size: .9rem; color: #2a2a2a;
+  text-align: center; letter-spacing: .1em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.2), 0 1px 0 rgba(255,255,255,.3);
+  position: relative; z-index: 1;
+}
+
+/* ── Seek bar ── */
+.wr-seek-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.wr-time { font-family: 'VT323', monospace; font-size: .85rem; color: var(--wr-amber-dim); min-width: 40px; }
+.wr-seek {
+  flex: 1; accent-color: var(--wr-amber); cursor: pointer; height: 4px;
+}
+.wr-seek:disabled { opacity: .35; cursor: default; }
+
+/* ── Transport keys ── */
+.wr-transport {
+  display: flex; justify-content: center; gap: 8px; margin-bottom: 12px;
+}
+.wr-key {
+  width: 52px; height: 40px;
+  border-radius: 4px; border: 2px solid #1a1a1a;
+  background: linear-gradient(180deg, var(--wr-metal-hi) 0%, var(--wr-metal-mid) 45%, var(--wr-metal-lo) 100%);
+  color: #2a2a2a; font-family: 'Share Tech Mono', monospace; font-size: .8rem; font-weight: bold;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 0 #2a2a2a, 0 6px 10px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.7), inset 0 -2px 3px rgba(0,0,0,.3);
+  transition: all .08s; user-select: none;
+}
+.wr-key:hover { background: linear-gradient(180deg, #e8e8e0 0%, var(--wr-metal-mid) 45%, var(--wr-metal-lo) 100%); }
+.wr-key:active, .wr-key.active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2a2a2a, 0 2px 4px rgba(0,0,0,.6), inset 0 2px 4px rgba(0,0,0,.4);
+  background: linear-gradient(180deg, var(--wr-metal-lo) 0%, var(--wr-metal-mid) 100%);
+}
+.wr-key.rec { color: var(--wr-red); }
+.wr-key:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+/* ── Volume row ── */
+.wr-vol-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+}
+.wr-vol-label { font-family: 'VT323', monospace; font-size: .75rem; color: var(--wr-amber-dim); min-width: 26px; }
+.wr-vol { flex: 1; accent-color: var(--wr-amber); cursor: pointer; }
+.wr-vol-pct { font-family: 'VT323', monospace; font-size: .75rem; color: var(--wr-amber-dim); min-width: 34px; text-align: right; }
+
+/* ── Insert tape button ── */
+.wr-insert-tape {
+  width: 100%; padding: 12px;
+  background: repeating-linear-gradient(45deg, rgba(255,179,71,.03) 0 10px, transparent 10px 20px),
+    linear-gradient(180deg, #1a1612, #0d0a08);
+  border: 2px dashed rgba(255,179,71,.3); border-radius: 6px;
+  color: var(--wr-amber); font-family: 'VT323', monospace; font-size: 1rem; letter-spacing: .15em;
+  cursor: pointer; text-align: center; transition: all .2s;
+  margin-bottom: 12px;
+}
+.wr-insert-tape:hover {
+  border-color: var(--wr-amber);
+  background-color: rgba(255,179,71,.05);
+  box-shadow: 0 0 16px rgba(255,179,71,.2);
+}
+
+/* ── Tape rack (playlist) ── */
+.wr-tape-rack-label {
+  font-family: 'VT323', monospace; font-size: .72rem; letter-spacing: .25em;
+  color: var(--wr-amber-dim); margin-bottom: 6px;
+}
+.wr-tape-rack {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 160px; overflow-y: auto;
+}
+.wr-tape-rack::-webkit-scrollbar { width: 5px; }
+.wr-tape-rack::-webkit-scrollbar-track { background: rgba(0,0,0,.4); }
+.wr-tape-rack::-webkit-scrollbar-thumb { background: var(--wr-amber-dim); border-radius: 3px; }
+.wr-tape-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: linear-gradient(180deg, #221e1a, #15120f);
+  border: 1px solid rgba(255,179,71,.1); border-radius: 3px;
+  color: var(--wr-amber); font-family: 'Share Tech Mono', monospace; font-size: .72rem;
+  cursor: pointer; transition: all .15s; text-align: left;
+  white-space: nowrap; overflow: hidden;
+}
+.wr-tape-item:hover { background: linear-gradient(180deg, #2a241e, #1a1612); border-color: rgba(255,179,71,.3); }
+.wr-tape-item.active {
+  background: linear-gradient(180deg, rgba(255,179,71,.15), rgba(255,179,71,.05));
+  border-color: var(--wr-amber); color: var(--wr-amber-hot);
+  box-shadow: 0 0 10px rgba(255,179,71,.2);
+}
+.wr-tape-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
+/* ── Media caption tab ── */
+.wr-caption-panel {
+  background: linear-gradient(180deg, #1a1612 0%, #0d0a08 100%);
+  border-radius: 6px; padding: 16px; margin-bottom: 14px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.8);
+}
+.wr-caption-label {
+  font-family: 'VT323', monospace; font-size: .72rem; letter-spacing: .22em;
+  color: var(--wr-amber-dim); margin-bottom: 10px;
+}
+.wr-caption-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;
+}
+.wr-caption-slot {
+  border: 1px dashed rgba(255,179,71,.25); border-radius: 6px; padding: 12px;
+  text-align: center; cursor: pointer; transition: all .2s;
+  font-family: 'Share Tech Mono', monospace; font-size: .72rem; color: var(--wr-amber-dim);
+}
+.wr-caption-slot:hover { border-color: var(--wr-amber); background: rgba(255,179,71,.05); }
+.wr-caption-slot.filled { border-style: solid; border-color: var(--wr-amber); color: var(--wr-amber-hot); }
+.wr-caption-preview {
+  border-radius: 6px; overflow: hidden; background: #000;
+  margin-bottom: 10px;
+  min-height: 120px; display: flex; align-items: center; justify-content: center;
+  color: var(--wr-amber-dim); font-family: 'VT323', monospace; font-size: .85rem;
+}
+.wr-caption-preview img, .wr-caption-preview video { max-width: 100%; max-height: 280px; }
+.wr-caption-track-info {
+  padding: 8px 12px;
+  background: rgba(255,179,71,.07); border-radius: 4px;
+  font-family: 'VT323', monospace; font-size: .85rem; color: var(--wr-amber);
+  letter-spacing: .07em; margin-bottom: 10px;
+}
+
+/* ── Status strip ── */
+.wr-status {
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid rgba(255,179,71,.15);
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: 'VT323', monospace; font-size: .7rem; letter-spacing: .15em; color: var(--wr-amber-dim);
+}
+.wr-status-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--wr-amber-dim); margin-right: 5px;
+}
+.wr-status-dot.live { background: var(--wr-green); box-shadow: 0 0 6px var(--wr-green); animation: wr-led-pulse 1.4s ease-in-out infinite; }
+
+/* ── Error / loading banners ── */
+.wr-error {
+  padding: 9px; background: rgba(230,57,70,.15); border: 1px solid rgba(230,57,70,.5);
+  border-radius: 3px; color: #ff8888; font-family: 'VT323', monospace;
+  font-size: .82rem; letter-spacing: .1em; text-align: center; margin-top: 10px;
+}
+.wr-loading {
+  padding: 7px; text-align: center; color: var(--wr-amber);
+  font-family: 'VT323', monospace; font-size: .82rem; letter-spacing: .2em;
+  animation: wr-led-pulse 1.2s ease-in-out infinite;
+}
+
+/* ── Responsive ── */
+@media (max-width: 540px) {
+  .wr-cabinet { padding: 12px; border-radius: 10px; }
+  .wr-freq-val { font-size: 2.4rem; }
+  .wr-reel { width: 44px; height: 44px; }
+  .wr-key { width: 42px; height: 36px; font-size: .72rem; }
+  .wr-brand h1 { font-size: 1.1rem; letter-spacing: .35em; }
+  .wr-grille { height: 48px; }
+  .wr-caption-grid { grid-template-columns: 1fr; }
+}
