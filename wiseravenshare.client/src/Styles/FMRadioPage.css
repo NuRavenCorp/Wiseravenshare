@@ -496,3 +496,171 @@
   .wr-grille { height: 48px; }
   .wr-caption-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Spectrum visualizer ─── */
+.wr-viz-wrap {
+  position: relative; border-radius: 6px; overflow: hidden;
+  background: #0a0602; margin-bottom: 12px;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.9);
+  height: 72px;
+}
+.wr-canvas { width: 100%; height: 72px; display: block; }
+.wr-viz-idle {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: "VT323", monospace; font-size: .8rem; letter-spacing: .2em;
+  color: rgba(255,179,71,.3); pointer-events: none;
+}
+
+/* ── Track info ── */
+.wr-track-info {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  background: rgba(0,0,0,.3); border-radius: 6px; margin-bottom: 12px;
+}
+.wr-track-art {
+  width: 44px; height: 44px; flex-shrink: 0;
+  background: linear-gradient(135deg, #3b82f6, #a855f7);
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+}
+.wr-track-meta { flex: 1; min-width: 0; }
+.wr-track-title {
+  font-family: "VT323", monospace; font-size: 1rem; color: var(--wr-amber-hot);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .05em;
+}
+.wr-track-artist { font-size: .75rem; color: var(--wr-amber-dim); letter-spacing: .05em; }
+.wr-track-album  { font-size: .65rem; color: rgba(255,179,71,.35); }
+.wr-fav-btn {
+  background: transparent; border: 1px solid rgba(255,179,71,.25); border-radius: 4px;
+  color: var(--wr-amber-dim); font-size: 1.2rem; cursor: pointer; padding: 4px 8px;
+  transition: all .15s;
+}
+.wr-fav-btn.active { color: #ffd700; border-color: #ffd700; text-shadow: 0 0 8px #ffd700; }
+.wr-fav-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* ── Seek wrap (progress fill) ── */
+.wr-seek-wrap { position: relative; flex: 1; }
+.wr-seek { width: 100%; position: relative; z-index: 2; }
+.wr-seek-fill {
+  position: absolute; top: 50%; left: 0; height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--wr-amber), #ff8c00);
+  transform: translateY(-50%); pointer-events: none; z-index: 1;
+  transition: width .1s linear;
+}
+
+/* ── Mode row ── */
+.wr-mode-row {
+  display: flex; gap: 6px; justify-content: center; margin-bottom: 10px;
+}
+.wr-mode-btn {
+  padding: 5px 12px; border-radius: 4px;
+  border: 1px solid rgba(255,179,71,.2);
+  background: rgba(0,0,0,.3); color: var(--wr-amber-dim);
+  font-family: "Share Tech Mono", monospace; font-size: .72rem; font-weight: bold;
+  cursor: pointer; transition: all .15s; letter-spacing: .08em;
+}
+.wr-mode-btn:hover { border-color: var(--wr-amber); color: var(--wr-amber); }
+.wr-mode-btn.active {
+  background: rgba(255,179,71,.15); border-color: var(--wr-amber);
+  color: var(--wr-amber-hot); box-shadow: 0 0 8px rgba(255,179,71,.25);
+}
+
+/* ── EQ panel ── */
+.wr-eq-panel {
+  background: linear-gradient(180deg, #1a1612, #0d0a08);
+  border-radius: 6px; padding: 12px; margin-bottom: 12px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.8);
+}
+.wr-eq-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+.wr-eq-title { font-family: "VT323", monospace; font-size: .72rem; letter-spacing: .25em; color: var(--wr-amber-dim); }
+.wr-eq-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.wr-preset-btn {
+  padding: 3px 8px; border-radius: 3px;
+  border: 1px solid rgba(255,179,71,.2); background: transparent;
+  color: var(--wr-amber-dim); font-family: "Share Tech Mono", monospace; font-size: .65rem;
+  cursor: pointer; transition: all .12s; letter-spacing: .06em;
+}
+.wr-preset-btn:hover   { border-color: var(--wr-amber); color: var(--wr-amber); }
+.wr-preset-btn.active  { background: rgba(255,179,71,.14); border-color: var(--wr-amber); color: var(--wr-amber-hot); }
+.wr-preset-btn:disabled { opacity: .35; cursor: not-allowed; }
+.wr-eq-bands {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  height: 130px; padding: 0 4px;
+}
+.wr-eq-band { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; }
+.wr-eq-val   { font-family: "VT323", monospace; font-size: .7rem; color: var(--wr-amber); min-width: 26px; text-align: center; }
+.wr-eq-label { font-family: "Share Tech Mono", monospace; font-size: .55rem; color: var(--wr-amber-dim); text-align: center; }
+.wr-eq-slider {
+  writing-mode: vertical-lr; direction: rtl;
+  width: 24px; height: 80px; cursor: pointer;
+  accent-color: var(--wr-amber);
+}
+
+/* ── Queue panel ── */
+.wr-queue-panel {
+  background: linear-gradient(180deg, #1a1612, #0d0a08);
+  border-radius: 6px; padding: 12px; margin-bottom: 12px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.8);
+}
+.wr-queue-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.wr-queue-item {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  background: linear-gradient(180deg, #221e1a, #15120f);
+  border: 1px solid rgba(255,179,71,.1); border-radius: 3px;
+  margin-bottom: 3px; transition: all .1s;
+}
+.wr-queue-item.active { border-color: var(--wr-amber); background: rgba(255,179,71,.1); }
+.wr-q-play {
+  background: transparent; border: none; color: var(--wr-amber-dim); cursor: pointer;
+  font-size: .85rem; padding: 0 4px; flex-shrink: 0;
+}
+.wr-queue-item .wr-tape-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .72rem; color: var(--wr-amber); cursor: pointer;
+}
+.wr-q-btn {
+  background: transparent; border: 1px solid rgba(255,179,71,.15); border-radius: 3px;
+  color: var(--wr-amber-dim); font-size: .65rem; cursor: pointer; padding: 2px 5px;
+  flex-shrink: 0; transition: all .12s;
+}
+.wr-q-btn:hover { border-color: var(--wr-amber); color: var(--wr-amber); }
+.wr-q-btn.fav   { color: #ffd700; border-color: rgba(255,215,0,.3); }
+.wr-q-btn.rm:hover { border-color: var(--wr-red); color: var(--wr-red); }
+
+/* ── Keyboard shortcut hint bar ── */
+.wr-kb-help {
+  display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;
+  padding: 8px 4px 0;
+  font-family: "Share Tech Mono", monospace; font-size: .62rem;
+  color: rgba(255,179,71,.4); letter-spacing: .04em;
+}
+.wr-kb-help kbd {
+  background: rgba(255,179,71,.08); border: 1px solid rgba(255,179,71,.2);
+  border-radius: 3px; padding: 1px 5px; font-size: .6rem; color: var(--wr-amber-dim);
+}
+
+/* ── Fullscreen ── */
+.wr-fullscreen { background: #0d0a08; }
+.wr-fullscreen .wr-cabinet { max-width: 100%; }
+
+/* ── Caption panel additions ── */
+.wr-caption-label { font-family: "VT323", monospace; font-size: .72rem; letter-spacing: .22em; color: var(--wr-amber-dim); margin-bottom: 8px; }
+.wr-caption-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.wr-caption-slot {
+  border: 1px dashed rgba(255,179,71,.25); border-radius: 6px; padding: 12px; text-align: center;
+  cursor: pointer; transition: all .2s; font-family: "Share Tech Mono", monospace;
+  font-size: .7rem; color: var(--wr-amber-dim);
+}
+.wr-caption-slot:hover { border-color: var(--wr-amber); background: rgba(255,179,71,.05); }
+.wr-caption-slot.filled { border-style: solid; border-color: var(--wr-amber); color: var(--wr-amber-hot); }
+.wr-caption-preview {
+  border-radius: 6px; overflow: hidden; background: #000;
+  margin-bottom: 10px; min-height: 100px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--wr-amber-dim); font-family: "VT323", monospace; font-size: .85rem;
+}
+.wr-caption-preview img, .wr-caption-preview video { max-width: 100%; max-height: 260px; }
+.wr-caption-track-info {
+  padding: 7px 12px; background: rgba(255,179,71,.07); border-radius: 4px;
+  font-family: "VT323", monospace; font-size: .85rem; color: var(--wr-amber);
+  letter-spacing: .07em; margin-bottom: 10px;
+}
