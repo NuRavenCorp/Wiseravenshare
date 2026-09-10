@@ -1186,21 +1186,7 @@ public class AuthController : ControllerBase
 
     private bool IsSelfRegistrationAllowed()
     {
-        var raw = _configuration["Authentication:AllowSelfRegistration"];
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            // Growth-safe default: keep signup open if the env var is missing.
-            _logger.LogWarning("Authentication:AllowSelfRegistration is not set. Defaulting to enabled.");
-            return true;
-        }
-
-        if (bool.TryParse(raw, out var parsedBool)) return parsedBool;
-        if (string.Equals(raw, "1", StringComparison.Ordinal)) return true;
-        if (string.Equals(raw, "0", StringComparison.Ordinal)) return false;
-
-        _logger.LogWarning(
-            "Authentication:AllowSelfRegistration value '{Value}' is invalid. Defaulting to enabled.",
-            raw);
+        // Self-registration is intentionally always enabled for growth mode.
         return true;
     }
 

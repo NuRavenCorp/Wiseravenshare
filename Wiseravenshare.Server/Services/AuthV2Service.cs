@@ -308,27 +308,7 @@ public sealed class AuthV2Service : IAuthV2Service
 
     private bool IsSelfRegistrationAllowed()
     {
-        var raw = _configuration["Authentication:AllowSelfRegistration"];
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return true;
-        }
-
-        if (bool.TryParse(raw, out var parsed))
-        {
-            return parsed;
-        }
-
-        if (string.Equals(raw, "1", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (string.Equals(raw, "0", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
+        // Self-registration is intentionally always enabled for growth mode.
         return true;
     }
 
