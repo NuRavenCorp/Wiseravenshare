@@ -328,6 +328,25 @@ const PodcastStudioPage = ({ onNavigate }) => {
         }, ...deduped];
     };
 
+    const matchDirectoryMember = (identifier) => {
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier);
+        if (!normalizedIdentifier) {
+            return null;
+        }
+
+        return teamDirectory.find((member) => {
+            const directoryIdentifiers = [
+                normalizeLoginIdentifier(member?.email),
+                normalizeLoginIdentifier(member?.handle),
+                normalizeLoginIdentifier(member?.username),
+                normalizeLoginIdentifier(member?.name),
+                normalizeLoginIdentifier(member?.displayName)
+            ].filter(Boolean);
+
+            return directoryIdentifiers.includes(normalizedIdentifier);
+        }) || null;
+    };
+
     const applyPolicyState = (state) => {
         const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
         const allowedRoles = Array.isArray(state?.allowedRoles)
@@ -883,15 +902,31 @@ const PodcastStudioPage = ({ onNavigate }) => {
             return;
         }
 
-        const nameFromEmail = identifier.includes('@') ? identifier.split('@')[0] : identifier.replace(/^@/, '');
-        const formattedName = nameFromEmail.charAt(0).toUpperCase() + nameFromEmail.slice(1);
+        const matchedProfile = matchDirectoryMember(identifier) || {
+            name: user?.name || user?.displayName || user?.username || 'Remote User',
+            email: user?.email || '',
+            handle: user?.handle || user?.username || '',
+            username: user?.username || user?.handle || '',
+            displayName: user?.displayName || user?.name || ''
+        };
+
+        const resolvedName = String(
+            matchedProfile?.displayName
+            || matchedProfile?.name
+            || matchedProfile?.username
+            || matchedProfile?.handle
+            || (identifier.includes('@') ? identifier.split('@')[0] : identifier.replace(/^@/, ''))
+        ).trim();
+
+        const candidateName = resolvedName || 'Remote User';
+        const displayName = candidateName.charAt(0).toUpperCase() + candidateName.slice(1);
         const login = resolveLoginStatus(identifier);
 
         const updatedList = upsertTeamMember({
-            name: formattedName,
+            name: displayName,
             role: syncRole,
-            locale: 'Remote Tandem',
-            device: 'Paired Sync',
+            locale: matchedProfile?.location || 'Remote Tandem',
+            device: matchedProfile?.device || 'Paired Sync',
             status: 'Synced in Tandem',
             identifier,
             loginState: login.loginState,
@@ -903,7 +938,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setSyncMessage(`Synced ${identifier} as ${syncRole}. Login status: ${login.loginStatus}.`);
 
         broadcastTandemState({ teamMembersList: updatedList });
-        setStatus(`Team member ${formattedName} synced in tandem as ${syncRole}.`);
+        setStatus(`Team member ${displayName} synced in tandem as ${syncRole}.`);
 
         setTimeout(() => setSyncMessage(''), 4500);
     };
@@ -1371,6 +1406,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <button
                             type="button"
                             onClick={() => {
+                                if (syncInput.trim()) {
+                                    handleSyncConnection();
+                                    return;
+                                }
+
                                 broadcastTandemState();
                                 setSyncMessage('Tandem sync forced across all paired connections.');
                                 setTimeout(() => setSyncMessage(''), 3000);
