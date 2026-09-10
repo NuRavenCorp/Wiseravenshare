@@ -12,6 +12,7 @@ import { subscriptionService } from '../Services/subscriptionService';
 import { crawlerService } from '../Services/crawlerService';
 import FMTunerModule from '../Components/FM/FMTunerModule';
 import FMCreatorStudio from '../Components/FM/FMCreatorStudio';
+import StudioPlayerBar from '../Components/Music/StudioPlayerBar';
 import '../Styles/MusicStudio.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1485,76 +1486,50 @@ const MusicStudioPage = ({ onNavigate, initialPanel = 'eq' }) => {
     <div className="music-studio">
       <audio ref={audioRef} />
 
-      {/* ── Header ── */}
-      <div className="studio-header">
-        <div className="studio-title"><FiActivity /> WiseRaven Music Studio</div>
-        <div className="studio-track-info">
-          {currentTrack ? (
-            <>
-              <span className="ti-title">{currentTrack.title}</span>
-              <span className="ti-sep">·</span>
-              <span className="ti-artist">{currentTrack.artist || 'Unknown Artist'}</span>
-              {vocalMode !== 'normal' && (
-                <span className={`mode-badge ${vocalMode}`}>
-                  {vocalMode === 'instrumental' ? 'INSTRUMENTAL' : 'KARAOKE'}
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="ti-empty">Upload tracks in the Music Rights Studio to get started</span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Visualizer ── */}
-      <div className="studio-visualizer">
-        <canvas ref={canvasRef} width={900} height={90} />
-      </div>
-
-      {/* ── Transport ── */}
-      <div className="studio-transport">
-        <div className="transport-side">
-          <button className={`tx-btn ${shuffle ? 'active' : ''}`} onClick={() => setShuffle(s => !s)} title="Shuffle">
-            <FiShuffle />
-          </button>
-          <button className={`tx-btn ${repeat !== 'off' ? 'active' : ''}`} onClick={cycleRepeat} title={`Repeat: ${repeat}`}>
-            <FiRepeat />
-            {repeat === 'one' && <span className="repeat-badge">1</span>}
-          </button>
-        </div>
-
-        <div className="transport-main">
-          <button className="tx-btn" onClick={skipPrev}><FiSkipBack /></button>
-          {isPlaying
-            ? <button className="tx-btn play-pause" onClick={pause}><FiPause /></button>
-            : <button className="tx-btn play-pause" onClick={play} disabled={!currentTrack && library.length === 0}><FiPlay /></button>
-          }
-          <button className="tx-btn" onClick={stop}><FiSquare /></button>
-          <button className="tx-btn" onClick={skipNext}><FiSkipForward /></button>
-        </div>
-
-        <div className="transport-side right">
-          <button className="tx-btn" onClick={() => setIsMuted(m => !m)}>
-            {isMuted ? <FiVolumeX /> : <FiVolume2 />}
-          </button>
-          <input type="range" min="0" max="1" step="0.01"
-            value={isMuted ? 0 : volume}
-            onChange={e => setVolume(parseFloat(e.target.value))}
-            className="vol-slider"
-          />
-          <span className="vol-pct">{Math.round(volume * 100)}%</span>
-        </div>
-      </div>
-
-      {/* ── Seek bar ── */}
-      <div className="studio-progress">
-        <span className="time-label">{fmt(currentTime)}</span>
-        <input type="range" min="0" max={duration || 0} step="0.1"
-          value={currentTime} onChange={seek}
-          className="seek-slider" disabled={!currentTrack}
-        />
-        <span className="time-label">{fmt(duration)}</span>
-      </div>
+      {/* ── Studio Player Bar (FM aesthetic) ── */}
+      <StudioPlayerBar
+        currentTrack={currentTrack}
+        library={library}
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        isMuted={isMuted}
+        repeat={repeat}
+        shuffle={shuffle}
+        vizData={vizData}
+        onPlay={play}
+        onPause={pause}
+        onStop={stop}
+        onPrev={skipPrev}
+        onNext={skipNext}
+        onSeek={seek}
+        onVolumeChange={(e) => setVolume(parseFloat(e.target.value))}
+        onMuteToggle={() => setIsMuted((m) => !m)}
+        onRepeatToggle={cycleRepeat}
+        onShuffleToggle={() => setShuffle((s) => !s)}
+        onSelectTrack={selectTrack}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        uploadFile={uploadFile}
+        uploadTitle={uploadTitle}
+        uploadArtist={uploadArtist}
+        uploadAlbum={uploadAlbum}
+        uploadGenre={uploadGenre}
+        isUploading={isUploading}
+        isMarketplaceUnlocked={isMarketplaceUnlocked}
+        uploadInputRef={uploadInputRef}
+        onUploadFileChange={(e) => {
+          const file = e.target.files?.[0] || null;
+          setUploadFile(file);
+          if (file && !uploadTitle) setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+        }}
+        onUploadTitleChange={(e) => setUploadTitle(e.target.value)}
+        onUploadArtistChange={(e) => setUploadArtist(e.target.value)}
+        onUploadAlbumChange={(e) => setUploadAlbum(e.target.value)}
+        onUploadGenreChange={(e) => setUploadGenre(e.target.value)}
+        onUploadSubmit={handleUploadTrack}
+      />
 
       {/* ── Main: Library ← | → Studio Controls ── */}
       <div className="studio-main">
