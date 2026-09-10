@@ -27,6 +27,7 @@ import '../Styles/FMRadioPage.css';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FM_LOW  = 88.0;
 const FM_HIGH = 108.0;
+const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 
 const EQ_BANDS = [
   { freq: 31,    label: '31Hz',  type: 'lowshelf'  },
@@ -98,6 +99,26 @@ const parseMeta = (filename) => {
 const lsGet = (k, fb) => { try { const v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : fb; } catch { return fb; } };
 const lsSet = (k, v)  => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+const normalizeLibraryTrack = (track) => {
+  if (!track || typeof track !== 'object') return null;
+
+  const fileName = String(track.name || track.fileName || track.title || 'Untitled').trim();
+  const artist = String(track.artist || '').trim();
+  const title = String(track.title || '').trim() || parseMeta(fileName).title;
+  const mediaUrl = String(track.mediaUrl || track.url || '').trim();
+
+  return {
+    id: String(track.id || `${fileName}-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    name: fileName,
+    title,
+    artist: artist || parseMeta(fileName).artist,
+    mediaUrl,
+    url: mediaUrl,
+    file: track.file || null,
+    objectUrl: track.objectUrl || null,
+  };
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const FMRadioPage = () => {
   // Tabs
@@ -116,6 +137,7 @@ const FMRadioPage = () => {
   const [eqGains,   setEqGains]   = useState(() => lsGet('wr_eq',   EQ_PRESETS.flat.slice()));
   const [eqPreset,  setEqPreset]  = useState('flat');
   const [favorites, setFavorites] = useState(() => lsGet('wr_favs', []));
+  const [theme, setTheme] = useState(() => lsGet('wr_theme', 'classic'));
 
   // Persist on change
   useEffect(() => { lsSet('wr_vol',  volume);    }, [volume]);
@@ -123,6 +145,7 @@ const FMRadioPage = () => {
   useEffect(() => { lsSet('wr_shuf', shuffle);   }, [shuffle]);
   useEffect(() => { lsSet('wr_eq',   eqGains);   }, [eqGains]);
   useEffect(() => { lsSet('wr_favs', favorites); }, [favorites]);
+  useEffect(() => { lsSet('wr_theme', theme); }, [theme]);
 
   // Playback state
   const [library,      setLibrary]      = useState([]);
@@ -160,7 +183,6 @@ const FMRadioPage = () => {
   const eqFiltersRef  = useRef([]);
   const analyserRef   = useRef(null);
   const eqWiredRef    = useRef(false);   // built only once
-  const themeRef      = useRef(theme);   // track active theme for viz
 
   // Stable refs for event callbacks
   const libraryRef  = useRef(library);
@@ -173,6 +195,23 @@ const FMRadioPage = () => {
   useEffect(() => { playingRef.current  = isPlaying;  }, [isPlaying]);
   useEffect(() => { repeatRef.current   = repeat;     }, [repeat]);
   useEffect(() => { shuffleRef.current  = shuffle;    }, [shuffle]);
+
+  // Pull durable tracks that Music Player has already cached so FM cassette/radio creator
+  // can reuse the original uploaded media list instead of appearing empty.
+  useEffect(() => {
+    const persisted = lsGet(MUSIC_LIBRARY_CACHE_KEY, []);
+    if (!Array.isArray(persisted) || persisted.length === 0) return;
+
+    const normalized = persisted
+      .map(normalizeLibraryTrack)
+      .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
+
+    if (!normalized.length) return;
+    setLibrary((prev) => {
+      if (Array.isArray(prev) && prev.length > 0) return prev;
+      return normalized;
+    });
+  }, []);
 
   // VU meter
   const [vuAngle, setVuAngle] = useState(-45);
@@ -314,16 +353,24 @@ const FMRadioPage = () => {
     setDuration(0);
     setIsPlaying(false);
 
-    const objectUrl = track.objectUrl || (() => {
-      track.objectUrl = URL.createObjectURL(track.file);
-      return track.objectUrl;
-    })();
+    let sourceUrl = String(track.mediaUrl || track.url || track.objectUrl || '').trim();
+    if (!sourceUrl && track.file) {
+      sourceUrl = URL.createObjectURL(track.file);
+      track.objectUrl = sourceUrl;
+    }
 
-    const mime = mimeForFile(track.name);
+    if (!sourceUrl) {
+      setLoadError(`Cannot play "${track.name || track.title || 'track'}" because no media URL was found.`);
+      return;
+    }
+
+    const trackName = track.name || track.fileName || track.title || 'track';
+    const ext = String(trackName).split('.').pop().toLowerCase();
+    const mime = mimeForFile(trackName);
 
     const howl = new Howl({
-      src:    [objectUrl],
-      format: [track.name.split('.').pop().toLowerCase()],
+      src:    [sourceUrl],
+      format: [ext],
       html5:  true,   // html5:true ensures all formats use the audio element (codec support via browser)
       volume: isMuted ? 0 : volume,
       onload: () => {
@@ -363,7 +410,7 @@ const FMRadioPage = () => {
         loadTrack(lib[next], next, true);
       },
       onloaderror: (_, err) => {
-        setLoadError(`Cannot decode "${track.name}" — ${err || 'unsupported format in this browser'}`);
+        setLoadError(`Cannot decode "${trackName}" - ${err || 'unsupported format in this browser'}`);
         setIsPlaying(false);
       },
     });
@@ -453,6 +500,7 @@ const FMRadioPage = () => {
     const tracks = files.map((f, i) => ({
       id: `${f.name}-${f.lastModified}-${i}`,
       name: f.name,
+      mediaUrl: '',
       file: f,
       objectUrl: null,
       ...parseMeta(f.name),
@@ -545,7 +593,12 @@ const FMRadioPage = () => {
   };
   const captionPlay = () => {
     if (!captionTrack || !captionAudioRef.current) return;
-    if (!captionAudioRef.current.src) captionAudioRef.current.src = URL.createObjectURL(captionTrack.file);
+    if (!captionAudioRef.current.src) {
+      const captionSource = captionTrack.mediaUrl || captionTrack.url || captionTrack.objectUrl
+        || (captionTrack.file ? URL.createObjectURL(captionTrack.file) : '');
+      if (!captionSource) return;
+      captionAudioRef.current.src = captionSource;
+    }
     captionAudioRef.current.play().catch(() => {});
     setCaptionPlaying(true);
     if (captionMediaType === 'video') captionMediaRef.current?.play().catch(() => {});
@@ -559,11 +612,12 @@ const FMRadioPage = () => {
   // ── Derived ───────────────────────────────────────────────────────────────
   const needlePct = `${((tunedFreq - FM_LOW) / (FM_HIGH - FM_LOW)) * 100}%`;
   const progress  = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const meta      = currentTrack ? parseMeta(currentTrack.name) : null;
-
-  // ── Theme ─────────────────────────────────────────────────────────────────
-  const [theme, setTheme] = useState(() => lsGet('wr_theme', 'classic'));
-  useEffect(() => { lsSet('wr_theme', theme); }, [theme]);
+  const meta      = currentTrack
+    ? {
+        title: String(currentTrack.title || '').trim() || parseMeta(currentTrack.name || '').title,
+        artist: String(currentTrack.artist || '').trim() || parseMeta(currentTrack.name || '').artist,
+      }
+    : null;
 
   const renderClassicTheme = () => (
     <div className="wr-cabinet">
