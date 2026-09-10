@@ -36,6 +36,15 @@ public class CreatorRadioStationDto
     public bool IsProprietaryFrequency { get; set; }
     public DateTime? FrequencyLockedAt { get; set; }
     public DateTime CreatedAt { get; set; }
+    // Monetization
+    public bool IsMonetized { get; set; }
+    public decimal? SubscriptionPrice { get; set; }
+    public bool AllowDonations { get; set; }
+    public string? DonationLink { get; set; }
+    public string? ContentRating { get; set; }
+    public string? TargetLanguage { get; set; }
+    public string? TargetRegion { get; set; }
+    public string? BrandColor { get; set; }
     public List<RadioStationScheduleDto> Schedule { get; set; } = new();
     public List<RadioStationEpisodeDto> Episodes { get; set; } = new();
 }
@@ -48,6 +57,9 @@ public class CreateCreatorRadioStationDto
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    [MaxLength(500)]
+    public string? Tagline { get; set; }
+
     public string? Frequency { get; set; }
     public string Band { get; set; } = "Online";
 
@@ -57,6 +69,22 @@ public class CreateCreatorRadioStationDto
     public string? SubGenre { get; set; }
     public string? LogoUrl { get; set; }
     public string? CoverImageUrl { get; set; }
+    public string? BrandColor { get; set; }
+
+    [MaxLength(50)]
+    public string? ContentRating { get; set; } = "General";
+
+    public int Bitrate { get; set; } = 128;
+
+    [MaxLength(10)]
+    public string StreamFormat { get; set; } = "mp3";
+
+    [MaxLength(100)]
+    public string? TargetLanguage { get; set; }
+
+    [MaxLength(100)]
+    public string? TargetRegion { get; set; }
+
     public string? Website { get; set; }
     public string? SocialLinks { get; set; }
     public string Visibility { get; set; } = "Public";
@@ -64,6 +92,25 @@ public class CreateCreatorRadioStationDto
     public bool AllowRequests { get; set; } = true;
     public bool AllowShoutouts { get; set; } = true;
     public bool ClaimProprietaryFrequency { get; set; } = true;
+
+    // Monetization
+    public bool IsMonetized { get; set; }
+    public string? MonetizationType { get; set; } = "None";
+    public decimal? SubscriptionPrice { get; set; }
+    public bool AllowDonations { get; set; }
+    public string? DonationLink { get; set; }
+
+    // Licensing (stored as metadata in Settings JSON)
+    public string? LicenseNumber { get; set; }
+    public string? LicenseType { get; set; }
+    public string? LicenseIssuingAuthority { get; set; }
+    public string? LicenseDocumentUrl { get; set; }
+    public DateTime? LicenseIssuedAt { get; set; }
+    public DateTime? LicenseExpiresAt { get; set; }
+    public bool LicenseCoversMusicBroadcast { get; set; }
+    public bool LicenseCoversTalkContent { get; set; }
+    public bool LicenseCoversLiveShows { get; set; }
+    public string[]? LicensePROs { get; set; }
 }
 
 public class UpdateCreatorRadioStationDto
