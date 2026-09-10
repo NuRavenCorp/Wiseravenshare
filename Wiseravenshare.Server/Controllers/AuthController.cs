@@ -1187,13 +1187,11 @@ public class AuthController : ControllerBase
     private bool IsSelfRegistrationAllowed()
     {
         var raw = _configuration["Authentication:AllowSelfRegistration"];
-        var isProduction = string.Equals(_configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Production", StringComparison.OrdinalIgnoreCase);
-
         if (string.IsNullOrWhiteSpace(raw))
         {
-            // Security fail-safe: in production, missing config must never open public signup.
-            return !isProduction;
+            // Growth-safe default: keep signup open if the env var is missing.
+            _logger.LogWarning("Authentication:AllowSelfRegistration is not set. Defaulting to enabled.");
+            return true;
         }
 
         if (bool.TryParse(raw, out var parsedBool)) return parsedBool;
@@ -1201,11 +1199,9 @@ public class AuthController : ControllerBase
         if (string.Equals(raw, "0", StringComparison.Ordinal)) return false;
 
         _logger.LogWarning(
-            "Authentication:AllowSelfRegistration value '{Value}' is invalid. Falling back to {Fallback}.",
-            raw,
-            isProduction ? "disabled in production" : "enabled in non-production");
-
-        return !isProduction;
+            "Authentication:AllowSelfRegistration value '{Value}' is invalid. Defaulting to enabled.",
+            raw);
+        return true;
     }
 
     private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out AppUserRecord? user)
