@@ -1,6 +1,6 @@
 import { getAuthToken } from './authStorage.js';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') || 'http://localhost:5242/api';
 
 /**
  * Personalization service - handles user profile, recommendations, and personalized trending

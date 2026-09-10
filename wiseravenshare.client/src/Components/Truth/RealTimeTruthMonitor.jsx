@@ -27,7 +27,7 @@ const RealTimeTruthMonitor = () => {
 
     const startMonitoring = () => {
         // Connect to WebSocket for real-time updates
-        wsService.connect(process.env.REACT_APP_WS_URL);
+        wsService.connect((import.meta?.env?.VITE_WS_URL || '').trim() || undefined);
 
         wsService.on('truth_alert', handleTruthAlert);
         wsService.on('misinfo_trend', handleMisinfoTrend);
