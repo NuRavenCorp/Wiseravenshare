@@ -11,10 +11,12 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class AuthV2Controller : ControllerBase
 {
     private readonly IAuthV2Service _authService;
+    private readonly ILogger<AuthV2Controller> _logger;
 
-    public AuthV2Controller(IAuthV2Service authService)
+    public AuthV2Controller(IAuthV2Service authService, ILogger<AuthV2Controller> logger)
     {
         _authService = authService;
+        _logger = logger;
     }
 
     [HttpGet("status")]
@@ -58,6 +60,11 @@ public sealed class AuthV2Controller : ControllerBase
 
             return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auth V2 register failed.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Signup failed. Please try again." });
+        }
     }
 
     [HttpPost("login")]
@@ -77,6 +84,11 @@ public sealed class AuthV2Controller : ControllerBase
         {
             return Unauthorized(new { message = ex.Message });
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auth V2 login failed.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Login failed. Please try again." });
+        }
     }
 
     [HttpPost("refresh-token")]
@@ -91,6 +103,11 @@ public sealed class AuthV2Controller : ControllerBase
         catch (UnauthorizedAccessException ex)
         {
             return Unauthorized(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auth V2 token refresh failed.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Session refresh failed. Please sign in again." });
         }
     }
 
