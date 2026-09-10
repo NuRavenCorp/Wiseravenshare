@@ -1263,6 +1263,94 @@ CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_creator
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureColumnPatchesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+-- Users table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Users""
+    ADD COLUMN IF NOT EXISTS ""PasswordResetToken"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL;
+
+-- Posts table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Posts""
+    ADD COLUMN IF NOT EXISTS ""IsTruthDispatch"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""IsSensitive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthDeclarationAccepted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthCorrection"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""TruthSources"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""Latitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""Longitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""LocationName"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""MediaMetadata"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""SharesCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""ViewsCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""IsPinned"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""QuoteOfId"" UUID NULL;
+
+-- WiseCoins table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""WiseCoins"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Balance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""StakedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalEarned"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalSpent"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- CoinTransactions table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""CoinTransactions"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""WiseCoinId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""TargetUserId"" UUID NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Amount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""NetAmount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Fee"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHoursValue"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHourRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Description"" TEXT NOT NULL DEFAULT '',
+    ""ReferenceId"" TEXT NULL,
+    ""ReferenceType"" TEXT NULL,
+    ""Metadata"" TEXT NULL,
+    ""Hash"" TEXT NULL,
+    ""PreviousHash"" TEXT NULL,
+    ""CompletedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- Content crawler catalog (personalization phase 3)
+CREATE TABLE IF NOT EXISTS app_data.content_crawler_catalog (
+    id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    content_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    country_code TEXT NULL,
+    score FLOAT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 static async Task EnsureZernioWebhookTablesAsync(string connectionString, CancellationToken cancellationToken = default)
 {
     if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -1882,6 +1970,15 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Zernio webhook tables bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureColumnPatchesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Column/table patch bootstrap failed during startup.");
     }
 
     // Seed default badge catalog (badge-first currency system)
