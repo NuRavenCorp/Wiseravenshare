@@ -27,11 +27,11 @@ const iconBtn = {
     color: 'var(--text-color)', padding: '6px', borderRadius: '8px', display: 'flex'
 };
 
-export const CollaborationRoom = ({ roomId, onLeave }) => {
+export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
     const { user } = useAuth();
     const {
         isConnected, isConnecting, onEvent, invoke,
-        joinRoom, leaveRoom, sendMessage, startFileTransfer, sendFileChunk
+        joinRoom, leaveRoom, sendMessage, startFileTransfer, sendFileChunk, bridgeToExternalPlatform
     } = useCollaborationHub();
 
     const [room, setRoom] = useState(null);
@@ -45,6 +45,7 @@ export const CollaborationRoom = ({ roomId, onLeave }) => {
     const [isSending, setIsSending] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
     const [fileTransfers, setFileTransfers] = useState({});
+    const [bridgeStatus, setBridgeStatus] = useState('');
 
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -224,6 +225,27 @@ export const CollaborationRoom = ({ roomId, onLeave }) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
     };
 
+    const handleBridgeShare = async (targetPlatform) => {
+        const inviteUrl = `${window.location.origin}/?room=${roomId}`;
+        const payload = {
+            roomId,
+            roomName: room?.name || roomMetadata?.roomName || '',
+            inviteUrl,
+            hashtags: Array.isArray(roomMetadata?.hashtags) ? roomMetadata.hashtags : [],
+            mediaNotes: roomMetadata?.mediaNotes || ''
+        };
+
+        try {
+            await bridgeToExternalPlatform(targetPlatform, null, payload);
+            setBridgeStatus(`Shared room with ${targetPlatform} collaborators.`);
+        } catch {
+            setBridgeStatus(`Could not bridge to ${targetPlatform} right now. Invite link copied instead.`);
+            navigator.clipboard?.writeText(inviteUrl);
+        }
+
+        setTimeout(() => setBridgeStatus(''), 3500);
+    };
+
     if (!isConnected) {
         return (
             <div style={{ ...panel, padding: '40px', textAlign: 'center' }}>
@@ -285,6 +307,47 @@ export const CollaborationRoom = ({ roomId, onLeave }) => {
                         </button>
                     )}
                 </div>
+            </div>
+
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                flexWrap: 'wrap',
+                padding: '8px 12px',
+                borderBottom: '1px solid var(--border-color)',
+                background: 'rgba(255,255,255,0.02)'
+            }}>
+                <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                    Cross-platform share
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {['tiktok', 'facebook', 'instagram', 'twitter', 'web'].map((targetPlatform) => (
+                        <button
+                            key={targetPlatform}
+                            type="button"
+                            onClick={() => handleBridgeShare(targetPlatform)}
+                            style={{
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(79, 140, 255, 0.15)',
+                                color: 'var(--text-color)',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                padding: '4px 10px',
+                                cursor: 'pointer',
+                                textTransform: 'capitalize'
+                            }}
+                        >
+                            {targetPlatform}
+                        </button>
+                    ))}
+                </div>
+                {bridgeStatus && (
+                    <div style={{ width: '100%', fontSize: '11px', color: '#4ade80' }}>
+                        {bridgeStatus}
+                    </div>
+                )}
             </div>
 
             {!isMinimized && (

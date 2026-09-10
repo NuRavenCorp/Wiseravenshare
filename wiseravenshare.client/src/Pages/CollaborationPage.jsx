@@ -89,6 +89,28 @@ const parseRoomIdFromInput = (value) => {
     return raw;
 };
 
+const parseHashtags = (value) => {
+    const tokens = String(value || '')
+        .split(/[\s,]+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .map((token) => (token.startsWith('#') ? token : `#${token}`));
+    return Array.from(new Set(tokens.map((token) => token.toLowerCase())));
+};
+
+const buildSuggestedHashtags = (roomName) => {
+    const normalized = String(roomName || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((part) => part.length >= 3)
+        .slice(0, 4)
+        .map((part) => `#${part}`);
+
+    const defaults = ['#wiseravenshare', '#crossplatform', '#collaboration'];
+    return Array.from(new Set([...normalized, ...defaults]));
+};
+
 const CollaborationPage = ({ initialRoomId }) => {
     const { isConnected, isConnecting, error: hubError, connect, createRoom, joinRoom } = useCollaborationHub();
     const [platform, setPlatform] = useState('web');
@@ -98,6 +120,10 @@ const CollaborationPage = ({ initialRoomId }) => {
     const [joinRoomId, setJoinRoomId] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const [mediaExpanded, setMediaExpanded] = useState(false);
+    const [hashtagsExpanded, setHashtagsExpanded] = useState(false);
+    const [mediaNotes, setMediaNotes] = useState('');
+    const [hashtagsInput, setHashtagsInput] = useState('');
 
     useEffect(() => {
         setPlatform(detectPlatform().platform);
@@ -169,6 +195,11 @@ const CollaborationPage = ({ initialRoomId }) => {
             <ErrorBoundary>
                 <CollaborationRoom
                     roomId={activeRoomId}
+                    roomMetadata={{
+                        roomName: roomName.trim(),
+                        mediaNotes: mediaNotes.trim(),
+                        hashtags: parseHashtags(hashtagsInput)
+                    }}
                     onLeave={() => {
                         setActiveRoomId(null);
                         if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
@@ -270,6 +301,97 @@ const CollaborationPage = ({ initialRoomId }) => {
                         <p style={{ margin: 0, fontSize: '11px', color: 'var(--light-color)', textAlign: 'center' }}>
                             Share the room link with others to collaborate across platforms
                         </p>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                            <button
+                                type="button"
+                                onClick={() => setMediaExpanded((prev) => !prev)}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    borderRadius: '10px',
+                                    padding: '10px 12px',
+                                    fontWeight: 600,
+                                    textAlign: 'left',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Media
+                                {' '}
+                                {mediaExpanded ? 'Collapse' : 'Expand'}
+                            </button>
+                            {mediaExpanded && (
+                                <div style={{ display: 'grid', gap: '8px', padding: '2px 2px 0' }}>
+                                    <textarea
+                                        value={mediaNotes}
+                                        onChange={(e) => setMediaNotes(e.target.value)}
+                                        rows={3}
+                                        placeholder="Attach media notes, clip links, or upload context for your room..."
+                                        style={{
+                                            ...input,
+                                            resize: 'vertical',
+                                            minHeight: '72px'
+                                        }}
+                                    />
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setHashtagsExpanded((prev) => !prev)}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    borderRadius: '10px',
+                                    padding: '10px 12px',
+                                    fontWeight: 600,
+                                    textAlign: 'left',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Hashtags
+                                {' '}
+                                {hashtagsExpanded ? 'Collapse' : 'Expand'}
+                            </button>
+                            {hashtagsExpanded && (
+                                <div style={{ display: 'grid', gap: '8px', padding: '2px 2px 0' }}>
+                                    <input
+                                        type="text"
+                                        value={hashtagsInput}
+                                        onChange={(e) => setHashtagsInput(e.target.value)}
+                                        placeholder="#tiktok #instagram #facebook #podcast"
+                                        style={input}
+                                    />
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {buildSuggestedHashtags(roomName).map((tag) => (
+                                            <button
+                                                key={tag}
+                                                type="button"
+                                                onClick={() => {
+                                                    const existing = parseHashtags(hashtagsInput);
+                                                    if (existing.includes(tag.toLowerCase())) {
+                                                        return;
+                                                    }
+                                                    const next = [...existing, tag.toLowerCase()].join(' ');
+                                                    setHashtagsInput(next);
+                                                }}
+                                                style={{
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'rgba(255,255,255,0.04)',
+                                                    color: 'var(--light-color)',
+                                                    borderRadius: '999px',
+                                                    padding: '4px 8px',
+                                                    fontSize: '11px',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                {tag}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
