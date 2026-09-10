@@ -91,15 +91,11 @@
             <div class="card h-100 shadow-sm">
                 <div class="card-body">
                     <h5 class="card-title">Facebook</h5>
-                    <div class="embed-shell">
-                        <iframe
-                            title="Facebook Feed"
-                            class="social-feed-iframe"
-                            loading="lazy"
-                            allowfullscreen="true"
-                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                            src="https://www.facebook.com/plugins/page.php?href=https%3A%2F%2Fwww.facebook.com%2Fmeta&tabs=timeline&width=340&height=450&small_header=false&adapt_container_width=true&hide_cover=false&show_facepile=true&appId">
-                        </iframe>
+                    <div class="embed-shell social-feed-js-card">
+                        <p>Open the live Facebook page directly from the app.</p>
+                        <button type="button" class="social-feed-js-button" data-feed-url="https://www.facebook.com/meta">
+                            Open Facebook Feed
+                        </button>
                     </div>
                 </div>
             </div>
@@ -109,12 +105,11 @@
             <div class="card h-100 shadow-sm">
                 <div class="card-body">
                     <h5 class="card-title">TikTok</h5>
-                    <div class="embed-shell">
-                        <blockquote class="tiktok-embed social-embed-block" cite="https://www.tiktok.com/@tiktok/video/7315262411457125664" data-video-id="7315262411457125664" style="max-width: 605px; min-width: 325px;">
-                            <section>
-                                <a target="_blank" title="tiktok" href="https://www.tiktok.com/@tiktok">@@tiktok</a>
-                            </section>
-                        </blockquote>
+                    <div class="embed-shell social-feed-js-card">
+                        <p>Load the live TikTok profile in a new tab.</p>
+                        <button type="button" class="social-feed-js-button" data-feed-url="https://www.tiktok.com/@tiktok">
+                            Open TikTok Feed
+                        </button>
                     </div>
                 </div>
             </div>
@@ -124,10 +119,11 @@
             <div class="card h-100 shadow-sm">
                 <div class="card-body">
                     <h5 class="card-title">Instagram</h5>
-                    <div class="embed-shell">
-                        <blockquote class="instagram-media social-embed-block" data-instgrm-captioned data-instgrm-permalink="https://www.instagram.com/p/C5w8-2bM1hN/" data-instgrm-version="14" style="margin: 0 auto; max-width: 540px; width: 100%;">
-                            <a href="https://www.instagram.com/p/C5w8-2bM1hN/" target="_blank">View this post on Instagram</a>
-                        </blockquote>
+                    <div class="embed-shell social-feed-js-card">
+                        <p>Open the latest Instagram post directly without an iframe.</p>
+                        <button type="button" class="social-feed-js-button" data-feed-url="https://www.instagram.com/p/C5w8-2bM1hN/">
+                            Open Instagram Feed
+                        </button>
                     </div>
                 </div>
             </div>
@@ -139,34 +135,44 @@
     .social-feeds-home .embed-shell {
         border-radius: 10px;
         overflow: hidden;
-        min-height: 460px;
-        background: #fff;
-        border: 1px solid rgba(0, 0, 0, 0.08);
+        min-height: 160px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 16px;
+        display: grid;
+        align-content: center;
+        gap: 12px;
     }
 
-    .social-feeds-home .social-feed-iframe {
-        width: 100%;
-        height: 450px;
-        border: 0;
+    .social-feed-js-card p {
+        margin: 0;
+        color: var(--text-color);
+        line-height: 1.5;
     }
 
-    .social-feeds-home .social-embed-block {
-        width: 100% !important;
-        min-width: 0 !important;
-    }
-
-    @media (max-width: 1199px) {
-        .social-feeds-home .embed-shell {
-            min-height: 420px;
-        }
-
-        .social-feeds-home .social-feed-iframe {
-            height: 420px;
-        }
+    .social-feed-js-button {
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        background: rgba(56, 189, 248, 0.08);
+        color: #bae6fd;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
     }
 </style>
 
 @section Scripts {
-    <script async src="https://www.tiktok.com/embed.js"></script>
-    <script async src="https://www.instagram.com/embed.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.social-feed-js-button').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const feedUrl = button.getAttribute('data-feed-url');
+                    if (feedUrl) {
+                        window.open(feedUrl, '_blank', 'noopener,noreferrer');
+                    }
+                });
+            });
+        });
+    </script>
 }
