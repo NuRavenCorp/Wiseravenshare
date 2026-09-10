@@ -143,16 +143,18 @@ public sealed class PersonalizationController : ControllerBase
 }
 
 // ─── Request models ───────────────────────────────────────────────────────────
+// NOTE: [Required] must be placed on constructor parameters (not properties) for
+// record primary constructors — placing it on properties throws at model binding.
 public record AutoTagRequest(
-    [property: System.ComponentModel.DataAnnotations.Required] string TargetType,
-    [property: System.ComponentModel.DataAnnotations.Required] Guid   TargetId,
-    [property: System.ComponentModel.DataAnnotations.Required] string Content
+    [System.ComponentModel.DataAnnotations.Required] string TargetType,
+    [System.ComponentModel.DataAnnotations.Required] Guid   TargetId,
+    [System.ComponentModel.DataAnnotations.Required] string Content
 );
 
 public record CrawledContentRequest(
-    [property: System.ComponentModel.DataAnnotations.Required] string ContentType,
-    [property: System.ComponentModel.DataAnnotations.Required] Guid   ContentId,
-    [property: System.ComponentModel.DataAnnotations.Required] string Content,
+    [System.ComponentModel.DataAnnotations.Required] string ContentType,
+    [System.ComponentModel.DataAnnotations.Required] Guid   ContentId,
+    [System.ComponentModel.DataAnnotations.Required] string Content,
     string[]? Tags,
     string?   CountryCode
 );
