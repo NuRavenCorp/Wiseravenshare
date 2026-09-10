@@ -3,31 +3,31 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.IdentityModel.Tokens;
-using Wiseravenshare.Server.Entities;
-using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services.Interfaces;
-using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Services;
 
 public sealed class AuthV2Service : IAuthV2Service
 {
-    private readonly IUserRepository _userRepository;
     private readonly IConfiguration _configuration;
-    private readonly ILogger<AuthV2Service> _logger;
+    private readonly UserStore _userStore;
+    private readonly RefreshTokenStore _refreshTokenStore;
 
     public AuthV2Service(
-        IUserRepository userRepository,
         IConfiguration configuration,
-        ILogger<AuthV2Service> logger)
+        UserStore userStore,
+        RefreshTokenStore refreshTokenStore)
     {
-        _userRepository = userRepository;
         _configuration = configuration;
-        _logger = logger;
+        _userStore = userStore;
+        _refreshTokenStore = refreshTokenStore;
     }
 
-    public async Task<AuthV2Result> RegisterAsync(AuthV2RegisterRequest request)
+    public Task<AuthV2Result> RegisterAsync(AuthV2RegisterRequest request)
     {
+        EnsureSeeded();
+
         var email = (request.Email ?? string.Empty).Trim();
         var password = request.Password ?? string.Empty;
         var name = (request.Name ?? string.Empty).Trim();
@@ -52,155 +52,146 @@ public sealed class AuthV2Service : IAuthV2Service
             throw new ArgumentException("Password must be at least 8 characters and include uppercase, lowercase, number, and special character.");
         }
 
-        var existing = await _userRepository.GetByEmailAsync(email);
-        if (existing is not null)
+        if (_userStore.EmailExists(email))
         {
             throw new InvalidOperationException("An account with that email already exists.");
         }
 
-        var username = BuildUsernameFromEmail(email);
-        var usernameOwner = await _userRepository.GetByUsernameAsync(username);
-        if (usernameOwner is not null)
+        UserRecord user;
+        try
         {
-            username = $"{username}_{Guid.NewGuid():N}"[..Math.Min(50, username.Length + 9)];
+            user = _userStore.CreateUser(
+                name,
+                email,
+                password,
+                request.Bio ?? string.Empty,
+                request.Location ?? string.Empty,
+                request.Website ?? string.Empty,
+                request.Avatar ?? string.Empty);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (string.Equals(ex.Message, "An account with that email already exists.", StringComparison.Ordinal))
+            {
+                throw;
+            }
+
+            throw new InvalidOperationException("Signup is temporarily unavailable while account storage reconnects. Please try again shortly.");
         }
 
-        var user = new User
-        {
-            Email = email,
-            Username = username,
-            DisplayName = string.IsNullOrWhiteSpace(name) ? username : name,
-            PasswordHash = PasswordHelper.HashPassword(password),
-            Bio = string.IsNullOrWhiteSpace(request.Bio) ? null : request.Bio.Trim(),
-            Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim(),
-            Website = string.IsNullOrWhiteSpace(request.Website) ? null : request.Website.Trim(),
-            AvatarUrl = string.IsNullOrWhiteSpace(request.Avatar) ? null : request.Avatar.Trim(),
-            IsActive = true,
-            Role = UserRole.User,
-            TruthScore = 50.0m,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await _userRepository.AddAsync(user);
-        await SetAndPersistRefreshTokenAsync(user);
-        return BuildAuthResult(user);
+        return Task.FromResult(BuildAuthResult(user));
     }
 
-    public async Task<AuthV2Result> LoginAsync(AuthV2LoginRequest request)
+    public Task<AuthV2Result> LoginAsync(AuthV2LoginRequest request)
     {
+        EnsureSeeded();
+
         var login = (request.UsernameOrEmail ?? request.Email ?? string.Empty).Trim();
         var password = request.Password ?? string.Empty;
-
         if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(password))
         {
-            throw new ArgumentException("Email/username and password are required.");
+            throw new ArgumentException("Email and password are required.");
         }
 
-        User? user = null;
-        if (login.Contains('@'))
-        {
-            user = await _userRepository.GetByEmailAsync(login);
-        }
-        else
-        {
-            user = await _userRepository.GetByUsernameAsync(login) ?? await _userRepository.GetByEmailAsync(login);
-        }
-
-        if (user is null || !user.IsActive || user.IsDeleted)
+        var user = _userStore.FindByLoginIdentifier(login);
+        if (user is null || !UserStore.VerifyPassword(password, user.PasswordHash))
         {
             throw new UnauthorizedAccessException("Invalid email or password.");
         }
 
-        if (!PasswordHelper.VerifyPassword(password, user.PasswordHash))
+        if (!_userStore.TryGetById(user.Id, out var refreshed) || refreshed is null)
         {
-            _logger.LogWarning("Auth V2 failed login for {Login}.", login);
             throw new UnauthorizedAccessException("Invalid email or password.");
         }
 
-        user.LastLoginAt = DateTime.UtcNow;
-        user.UpdatedAt = DateTime.UtcNow;
-        await SetAndPersistRefreshTokenAsync(user);
-        return BuildAuthResult(user);
+        return Task.FromResult(BuildAuthResult(refreshed));
     }
 
-    public async Task<AuthV2Result> RefreshAsync(string refreshToken)
+    public Task<AuthV2Result> RefreshAsync(string refreshToken)
     {
+        EnsureSeeded();
+
         var token = (refreshToken ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(token))
         {
             throw new UnauthorizedAccessException("Refresh token is required.");
         }
 
-        var matches = await _userRepository.FindAsync(u => u.RefreshToken == token && !u.IsDeleted);
-        var user = matches.FirstOrDefault();
-        if (user is null || !user.IsActive || user.RefreshTokenExpiryTime is null || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
+        var record = _refreshTokenStore.Find(token);
+        if (record is null || record.ExpiresAtUtc <= DateTime.UtcNow)
         {
+            _refreshTokenStore.Remove(token);
             throw new UnauthorizedAccessException("Refresh token is invalid or expired.");
         }
 
-        user.UpdatedAt = DateTime.UtcNow;
-        await SetAndPersistRefreshTokenAsync(user);
-        return BuildAuthResult(user);
+        if (!_userStore.TryGetById(record.UserId, out var user) || user is null)
+        {
+            _refreshTokenStore.Remove(token);
+            throw new UnauthorizedAccessException("User not found.");
+        }
+
+        _refreshTokenStore.Remove(token);
+        return Task.FromResult(BuildAuthResult(user));
     }
 
-    public async Task<AuthV2VerifyResult> VerifyAsync(string token)
+    public Task<AuthV2VerifyResult> VerifyAsync(string token)
     {
+        EnsureSeeded();
+
         var jwt = (token ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(jwt))
         {
-            return new AuthV2VerifyResult { Valid = false, Message = "Token is required." };
+            return Task.FromResult(new AuthV2VerifyResult { Valid = false, Message = "Token is required." });
         }
 
         try
         {
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(jwt, BuildValidationParameters(), out _);
+            var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                ?? string.Empty;
             var email = principal.FindFirstValue(ClaimTypes.Email)
                 ?? principal.FindFirstValue(JwtRegisteredClaimNames.Email)
                 ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(email))
+
+            UserRecord? user = null;
+            if (!string.IsNullOrWhiteSpace(userId))
             {
-                return new AuthV2VerifyResult { Valid = false, Message = "Invalid token claims." };
+                _userStore.TryGetById(userId, out user);
             }
 
-            var user = await _userRepository.GetByEmailAsync(email);
-            if (user is null || !user.IsActive || user.IsDeleted)
+            if (user is null && !string.IsNullOrWhiteSpace(email))
             {
-                return new AuthV2VerifyResult { Valid = false, Message = "User not found." };
+                _userStore.TryGetByEmail(email, out user);
             }
 
-            return new AuthV2VerifyResult
+            if (user is null)
+            {
+                return Task.FromResult(new AuthV2VerifyResult { Valid = false, Message = "User not found." });
+            }
+
+            return Task.FromResult(new AuthV2VerifyResult
             {
                 Valid = true,
                 User = BuildUserResponse(user)
-            };
+            });
         }
         catch
         {
-            return new AuthV2VerifyResult { Valid = false, Message = "Invalid token." };
+            return Task.FromResult(new AuthV2VerifyResult { Valid = false, Message = "Invalid token." });
         }
     }
 
-    public async Task LogoutAsync(Guid userId)
+    public Task LogoutAsync(Guid userId)
     {
-        var user = await _userRepository.GetByIdAsync(userId);
-        if (user is null)
-        {
-            return;
-        }
-
-        user.RefreshToken = null;
-        user.RefreshTokenExpiryTime = null;
-        user.UpdatedAt = DateTime.UtcNow;
-        await _userRepository.UpdateAsync(user);
+        _refreshTokenStore.RemoveAllForUser(userId.ToString("N"));
+        return Task.CompletedTask;
     }
 
     public AuthV2StatusResult GetStatus()
     {
-        var issuer = GetJwtIssuer();
-        var audience = GetJwtAudience();
-        var key = GetJwtKey();
+        var key = ResolveJwtKeyFromConfiguration();
         return new AuthV2StatusResult
         {
             SelfRegistrationEnabled = IsSelfRegistrationAllowed(),
@@ -208,58 +199,53 @@ public sealed class AuthV2Service : IAuthV2Service
             TeamInviteLoginEnabled = true,
             Jwt = new AuthV2JwtStatus
             {
-                IssuerConfigured = !string.IsNullOrWhiteSpace(issuer),
-                AudienceConfigured = !string.IsNullOrWhiteSpace(audience),
+                IssuerConfigured = !string.IsNullOrWhiteSpace(GetJwtIssuer()),
+                AudienceConfigured = !string.IsNullOrWhiteSpace(GetJwtAudience()),
                 KeyConfigured = !string.IsNullOrWhiteSpace(key) && key.Length >= 32
             }
         };
     }
 
-    private async Task SetAndPersistRefreshTokenAsync(User user)
+    private AuthV2Result BuildAuthResult(UserRecord user)
     {
-        user.RefreshToken = GenerateRefreshToken();
-        user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(30);
-        await _userRepository.UpdateAsync(user);
-    }
-
-    private AuthV2Result BuildAuthResult(User user)
-    {
+        var refreshToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        _refreshTokenStore.Save(refreshToken, user.Id, DateTime.UtcNow.AddDays(365));
         return new AuthV2Result
         {
             Token = GenerateToken(user),
-            RefreshToken = user.RefreshToken ?? string.Empty,
+            RefreshToken = refreshToken,
             User = BuildUserResponse(user)
         };
     }
 
-    private AuthV2User BuildUserResponse(User user)
+    private static AuthV2User BuildUserResponse(UserRecord user)
     {
         return new AuthV2User
         {
-            Id = user.Id.ToString("N"),
+            Id = user.Id,
             Email = user.Email,
-            Username = user.Username,
-            Name = string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName,
-            DisplayName = string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName,
-            AvatarUrl = user.AvatarUrl,
-            TeamRole = user.Role == UserRole.Admin ? "owner" : "member",
-            Role = user.Role.ToString()
+            Username = user.Handle,
+            Name = user.Name,
+            DisplayName = user.Name,
+            AvatarUrl = user.Avatar,
+            TeamRole = "member",
+            Role = "User"
         };
     }
 
-    private string GenerateToken(User user)
+    private string GenerateToken(UserRecord user)
     {
         var claims = new[]
         {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString("N")),
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString("N")),
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id),
+            new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(ClaimTypes.Email, user.Email),
-            new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
-            new Claim(ClaimTypes.Name, string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName),
-            new Claim(ClaimTypes.Role, user.Role.ToString()),
-            new Claim("teamRole", user.Role == UserRole.Admin ? "owner" : "member"),
-            new Claim("access_scope", user.Role == UserRole.Admin ? "admin" : "team"),
+            new Claim(JwtRegisteredClaimNames.UniqueName, user.Handle),
+            new Claim(ClaimTypes.Name, user.Name),
+            new Claim(ClaimTypes.Role, "User"),
+            new Claim("teamRole", "member"),
+            new Claim("access_scope", "team"),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
@@ -288,6 +274,28 @@ public sealed class AuthV2Service : IAuthV2Service
         };
     }
 
+    private void EnsureSeeded()
+    {
+        _userStore.EnsureSeeded(ReadConfiguredUsers());
+    }
+
+    private IEnumerable<(string Name, string Email, string Password)> ReadConfiguredUsers()
+    {
+        foreach (var entry in _configuration.GetSection("Authentication:Users").GetChildren())
+        {
+            var email = (entry["Email"] ?? string.Empty).Trim();
+            var password = (entry["Password"] ?? string.Empty).Trim();
+            var name = (entry["Name"] ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            {
+                continue;
+            }
+
+            yield return (name, email, password);
+        }
+    }
+
     private int GetAccessTokenMinutes()
     {
         if (int.TryParse(_configuration["Authentication:Jwt:ExpiresMinutes"], out var minutes) && minutes > 0)
@@ -311,7 +319,17 @@ public sealed class AuthV2Service : IAuthV2Service
             return parsed;
         }
 
-        return string.Equals(raw, "1", StringComparison.Ordinal);
+        if (string.Equals(raw, "1", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(raw, "0", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private string GetJwtKey()
@@ -362,11 +380,6 @@ public sealed class AuthV2Service : IAuthV2Service
             : _configuration["Authentication:Jwt:Audience"]!;
     }
 
-    private static string GenerateRefreshToken()
-    {
-        return Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    }
-
     private static bool IsValidEmail(string email)
     {
         try
@@ -387,28 +400,5 @@ public sealed class AuthV2Service : IAuthV2Service
                && password.Any(char.IsLower)
                && password.Any(char.IsDigit)
                && password.Any(ch => !char.IsLetterOrDigit(ch));
-    }
-
-    private static string BuildUsernameFromEmail(string email)
-    {
-        var localPart = email.Split('@')[0].Trim();
-        if (string.IsNullOrWhiteSpace(localPart))
-        {
-            localPart = $"user{Guid.NewGuid():N}"[..12];
-        }
-
-        var sanitized = new string(localPart.Select(ch => char.IsLetterOrDigit(ch) || ch == '_' ? ch : '_').ToArray());
-        sanitized = sanitized.Trim('_');
-        if (string.IsNullOrWhiteSpace(sanitized))
-        {
-            sanitized = $"user{Guid.NewGuid():N}"[..12];
-        }
-
-        if (sanitized.Length > 50)
-        {
-            sanitized = sanitized[..50];
-        }
-
-        return sanitized;
     }
 }
