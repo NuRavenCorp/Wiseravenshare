@@ -617,6 +617,7 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             LogoUrl = station.LogoUrl,
             CoverImageUrl = station.CoverImageUrl,
             StreamUrl = station.StreamUrl,
+            StreamKey = station.StreamKey,
             Website = station.Website,
             SocialLinks = station.SocialLinks,
             CreatorId = station.CreatorId,

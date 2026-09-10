@@ -148,7 +148,8 @@ const FMRadioPage = () => {
   // Refs
   const howlRef         = useRef(null);   // current Howl instance
   const uploadRef       = useRef(null);
-  const canvasRef       = useRef(null);
+  const canvasRef       = useRef(null);   // classic viz canvas
+  const modCanvasRef    = useRef(null);   // modern viz canvas
   const captionAudioRef = useRef(null);
   const captionMediaRef = useRef(null);
   const containerRef    = useRef(null);
@@ -159,6 +160,7 @@ const FMRadioPage = () => {
   const eqFiltersRef  = useRef([]);
   const analyserRef   = useRef(null);
   const eqWiredRef    = useRef(false);   // built only once
+  const themeRef      = useRef(theme);   // track active theme for viz
 
   // Stable refs for event callbacks
   const libraryRef  = useRef(library);
@@ -232,26 +234,41 @@ const FMRadioPage = () => {
   // ── Spectrum visualizer ───────────────────────────────────────────────────
   const startViz = useCallback(() => {
     const analyser = analyserRef.current;
-    const canvas   = canvasRef.current;
-    if (!analyser || !canvas) return;
-    const ctx  = canvas.getContext('2d');
+    if (!analyser) return;
+    // Draw to whichever canvas is currently mounted
+    const getActiveCanvas = () => modCanvasRef.current || canvasRef.current;
     const data = new Uint8Array(analyser.frequencyBinCount);
-    const COLORS = ['#ffb347', '#ff8c00', '#e63946', '#a855f7', '#3b82f6'];
+    const COLORS_CLASSIC = ['#ffb347', '#ff8c00', '#e63946', '#a855f7', '#3b82f6'];
+    const COLORS_MODERN  = ['#3b82f6', '#a855f7', '#ec4899', '#a855f7', '#3b82f6'];
 
     const draw = () => {
       vizRafRef.current = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(data);
-      const { width: W, height: H } = canvas;
-      ctx.clearRect(0, 0, W, H);
+      const canvas = getActiveCanvas();
+      if (!canvas) return;
+      const isModern = canvas === modCanvasRef.current;
+      const COLORS = isModern ? COLORS_MODERN : COLORS_CLASSIC;
+      const ctx2d = canvas.getContext('2d');
+      const W = canvas.offsetWidth || canvas.width;
+      const H = canvas.offsetHeight || canvas.height;
+      if (canvas.width !== W) canvas.width = W;
+      if (canvas.height !== H) canvas.height = H;
+      ctx2d.clearRect(0, 0, W, H);
       const bw = W / data.length;
       for (let i = 0; i < data.length; i++) {
         const bh = (data[i] / 255) * H;
         const ci = Math.floor((i / data.length) * (COLORS.length - 1));
-        const g  = ctx.createLinearGradient(0, H, 0, H - bh);
+        const g  = ctx2d.createLinearGradient(0, H, 0, H - bh);
         g.addColorStop(0, COLORS[ci]);
         g.addColorStop(1, COLORS[Math.min(ci + 1, COLORS.length - 1)]);
-        ctx.fillStyle = g;
-        ctx.fillRect(i * bw, H - bh, bw - 1, bh);
+        ctx2d.fillStyle = g;
+        if (isModern) {
+          // Circular bars for modern mode
+          const x = i * bw;
+          ctx2d.fillRect(x, H - bh, bw - 1, bh);
+        } else {
+          ctx2d.fillRect(i * bw, H - bh, bw - 1, bh);
+        }
       }
     };
     draw();
@@ -259,8 +276,9 @@ const FMRadioPage = () => {
 
   const stopViz = useCallback(() => {
     if (vizRafRef.current) { cancelAnimationFrame(vizRafRef.current); vizRafRef.current = null; }
-    const canvas = canvasRef.current;
-    if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    [canvasRef.current, modCanvasRef.current].forEach((c) => {
+      if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    });
   }, []);
 
   // ── Time ticker ───────────────────────────────────────────────────────────
@@ -543,295 +561,495 @@ const FMRadioPage = () => {
   const progress  = duration > 0 ? (currentTime / duration) * 100 : 0;
   const meta      = currentTrack ? parseMeta(currentTrack.name) : null;
 
-  // ─────────────────────────────────────────────────────────────────────────
-  return (
-    <div ref={containerRef} className={`wr-shell${isFullscreen ? ' wr-fullscreen' : ''}`}>
-      <audio ref={captionAudioRef} preload="none" />
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  const [theme, setTheme] = useState(() => lsGet('wr_theme', 'classic'));
+  useEffect(() => { lsSet('wr_theme', theme); }, [theme]);
 
-      <div className="wr-cabinet">
+  const renderClassicTheme = () => (
+    <div className="wr-cabinet">
+      <div className="wr-brand">
+        <h1>WISERAVENSHARE</h1>
+        <div className="wr-model">WR-77 · FM · CASSETTE · 10-BAND EQ · ALL CODECS</div>
+      </div>
 
-        {/* Brand */}
-        <div className="wr-brand">
-          <h1>WISERAVENSHARE</h1>
-          <div className="wr-model">WR-77 · FM · CASSETTE · 10-BAND EQ · ALL CODECS</div>
-        </div>
+      <div className="wr-grille" />
 
-        <div className="wr-grille" />
+      <div className="wr-vu">
+        <div className="wr-vu-label">VU</div>
+        <div className="wr-vu-arc" />
+        <div className="wr-vu-needle" style={{ transform: `translateX(-50%) rotate(${vuAngle}deg)` }} />
+        <div className="wr-vu-pivot" />
+      </div>
 
-        {/* VU meter */}
-        <div className="wr-vu">
-          <div className="wr-vu-label">VU</div>
-          <div className="wr-vu-arc" />
-          <div className="wr-vu-needle" style={{ transform: `translateX(-50%) rotate(${vuAngle}deg)` }} />
-          <div className="wr-vu-pivot" />
-        </div>
-
-        {/* Tuner display */}
-        <div className="wr-tuner-display">
-          <div className="wr-freq-row">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span className="wr-freq-val">{tunedFreq.toFixed(1)}</span>
-              <span className="wr-freq-unit">MHz</span>
-            </div>
-            <div className="wr-stereo-led">
-              <div className={`wr-led${anyPlaying ? ' on' : ''}`} />
-              STEREO
-            </div>
+      <div className="wr-tuner-display">
+        <div className="wr-freq-row">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span className="wr-freq-val">{tunedFreq.toFixed(1)}</span>
+            <span className="wr-freq-unit">MHz</span>
           </div>
-          <div className="wr-station-ticker">
-            {tab === 'cassette' && currentTrack ? `${meta?.title} — ${meta?.artist}` : stationName}
+          <div className="wr-stereo-led">
+            <div className={`wr-led${anyPlaying ? ' on' : ''}`} />
+            STEREO
           </div>
         </div>
+        <div className="wr-station-ticker">
+          {tab === 'cassette' && currentTrack ? `${meta?.title} — ${meta?.artist}` : stationName}
+        </div>
+      </div>
 
-        {/* Dial */}
-        <div className="wr-dial-assembly">
-          <div className="wr-dial-scale">
-            <div className="wr-dial-ticks" />
-            <div className="wr-dial-numbers">
-              {[88, 92, 96, 100, 104, 108].map((n) => <span key={n}>{n}</span>)}
-            </div>
-            <div className="wr-dial-needle" style={{ left: needlePct }} />
-            <input type="range" className="wr-dial-range"
-              min={FM_LOW} max={FM_HIGH} step={0.1} value={tunedFreq}
-              onChange={(e) => setTunedFreq(parseFloat(e.target.value))} />
+      <div className="wr-dial-assembly">
+        <div className="wr-dial-scale">
+          <div className="wr-dial-ticks" />
+          <div className="wr-dial-numbers">
+            {[88, 92, 96, 100, 104, 108].map((n) => <span key={n}>{n}</span>)}
           </div>
+          <div className="wr-dial-needle" style={{ left: needlePct }} />
+          <input type="range" className="wr-dial-range"
+            min={FM_LOW} max={FM_HIGH} step={0.1} value={tunedFreq}
+            onChange={(e) => setTunedFreq(parseFloat(e.target.value))} />
         </div>
+      </div>
 
-        {/* Source tabs */}
-        <div className="wr-source-tabs">
-          <button className={`wr-source-btn${tab === 'radio'    ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
-          <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 CASSETTE</button>
-          <button className={`wr-source-btn${tab === 'caption'  ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
-        </div>
+      <div className="wr-source-tabs">
+        <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
+        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 CASSETTE</button>
+        <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
+      </div>
 
-        {/* ── FM RADIO ── */}
-        {tab === 'radio' && <div className="wr-fm-section"><FMTunerModule /></div>}
+      {tab === 'radio' && <div className="wr-fm-section"><FMTunerModule /></div>}
 
-        {/* ── CASSETTE DECK ── */}
-        {tab === 'cassette' && (
-          <div className="wr-cassette-deck">
-            <div className="wr-deck-label">◄◄ CASSETTE · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
+      {tab === 'cassette' && (
+        <div className="wr-cassette-deck">
+          <div className="wr-deck-label">◄◄ CASSETTE · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
 
-            {/* Spectrum visualizer */}
-            <div className="wr-viz-wrap">
-              <canvas ref={canvasRef} className="wr-canvas" width={800} height={72} />
-              {!isPlaying && <div className="wr-viz-idle">▶ PRESS PLAY FOR SPECTRUM ANALYZER</div>}
+          <div className="wr-viz-wrap">
+            <canvas ref={canvasRef} className="wr-canvas" width={800} height={72} />
+            {!isPlaying && <div className="wr-viz-idle">▶ PRESS PLAY FOR SPECTRUM ANALYZER</div>}
+          </div>
+
+          <div className="wr-track-info">
+            <div className="wr-track-art">{isFav(currentTrack) ? '⭐' : '🎵'}</div>
+            <div className="wr-track-meta">
+              <div className="wr-track-title">{meta?.title || 'No track loaded'}</div>
+              <div className="wr-track-artist">{meta?.artist || '—'}</div>
             </div>
+            <button className={`wr-fav-btn${isFav(currentTrack) ? ' active' : ''}`}
+              onClick={() => toggleFav(currentTrack)} disabled={!currentTrack} title="Favorite">
+              {isFav(currentTrack) ? '★' : '☆'}
+            </button>
+          </div>
 
-            {/* Track info */}
-            <div className="wr-track-info">
-              <div className="wr-track-art">{isFav(currentTrack) ? '⭐' : '🎵'}</div>
-              <div className="wr-track-meta">
-                <div className="wr-track-title">{meta?.title || 'No track loaded'}</div>
-                <div className="wr-track-artist">{meta?.artist || '—'}</div>
+          <div className="wr-cassette-door">
+            <div className="wr-tape-visual">
+              <div className={`wr-reel left${isPlaying ? ' spinning' : ''}`} />
+              <div className="wr-tape-ribbon" />
+              <div className={`wr-reel right${isPlaying ? ' spinning' : ''}`} />
+            </div>
+            <div className="wr-cassette-label">{currentTrack?.name || 'NO TAPE INSERTED'}</div>
+          </div>
+
+          {loadError && (
+            <div className="wr-error">
+              ⚠ {loadError}
+              <button style={{ marginLeft: 10, background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }}
+                onClick={() => setLoadError('')}>✕</button>
+            </div>
+          )}
+
+          <div className="wr-seek-row">
+            <span className="wr-time">{fmt(currentTime)}</span>
+            <div className="wr-seek-wrap">
+              <input type="range" className="wr-seek"
+                min={0} max={duration || 0} step={0.1} value={currentTime}
+                onChange={(e) => seek(parseFloat(e.target.value))}
+                disabled={!currentTrack} />
+              <div className="wr-seek-fill" style={{ width: `${progress}%` }} />
+            </div>
+            <span className="wr-time">{fmt(duration)}</span>
+          </div>
+
+          <div className="wr-transport">
+            <button className="wr-key" onClick={skipPrev} disabled={!library.length} title="Prev [Shift+←]">⏮</button>
+            <button className="wr-key" onClick={rewind} disabled={!currentTrack} title="Rewind [←]">◀◀</button>
+            <button className={`wr-key${isPlaying ? ' active' : ''}`} onClick={play} disabled={!currentTrack} title="Play [Space]">▶</button>
+            <button className="wr-key" onClick={pause} disabled={!isPlaying} title="Pause [Space]">❚❚</button>
+            <button className="wr-key" onClick={stop} disabled={!currentTrack} title="Stop">■</button>
+            <button className="wr-key" onClick={fastForward} disabled={!currentTrack} title="FF [→]">▶▶</button>
+            <button className="wr-key" onClick={skipNext} disabled={!library.length} title="Next [Shift+→]">⏭</button>
+          </div>
+
+          <div className="wr-mode-row">
+            <button className={`wr-mode-btn${shuffle ? ' active' : ''}`} onClick={() => setShuffle((s) => !s)} title="Shuffle">⇄</button>
+            <button className={`wr-mode-btn${repeat !== 'off' ? ' active' : ''}`} onClick={cycleRepeat} title={`Repeat: ${repeat}`}>
+              {repeat === 'one' ? '↺¹' : '↺'}
+            </button>
+            <button className={`wr-mode-btn${showEq ? ' active' : ''}`} onClick={() => setShowEq((x) => !x)} title="Equalizer [E]">EQ</button>
+            <button className={`wr-mode-btn${showQueue ? ' active' : ''}`} onClick={() => setShowQueue((x) => !x)} title="Queue [Q]">Q</button>
+            <button className="wr-mode-btn" title="Fullscreen [F]" onClick={() => {
+              if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().catch(() => {});
+              else document.exitFullscreen?.().catch(() => {});
+            }}>⛶</button>
+          </div>
+
+          <div className="wr-vol-row">
+            <button className="wr-key" style={{ width: 34, height: 28, fontSize: '.72rem' }} onClick={() => setIsMuted((m) => !m)}>{isMuted ? '🔇' : '🔊'}</button>
+            <input type="range" className="wr-vol" min={0} max={1} step={0.01}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }} />
+            <span className="wr-vol-pct">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+          </div>
+
+          {showEq && (
+            <div className="wr-eq-panel">
+              <div className="wr-eq-header">
+                <span className="wr-eq-title">10-BAND EQUALIZER</span>
+                <div className="wr-eq-presets">
+                  {Object.keys(EQ_PRESETS).map((p) => (
+                    <button key={p} className={`wr-preset-btn${eqPreset === p ? ' active' : ''}`} onClick={() => applyPreset(p)}>{p}</button>
+                  ))}
+                  <button className="wr-preset-btn" onClick={() => applyPreset('flat')}>Reset</button>
+                </div>
               </div>
-              <button className={`wr-fav-btn${isFav(currentTrack) ? ' active' : ''}`}
-                onClick={() => toggleFav(currentTrack)} disabled={!currentTrack} title="Favorite">
-                {isFav(currentTrack) ? '★' : '☆'}
-              </button>
-            </div>
-
-            {/* Cassette door */}
-            <div className="wr-cassette-door">
-              <div className="wr-tape-visual">
-                <div className={`wr-reel left${isPlaying ? ' spinning' : ''}`} />
-                <div className="wr-tape-ribbon" />
-                <div className={`wr-reel right${isPlaying ? ' spinning' : ''}`} />
+              <div className="wr-eq-bands">
+                {EQ_BANDS.map((band, i) => (
+                  <div key={band.freq} className="wr-eq-band">
+                    <span className="wr-eq-val">{(eqGains[i] > 0 ? '+' : '') + (eqGains[i]?.toFixed(0) ?? 0)}</span>
+                    <input type="range" className="wr-eq-slider" orient="vertical"
+                      min={-12} max={12} step={0.5} value={eqGains[i] ?? 0}
+                      onChange={(e) => setEqBand(i, parseFloat(e.target.value))} />
+                    <span className="wr-eq-label">{band.label}</span>
+                  </div>
+                ))}
               </div>
-              <div className="wr-cassette-label">{currentTrack?.name || 'NO TAPE INSERTED'}</div>
             </div>
+          )}
 
-            {/* Error banner */}
-            {loadError && (
-              <div className="wr-error">
-                ⚠ {loadError}
-                <button style={{ marginLeft: 10, background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }}
-                  onClick={() => setLoadError('')}>✕</button>
+          {showQueue && (
+            <div className="wr-queue-panel">
+              <div className="wr-queue-header">
+                <span className="wr-eq-title">QUEUE ({library.length})</span>
+                <button className="wr-preset-btn" onClick={clearQueue} disabled={!library.length}>Clear all</button>
+              </div>
+              {library.length === 0 ? (
+                <div className="wr-loading" style={{ animation: 'none', opacity: .5, padding: '10px 0' }}>Queue empty — load files below</div>
+              ) : (
+                <div className="wr-tape-rack">
+                  {library.map((t, i) => (
+                    <div key={t.id} className={`wr-queue-item${currentTrack?.id === t.id ? ' active' : ''}`}>
+                      <button className="wr-q-play" onClick={() => loadTrack(t, i, true)}>
+                        {currentTrack?.id === t.id && isPlaying ? '▶' : '○'}
+                      </button>
+                      <span className="wr-tape-name" onClick={() => loadTrack(t, i, true)}>
+                        {isFav(t) && '⭐ '}{t.title || t.name}
+                      </span>
+                      <button className="wr-q-btn" onClick={() => moveTrack(t.id, 'up')} title="Up">↑</button>
+                      <button className="wr-q-btn" onClick={() => moveTrack(t.id, 'down')} title="Down">↓</button>
+                      <button className={`wr-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)} title="Fav">★</button>
+                      <button className="wr-q-btn rm" onClick={() => removeTrack(t.id)} title="Remove">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
+            accept="audio/*,video/mp4,.mp3,.mp4,.m4a,.wav,.flac,.ogg,.oga,.aac,.opus,.weba,.webm,.wma"
+            onChange={handleUpload} />
+          <button className="wr-insert-tape" onClick={() => uploadRef.current?.click()}>
+            ⏏ LOAD FILES — mp3 · mp4 · flac · wav · ogg · m4a · aac · opus · wma
+          </button>
+
+          <div className="wr-kb-help">
+            <kbd>Space</kbd>play/pause &nbsp;
+            <kbd>←</kbd><kbd>→</kbd>seek &nbsp;
+            <kbd>Shift+←</kbd><kbd>Shift+→</kbd>skip &nbsp;
+            <kbd>↑↓</kbd>vol &nbsp;
+            <kbd>E</kbd>eq &nbsp;
+            <kbd>Q</kbd>queue &nbsp;
+            <kbd>M</kbd>mute &nbsp;
+            <kbd>F</kbd>fullscreen
+          </div>
+        </div>
+      )}
+
+      {tab === 'caption' && (
+        <div className="wr-cassette-deck">
+          <div className="wr-deck-label">▸ CAPTION PHOTOS & VIDEOS WITH MUSIC</div>
+          <div className="wr-caption-panel">
+            <div className="wr-caption-label">▸ 1. SELECT MUSIC TRACK</div>
+            {library.length === 0 ? (
+              <div className="wr-loading" style={{ animation: 'none', opacity: .55, padding: '6px 0' }}>Load tracks in Cassette tab first</div>
+            ) : (
+              <div className="wr-tape-rack" style={{ marginBottom: 12 }}>
+                {library.map((t) => (
+                  <button key={t.id} className={`wr-tape-item${captionTrack?.id === t.id ? ' active' : ''}`}
+                    onClick={() => { setCaptionTrack(t); setCaptionPlaying(false); if (captionAudioRef.current) captionAudioRef.current.src = ''; }}>
+                    <span>📼</span><span className="wr-tape-name">{t.title || t.name}</span>
+                  </button>
+                ))}
               </div>
             )}
-
-            {/* Seek */}
-            <div className="wr-seek-row">
-              <span className="wr-time">{fmt(currentTime)}</span>
-              <div className="wr-seek-wrap">
-                <input type="range" className="wr-seek"
-                  min={0} max={duration || 0} step={0.1} value={currentTime}
-                  onChange={(e) => seek(parseFloat(e.target.value))}
-                  disabled={!currentTrack} />
-                <div className="wr-seek-fill" style={{ width: `${progress}%` }} />
+            <div className="wr-caption-label">▸ 2. SELECT PHOTO OR VIDEO</div>
+            <div className="wr-caption-grid">
+              <label className={`wr-caption-slot${captionMediaFile ? ' filled' : ''}`}>
+                {captionMediaFile ? `✓ ${captionMediaFile.name}` : '📁 Pick photo or video'}
+                <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
+              </label>
+              <div className="wr-caption-slot" style={{ cursor: 'default' }}>
+                <div style={{ fontSize: '.85rem', marginBottom: 4 }}>🎵</div>
+                <div style={{ fontSize: '.7rem', opacity: .7 }}>{captionTrack ? (captionTrack.title || captionTrack.name) : 'None selected'}</div>
               </div>
-              <span className="wr-time">{fmt(duration)}</span>
             </div>
-
-            {/* Transport */}
+            <div className="wr-caption-preview">
+              {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" />}
+              {captionMediaUrl && captionMediaType === 'video' && (
+                <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%' }} />
+              )}
+              {!captionMediaUrl && <span>▸ Preview appears here</span>}
+            </div>
+            {captionTrack && <div className="wr-caption-track-info">🎵 {captionTrack.title || captionTrack.name}</div>}
             <div className="wr-transport">
-              <button className="wr-key" onClick={skipPrev}    disabled={!library.length} title="Prev [Shift+←]">⏮</button>
-              <button className="wr-key" onClick={rewind}      disabled={!currentTrack}   title="Rewind [←]">◀◀</button>
-              <button className={`wr-key${isPlaying ? ' active' : ''}`} onClick={play}    disabled={!currentTrack} title="Play [Space]">▶</button>
-              <button className="wr-key" onClick={pause}       disabled={!isPlaying}      title="Pause [Space]">❚❚</button>
-              <button className="wr-key" onClick={stop}        disabled={!currentTrack}   title="Stop">■</button>
-              <button className="wr-key" onClick={fastForward} disabled={!currentTrack}   title="FF [→]">▶▶</button>
-              <button className="wr-key" onClick={skipNext}    disabled={!library.length} title="Next [Shift+→]">⏭</button>
+              <button className={`wr-key${captionPlaying ? ' active' : ''}`} onClick={captionPlay} disabled={!captionTrack}>▶ PLAY</button>
+              <button className="wr-key" onClick={captionStop} disabled={!captionPlaying}>■ STOP</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="wr-status">
+        <span><span className={`wr-status-dot${anyPlaying ? ' live' : ''}`} />{anyPlaying ? 'PLAYING' : 'STANDBY'}</span>
+        <span>{tab === 'radio' ? 'FM STEREO' : tab === 'cassette' ? `TAPE  ${repeat !== 'off' ? `REP:${repeat.toUpperCase()} ` : ''}${shuffle ? 'SHUF' : ''}` : 'CAPTION'}</span>
+        <span>WR-77</span>
+      </div>
+    </div>
+  );
+
+  const renderModernTheme = () => (
+    <div className="mod-shell">
+      <div className="mod-topbar">
+        <div className="mod-logo">🎧 WiseRaven</div>
+        <div className="mod-tabs">
+          <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
+          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Media Player</button>
+          <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
+        </div>
+      </div>
+
+      {tab === 'radio' && (
+        <div className="mod-fm">
+          <div className="mod-freq-card">
+            <div className="mod-freq-display">
+              <span className="mod-freq-num">{tunedFreq.toFixed(1)}</span>
+              <span className="mod-freq-unit">MHz</span>
+              {anyPlaying && <span className="mod-live-pill">◉ LIVE</span>}
+            </div>
+            <input type="range" className="mod-freq-slider"
+              min={FM_LOW} max={FM_HIGH} step={0.1} value={tunedFreq}
+              onChange={(e) => setTunedFreq(parseFloat(e.target.value))} />
+            <div className="mod-freq-scale">
+              {[88, 92, 96, 100, 104, 108].map((n) => <span key={n}>{n}</span>)}
+            </div>
+          </div>
+          <FMTunerModule />
+        </div>
+      )}
+
+      {tab === 'cassette' && (
+        <div className="mod-player">
+          <div className="mod-player-left">
+            <div className="mod-art">
+              <canvas ref={canvasRef} className="mod-viz-canvas" width={220} height={220} />
+              {!isPlaying && (
+                <div className="mod-art-idle" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: '4rem' }}>{isFav(currentTrack) ? '⭐' : '🎵'}</span>
+                  {currentTrack && <span className="mod-art-hint">Press play</span>}
+                </div>
+              )}
+            </div>
+            <div className="mod-track-info">
+              <div className="mod-track-title">{meta?.title || 'No track loaded'}</div>
+              <div className="mod-track-artist">{meta?.artist || '—'}</div>
             </div>
 
-            {/* Modes */}
-            <div className="wr-mode-row">
-              <button className={`wr-mode-btn${shuffle  ? ' active' : ''}`} onClick={() => setShuffle((s) => !s)} title="Shuffle">⇄</button>
-              <button className={`wr-mode-btn${repeat !== 'off' ? ' active' : ''}`} onClick={cycleRepeat} title={`Repeat: ${repeat}`}>
+            <div className="mod-progress-wrap">
+              <span className="mod-time">{fmt(currentTime)}</span>
+              <div className="mod-progress-bar" onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                seek(((e.clientX - rect.left) / rect.width) * (duration || 0));
+              }}>
+                <div className="mod-progress-fill" style={{ width: `${progress}%` }} />
+                <div className="mod-progress-thumb" style={{ left: `${progress}%` }} />
+              </div>
+              <span className="mod-time">{fmt(duration)}</span>
+            </div>
+
+            <div className="mod-transport">
+              <button className={`mod-ctrl sm${shuffle ? ' on' : ''}`} onClick={() => setShuffle((s) => !s)} title="Shuffle">⇄</button>
+              <button className="mod-ctrl" onClick={skipPrev} disabled={!library.length}>⏮</button>
+              <button className="mod-ctrl" onClick={rewind} disabled={!currentTrack}>−10s</button>
+              <button className={`mod-ctrl play${isPlaying ? ' playing' : ''}`} onClick={isPlaying ? pause : play} disabled={!currentTrack}>{isPlaying ? '⏸' : '▶'}</button>
+              <button className="mod-ctrl" onClick={stop} disabled={!currentTrack}>⏹</button>
+              <button className="mod-ctrl" onClick={fastForward} disabled={!currentTrack}>+10s</button>
+              <button className="mod-ctrl" onClick={skipNext} disabled={!library.length}>⏭</button>
+              <button className={`mod-ctrl sm${repeat !== 'off' ? ' on' : ''}`} onClick={cycleRepeat} title={`Repeat: ${repeat}`}>
                 {repeat === 'one' ? '↺¹' : '↺'}
               </button>
-              <button className={`wr-mode-btn${showEq    ? ' active' : ''}`} onClick={() => setShowEq((x) => !x)}    title="Equalizer [E]">EQ</button>
-              <button className={`wr-mode-btn${showQueue ? ' active' : ''}`} onClick={() => setShowQueue((x) => !x)} title="Queue [Q]">Q</button>
-              <button className="wr-mode-btn" title="Fullscreen [F]"
-                onClick={() => {
-                  if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().catch(() => {});
-                  else document.exitFullscreen?.().catch(() => {});
-                }}>⛶</button>
             </div>
 
-            {/* Volume */}
-            <div className="wr-vol-row">
-              <button className="wr-key" style={{ width: 34, height: 28, fontSize: '.72rem' }}
-                onClick={() => setIsMuted((m) => !m)}>{isMuted ? '🔇' : '🔊'}</button>
-              <input type="range" className="wr-vol" min={0} max={1} step={0.01}
+            <div className="mod-vol-row">
+              <button className="mod-ctrl sm" onClick={() => setIsMuted((m) => !m)}>{isMuted ? '🔇' : '🔊'}</button>
+              <input type="range" className="mod-vol-slider" min={0} max={1} step={0.01}
                 value={isMuted ? 0 : volume}
                 onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }} />
-              <span className="wr-vol-pct">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+              <span className="mod-vol-pct">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
             </div>
 
-            {/* 10-band EQ */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className={`mod-fav-btn${isFav(currentTrack) ? ' on' : ''}`} onClick={() => toggleFav(currentTrack)} disabled={!currentTrack}>
+                {isFav(currentTrack) ? '★ Favorited' : '☆ Favorite'}
+              </button>
+            </div>
+            {loadError && <div className="mod-error">⚠ {loadError} <button onClick={() => setLoadError('')}>✕</button></div>}
+          </div>
+
+          <div className="mod-player-right">
+            <div className="mod-pills">
+              <button className={`mod-pill${showEq ? ' on' : ''}`} onClick={() => setShowEq((x) => !x)}>EQ</button>
+              <button className={`mod-pill${showQueue ? ' on' : ''}`} onClick={() => setShowQueue((x) => !x)}>Queue</button>
+              <button className="mod-pill" onClick={() => {
+                if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().catch(() => {});
+                else document.exitFullscreen?.().catch(() => {});
+              }}>⛶</button>
+            </div>
+
             {showEq && (
-              <div className="wr-eq-panel">
-                <div className="wr-eq-header">
-                  <span className="wr-eq-title">10-BAND EQUALIZER</span>
-                  <div className="wr-eq-presets">
-                    {Object.keys(EQ_PRESETS).map((p) => (
-                      <button key={p} className={`wr-preset-btn${eqPreset === p ? ' active' : ''}`}
-                        onClick={() => applyPreset(p)}>{p}</button>
-                    ))}
-                    <button className="wr-preset-btn" onClick={() => applyPreset('flat')}>Reset</button>
-                  </div>
+              <div className="mod-eq">
+                <div className="mod-eq-presets">
+                  {Object.keys(EQ_PRESETS).map((p) => (
+                    <button key={p} className={`mod-eq-preset${eqPreset === p ? ' on' : ''}`} onClick={() => applyPreset(p)}>{p}</button>
+                  ))}
+                  <button className="mod-eq-preset" onClick={() => applyPreset('flat')}>Reset</button>
                 </div>
-                <div className="wr-eq-bands">
+                <div className="mod-eq-bands">
                   {EQ_BANDS.map((band, i) => (
-                    <div key={band.freq} className="wr-eq-band">
-                      <span className="wr-eq-val">{(eqGains[i] > 0 ? '+' : '') + (eqGains[i]?.toFixed(0) ?? 0)}</span>
-                      <input type="range" className="wr-eq-slider" orient="vertical"
+                    <div key={band.freq} className="mod-eq-band">
+                      <span className="mod-eq-val">{eqGains[i] > 0 ? '+' : ''}{(eqGains[i] || 0).toFixed(0)}</span>
+                      <input type="range" orient="vertical" className="mod-eq-slider"
                         min={-12} max={12} step={0.5} value={eqGains[i] ?? 0}
                         onChange={(e) => setEqBand(i, parseFloat(e.target.value))} />
-                      <span className="wr-eq-label">{band.label}</span>
+                      <span className="mod-eq-label">{band.label}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Queue */}
             {showQueue && (
-              <div className="wr-queue-panel">
-                <div className="wr-queue-header">
-                  <span className="wr-eq-title">QUEUE ({library.length})</span>
-                  <button className="wr-preset-btn" onClick={clearQueue} disabled={!library.length}>Clear all</button>
+              <div className="mod-queue">
+                <div className="mod-queue-head">
+                  <span>Queue ({library.length})</span>
+                  <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear</button>
                 </div>
-                {library.length === 0
-                  ? <div className="wr-loading" style={{ animation: 'none', opacity: .5, padding: '10px 0' }}>Queue empty — load files below</div>
-                  : (
-                    <div className="wr-tape-rack">
-                      {library.map((t, i) => (
-                        <div key={t.id} className={`wr-queue-item${currentTrack?.id === t.id ? ' active' : ''}`}>
-                          <button className="wr-q-play" onClick={() => loadTrack(t, i, true)}>
-                            {currentTrack?.id === t.id && isPlaying ? '▶' : '○'}
-                          </button>
-                          <span className="wr-tape-name" onClick={() => loadTrack(t, i, true)}>
-                            {isFav(t) && '⭐ '}{t.title || t.name}
-                          </span>
-                          <button className="wr-q-btn" onClick={() => moveTrack(t.id, 'up')}   title="Up">↑</button>
-                          <button className="wr-q-btn" onClick={() => moveTrack(t.id, 'down')} title="Down">↓</button>
-                          <button className={`wr-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)} title="Fav">★</button>
-                          <button className="wr-q-btn rm" onClick={() => removeTrack(t.id)} title="Remove">✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                }
+                {library.length === 0 ? (
+                  <div className="mod-queue-empty">No tracks — load files below</div>
+                ) : (
+                  <div className="mod-queue-list">
+                    {library.map((t, i) => (
+                      <div key={t.id} className={`mod-queue-item${currentTrack?.id === t.id ? ' active' : ''}`}>
+                        <button className="mod-q-play" onClick={() => loadTrack(t, i, true)}>
+                          {currentTrack?.id === t.id && isPlaying ? '▶' : '·'}
+                        </button>
+                        <span className="mod-q-name" onClick={() => loadTrack(t, i, true)}>
+                          {isFav(t) && '⭐ '}{t.title || t.name}
+                        </span>
+                        <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'up')}>↑</button>
+                        <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'down')}>↓</button>
+                        <button className={`mod-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)}>★</button>
+                        <button className="mod-q-btn rm" onClick={() => removeTrack(t.id)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Upload */}
             <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
               accept="audio/*,video/mp4,.mp3,.mp4,.m4a,.wav,.flac,.ogg,.oga,.aac,.opus,.weba,.webm,.wma"
               onChange={handleUpload} />
-            <button className="wr-insert-tape" onClick={() => uploadRef.current?.click()}>
-              ⏏ LOAD FILES — mp3 · mp4 · flac · wav · ogg · m4a · aac · opus · wma
+            <button className="mod-upload-btn" onClick={() => uploadRef.current?.click()}>
+              ＋ Load Files — mp3 · mp4 · flac · wav · ogg · m4a · aac · opus
             </button>
 
-            {/* Keyboard hint */}
-            <div className="wr-kb-help">
+            <div className="mod-kb-hint">
               <kbd>Space</kbd>play/pause &nbsp;
-              <kbd>←</kbd><kbd>→</kbd>seek &nbsp;
-              <kbd>Shift+←</kbd><kbd>Shift+→</kbd>skip &nbsp;
-              <kbd>↑↓</kbd>vol &nbsp;
+              <kbd>←/→</kbd>seek &nbsp;
+              <kbd>Shift+←/→</kbd>skip &nbsp;
               <kbd>E</kbd>eq &nbsp;
               <kbd>Q</kbd>queue &nbsp;
-              <kbd>M</kbd>mute &nbsp;
-              <kbd>F</kbd>fullscreen
+              <kbd>M</kbd>mute
             </div>
           </div>
-        )}
-
-        {/* ── CAPTION TAB ── */}
-        {tab === 'caption' && (
-          <div className="wr-cassette-deck">
-            <div className="wr-deck-label">▸ CAPTION PHOTOS & VIDEOS WITH MUSIC</div>
-            <div className="wr-caption-panel">
-              <div className="wr-caption-label">▸ 1. SELECT MUSIC TRACK</div>
-              {library.length === 0
-                ? <div className="wr-loading" style={{ animation: 'none', opacity: .55, padding: '6px 0' }}>Load tracks in Cassette tab first</div>
-                : (
-                  <div className="wr-tape-rack" style={{ marginBottom: 12 }}>
-                    {library.map((t) => (
-                      <button key={t.id} className={`wr-tape-item${captionTrack?.id === t.id ? ' active' : ''}`}
-                        onClick={() => { setCaptionTrack(t); setCaptionPlaying(false); if (captionAudioRef.current) captionAudioRef.current.src = ''; }}>
-                        <span>📼</span><span className="wr-tape-name">{t.title || t.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )
-              }
-              <div className="wr-caption-label">▸ 2. SELECT PHOTO OR VIDEO</div>
-              <div className="wr-caption-grid">
-                <label className={`wr-caption-slot${captionMediaFile ? ' filled' : ''}`}>
-                  {captionMediaFile ? `✓ ${captionMediaFile.name}` : '📁 Pick photo or video'}
-                  <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
-                </label>
-                <div className="wr-caption-slot" style={{ cursor: 'default' }}>
-                  <div style={{ fontSize: '.85rem', marginBottom: 4 }}>🎵</div>
-                  <div style={{ fontSize: '.7rem', opacity: .7 }}>{captionTrack ? (captionTrack.title || captionTrack.name) : 'None selected'}</div>
-                </div>
-              </div>
-              <div className="wr-caption-preview">
-                {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" />}
-                {captionMediaUrl && captionMediaType === 'video' && (
-                  <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%' }} />
-                )}
-                {!captionMediaUrl && <span>▸ Preview appears here</span>}
-              </div>
-              {captionTrack && <div className="wr-caption-track-info">🎵 {captionTrack.title || captionTrack.name}</div>}
-              <div className="wr-transport">
-                <button className={`wr-key${captionPlaying ? ' active' : ''}`} onClick={captionPlay} disabled={!captionTrack}>▶ PLAY</button>
-                <button className="wr-key" onClick={captionStop} disabled={!captionPlaying}>■ STOP</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Status */}
-        <div className="wr-status">
-          <span><span className={`wr-status-dot${anyPlaying ? ' live' : ''}`} />{anyPlaying ? 'PLAYING' : 'STANDBY'}</span>
-          <span>{tab === 'radio' ? 'FM STEREO' : tab === 'cassette' ? `TAPE  ${repeat !== 'off' ? `REP:${repeat.toUpperCase()} ` : ''}${shuffle ? 'SHUF' : ''}` : 'CAPTION'}</span>
-          <span>WR-77</span>
         </div>
+      )}
+
+      {tab === 'caption' && (
+        <div className="mod-caption-wrap">
+          <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
+          <div className="mod-caption-cols">
+            <div>
+              <div className="mod-section-label">1. Select music track</div>
+              {library.length === 0 ? (
+                <div className="mod-queue-empty">Load tracks in Media Player tab first</div>
+              ) : (
+                <div className="mod-queue-list">
+                  {library.map((t) => (
+                    <div key={t.id} className={`mod-queue-item${captionTrack?.id === t.id ? ' active' : ''}`}
+                      onClick={() => { setCaptionTrack(t); setCaptionPlaying(false); if (captionAudioRef.current) captionAudioRef.current.src = ''; }}>
+                      <span className="mod-q-name">🎵 {t.title || t.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="mod-section-label">2. Select photo or video</div>
+              <label className={`mod-media-drop${captionMediaFile ? ' filled' : ''}`}>
+                {captionMediaFile ? `✓ ${captionMediaFile.name}` : '+ Drop photo or video here'}
+                <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
+              </label>
+              {captionTrack && <div className="mod-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              <div className="mod-caption-preview-wrap">
+                {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
+                {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}
+                {!captionMediaUrl && <div className="mod-queue-empty">Preview appears here</div>}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="mod-upload-btn" style={{ flex: 1 }} onClick={captionPlay} disabled={!captionTrack}>▶ Play with music</button>
+                <button className="mod-upload-btn" onClick={captionStop} disabled={!captionPlaying}>⏹ Stop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div ref={containerRef} className={`wr-shell${isFullscreen ? ' wr-fullscreen' : ''}${theme === 'modern' ? ' wr-modern-shell' : ''}`}>
+      <audio ref={captionAudioRef} preload="none" />
+
+      <div className="wr-theme-toggle">
+        <button className={`wr-theme-btn${theme === 'classic' ? ' active' : ''}`} onClick={() => setTheme('classic')}>
+          📻 Classic
+        </button>
+        <button className={`wr-theme-btn${theme === 'modern' ? ' active' : ''}`} onClick={() => setTheme('modern')}>
+          🎧 Modern
+        </button>
       </div>
+
+      {theme === 'classic' ? renderClassicTheme() : null}
+      {theme === 'modern' ? renderModernTheme() : null}
     </div>
   );
 };

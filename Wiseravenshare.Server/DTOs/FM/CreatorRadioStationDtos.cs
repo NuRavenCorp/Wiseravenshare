@@ -14,6 +14,7 @@ public class CreatorRadioStationDto
     public string? LogoUrl { get; set; }
     public string? CoverImageUrl { get; set; }
     public string? StreamUrl { get; set; }
+    public string? StreamKey { get; set; }
     public string? Website { get; set; }
     public string? SocialLinks { get; set; }
     public Guid CreatorId { get; set; }
