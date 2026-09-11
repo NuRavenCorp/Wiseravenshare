@@ -1289,7 +1289,7 @@ public class AuthController : ControllerBase
         }
 
         // Admins and team members are always allowed.
-        if (IsConfiguredAdminUser(email) || _teamAccessService.IsTeamMemberAllowed(email))
+        if (IsConfiguredAdminUser(email) || (_teamAccessService?.IsTeamMemberAllowed(email) ?? false))
         {
             return true;
         }
@@ -1297,7 +1297,7 @@ public class AuthController : ControllerBase
         // Existing users (already registered) are always allowed to log in,
         // regardless of whether self-registration is currently enabled.
         // AllowSelfRegistration only gates creation of NEW accounts.
-        if (_userStore.EmailExists(email))
+        if (_userStore?.EmailExists(email) == true)
         {
             return true;
         }

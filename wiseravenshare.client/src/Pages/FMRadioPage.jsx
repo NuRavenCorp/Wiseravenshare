@@ -22,12 +22,15 @@ import React, {
 } from 'react';
 import { Howl, Howler } from 'howler';
 import FMTunerModule from '../Components/FM/FMTunerModule';
+import { fmService } from '../Services/fmService';
+import { apiService } from '../Services/api';
 import '../Styles/FMRadioPage.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FM_LOW  = 88.0;
 const FM_HIGH = 108.0;
 const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
+const INSTRUMENT_HANDOFF_KEY = 'wr_instrument_handoff';
 
 const EQ_BANDS = [
   { freq: 31,    label: '31Hz',  type: 'lowshelf'  },
@@ -233,6 +236,46 @@ const FMRadioPage = () => {
   const [captionMediaFile, setCaptionMediaFile] = useState(null);
   const [captionPlaying,   setCaptionPlaying]   = useState(false);
 
+  // Radio Creator
+  const [creatorStationForm, setCreatorStationForm] = useState({
+    name: '',
+    description: '',
+    frequency: '',
+    genre: 'Talk',
+    visibility: 'Public',
+    claimProprietaryFrequency: true,
+    allowRequests: true,
+    allowShoutouts: true,
+    allowChat: true,
+    brandColor: '#ffb347',
+  });
+  const [creatorTrackForm, setCreatorTrackForm] = useState({
+    title: '',
+    artist: '',
+    album: '',
+    genre: 'Original',
+    destinationFolder: 'radio-creator',
+  });
+  const [creatorOwnershipForm, setCreatorOwnershipForm] = useState({
+    copyrightHolder: '',
+    rightsNotice: '',
+    licenseType: 'All Rights Reserved',
+    proAffiliation: '',
+    witnessNotes: '',
+  });
+  const [creatorEnhancementPreset, setCreatorEnhancementPreset] = useState('flat');
+  const [creatorSelectedFile, setCreatorSelectedFile] = useState(null);
+  const [creatorRecordedBlob, setCreatorRecordedBlob] = useState(null);
+  const [creatorRecordedUrl, setCreatorRecordedUrl] = useState('');
+  const [creatorRecordSeconds, setCreatorRecordSeconds] = useState(0);
+  const [creatorRecorderState, setCreatorRecorderState] = useState('idle');
+  const [creatorStationDrafts, setCreatorStationDrafts] = useState([]);
+  const [creatorConnections, setCreatorConnections] = useState([]);
+  const [creatorProofRecord, setCreatorProofRecord] = useState(null);
+  const [creatorStatus, setCreatorStatus] = useState('');
+  const [creatorBusy, setCreatorBusy] = useState(false);
+  const [creatorUseInstrumentInput, setCreatorUseInstrumentInput] = useState(true);
+
   // Refs
   const howlRef         = useRef(null);   // current Howl instance
   const uploadRef       = useRef(null);
@@ -243,6 +286,10 @@ const FMRadioPage = () => {
   const containerRef    = useRef(null);
   const vizRafRef       = useRef(null);
   const tickRef         = useRef(null);   // time-update interval
+  const creatorRecorderRef = useRef(null);
+  const creatorRecorderStreamRef = useRef(null);
+  const creatorRecorderChunksRef = useRef([]);
+  const creatorRecorderTimerRef = useRef(null);
 
   // Web Audio nodes wired into Howler's ctx
   const eqFiltersRef  = useRef([]);
@@ -277,6 +324,301 @@ const FMRadioPage = () => {
       return normalized;
     });
   }, []);
+
+  useEffect(() => {
+    const loadCreatorData = async () => {
+      try {
+        const [stations, connectionsResponse] = await Promise.all([
+          fmService.getMyCreatorStations(),
+          apiService.getInstrumentConnections(),
+        ]);
+
+        setCreatorStationDrafts(Array.isArray(stations) ? stations : []);
+        setCreatorConnections(Array.isArray(connectionsResponse?.data) ? connectionsResponse.data : []);
+      } catch {
+        // Creator tooling remains usable even if optional preload fails.
+      }
+    };
+
+    loadCreatorData();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const handoff = localStorage.getItem(INSTRUMENT_HANDOFF_KEY);
+      if (!handoff) return;
+
+      const parsed = JSON.parse(handoff);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      setTab('creator');
+      setCreatorStatus(`Instrument handoff active: ${parsed.sourceName || 'Unknown Source'}`);
+      setCreatorUseInstrumentInput(true);
+      setCreatorTrackForm((prev) => ({
+        ...prev,
+        artist: prev.artist || parsed.sourceName || '',
+      }));
+      localStorage.removeItem(INSTRUMENT_HANDOFF_KEY);
+    } catch {
+      // Ignore malformed handoff payloads.
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (creatorRecordedUrl) {
+      URL.revokeObjectURL(creatorRecordedUrl);
+    }
+    if (creatorRecorderTimerRef.current) {
+      clearInterval(creatorRecorderTimerRef.current);
+    }
+    if (creatorRecorderStreamRef.current) {
+      creatorRecorderStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+  }, [creatorRecordedUrl]);
+
+  const updateCreatorStationField = (field, value) => {
+    setCreatorStationForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateCreatorTrackField = (field, value) => {
+    setCreatorTrackForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateCreatorOwnershipField = (field, value) => {
+    setCreatorOwnershipForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const startCreatorRecording = async () => {
+    if (creatorRecorderState === 'recording') return;
+
+    try {
+      const supportsRecorder = typeof window !== 'undefined' && typeof window.MediaRecorder !== 'undefined';
+      if (!supportsRecorder) {
+        setCreatorStatus('Audio recording is not supported in this browser.');
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      creatorRecorderStreamRef.current = stream;
+
+      const mimeType = window.MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      const recorder = new window.MediaRecorder(stream, { mimeType });
+      creatorRecorderChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          creatorRecorderChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(creatorRecorderChunksRef.current, { type: 'audio/webm' });
+        if (creatorRecordedUrl) {
+          URL.revokeObjectURL(creatorRecordedUrl);
+        }
+        const url = URL.createObjectURL(blob);
+        setCreatorRecordedBlob(blob);
+        setCreatorRecordedUrl(url);
+        setCreatorRecorderState('stopped');
+      };
+
+      recorder.start(250);
+      creatorRecorderRef.current = recorder;
+      setCreatorRecordSeconds(0);
+      setCreatorRecorderState('recording');
+      creatorRecorderTimerRef.current = setInterval(() => {
+        setCreatorRecordSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch {
+      setCreatorStatus('Microphone access is required to record proprietary tracks.');
+    }
+  };
+
+  const stopCreatorRecording = () => {
+    if (creatorRecorderRef.current && creatorRecorderState === 'recording') {
+      creatorRecorderRef.current.stop();
+      if (creatorRecorderTimerRef.current) {
+        clearInterval(creatorRecorderTimerRef.current);
+        creatorRecorderTimerRef.current = null;
+      }
+      if (creatorRecorderStreamRef.current) {
+        creatorRecorderStreamRef.current.getTracks().forEach((track) => track.stop());
+        creatorRecorderStreamRef.current = null;
+      }
+    }
+  };
+
+  const applyCreatorEnhancementPreset = (presetName) => {
+    if (!Object.prototype.hasOwnProperty.call(EQ_PRESETS, presetName)) return;
+    applyPreset(presetName);
+    setCreatorEnhancementPreset(presetName);
+    setCreatorStatus(`Enhancement preset applied: ${presetName}`);
+  };
+
+  const toHex = (buffer) => Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  const buildUploadFileFromCreatorState = () => {
+    if (creatorSelectedFile) return creatorSelectedFile;
+    if (!creatorRecordedBlob) return null;
+    const fallbackTitle = creatorTrackForm.title?.trim() || `proprietary-track-${Date.now()}`;
+    return new File([creatorRecordedBlob], `${fallbackTitle}.webm`, { type: 'audio/webm' });
+  };
+
+  const saveCreatorPackage = async () => {
+    if (creatorBusy) return;
+
+    const uploadFile = buildUploadFileFromCreatorState();
+    if (!uploadFile) {
+      setCreatorStatus('Upload a file or record a track before saving.');
+      return;
+    }
+
+    if (!creatorStationForm.name.trim()) {
+      setCreatorStatus('Station name is required.');
+      return;
+    }
+
+    if (!creatorTrackForm.title.trim()) {
+      setCreatorStatus('Track title is required.');
+      return;
+    }
+
+    setCreatorBusy(true);
+    setCreatorStatus('Saving station, proprietary music, and ownership proof...');
+
+    try {
+      let station = null;
+      try {
+        station = await fmService.createCreatorStation({
+          name: creatorStationForm.name,
+          description: creatorStationForm.description,
+          frequency: creatorStationForm.frequency,
+          genre: creatorStationForm.genre,
+          visibility: creatorStationForm.visibility,
+          brandColor: creatorStationForm.brandColor,
+          allowRequests: creatorStationForm.allowRequests,
+          allowShoutouts: creatorStationForm.allowShoutouts,
+          allowChat: creatorStationForm.allowChat,
+          claimProprietaryFrequency: creatorStationForm.claimProprietaryFrequency,
+        });
+      } catch {
+        // Continue with proprietary file capture even if station creation already exists or fails.
+      }
+
+      const fingerprint = await uploadFile.arrayBuffer()
+        .then(async (bytes) => {
+          if (typeof crypto?.subtle?.digest === 'function') {
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            return toHex(digest);
+          }
+
+          // Fallback hash for environments without SubtleCrypto.
+          const view = new Uint8Array(bytes);
+          let acc = 0;
+          for (let i = 0; i < view.length; i += 1) {
+            acc = (acc + ((view[i] + i) * 2654435761)) >>> 0;
+          }
+          return `${acc.toString(16).padStart(8, '0')}${Date.now().toString(16)}`;
+        });
+      const nowIso = new Date().toISOString();
+
+      const uploadResult = await apiService.uploadMusicTrack(uploadFile, {
+        title: creatorTrackForm.title,
+        artist: creatorTrackForm.artist,
+        album: creatorTrackForm.album,
+        genre: creatorTrackForm.genre,
+        destinationFolder: creatorTrackForm.destinationFolder || 'radio-creator',
+        fingerprint,
+      });
+
+      const activeConnection = creatorConnections.find((conn) => conn.isActive) || creatorConnections[0] || null;
+      const proofCaptureResponse = await apiService.recordStudioCaptureSource({
+        rigProfileId: null,
+        sourceType: creatorUseInstrumentInput
+          ? String(activeConnection?.transport || 'analog')
+          : 'analog',
+        sourceName: creatorUseInstrumentInput
+          ? String(activeConnection?.deviceName || 'Instrument Input')
+          : 'Manual Upload',
+        deviceIdentifier: creatorUseInstrumentInput
+          ? String(activeConnection?.deviceIdentifier || 'instrument-input')
+          : 'manual-upload',
+        fileName: uploadFile.name,
+        durationSeconds: creatorRecordSeconds > 0 ? creatorRecordSeconds : null,
+        channelCount: 2,
+        capturedAtUtc: nowIso,
+        metadataJson: JSON.stringify({
+          stationName: creatorStationForm.name,
+          stationId: station?.id || null,
+          copyrightHolder: creatorOwnershipForm.copyrightHolder,
+          rightsNotice: creatorOwnershipForm.rightsNotice,
+          licenseType: creatorOwnershipForm.licenseType,
+          proAffiliation: creatorOwnershipForm.proAffiliation,
+          witnessNotes: creatorOwnershipForm.witnessNotes,
+          enhancementPreset: creatorEnhancementPreset,
+          uploadedTrackId: uploadResult?.data?.track?.id || null,
+          uploadedTrackUrl: uploadResult?.data?.track?.mediaUrl || uploadResult?.data?.mediaUrl || null,
+        }),
+      });
+
+      const proofCapture = proofCaptureResponse?.data || null;
+      const proofPacket = {
+        station: station || {
+          name: creatorStationForm.name,
+          frequency: creatorStationForm.frequency,
+          genre: creatorStationForm.genre,
+        },
+        music: {
+          title: creatorTrackForm.title,
+          artist: creatorTrackForm.artist,
+          album: creatorTrackForm.album,
+          genre: creatorTrackForm.genre,
+          fileName: uploadFile.name,
+          sizeBytes: uploadFile.size,
+        },
+        ownership: {
+          fingerprint,
+          savedAtUtc: nowIso,
+          capturedAtUtc: proofCapture?.capturedAtUtc || nowIso,
+          fingerprintedAtUtc: proofCapture?.fingerprintedAtUtc || nowIso,
+          captureHash: proofCapture?.fingerprintHash || fingerprint,
+          copyrightHolder: creatorOwnershipForm.copyrightHolder,
+          rightsNotice: creatorOwnershipForm.rightsNotice,
+          licenseType: creatorOwnershipForm.licenseType,
+          proAffiliation: creatorOwnershipForm.proAffiliation,
+          witnessNotes: creatorOwnershipForm.witnessNotes,
+        },
+      };
+
+      setCreatorProofRecord(proofPacket);
+
+      if (station?.id) {
+        setCreatorStationDrafts((prev) => [station, ...prev.filter((item) => item.id !== station.id)]);
+      }
+
+      setCreatorStatus('Radio Creator package saved with fingerprint timestamp proof.');
+      setTab('creator');
+    } catch (error) {
+      setCreatorStatus(error?.message || 'Unable to save the Radio Creator package.');
+    } finally {
+      setCreatorBusy(false);
+    }
+  };
+
+  const downloadOwnershipCertificate = () => {
+    if (!creatorProofRecord) return;
+    const json = JSON.stringify(creatorProofRecord, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${(creatorTrackForm.title || 'ownership-proof').replace(/\s+/g, '-').toLowerCase()}-ownership-proof.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   // VU meter
   const [vuAngle, setVuAngle] = useState(-45);
@@ -708,6 +1050,215 @@ const FMRadioPage = () => {
       }
     : null;
 
+  const renderCreatorStudio = (isModern = false) => (
+    <div className={isModern ? 'mod-creator-shell' : 'wr-creator-shell'}>
+      <div className={isModern ? 'mod-creator-grid' : 'wr-creator-grid'}>
+        <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
+          <h3>Radio Station Builder</h3>
+          <div className="wr-creator-form-grid">
+            <label>
+              <span>Station Name</span>
+              <input
+                type="text"
+                value={creatorStationForm.name}
+                onChange={(e) => updateCreatorStationField('name', e.target.value)}
+                maxLength={255}
+                placeholder="WiseRaven Live Sessions"
+              />
+            </label>
+            <label>
+              <span>Frequency</span>
+              <input
+                type="text"
+                value={creatorStationForm.frequency}
+                onChange={(e) => updateCreatorStationField('frequency', e.target.value)}
+                placeholder="99.3 FM or Online"
+              />
+            </label>
+            <label>
+              <span>Genre</span>
+              <input
+                type="text"
+                value={creatorStationForm.genre}
+                onChange={(e) => updateCreatorStationField('genre', e.target.value)}
+              />
+            </label>
+            <label>
+              <span>Visibility</span>
+              <select
+                value={creatorStationForm.visibility}
+                onChange={(e) => updateCreatorStationField('visibility', e.target.value)}
+              >
+                <option value="Public">Public</option>
+                <option value="Private">Private</option>
+                <option value="Unlisted">Unlisted</option>
+              </select>
+            </label>
+          </div>
+          <label className="wr-creator-textarea">
+            <span>Description</span>
+            <textarea
+              value={creatorStationForm.description}
+              onChange={(e) => updateCreatorStationField('description', e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Describe your station format, schedule, and proprietary content focus."
+            />
+          </label>
+          <div className="wr-creator-checks">
+            <label><input type="checkbox" checked={creatorStationForm.claimProprietaryFrequency} onChange={(e) => updateCreatorStationField('claimProprietaryFrequency', e.target.checked)} /> Claim proprietary frequency</label>
+            <label><input type="checkbox" checked={creatorStationForm.allowRequests} onChange={(e) => updateCreatorStationField('allowRequests', e.target.checked)} /> Allow requests</label>
+            <label><input type="checkbox" checked={creatorStationForm.allowShoutouts} onChange={(e) => updateCreatorStationField('allowShoutouts', e.target.checked)} /> Allow shoutouts</label>
+            <label><input type="checkbox" checked={creatorStationForm.allowChat} onChange={(e) => updateCreatorStationField('allowChat', e.target.checked)} /> Allow chat</label>
+          </div>
+        </section>
+
+        <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
+          <h3>Proprietary Music Creator</h3>
+          <div className="wr-creator-form-grid">
+            <label>
+              <span>Track Title</span>
+              <input type="text" value={creatorTrackForm.title} onChange={(e) => updateCreatorTrackField('title', e.target.value)} placeholder="Original Theme Song" />
+            </label>
+            <label>
+              <span>Artist</span>
+              <input type="text" value={creatorTrackForm.artist} onChange={(e) => updateCreatorTrackField('artist', e.target.value)} placeholder="Your artist name" />
+            </label>
+            <label>
+              <span>Album</span>
+              <input type="text" value={creatorTrackForm.album} onChange={(e) => updateCreatorTrackField('album', e.target.value)} placeholder="Album or show package" />
+            </label>
+            <label>
+              <span>Genre</span>
+              <input type="text" value={creatorTrackForm.genre} onChange={(e) => updateCreatorTrackField('genre', e.target.value)} />
+            </label>
+          </div>
+
+          <div className="wr-creator-upload-row">
+            <label className="wr-creator-upload">
+              Upload Proprietary File
+              <input
+                type="file"
+                accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.webm"
+                onChange={(e) => setCreatorSelectedFile(e.target.files?.[0] || null)}
+              />
+            </label>
+            <div className="wr-creator-upload-name">
+              {creatorSelectedFile?.name || 'No uploaded file selected'}
+            </div>
+          </div>
+
+          <div className="wr-creator-record-row">
+            <button className="wr-key rec" onClick={startCreatorRecording} disabled={creatorRecorderState === 'recording'}>● Record</button>
+            <button className="wr-key" onClick={stopCreatorRecording} disabled={creatorRecorderState !== 'recording'}>■ Stop</button>
+            <span className="wr-creator-record-time">Recorded: {fmt(creatorRecordSeconds)}</span>
+          </div>
+
+          {creatorRecordedUrl && (
+            <audio controls className="wr-creator-audio-preview">
+              <source src={creatorRecordedUrl} type="audio/webm" />
+            </audio>
+          )}
+
+          <div className="wr-creator-preset-row">
+            {['flat', 'bassBoost', 'treble', 'rock', 'vocal', 'classical'].map((presetName) => (
+              <button
+                key={presetName}
+                className={`wr-preset-btn${creatorEnhancementPreset === presetName ? ' active' : ''}`}
+                onClick={() => applyCreatorEnhancementPreset(presetName)}
+              >
+                {presetName}
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
+        <h3>Ownership Form + Copyright Timestamp</h3>
+        <div className="wr-creator-form-grid">
+          <label>
+            <span>Copyright Holder</span>
+            <input type="text" value={creatorOwnershipForm.copyrightHolder} onChange={(e) => updateCreatorOwnershipField('copyrightHolder', e.target.value)} placeholder="Legal owner name" />
+          </label>
+          <label>
+            <span>License Type</span>
+            <input type="text" value={creatorOwnershipForm.licenseType} onChange={(e) => updateCreatorOwnershipField('licenseType', e.target.value)} placeholder="All Rights Reserved" />
+          </label>
+          <label>
+            <span>PRO Affiliation</span>
+            <input type="text" value={creatorOwnershipForm.proAffiliation} onChange={(e) => updateCreatorOwnershipField('proAffiliation', e.target.value)} placeholder="ASCAP / BMI / SESAC" />
+          </label>
+          <label>
+            <span>Input Mode</span>
+            <select value={creatorUseInstrumentInput ? 'instrument' : 'manual'} onChange={(e) => setCreatorUseInstrumentInput(e.target.value === 'instrument')}>
+              <option value="instrument">Instrument Connector</option>
+              <option value="manual">Manual Upload</option>
+            </select>
+          </label>
+        </div>
+        <label className="wr-creator-textarea">
+          <span>Rights Notice</span>
+          <textarea value={creatorOwnershipForm.rightsNotice} onChange={(e) => updateCreatorOwnershipField('rightsNotice', e.target.value)} rows={2} placeholder="Example: Copyright 2026 WiseRavenShare. Unauthorized use prohibited." />
+        </label>
+        <label className="wr-creator-textarea">
+          <span>Witness / Creation Notes</span>
+          <textarea value={creatorOwnershipForm.witnessNotes} onChange={(e) => updateCreatorOwnershipField('witnessNotes', e.target.value)} rows={2} placeholder="Session notes, collaborators, location, and context for evidentiary records." />
+        </label>
+
+        <div className="wr-creator-actions">
+          <button className="wr-insert-tape" onClick={saveCreatorPackage} disabled={creatorBusy}>
+            {creatorBusy ? 'Saving package...' : 'Save Radio Creator Package'}
+          </button>
+          <button className="wr-mode-btn" onClick={downloadOwnershipCertificate} disabled={!creatorProofRecord}>
+            Download Ownership Certificate
+          </button>
+        </div>
+
+        {creatorStatus && <div className="wr-loading" style={{ animation: 'none' }}>{creatorStatus}</div>}
+
+        {creatorProofRecord && (
+          <div className="wr-creator-proof">
+            <div><strong>Fingerprint:</strong> {creatorProofRecord.ownership.captureHash}</div>
+            <div><strong>Captured At:</strong> {new Date(creatorProofRecord.ownership.capturedAtUtc).toLocaleString()}</div>
+            <div><strong>Fingerprinted At:</strong> {new Date(creatorProofRecord.ownership.fingerprintedAtUtc).toLocaleString()}</div>
+            <div><strong>Rights Holder:</strong> {creatorProofRecord.ownership.copyrightHolder || 'Not provided'}</div>
+          </div>
+        )}
+
+        <div className="wr-creator-linked">
+          <h4>Connected Instrument Inputs</h4>
+          {creatorConnections.length === 0 ? (
+            <p className="wr-creator-empty">No active instrument links yet. Connect condenser mic, piano, or guitar in Instrument Connector.</p>
+          ) : (
+            <ul>
+              {creatorConnections.map((connection) => (
+                <li key={connection.id}>
+                  {connection.deviceName} · {String(connection.transport || '').toUpperCase()} · {connection.isActive ? 'ACTIVE' : 'IDLE'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="wr-creator-linked">
+          <h4>Your Creator Stations</h4>
+          {creatorStationDrafts.length === 0 ? (
+            <p className="wr-creator-empty">No creator stations found yet.</p>
+          ) : (
+            <ul>
+              {creatorStationDrafts.slice(0, 5).map((station) => (
+                <li key={station.id || station.name}>
+                  {station.name} · {station.frequency || 'Online'} · {station.status || 'Draft'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+
   const renderClassicTheme = () => (
     <div className="wr-cabinet">
       <div className="wr-brand">
@@ -756,6 +1307,7 @@ const FMRadioPage = () => {
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
         <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 CASSETTE</button>
+        <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
@@ -960,9 +1512,11 @@ const FMRadioPage = () => {
         </div>
       )}
 
+      {tab === 'creator' && renderCreatorStudio(false)}
+
       <div className="wr-status">
         <span><span className={`wr-status-dot${anyPlaying ? ' live' : ''}`} />{anyPlaying ? 'PLAYING' : 'STANDBY'}</span>
-        <span>{tab === 'radio' ? 'FM STEREO' : tab === 'cassette' ? `TAPE  ${repeat !== 'off' ? `REP:${repeat.toUpperCase()} ` : ''}${shuffle ? 'SHUF' : ''}` : 'CAPTION'}</span>
+        <span>{tab === 'radio' ? 'FM STEREO' : tab === 'cassette' ? `TAPE  ${repeat !== 'off' ? `REP:${repeat.toUpperCase()} ` : ''}${shuffle ? 'SHUF' : ''}` : tab === 'creator' ? 'CREATOR STUDIO' : 'CAPTION'}</span>
         <span>WR-77</span>
       </div>
     </div>
@@ -975,6 +1529,7 @@ const FMRadioPage = () => {
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
           <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Media Player</button>
+          <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>
       </div>
@@ -1175,6 +1730,8 @@ const FMRadioPage = () => {
           </div>
         </div>
       )}
+
+      {tab === 'creator' && renderCreatorStudio(true)}
     </div>
   );
 
