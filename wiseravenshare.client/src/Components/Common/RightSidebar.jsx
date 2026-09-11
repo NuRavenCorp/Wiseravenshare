@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { extractHashtags } from '../../Services/EngagementAlgorithms';
 import { apiService } from '../../Services/api';
 import { ravensightAPI } from '../../Services/RavensightAPI';
@@ -506,6 +506,11 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
 
 const RightSidebar = ({ onNavigate }) => {
     const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
     const [hashtagFeed, setHashtagFeed] = useState([]);
     const [trendingPostAnnouncements, setTrendingPostAnnouncements] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
