@@ -53,9 +53,13 @@ const seedUsers = [
 ];
 
 const readPosts = () => {
-    const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
-    const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
-    return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
+    try {
+        const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
+        const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
+        return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
+    } catch {
+        return [];
+    }
 };
 
 const looksLikeCorruptBlob = (value) => {
@@ -501,6 +505,7 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
 };
 
 const RightSidebar = ({ onNavigate }) => {
+    const { user } = useAuth();
     const [hashtagFeed, setHashtagFeed] = useState([]);
     const [trendingPostAnnouncements, setTrendingPostAnnouncements] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
