@@ -76,6 +76,8 @@ public sealed class SiteCrawlerController : ControllerBase
         [FromQuery] string? userCategory = null,
         CancellationToken ct = default)
     {
+        if (!IsAdminRequest()) return Forbid();
+
         var summary = await _siteCrawlerService.GetSummaryAsync(countryCode, userCategory, ct);
         return Ok(summary);
     }

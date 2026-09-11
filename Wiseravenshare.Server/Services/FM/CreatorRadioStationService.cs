@@ -33,11 +33,13 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
 {
     private readonly AppDbContext _db;
     private readonly IFrequencyIntegrityService _frequencyIntegrity;
+    private readonly IIcecastStreamService _icecastStreamService;
 
-    public CreatorRadioStationService(AppDbContext db, IFrequencyIntegrityService frequencyIntegrity)
+    public CreatorRadioStationService(AppDbContext db, IFrequencyIntegrityService frequencyIntegrity, IIcecastStreamService icecastStreamService)
     {
         _db = db;
         _frequencyIntegrity = frequencyIntegrity;
+        _icecastStreamService = icecastStreamService;
     }
 
     public async Task<CreatorRadioStationDto> CreateStationAsync(CreateCreatorRadioStationDto dto, Guid creatorId, CancellationToken cancellationToken = default)
@@ -65,7 +67,7 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             Website = TrimOrNull(dto.Website),
             SocialLinks = TrimOrNull(dto.SocialLinks),
             StreamUrl = null,
-            StreamKey = $"wr-{Guid.NewGuid():N}"[..16],
+            StreamKey = null,
             CreatorId = creatorId,
             Status = RadioStationStatus.Draft,
             Visibility = visibility,
@@ -85,6 +87,11 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
         };
 
         _db.Set<CreatorRadioStation>().Add(station);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var streamProvision = await _icecastStreamService.ProvisionAsync(station.Name, station.Id, null, cancellationToken);
+        station.StreamUrl = streamProvision.ListenerUrl;
+        station.StreamKey = streamProvision.StreamKey;
         await _db.SaveChangesAsync(cancellationToken);
 
         if (dto.ClaimProprietaryFrequency)
@@ -304,6 +311,12 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
         if (string.IsNullOrWhiteSpace(station.StreamKey))
         {
             station.StreamKey = $"wr-{Guid.NewGuid():N}"[..16];
+        }
+
+        if (string.IsNullOrWhiteSpace(station.StreamUrl))
+        {
+            var provision = await _icecastStreamService.ProvisionAsync(station.Name, station.Id, station.StreamKey, cancellationToken);
+            station.StreamUrl = provision.ListenerUrl;
         }
 
         station.IsLive = true;

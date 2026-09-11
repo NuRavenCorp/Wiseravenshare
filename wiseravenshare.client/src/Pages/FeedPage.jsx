@@ -17,6 +17,15 @@ import { crawlerService } from '../Services/crawlerService';
 import { personalizationService } from '../Services/personalizationService';
 import { contentCrawlerService } from '../Services/contentCrawlerService';
 
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
+
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
     const [posts, setPosts] = useState([]);
@@ -31,6 +40,11 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [contentTrending, setContentTrending] = useState(null);
     const [isContentTrendingLoading, setIsContentTrendingLoading] = useState(false);
     const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
 
@@ -179,6 +193,13 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         let cancelled = false;
 
         const loadCrawlerTrending = async () => {
+            if (!isAdminUser) {
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+                return;
+            }
+
             try {
                 setIsCrawlerLoading(true);
                 const summary = await crawlerService.getSummary(null, 'core');
@@ -244,7 +265,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [isAdminUser]);
 
     const handlePostCreate = (newPost) => {
         setPosts(prev => mergeFeedPosts([normalizePost(newPost)], prev));

@@ -437,6 +437,7 @@ const FMCreatorStudio = () => {
           <div className="fm-detail-section">
             <h5><FiRadio /> Broadcast Info</h5>
             <div className="fm-detail-row"><span>Status</span><span style={{ color: selectedStation.isLive ? '#4ade80' : '#94a3b8' }}>{selectedStation.isLive ? '● LIVE' : '○ Off Air'}</span></div>
+            <div className="fm-detail-row"><span>Stream URL</span><code style={{ fontSize: '.7rem', opacity: .7 }}>{selectedStation.streamUrl || 'Not provisioned'}</code></div>
             <div className="fm-detail-row"><span>Stream Key</span><code style={{ fontSize: '.7rem', opacity: .7 }}>{selectedStation.streamKey || 'Not provisioned'}</code></div>
             <div className="fm-detail-row"><span>Frequency</span><span>{selectedStation.frequency} {selectedStation.band}</span></div>
           </div>

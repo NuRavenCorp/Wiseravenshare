@@ -166,6 +166,15 @@ const normalizeNewsItem = (item, index) => ({
     category: inferNewsCategory(item)
 });
 
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
+
 const DiscoverPage = ({ onNavigate }) => {
     const [posts, setPosts] = useState([]);
     const [topics, setTopics] = useState([]);
@@ -178,6 +187,11 @@ const DiscoverPage = ({ onNavigate }) => {
     const [personalizedTrends, setPersonalizedTrends] = useState([]);
     const [crawlerTrending, setCrawlerTrending] = useState(null);
     const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
     const { getTrending, track } = usePersonalization();
 
     // Load personalized regional trends to supplement the topic list.
@@ -194,6 +208,13 @@ const DiscoverPage = ({ onNavigate }) => {
         let cancelled = false;
 
         const loadCrawlerTrending = async () => {
+            if (!isAdminUser) {
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+                return;
+            }
+
             try {
                 const summary = await crawlerService.getSummary();
                 if (!cancelled) {
@@ -211,7 +232,7 @@ const DiscoverPage = ({ onNavigate }) => {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [isAdminUser]);
 
     useEffect(() => {
         loadDiscoverContent();
