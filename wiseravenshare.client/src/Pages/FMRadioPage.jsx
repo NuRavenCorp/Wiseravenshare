@@ -54,6 +54,12 @@ const EQ_PRESETS = {
   karaoke:   [0,  0,  0,  0, -6, -6, -4,  0,  0,  0],
 };
 
+const FALLBACK_AUDIO_CANDIDATES = [
+  'https://ice6.somafm.com/groovesalad-128-mp3',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
+];
+
 // Map extension → MIME so Howler picks the right codec
 const EXT_MIME = {
   mp3:  'audio/mpeg',
@@ -102,21 +108,80 @@ const lsSet = (k, v)  => { try { localStorage.setItem(k, JSON.stringify(v)); } c
 const normalizeLibraryTrack = (track) => {
   if (!track || typeof track !== 'object') return null;
 
+  const normalizePlaybackUrl = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('/') || raw.startsWith('api/')) {
+      return raw.startsWith('/') ? raw : `/${raw}`;
+    }
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith('data:')) return raw;
+    if (raw.startsWith('blob:')) return raw;
+    return '';
+  };
+
+  const toBlobStreamUrl = (relativePath = '') => {
+    const normalized = String(relativePath || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    if (!normalized) return '';
+    const encoded = normalized
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+  };
+
   const fileName = String(track.name || track.fileName || track.title || 'Untitled').trim();
   const artist = String(track.artist || '').trim();
   const title = String(track.title || '').trim() || parseMeta(fileName).title;
-  const mediaUrl = String(track.mediaUrl || track.url || '').trim();
+  const relativePath = String(track.relativePath || track.RelativePath || track.objectKey || track.ObjectKey || '').trim();
+  const directUrl = normalizePlaybackUrl(track.mediaUrl || track.url || track.fileUrl || track.publicUrl || track.MediaUrl || track.Url || '');
+  const blobStreamUrl = toBlobStreamUrl(relativePath);
+  const fileNameStreamUrl = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
+  const mediaUrl = blobStreamUrl || fileNameStreamUrl || directUrl;
 
   return {
     id: String(track.id || `${fileName}-${Date.now()}-${Math.random().toString(16).slice(2)}`),
     name: fileName,
     title,
     artist: artist || parseMeta(fileName).artist,
+    fileName,
+    relativePath,
     mediaUrl,
     url: mediaUrl,
     file: track.file || null,
     objectUrl: track.objectUrl || null,
   };
+};
+
+const resolveTrackSourceCandidates = (track) => {
+  if (!track) return [];
+
+  const rawDirect = String(track.mediaUrl || track.url || track.objectUrl || '').trim();
+  const normalizedDirect = rawDirect.startsWith('api/') ? `/${rawDirect}` : rawDirect;
+  const relativePath = String(track.relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  const encodedRelativePath = relativePath
+    ? relativePath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment)).join('/')
+    : '';
+  const blobStream = encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : '';
+  const fileName = String(track.fileName || track.name || '').trim();
+  const fileNameStream = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
+  const proxy = /^https?:\/\//i.test(normalizedDirect)
+    ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(normalizedDirect)}`
+    : '';
+  const fileObjectUrl = track.file ? URL.createObjectURL(track.file) : '';
+
+  return [...new Set([
+    normalizedDirect,
+    blobStream,
+    fileNameStream,
+    proxy,
+    fileObjectUrl,
+    ...FALLBACK_AUDIO_CANDIDATES
+  ].filter(Boolean))];
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -592,20 +657,44 @@ const FMRadioPage = () => {
     e.target.value = '';
   };
   const captionPlay = () => {
-    if (!captionTrack || !captionAudioRef.current) return;
-    if (!captionAudioRef.current.src) {
-      const captionSource = captionTrack.mediaUrl || captionTrack.url || captionTrack.objectUrl
-        || (captionTrack.file ? URL.createObjectURL(captionTrack.file) : '');
-      if (!captionSource) return;
-      captionAudioRef.current.src = captionSource;
+    if (!captionTrack || !captionAudioRef.current || !captionMediaUrl) return;
+
+    const audio = captionAudioRef.current;
+    const candidates = resolveTrackSourceCandidates(captionTrack);
+    if (!candidates.length) return;
+
+    let sourceIndex = 0;
+    const tryPlay = () => {
+      audio.src = candidates[sourceIndex];
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setCaptionPlaying(true);
+        if (captionMediaType === 'video') {
+          captionMediaRef.current?.play().catch(() => {});
+        }
+      }).catch(() => {
+        sourceIndex += 1;
+        if (sourceIndex < candidates.length) {
+          tryPlay();
+        }
+      });
+    };
+
+    if (captionMediaType === 'video' && captionMediaRef.current) {
+      captionMediaRef.current.currentTime = 0;
     }
-    captionAudioRef.current.play().catch(() => {});
-    setCaptionPlaying(true);
-    if (captionMediaType === 'video') captionMediaRef.current?.play().catch(() => {});
+
+    tryPlay();
   };
   const captionStop = () => {
     captionAudioRef.current?.pause();
+    if (captionAudioRef.current) {
+      captionAudioRef.current.currentTime = 0;
+    }
     captionMediaRef.current?.pause();
+    if (captionMediaRef.current) {
+      captionMediaRef.current.currentTime = 0;
+    }
     setCaptionPlaying(false);
   };
 
@@ -831,7 +920,7 @@ const FMRadioPage = () => {
         <div className="wr-cassette-deck">
           <div className="wr-deck-label">▸ CAPTION PHOTOS & VIDEOS WITH MUSIC</div>
           <div className="wr-caption-panel">
-            <div className="wr-caption-label">▸ 1. SELECT MUSIC TRACK</div>
+            <div className="wr-caption-label">▸ 1. ADD MUSIC TRACK SELECTOR</div>
             {library.length === 0 ? (
               <div className="wr-loading" style={{ animation: 'none', opacity: .55, padding: '6px 0' }}>Load tracks in Cassette tab first</div>
             ) : (
@@ -864,7 +953,7 @@ const FMRadioPage = () => {
             </div>
             {captionTrack && <div className="wr-caption-track-info">🎵 {captionTrack.title || captionTrack.name}</div>}
             <div className="wr-transport">
-              <button className={`wr-key${captionPlaying ? ' active' : ''}`} onClick={captionPlay} disabled={!captionTrack}>▶ PLAY</button>
+              <button className={`wr-key${captionPlaying ? ' active' : ''}`} onClick={captionPlay} disabled={!captionTrack || !captionMediaUrl}>▶ PLAY WITH MUSIC</button>
               <button className="wr-key" onClick={captionStop} disabled={!captionPlaying}>■ STOP</button>
             </div>
           </div>
@@ -1052,7 +1141,7 @@ const FMRadioPage = () => {
           <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
           <div className="mod-caption-cols">
             <div>
-              <div className="mod-section-label">1. Select music track</div>
+              <div className="mod-section-label">1. Add Music track selector</div>
               {library.length === 0 ? (
                 <div className="mod-queue-empty">Load tracks in Media Player tab first</div>
               ) : (
@@ -1079,7 +1168,7 @@ const FMRadioPage = () => {
                 {!captionMediaUrl && <div className="mod-queue-empty">Preview appears here</div>}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="mod-upload-btn" style={{ flex: 1 }} onClick={captionPlay} disabled={!captionTrack}>▶ Play with music</button>
+                <button className="mod-upload-btn" style={{ flex: 1 }} onClick={captionPlay} disabled={!captionTrack || !captionMediaUrl}>▶ Play with music</button>
                 <button className="mod-upload-btn" onClick={captionStop} disabled={!captionPlaying}>⏹ Stop</button>
               </div>
             </div>
@@ -1091,7 +1180,12 @@ const FMRadioPage = () => {
 
   return (
     <div ref={containerRef} className={`wr-shell${isFullscreen ? ' wr-fullscreen' : ''}${theme === 'modern' ? ' wr-modern-shell' : ''}`}>
-      <audio ref={captionAudioRef} preload="none" />
+      <audio
+        ref={captionAudioRef}
+        preload="none"
+        onEnded={() => setCaptionPlaying(false)}
+        onError={() => setCaptionPlaying(false)}
+      />
 
       <div className="wr-theme-toggle">
         <button className={`wr-theme-btn${theme === 'classic' ? ' active' : ''}`} onClick={() => setTheme('classic')}>
