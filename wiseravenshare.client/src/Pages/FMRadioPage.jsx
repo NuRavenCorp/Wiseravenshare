@@ -23,6 +23,7 @@ import React, {
 import { Howl, Howler } from 'howler';
 import FMTunerModule from '../Components/FM/FMTunerModule';
 import { fmService } from '../Services/fmService';
+import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
 import '../Styles/FMRadioPage.css';
 
@@ -205,7 +206,6 @@ const FMRadioPage = () => {
   const [eqGains,   setEqGains]   = useState(() => lsGet('wr_eq',   EQ_PRESETS.flat.slice()));
   const [eqPreset,  setEqPreset]  = useState('flat');
   const [favorites, setFavorites] = useState(() => lsGet('wr_favs', []));
-  const [theme, setTheme] = useState(() => lsGet('wr_theme', 'classic'));
 
   // Persist on change
   useEffect(() => { lsSet('wr_vol',  volume);    }, [volume]);
@@ -213,7 +213,6 @@ const FMRadioPage = () => {
   useEffect(() => { lsSet('wr_shuf', shuffle);   }, [shuffle]);
   useEffect(() => { lsSet('wr_eq',   eqGains);   }, [eqGains]);
   useEffect(() => { lsSet('wr_favs', favorites); }, [favorites]);
-  useEffect(() => { lsSet('wr_theme', theme); }, [theme]);
 
   // Playback state
   const [library,      setLibrary]      = useState([]);
@@ -275,6 +274,14 @@ const FMRadioPage = () => {
   const [creatorStatus, setCreatorStatus] = useState('');
   const [creatorBusy, setCreatorBusy] = useState(false);
   const [creatorUseInstrumentInput, setCreatorUseInstrumentInput] = useState(true);
+  const [creatorRegions, setCreatorRegions] = useState([]);
+  const [creatorRegionIso, setCreatorRegionIso] = useState('US');
+  const [creatorRegionTags, setCreatorRegionTags] = useState([]);
+  const [creatorTag, setCreatorTag] = useState('');
+  const [creatorScanBusy, setCreatorScanBusy] = useState(false);
+  const [creatorScanStations, setCreatorScanStations] = useState([]);
+  const [creatorUnusedFrequencies, setCreatorUnusedFrequencies] = useState([]);
+  const [creatorUnusedInternetSlots, setCreatorUnusedInternetSlots] = useState([]);
 
   // Refs
   const howlRef         = useRef(null);   // current Howl instance
@@ -328,13 +335,21 @@ const FMRadioPage = () => {
   useEffect(() => {
     const loadCreatorData = async () => {
       try {
-        const [stations, connectionsResponse] = await Promise.all([
+        const [stations, connectionsResponse, countries] = await Promise.all([
           fmService.getMyCreatorStations(),
           apiService.getInstrumentConnections(),
+          getCountries(180),
         ]);
 
         setCreatorStationDrafts(Array.isArray(stations) ? stations : []);
         setCreatorConnections(Array.isArray(connectionsResponse?.data) ? connectionsResponse.data : []);
+        const mappedCountries = Array.isArray(countries) ? countries : [];
+        setCreatorRegions(mappedCountries);
+
+        const defaultRegion = mappedCountries.find((item) => item.iso === 'US')?.iso
+          || mappedCountries[0]?.iso
+          || 'US';
+        setCreatorRegionIso(defaultRegion);
       } catch {
         // Creator tooling remains usable even if optional preload fails.
       }
@@ -342,6 +357,26 @@ const FMRadioPage = () => {
 
     loadCreatorData();
   }, []);
+
+  useEffect(() => {
+    const loadTags = async () => {
+      if (!creatorRegionIso) {
+        setCreatorRegionTags([]);
+        return;
+      }
+
+      try {
+        const tags = await getPopularTags(creatorRegionIso, 40);
+        const tagList = Array.isArray(tags) ? tags : [];
+        setCreatorRegionTags(tagList);
+        setCreatorTag((prev) => prev || tagList[0]?.name || '');
+      } catch {
+        setCreatorRegionTags([]);
+      }
+    };
+
+    loadTags();
+  }, [creatorRegionIso]);
 
   useEffect(() => {
     try {
@@ -459,6 +494,95 @@ const FMRadioPage = () => {
   };
 
   const toHex = (buffer) => Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  const parseFrequencyValue = (text) => {
+    const source = String(text || '');
+    const match = source.match(/\b(8[8-9](?:\.\d)?|9\d(?:\.\d)?|10[0-8](?:\.\d)?)\b/);
+    if (!match) return null;
+    const value = Number.parseFloat(match[1]);
+    if (!Number.isFinite(value) || value < FM_LOW || value > FM_HIGH) return null;
+    return Number(value.toFixed(1));
+  };
+
+  const buildUnusedFrequencies = (stations) => {
+    const used = new Set();
+    stations.forEach((station) => {
+      const parsed = parseFrequencyValue(station.frequency || station.name);
+      if (parsed !== null) {
+        used.add(parsed.toFixed(1));
+      }
+    });
+
+    creatorStationDrafts.forEach((station) => {
+      const parsed = parseFrequencyValue(station.frequency || station.name);
+      if (parsed !== null) {
+        used.add(parsed.toFixed(1));
+      }
+    });
+
+    const suggestions = [];
+    for (let freq = 88.1; freq <= 107.9; freq += 0.2) {
+      const rounded = Number(freq.toFixed(1));
+      const key = rounded.toFixed(1);
+      if (!used.has(key)) {
+        suggestions.push(key);
+      }
+      if (suggestions.length >= 14) {
+        break;
+      }
+    }
+
+    return suggestions;
+  };
+
+  const buildUnusedInternetSlots = () => {
+    const used = new Set(
+      creatorStationDrafts
+        .map((station) => String(station.frequency || '').trim().toUpperCase())
+        .filter((value) => value.startsWith('NET-'))
+    );
+
+    const regionToken = (creatorRegionIso || 'GLB').toUpperCase();
+    const slots = [];
+    for (let index = 1; index <= 80; index += 1) {
+      const slot = `NET-${regionToken}-${String(index).padStart(3, '0')}`;
+      if (!used.has(slot)) {
+        slots.push(slot);
+      }
+      if (slots.length >= 8) {
+        break;
+      }
+    }
+
+    return slots;
+  };
+
+  const scanCreatorFrequencies = async () => {
+    if (creatorScanBusy) return;
+    setCreatorScanBusy(true);
+    setCreatorStatus('Scanning available frequencies and internet channel slots...');
+
+    try {
+      const stations = await getStationsByRegionAndGenre({
+        countrycode: creatorRegionIso,
+        tag: creatorTag,
+        limit: 120,
+      });
+
+      const normalizedStations = Array.isArray(stations) ? stations : [];
+      setCreatorScanStations(normalizedStations.slice(0, 24));
+      setCreatorUnusedFrequencies(buildUnusedFrequencies(normalizedStations));
+      setCreatorUnusedInternetSlots(buildUnusedInternetSlots());
+      setCreatorStatus('Scan complete. Choose an available FM or internet-style slot.');
+    } catch {
+      setCreatorScanStations([]);
+      setCreatorUnusedFrequencies(buildUnusedFrequencies([]));
+      setCreatorUnusedInternetSlots(buildUnusedInternetSlots());
+      setCreatorStatus('Scan fallback applied. Suggested frequencies are based on current creator inventory.');
+    } finally {
+      setCreatorScanBusy(false);
+    }
+  };
 
   const buildUploadFileFromCreatorState = () => {
     if (creatorSelectedFile) return creatorSelectedFile;
@@ -1055,6 +1179,80 @@ const FMRadioPage = () => {
       <div className={isModern ? 'mod-creator-grid' : 'wr-creator-grid'}>
         <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
           <h3>Radio Station Builder</h3>
+          <div className="wr-creator-scan-row">
+            <label>
+              <span>Region</span>
+              <select value={creatorRegionIso} onChange={(e) => setCreatorRegionIso(e.target.value)}>
+                {creatorRegions.length === 0
+                  ? <option value="US">US</option>
+                  : creatorRegions.slice(0, 150).map((region) => (
+                    <option key={region.iso || region.name} value={region.iso || region.name}>
+                      {region.name} ({region.iso || 'N/A'})
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              <span>Genre Tag</span>
+              <select value={creatorTag} onChange={(e) => setCreatorTag(e.target.value)}>
+                {creatorRegionTags.length === 0
+                  ? <option value="">Any</option>
+                  : creatorRegionTags.map((tag) => (
+                    <option key={tag.name} value={tag.name}>{tag.name}</option>
+                  ))}
+              </select>
+            </label>
+            <button className="wr-mode-btn" onClick={scanCreatorFrequencies} disabled={creatorScanBusy}>
+              {creatorScanBusy ? 'Scanning...' : 'Scan Frequencies'}
+            </button>
+          </div>
+
+          {(creatorUnusedFrequencies.length > 0 || creatorUnusedInternetSlots.length > 0) && (
+            <div className="wr-creator-suggestions">
+              <div>
+                <strong>Available FM:</strong>
+                <div className="wr-creator-chip-list">
+                  {creatorUnusedFrequencies.map((freq) => (
+                    <button
+                      key={freq}
+                      className="wr-preset-btn"
+                      onClick={() => updateCreatorStationField('frequency', `${freq} FM`)}
+                    >
+                      {freq} FM
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <strong>Unused Internet Slots:</strong>
+                <div className="wr-creator-chip-list">
+                  {creatorUnusedInternetSlots.map((slot) => (
+                    <button
+                      key={slot}
+                      className="wr-preset-btn"
+                      onClick={() => updateCreatorStationField('frequency', slot)}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {creatorScanStations.length > 0 && (
+            <div className="wr-creator-linked" style={{ marginBottom: '10px' }}>
+              <h4>Region Scan Snapshot</h4>
+              <ul>
+                {creatorScanStations.slice(0, 8).map((station) => (
+                  <li key={station.id || station.name}>
+                    {station.name} · {station.frequency || 'Online'} · {station.country || creatorRegionIso}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="wr-creator-form-grid">
             <label>
               <span>Station Name</span>
@@ -1736,7 +1934,7 @@ const FMRadioPage = () => {
   );
 
   return (
-    <div ref={containerRef} className={`wr-shell${isFullscreen ? ' wr-fullscreen' : ''}${theme === 'modern' ? ' wr-modern-shell' : ''}`}>
+    <div ref={containerRef} className={`wr-shell wr-modern-shell${isFullscreen ? ' wr-fullscreen' : ''}`}>
       <audio
         ref={captionAudioRef}
         preload="none"
@@ -1744,17 +1942,7 @@ const FMRadioPage = () => {
         onError={() => setCaptionPlaying(false)}
       />
 
-      <div className="wr-theme-toggle">
-        <button className={`wr-theme-btn${theme === 'classic' ? ' active' : ''}`} onClick={() => setTheme('classic')}>
-          📻 Classic
-        </button>
-        <button className={`wr-theme-btn${theme === 'modern' ? ' active' : ''}`} onClick={() => setTheme('modern')}>
-          🎧 Modern
-        </button>
-      </div>
-
-      {theme === 'classic' ? renderClassicTheme() : null}
-      {theme === 'modern' ? renderModernTheme() : null}
+      {renderModernTheme()}
     </div>
   );
 };
