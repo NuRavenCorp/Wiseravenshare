@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward } from 'react-icons/fi';
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
@@ -119,7 +119,34 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [videoSearch, setVideoSearch] = useState('');
     const [photoSearch, setPhotoSearch] = useState('');
     const [currentTrack, setCurrentTrack] = useState(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [photoLightbox, setPhotoLightbox] = useState(null);
+    const [playingVideoId, setPlayingVideoId] = useState(null);
+    const audioRef = useRef(null);
     const [selectedPlanId, setSelectedPlanId] = useState(null);
+
+    const playTrack = (track) => {
+        setCurrentTrack(track);
+        setIsPlaying(true);
+    };
+
+    const togglePlayPause = () => {
+        if (!currentTrack) return;
+        setIsPlaying((prev) => !prev);
+    };
+
+    // Sync the audio element with currentTrack + isPlaying state.
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (!currentTrack?.mediaUrl) { audio.pause(); return; }
+        if (audio.src !== currentTrack.mediaUrl) {
+            audio.src = currentTrack.mediaUrl;
+            audio.load();
+        }
+        if (isPlaying) { audio.play().catch(() => {}); }
+        else { audio.pause(); }
+    }, [currentTrack, isPlaying]);
     const handleProtectTrack = (planId) => {
         if (!currentTrack) {
             addToast('Please select a music track first', 'info');
@@ -223,6 +250,40 @@ const MyLibraryPage = ({ onNavigate }) => {
 
     return (
         <section style={{ display: 'grid', gap: '14px' }}>
+            {/* Hidden audio engine */}
+            <audio ref={audioRef} preload="metadata" onEnded={() => setIsPlaying(false)} />
+
+            {/* Now-playing bar — visible whenever a track is loaded */}
+            {currentTrack && (
+                <div style={{
+                    position: 'sticky', top: '72px', zIndex: 20,
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '10px 14px',
+                    background: 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(168,85,247,0.18))',
+                    border: '1px solid rgba(168,85,247,0.4)',
+                    borderRadius: '12px',
+                    backdropFilter: 'blur(10px)'
+                }}>
+                    <button type="button" onClick={togglePlayPause}
+                        style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: 'linear-gradient(135deg, #3b82f6, #a855f7)', color: '#fff', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {isPlaying ? '⏸' : '▶'}
+                    </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack.title}</div>
+                        {currentTrack.artist && <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.55)' }}>{currentTrack.artist}</div>}
+                    </div>
+                    <FiMusic style={{ color: isPlaying ? '#a855f7' : 'rgba(255,255,255,0.3)', fontSize: '18px', flexShrink: 0 }} />
+                </div>
+            )}
+
+            {/* Photo lightbox */}
+            {photoLightbox && (
+                <div onClick={() => setPhotoLightbox(null)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+                    <img src={photoLightbox} alt="Full view"
+                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
+                </div>
+            )}
             <div style={{ border: '1px solid var(--border-color)', borderRadius: '14px', padding: '16px', background: 'var(--card-bg)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '20px' }}>
                     <FiBookOpen /> My Media Library
@@ -332,31 +393,48 @@ const MyLibraryPage = ({ onNavigate }) => {
                                 <div style={{ display: 'grid', gap: '8px' }}>
                                     {allMediaItems.map((item) => (
                                         <div key={item.id}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => {
+                                                if (item.type === 'music') playTrack(item);
+                                                else if (item.type === 'photo') setPhotoLightbox(item.imageUrl || item.url);
+                                                else if (item.type === 'video') setPlayingVideoId((id) => id === item.id ? null : item.id);
+                                            }}
+                                            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.click()}
                                             style={{
                                                 textAlign: 'left',
-                                                border: '1px solid var(--border-color)',
+                                                border: `1px solid ${(item.type === 'music' && currentTrack?.id === item.id) || playingVideoId === item.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
                                                 borderRadius: '10px',
-                                                background: 'rgba(255,255,255,0.03)',
+                                                background: (item.type === 'music' && currentTrack?.id === item.id) ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.03)',
                                                 color: 'var(--text-color)',
                                                 padding: '10px',
-                                                display: 'flex',
-                                                gap: '10px',
-                                                alignItems: 'center'
+                                                cursor: 'pointer',
+                                                display: 'grid',
+                                                gap: '8px'
                                             }}
                                         >
-                                            {item.type === 'photo' && item.imageUrl && (
-                                                <img src={item.imageUrl} alt={item.title} style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'cover' }} />
-                                            )}
-                                            {item.type === 'music' && <FiMusic style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
-                                            {item.type === 'video' && <FiVideo style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
-                                            <div style={{ flex: 1 }}>
-                                                <div><strong>{item.title}</strong> <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>({item.type})</span></div>
-                                                {(item.artist || item.description) && (
-                                                    <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                        {item.artist || item.description}
-                                                    </div>
+                                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                                {item.type === 'photo' && (item.imageUrl || item.url) && (
+                                                    <img src={item.imageUrl || item.url} alt={item.title} style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'cover' }} />
                                                 )}
+                                                {item.type === 'music' && <FiMusic style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
+                                                {item.type === 'video' && <FiVideo style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
+                                                <div style={{ flex: 1 }}>
+                                                    <div><strong>{item.title}</strong> <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>({item.type})</span></div>
+                                                    {(item.artist || item.description) && (
+                                                        <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
+                                                            {item.artist || item.description}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <FiPlay style={{ color: 'var(--light-color)', flexShrink: 0 }} />
                                             </div>
+                                            {/* Inline video for All tab */}
+                                            {item.type === 'video' && playingVideoId === item.id && item.videoUrl && (
+                                                <video src={item.videoUrl} controls autoPlay
+                                                    style={{ width: '100%', maxHeight: '340px', borderRadius: '8px', background: '#000' }}
+                                                    onClick={(e) => e.stopPropagation()} />
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -389,19 +467,24 @@ const MyLibraryPage = ({ onNavigate }) => {
                             ) : (
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
                                     {filteredPhotos.map((photo) => (
-                                        <div
+                                        <button
                                             key={photo.id}
+                                            type="button"
+                                            onClick={() => setPhotoLightbox(photo.imageUrl || photo.url)}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 borderRadius: '10px',
                                                 background: 'rgba(255,255,255,0.03)',
                                                 overflow: 'hidden',
-                                                cursor: 'pointer',
-                                                transition: 'transform 0.2s',
-                                                ':hover': { transform: 'scale(1.02)' }
+                                                cursor: 'zoom-in',
+                                                padding: 0,
+                                                textAlign: 'left',
+                                                transition: 'transform 0.15s, border-color 0.15s'
                                             }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.borderColor = 'var(--highlight-color)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
                                         >
-                                            <img src={photo.imageUrl} alt={photo.title} style={{ width: '100%', height: '150px', objectFit: 'cover' }} />
+                                            <img src={photo.imageUrl || photo.url} alt={photo.title} style={{ width: '100%', height: '150px', objectFit: 'cover', display: 'block' }} />
                                             <div style={{ padding: '8px', fontSize: '12px' }}>
                                                 <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                     {photo.title}
@@ -412,7 +495,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                     </div>
                                                 )}
                                             </div>
-                                        </div>
+                                        </button>
                                     ))}
                                 </div>
                             )}
@@ -447,21 +530,21 @@ const MyLibraryPage = ({ onNavigate }) => {
                                         <button
                                             key={track.id}
                                             type="button"
-                                            onClick={() => setCurrentTrack(track)}
+                                            onClick={() => playTrack(track)}
                                             style={{
                                                 textAlign: 'left',
-                                                border: '1px solid var(--border-color)',
+                                                border: `1px solid ${currentTrack?.id === track.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
                                                 borderRadius: '10px',
-                                                background: currentTrack?.id === track.id ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
+                                                background: currentTrack?.id === track.id ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.03)',
                                                 color: 'var(--text-color)',
                                                 padding: '10px',
                                                 cursor: 'pointer'
                                             }}
                                         >
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                                                 <strong>{track.title || 'Untitled'}</strong>
-                                                <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                                                    <FiPlay />
+                                                <span style={{ fontSize: '18px', color: 'var(--highlight-color)', flexShrink: 0 }}>
+                                                    {currentTrack?.id === track.id && isPlaying ? '⏸' : '▶'}
                                                 </span>
                                             </div>
                                             <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
@@ -501,35 +584,37 @@ const MyLibraryPage = ({ onNavigate }) => {
                                         <div
                                             key={video.id}
                                             style={{
-                                                border: '1px solid var(--border-color)',
+                                                border: `1px solid ${playingVideoId === video.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
                                                 borderRadius: '10px',
                                                 background: 'rgba(255,255,255,0.03)',
-                                                padding: '10px'
+                                                overflow: 'hidden'
                                             }}
                                         >
-                                            <strong>{video.title || 'Untitled video'}</strong>
-                                            {video.description && (
-                                                <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                    {video.description}
+                                            {/* Collapsed row — tap to expand player */}
+                                            <button type="button"
+                                                onClick={() => setPlayingVideoId((id) => id === video.id ? null : video.id)}
+                                                style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-color)', padding: '12px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                <span style={{ fontSize: '20px', color: 'var(--highlight-color)', flexShrink: 0 }}>
+                                                    {playingVideoId === video.id ? '⏸' : '▶'}
+                                                </span>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{video.title || 'Untitled video'}</div>
+                                                    {video.description && (
+                                                        <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{video.description}</div>
+                                                    )}
+                                                </div>
+                                            </button>
+                                            {/* Inline player — expands when row is active */}
+                                            {playingVideoId === video.id && video.videoUrl && (
+                                                <video src={video.videoUrl} controls autoPlay
+                                                    style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
+                                                    onEnded={() => setPlayingVideoId(null)} />
+                                            )}
+                                            {playingVideoId === video.id && !video.videoUrl && (
+                                                <div style={{ padding: '14px', fontSize: '12px', color: 'var(--light-color)' }}>
+                                                    No playable URL for this video.
                                                 </div>
                                             )}
-                                            <div style={{ marginTop: '8px' }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onNavigate?.('ravensight')}
-                                                    style={{
-                                                        border: '1px solid var(--border-color)',
-                                                        borderRadius: '8px',
-                                                        background: 'transparent',
-                                                        color: 'var(--text-color)',
-                                                        padding: '6px 10px',
-                                                        cursor: 'pointer',
-                                                        fontSize: '12px'
-                                                    }}
-                                                >
-                                                    Open in Ravensight
-                                                </button>
-                                            </div>
                                         </div>
                                     ))}
                                 </div>
