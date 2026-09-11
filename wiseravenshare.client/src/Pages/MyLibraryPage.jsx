@@ -163,8 +163,10 @@ const MyLibraryPage = ({ onNavigate }) => {
             try {
                 const [musicResult, videoResult, photoResult] = await Promise.allSettled([
                     apiService.getMusicLibrary(),
-                    ravensightAPI.getUserVideos(user?.id || null),
-                    apiService.getLibraryMedia?.({ mediaType: 'image' }).catch(() => ({ data: [] }))
+                    apiService.getVideoLibrary
+                        ? apiService.getVideoLibrary()
+                        : ravensightAPI.getUserVideos(user?.id || null),
+                    apiService.getPhotoLibrary ? apiService.getPhotoLibrary() : Promise.resolve({ data: [] })
                 ]);
 
                 if (!isMounted) return;
@@ -175,7 +177,11 @@ const MyLibraryPage = ({ onNavigate }) => {
                         .filter(Boolean)
                     : [];
                 const nextVideos = videoResult.status === 'fulfilled'
-                    ? (Array.isArray(videoResult.value?.videos) ? videoResult.value.videos : [])
+                    ? (Array.isArray(videoResult.value?.videos)
+                        ? videoResult.value.videos
+                        : Array.isArray(videoResult.value?.data)
+                            ? videoResult.value.data
+                            : [])
                         .map(normalizeVideo)
                         .filter(Boolean)
                     : [];

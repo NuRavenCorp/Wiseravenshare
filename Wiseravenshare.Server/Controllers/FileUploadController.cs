@@ -17,17 +17,19 @@ public class MediaController : ControllerBase
     private readonly IYouTubeService _youTubeService;
     private readonly ISocialPlatformService _socialPlatformService;
     private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly ILogger<MediaController> _logger;
     private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
+    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, RavensightMediaCatalogStore mediaCatalogStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _socialPlatformService = socialPlatformService;
         _videoLibraryStore = videoLibraryStore;
+        _mediaCatalogStore = mediaCatalogStore;
         _logger = logger;
         _cacheInvalidation = cacheInvalidation;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
@@ -209,6 +211,49 @@ public class MediaController : ControllerBase
         }
 
         var mediaUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+
+        // Register photos and music in the user catalog so they appear in My Library.
+        if (isPhoto || isAudio)
+        {
+            var catalogUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? User.FindFirstValue("id");
+            if (Guid.TryParse(catalogUserId, out var catalogUserGuid) && catalogUserGuid != Guid.Empty)
+            {
+                var displayName = User.FindFirstValue(ClaimTypes.Name);
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+                var userIdentity = StoragePathResolver.ResolveUserStorageIdentity(displayName, email, catalogUserId);
+                var mediaFolder = isPhoto ? $"users/{userIdentity}/media/photos" : $"users/{userIdentity}/media/music";
+
+                try
+                {
+                    await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+                    {
+                        UserId = catalogUserGuid,
+                        MediaType = isPhoto ? RavensightMediaType.Photo : RavensightMediaType.Music,
+                        FileName = uniqueFileName,
+                        RelativePath = $"{mediaFolder}/{uniqueFileName}",
+                        PublicUrl = null,
+                        AbsolutePath = string.Empty,
+                        DestinationFolder = mediaFolder,
+                        ContentType = upload.File.ContentType ?? "application/octet-stream",
+                        SizeBytes = upload.File.Length,
+                        SavedAtUtc = DateTime.UtcNow,
+                        MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            title = upload.Title ?? Path.GetFileNameWithoutExtension(upload.File.FileName),
+                            originalFileName = upload.File.FileName,
+                            mediaType = isPhoto ? "photo" : "music"
+                        })
+                    }, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to register {MediaType} upload in catalog for user {UserId}.", isPhoto ? "photo" : "music", catalogUserGuid);
+                }
+            }
+        }
+
         await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
 
         return Ok(new

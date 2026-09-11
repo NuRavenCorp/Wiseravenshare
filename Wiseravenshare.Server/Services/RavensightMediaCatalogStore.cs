@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS {PreferencesTable} (
         await EnsureSchemaAsync(cancellationToken);
 
         var now = DateTime.UtcNow;
-        var expiresAtUtc = request.SavedAtUtc.AddDays(VideoRetentionPolicy.TemporaryRetentionDays);
+        // Library media persists indefinitely — only removed by explicit user delete action.
+        var expiresAtUtc = now.AddYears(100);
         var id = Guid.NewGuid().ToString("N");
         var mediaType = request.MediaType.ToString().ToLowerInvariant();
 
@@ -127,7 +128,7 @@ INSERT INTO {AssetsTable} (
 ) VALUES (
     @id, @user_id, @media_type, @file_name, @relative_path, @public_url, @absolute_path,
     @destination_folder, @content_type, @size_bytes, @saved_at_utc, @expires_at_utc,
-    TRUE, CAST(@metadata_json AS jsonb), NULL, @created_at_utc, @updated_at_utc
+    FALSE, CAST(@metadata_json AS jsonb), NULL, @created_at_utc, @updated_at_utc
 );";
 
         await using (var command = new NpgsqlCommand(sql, connection))
@@ -164,7 +165,7 @@ INSERT INTO {AssetsTable} (
             SizeBytes = request.SizeBytes,
             SavedAtUtc = request.SavedAtUtc,
             ExpiresAtUtc = expiresAtUtc,
-            AutoDeleteEnabled = true,
+            AutoDeleteEnabled = false,
             MetadataJson = string.IsNullOrWhiteSpace(request.MetadataJson) ? "{}" : request.MetadataJson,
             DeletedAtUtc = null
         };
@@ -337,6 +338,69 @@ WHERE id = @id;";
         command.Parameters.AddWithValue("deleted_at_utc", deletedAtUtc);
         command.Parameters.AddWithValue("updated_at_utc", deletedAtUtc);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RavensightMediaAssetRecord>> GetUserAssetsAsync(
+        Guid userId,
+        string? mediaType = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSchemaAsync(cancellationToken);
+
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString))
+            return Array.Empty<RavensightMediaAssetRecord>();
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var whereMediaType = string.IsNullOrWhiteSpace(mediaType)
+            ? string.Empty
+            : "AND media_type = @media_type";
+
+        var sql = $@"
+SELECT id, user_id, media_type, file_name, relative_path, public_url, absolute_path,
+       destination_folder, content_type, size_bytes, saved_at_utc, expires_at_utc,
+       auto_delete_enabled, metadata_json, deleted_at_utc
+FROM {AssetsTable}
+WHERE user_id = @user_id
+  AND deleted_at_utc IS NULL
+  {whereMediaType}
+ORDER BY saved_at_utc DESC
+LIMIT @limit;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        if (!string.IsNullOrWhiteSpace(mediaType))
+            command.Parameters.AddWithValue("media_type", mediaType.ToLowerInvariant());
+        command.Parameters.AddWithValue("limit", limit);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var results = new List<RavensightMediaAssetRecord>();
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new RavensightMediaAssetRecord
+            {
+                Id = reader.GetString(0),
+                UserId = reader.GetGuid(1),
+                MediaType = reader.GetString(2),
+                FileName = reader.GetString(3),
+                RelativePath = reader.GetString(4),
+                PublicUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
+                AbsolutePath = reader.GetString(6),
+                DestinationFolder = reader.GetString(7),
+                ContentType = reader.GetString(8),
+                SizeBytes = reader.GetInt64(9),
+                SavedAtUtc = reader.GetDateTime(10),
+                ExpiresAtUtc = reader.GetDateTime(11),
+                AutoDeleteEnabled = reader.GetBoolean(12),
+                MetadataJson = reader.IsDBNull(13) ? "{}" : reader.GetString(13),
+                DeletedAtUtc = reader.IsDBNull(14) ? null : reader.GetDateTime(14)
+            });
+        }
+
+        return results;
     }
 
     public async Task<IReadOnlyList<RavensightMediaAssetRecord>> GetUserAssetsByTypeAsync(

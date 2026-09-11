@@ -166,9 +166,9 @@ public sealed class RavensightVideoMediaController : ControllerBase
             mediaAssetId = mediaRecord.Id,
             retention = new
             {
-                days = VideoRetentionPolicy.TemporaryRetentionDays,
+                days = (int?)null,
                 expiresAtUtc = mediaRecord.ExpiresAtUtc,
-                warning = $"This Ravensight server copy will auto-delete in {VideoRetentionPolicy.TemporaryRetentionDays} days unless you save it to your local Ravensight folder.",
+                warning = (string?)null,
                 localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }
