@@ -145,7 +145,12 @@ public sealed class StudioCaptureService : IStudioCaptureService
         {
             "analog" => "analog",
             "usb-c" => "usb-c",
-            "usb" => "usb-c",
+            "type-c" => "usb-c",
+            "usbc" => "usb-c",
+            "micro-usb" => "micro-usb",
+            "microusb" => "micro-usb",
+            "usb-micro" => "micro-usb",
+            "usb" => "usb",
             "bluetooth" => "bluetooth",
             "midi" => "midi",
             "network" => "network",

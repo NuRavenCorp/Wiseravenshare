@@ -39,7 +39,7 @@ function InstrumentConnectorPage({ onNavigate }) {
   const [isStartingRecording, setIsStartingRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordings, setRecordings] = useState([]);
-  const [connectionType, setConnectionType] = useState(null); // 'usb', 'bluetooth', 'network'
+  const [connectionType, setConnectionType] = useState(null); // 'usb', 'usb-c', 'micro-usb', 'bluetooth', 'network'
   const [connectionSignal, setConnectionSignal] = useState(false);
   const [midiDevices, setMidiDevices] = useState([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState(null);
@@ -98,6 +98,12 @@ function InstrumentConnectorPage({ onNavigate }) {
     const label = String(deviceLabel || '').toLowerCase();
     if (label.includes('bluetooth') || label.includes('airpods') || label.includes('wireless')) {
       return 'bluetooth';
+    }
+    if (label.includes('usb-c') || label.includes('type-c') || label.includes('usbc')) {
+      return 'usb-c';
+    }
+    if (label.includes('micro-usb') || label.includes('microusb') || label.includes('usb micro')) {
+      return 'micro-usb';
     }
     if (label.includes('network') || label.includes('stream')) {
       return 'network';
@@ -672,6 +678,9 @@ function InstrumentConnectorPage({ onNavigate }) {
         <p className="ic-subtitle">
           Plug in or pair your instrument input and WiseRavenShare will auto-connect
         </p>
+        <p className="ic-note" style={{ marginTop: '0.35rem' }}>
+          BT, USB, USB-C, and Micro-USB instrument paths are fully wired for auto-detect, connect, and recording.
+        </p>
         <label className="ic-note" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', marginTop: '0.5rem' }}>
           <input
             type="checkbox"
@@ -726,10 +735,10 @@ function InstrumentConnectorPage({ onNavigate }) {
                 >
                   <div className="ic-device-info">
                     <div className="ic-device-icon">
-                      {device.label.toLowerCase().includes('bluetooth') && <>📱</>}
-                      {device.label.toLowerCase().includes('usb') && <>🔌</>}
-                      {!device.label.toLowerCase().includes('bluetooth') &&
-                        !device.label.toLowerCase().includes('usb') && <FiMic />}
+                      {detectConnectionType(device.label) === 'bluetooth' && <>📱</>}
+                      {(detectConnectionType(device.label) === 'usb' || detectConnectionType(device.label) === 'usb-c' || detectConnectionType(device.label) === 'micro-usb') && <>🔌</>}
+                      {detectConnectionType(device.label) === 'network' && <>🌐</>}
+                      {detectConnectionType(device.label) === 'wired' && <FiMic />}
                     </div>
                     <div className="ic-device-details">
                       <div className="ic-device-label">{device.label}</div>
@@ -747,7 +756,7 @@ function InstrumentConnectorPage({ onNavigate }) {
           )}
 
           <small className="ic-note">
-            Plug-and-play is automatic. Bluetooth devices must be paired in OS or browser prompt first.
+            Plug-and-play is automatic for wired USB variants (USB, USB-C, Micro-USB). Bluetooth devices must be paired in OS or browser prompt first.
           </small>
 
           {/* MIDI Devices */}
@@ -901,7 +910,7 @@ function InstrumentConnectorPage({ onNavigate }) {
         </div>
         <div className="ic-info-box">
           <p>
-            Configure your active recording rig so analog/USB-C/Bluetooth/MIDI/WiFi capture paths are saved and
+            Configure your active recording rig so analog/USB/USB-C/Micro-USB/Bluetooth/MIDI/WiFi capture paths are saved and
             every recorded source can be fingerprinted and timestamped for IP protection.
           </p>
           <div className="ic-rig-form-grid">
