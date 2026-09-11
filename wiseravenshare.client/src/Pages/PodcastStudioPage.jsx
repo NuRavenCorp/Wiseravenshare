@@ -205,15 +205,15 @@ const resolveUploadedMediaUrl = (payload, fallback = '') => {
 
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
-    const [title, setTitle] = useState('The Social Creator Teams Brief');
+    const [title, setTitle] = useState('Ravensight Podcast Studio');
     const [format, setFormat] = useState('Interview');
     const [status, setStatus] = useState('Ready to record');
     const [selectedMode, setSelectedMode] = useState('Desktop');
     const [scriptText, setScriptText] = useState(
-        'Welcome to today\'s episode. We are building a creator operating system that helps teams produce, publish, and grow from anywhere.'
+        'Welcome to Ravensight Podcast Studio. We are covering the story, verifying the facts, and shaping the live discussion for our audience with clarity and accountability.'
     );
     const [controlRole, setControlRole] = useState('Owner');
-    const [storyAngle, setStoryAngle] = useState('Community impact and verified eyewitness accounts');
+    const [storyAngle, setStoryAngle] = useState('Verified reporting, audience impact, and live community response');
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
@@ -1182,7 +1182,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     </span>
                                 )}
                             </div>
-                            <h2 style={{ margin: '8px 0 0', fontSize: '28px' }}>Social Creator Teams & Live Production</h2>
+                            <h2 style={{ margin: '8px 0 0', fontSize: '28px' }}>Ravensight Podcast Studio & Live Production</h2>
                         </div>
 
                         {/* Top Action Buttons */}
