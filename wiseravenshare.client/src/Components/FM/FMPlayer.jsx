@@ -6,6 +6,12 @@ import {
 } from 'react-icons/fi';
 import { fmService } from '../../Services/fmService';
 
+const FALLBACK_STREAM_CANDIDATES = [
+  'https://ice6.somafm.com/groovesalad-128-mp3',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
+];
+
 const formatTime = (seconds) => {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
   const minutes = Math.floor(safeSeconds / 60);
@@ -57,6 +63,7 @@ const FMPlayer = ({
   const waveformTimerRef = useRef(null);
   const sourceCandidatesRef = useRef([]);
   const sourceIndexRef = useRef(0);
+  const playIntentRef = useRef(false);
 
   const stopWaveform = useCallback(() => {
     if (waveformTimerRef.current) {
@@ -98,6 +105,7 @@ const FMPlayer = ({
     const audio = audioRef.current;
     if (!audio) return;
 
+    playIntentRef.current = false;
     audio.pause();
     setIsPlaying(false);
     setIsBuffering(false);
@@ -108,6 +116,7 @@ const FMPlayer = ({
     const audio = audioRef.current;
     if (!audio) return;
 
+    playIntentRef.current = true;
     setError('');
     setIsBuffering(true);
 
@@ -143,11 +152,11 @@ const FMPlayer = ({
     const raw = String(value || '').trim();
     if (!raw) return [];
 
-    const fallback = raw.startsWith('http://')
+    const fallback = /^https?:\/\//i.test(raw)
       ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(raw)}`
       : raw;
 
-    return [...new Set([raw, fallback].filter(Boolean))];
+    return [...new Set([raw, fallback, ...FALLBACK_STREAM_CANDIDATES].filter(Boolean))];
   }, []);
 
   const seek = useCallback((nextTime) => {
@@ -163,6 +172,7 @@ const FMPlayer = ({
     const audio = audioRef.current;
     if (!audio || !station?.streamUrl) return;
 
+    playIntentRef.current = true;
     setError('');
     setIsBuffering(true);
 
@@ -236,7 +246,7 @@ const FMPlayer = ({
         sourceIndexRef.current = nextIndex;
         audio.src = nextCandidates[nextIndex];
         audio.load();
-        if (parentPlaying || isPlaying) {
+        if (playIntentRef.current) {
           audio.play().catch(() => {});
         }
         return;
@@ -269,12 +279,13 @@ const FMPlayer = ({
       audio.removeEventListener('error', onError);
       audio.src = '';
       audioRef.current = null;
+      playIntentRef.current = false;
       setCurrentTime(0);
       setDuration(0);
       setIsPlaying(false);
       setIsBuffering(false);
     };
-  }, [getStreamCandidates, isMuted, isPlaying, parentPlaying, station?.streamUrl, startWaveform, stopMetaPoll, stopWaveform, volume]);
+  }, [getStreamCandidates, station?.streamUrl, startWaveform, stopMetaPoll, stopWaveform]);
 
   useEffect(() => {
     if (isExpanded && isPlaying) {

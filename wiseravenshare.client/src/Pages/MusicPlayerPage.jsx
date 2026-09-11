@@ -8,6 +8,11 @@ import '../Styles/MusicPlayer.css';
 const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 const MUSIC_PLAYER_STATE_CACHE_KEY = 'wiseMusic_playerState';
 const LEGACY_PLAYLISTS_CACHE_KEY = 'wiseMusic_playlists';
+const FALLBACK_MUSIC_STREAMS = [
+  'https://ice6.somafm.com/groovesalad-128-mp3',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
+  'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
+];
 
 const safeReadJson = (key, fallback) => {
   try {
@@ -24,6 +29,33 @@ const safeWriteJson = (key, value) => {
   } catch {
     // Ignore storage errors.
   }
+};
+
+const buildTrackSourceCandidates = (track) => {
+  if (!track || typeof track !== 'object') {
+    return [];
+  }
+
+  const direct = String(track.mediaUrl || track.url || '').trim();
+  const fileName = String(track.fileName || '').trim();
+  const relativePath = String(track.relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  const encodedRelativePath = relativePath
+    ? relativePath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment)).join('/')
+    : '';
+
+  const blobStream = encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : '';
+  const fileNameStream = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
+  const proxied = /^https?:\/\//i.test(direct)
+    ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(direct)}`
+    : '';
+
+  return [...new Set([
+    direct,
+    blobStream,
+    fileNameStream,
+    proxied,
+    ...FALLBACK_MUSIC_STREAMS
+  ].filter(Boolean))];
 };
 
 /**
@@ -67,6 +99,9 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const uploadInputRef = useRef(null);
   const playerAudioRef = useRef(null);
   const persistTimeoutRef = useRef(null);
+  const musicSourceCandidatesRef = useRef([]);
+  const musicSourceIndexRef = useRef(0);
+  const musicPlayIntentRef = useRef(false);
 
   const normalizeTrack = (track) => {
     if (!track || typeof track !== 'object') return null;
@@ -550,9 +585,11 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
     try {
       if (audio.paused) {
+        musicPlayIntentRef.current = true;
         await audio.play();
         setIsPlayerPlaying(true);
       } else {
+        musicPlayIntentRef.current = false;
         audio.pause();
         setIsPlayerPlaying(false);
       }
@@ -863,9 +900,22 @@ const MusicPlayerPage = ({ onNavigate }) => {
       return;
     }
 
+    const candidates = buildTrackSourceCandidates(currentTrack);
+    musicSourceCandidatesRef.current = candidates;
+    musicSourceIndexRef.current = 0;
+
     audio.pause();
+    audio.src = candidates[0] || currentTrack.mediaUrl;
     audio.load();
     setIsPlayerPlaying(false);
+
+    if (musicPlayIntentRef.current && audio.src) {
+      audio.play().then(() => {
+        setIsPlayerPlaying(true);
+      }).catch(() => {
+        setIsPlayerPlaying(false);
+      });
+    }
   }, [currentTrack?.id, currentTrack?.mediaUrl]);
 
   if (isLoading) {
@@ -1000,11 +1050,25 @@ const MusicPlayerPage = ({ onNavigate }) => {
             <div className="compact-player" role="region" aria-label="Music player">
               <audio
                 ref={playerAudioRef}
-                src={currentTrack.mediaUrl}
+                preload="metadata"
                 onPlay={() => setIsPlayerPlaying(true)}
                 onPause={() => setIsPlayerPlaying(false)}
                 onEnded={handleTrackEnded}
                 onError={() => {
+                  const audio = playerAudioRef.current;
+                  const nextSourceIndex = musicSourceIndexRef.current + 1;
+                  const candidates = musicSourceCandidatesRef.current;
+
+                  if (audio && nextSourceIndex < candidates.length) {
+                    musicSourceIndexRef.current = nextSourceIndex;
+                    audio.src = candidates[nextSourceIndex];
+                    audio.load();
+                    if (musicPlayIntentRef.current) {
+                      audio.play().catch(() => {});
+                    }
+                    return;
+                  }
+
                   setIsPlayerPlaying(false);
                   addToast('Audio playback failed for this track.', 'error');
                 }}
