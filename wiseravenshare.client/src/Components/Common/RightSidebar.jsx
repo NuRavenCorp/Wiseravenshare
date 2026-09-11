@@ -172,7 +172,15 @@ const buildHashtagFeed = (posts = [], limit = 6) => {
 
     const buckets = new Map();
 
-    posts.forEach((post) => {
+    // Photo uploads belong in the dedicated gallery, not the hashtag column.
+    const textPosts = posts.filter((post) => {
+        const mediaType = String(post?.mediaType || post?.type || '').toLowerCase();
+        if (mediaType === 'photo' || mediaType === 'image') return false;
+        const mediaUrl = String(post?.mediaUrl || '').toLowerCase();
+        return !/\.(jpg|jpeg|png|gif|webp|svg)(\?|#|$)/i.test(mediaUrl);
+    });
+
+    textPosts.forEach((post) => {
         const tags = extractHashtags(post?.content || '');
         if (tags.length === 0) {
             return;
@@ -508,8 +516,8 @@ const RightSidebar = ({ onNavigate }) => {
     const [mediaExpanded, setMediaExpanded] = useState(false);
     const [dispatchReports, setDispatchReports] = useState([]);
     const [activeDispatchReport, setActiveDispatchReport] = useState(null);
-    const { user } = useAuth();
-    const isAdminUser = parseAdminEmails().has(String(user?.email || '').trim().toLowerCase());
+    const [playingVideoId, setPlayingVideoId] = useState(null);
+    const [videoAutoPlay, setVideoAutoPlay] = useState(true);
 
     useEffect(() => {
         let refreshTimer;
@@ -826,6 +834,71 @@ const RightSidebar = ({ onNavigate }) => {
     const videoMediaItems = recentMediaItems.filter((item) => item.type === 'video');
     const musicMediaItems = recentMediaItems.filter((item) => item.type === 'music');
 
+    const handleVideoEnded = (item, allVideoItems) => {
+        if (!videoAutoPlay) return;
+        const idx = allVideoItems.findIndex((v) => v.id === item.id);
+        const next = allVideoItems[idx + 1];
+        if (next) setPlayingVideoId(next.id);
+    };
+
+    const renderPhotoContainer = (label, items) => (
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>{label}</strong>
+                <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>{items.length}</span>
+            </div>
+            {recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading...</div>}
+            {!recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>No photos yet.</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                {items.slice(0, 9).map((item) => (
+                    <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.title}
+                        style={{ display: 'block', borderRadius: '6px', overflow: 'hidden', aspectRatio: '1', background: 'rgba(255,255,255,0.06)' }}>
+                        <img src={item.url} alt={item.title}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    </a>
+                ))}
+            </div>
+        </div>
+    );
+
+    const renderVideoContainer = (label, items) => (
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>{label}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>{items.length}</span>
+                    <button type="button"
+                        onClick={() => setVideoAutoPlay((v) => !v)}
+                        style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '999px', border: '1px solid var(--border-color)', background: videoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
+                        {videoAutoPlay ? '▶▶ Auto' : '⏸ Manual'}
+                    </button>
+                </div>
+            </div>
+            {recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading...</div>}
+            {!recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>No videos yet.</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {items.slice(0, 5).map((item) => {
+                    const isActive = playingVideoId === item.id;
+                    return (
+                        <div key={item.id} style={{ borderRadius: '8px', overflow: 'hidden', border: `1px solid ${isActive ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: 'rgba(0,0,0,0.4)' }}>
+                            {isActive ? (
+                                <video src={item.url} controls autoPlay
+                                    style={{ width: '100%', maxHeight: '180px', display: 'block', background: '#000' }}
+                                    onEnded={() => handleVideoEnded(item, items)} />
+                            ) : (
+                                <button type="button" onClick={() => setPlayingVideoId(item.id)}
+                                    style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', color: 'var(--text-color)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}>
+                                    <span style={{ fontSize: '20px', flexShrink: 0 }}>▶</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                                </button>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+
     const renderMediaContainer = (label, items, type) => (
         <div
             style={{
@@ -868,32 +941,24 @@ const RightSidebar = ({ onNavigate }) => {
                             background: 'rgba(255,255,255,0.02)'
                         }}
                     >
-                        {item.type === 'photo' ? (
-                            <img
-                                src={item.url}
-                                alt={item.title}
-                                style={{ width: '56px', height: '56px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border-color)' }}
-                            />
-                        ) : (
-                            <div
-                                style={{
-                                    width: '56px',
-                                    height: '56px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border-color)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    background: item.type === 'video'
-                                        ? 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(34,197,94,0.16))'
-                                        : 'linear-gradient(135deg, rgba(251,146,60,0.2), rgba(244,63,94,0.16))'
-                                }}
-                            >
-                                {item.type === 'video' ? 'Video' : 'Music'}
-                            </div>
-                        )}
+                        <div
+                            style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                background: item.type === 'video'
+                                    ? 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(34,197,94,0.16))'
+                                    : 'linear-gradient(135deg, rgba(251,146,60,0.2), rgba(244,63,94,0.16))'
+                            }}
+                        >
+                            {item.type === 'video' ? 'Video' : 'Music'}
+                        </div>
 
                         <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: '10px', color: 'var(--highlight-color)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>
@@ -1146,8 +1211,8 @@ const RightSidebar = ({ onNavigate }) => {
                 {mediaExpanded && (
                     <>
                         <div style={{ display: 'grid', gap: '10px' }}>
-                            {renderMediaContainer('Recent Photos', photoMediaItems, 'photos')}
-                            {renderMediaContainer('Recent Videos', videoMediaItems, 'videos')}
+                            {renderPhotoContainer('Photos', photoMediaItems)}
+                            {renderVideoContainer('Videos', videoMediaItems)}
                             {renderMediaContainer('Recent Music', musicMediaItems, 'music')}
                         </div>
                     </>
