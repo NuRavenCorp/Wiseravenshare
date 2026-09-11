@@ -204,6 +204,12 @@ public sealed class InstrumentConnectionsController : ControllerBase
         return value switch
         {
             "bluetooth" => "bluetooth",
+            "usb-c" => "usb-c",
+            "type-c" => "usb-c",
+            "usbc" => "usb-c",
+            "micro-usb" => "micro-usb",
+            "microusb" => "micro-usb",
+            "usb-micro" => "micro-usb",
             "usb" => "usb",
             "network" => "network",
             "wired" => "wired",

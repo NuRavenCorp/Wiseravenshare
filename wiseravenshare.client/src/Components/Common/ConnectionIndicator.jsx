@@ -53,6 +53,10 @@ function ConnectionIndicator({
     switch (connectionType) {
       case 'bluetooth':
         return '📱';
+      case 'usb-c':
+        return '🔌';
+      case 'micro-usb':
+        return '🔌';
       case 'usb':
         return '🔌';
       case 'network':
@@ -68,6 +72,10 @@ function ConnectionIndicator({
     switch (connectionType) {
       case 'bluetooth':
         return 'Bluetooth';
+      case 'usb-c':
+        return 'USB-C Audio Interface';
+      case 'micro-usb':
+        return 'Micro-USB Audio Interface';
       case 'usb':
         return 'USB/Audio Interface';
       case 'network':

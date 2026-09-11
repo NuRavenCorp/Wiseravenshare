@@ -597,6 +597,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setStatus(`Dispatch handoff received (${handoff.urgency || 'Standard'})`);
     }, []);
 
+    useEffect(() => {
+        try {
+            const savedDraft = String(localStorage.getItem('wisePodcastScriptDraft') || '').trim();
+            if (!savedDraft) {
+                return;
+            }
+
+            setScriptText(savedDraft);
+            setStatus('Recovered saved podcast script draft.');
+        } catch {
+            // Ignore local storage restore failures.
+        }
+    }, []);
+
     // Recording Functions
     const startRecording = async () => {
         // Only presenting roles (Owner / Producer / Host) may go live.
