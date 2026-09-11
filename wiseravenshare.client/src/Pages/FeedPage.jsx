@@ -32,7 +32,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
     const [feedScope, setFeedScope] = useState('local');
-    const [expandedPhotoDayKeys, setExpandedPhotoDayKeys] = useState({});
+    // Photo posts render inline in the main feed — no day-group tiles.
     const [crawlerTrending, setCrawlerTrending] = useState(null);
     const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
     const [personalizedTrending, setPersonalizedTrending] = useState(null);
@@ -432,44 +432,6 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         });
     }, [posts, feedScope, localRegion]);
 
-    const { nonPhotoPosts, photoPostsByDay } = useMemo(() => {
-        const byDay = {};
-        const nonPhotos = [];
-
-        rankedFeedPosts.forEach((post) => {
-            if (!isPhotoPost(post)) {
-                nonPhotos.push(post);
-                return;
-            }
-
-            const createdAt = post?.createdAt ? new Date(post.createdAt) : new Date();
-            const safeDate = Number.isFinite(createdAt.getTime()) ? createdAt : new Date();
-            const dayKey = safeDate.toISOString().slice(0, 10);
-            if (!byDay[dayKey]) {
-                byDay[dayKey] = [];
-            }
-            byDay[dayKey].push(post);
-        });
-
-        const grouped = Object.entries(byDay)
-            .sort((left, right) => right[0].localeCompare(left[0]))
-            .map(([dayKey, items]) => ({
-                dayKey,
-                items
-            }));
-
-        return {
-            nonPhotoPosts: nonPhotos,
-            photoPostsByDay: grouped
-        };
-    }, [rankedFeedPosts]);
-
-    const togglePhotoDay = (dayKey) => {
-        setExpandedPhotoDayKeys((prev) => ({
-            ...prev,
-            [dayKey]: !prev[dayKey]
-        }));
-    };
 
     useEffect(() => {
         setIntegrityReports((prev) => {
@@ -573,73 +535,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
             <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
-                {photoPostsByDay.map((group) => {
-                    const isExpanded = expandedPhotoDayKeys[group.dayKey] ?? true;
-                    const dayLabel = new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(undefined, {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                    });
-
-                    return (
-                        <div
-                            key={`photo-day-${group.dayKey}`}
-                            style={{
-                                marginBottom: '14px',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: '12px',
-                                background: 'rgba(17, 24, 39, 0.5)'
-                            }}
-                        >
-                            <button
-                                type="button"
-                                onClick={() => togglePhotoDay(group.dayKey)}
-                                style={{
-                                    width: '100%',
-                                    textAlign: 'left',
-                                    border: 'none',
-                                    borderRadius: '12px',
-                                    background: 'transparent',
-                                    color: 'var(--text-color)',
-                                    padding: '12px 14px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    fontWeight: 700
-                                }}
-                            >
-                                <span>📸 Daily Photo Uploads · {dayLabel}</span>
-                                <span style={{ fontSize: '12px', color: 'var(--light-color)', fontWeight: 600 }}>
-                                    {group.items.length} photo{group.items.length === 1 ? '' : 's'} · {isExpanded ? 'Hide' : 'Show'}
-                                </span>
-                            </button>
-
-                            {isExpanded && (
-                                <div style={{ padding: '0 10px 10px 10px', position: 'relative', zIndex: 10 }}>
-                                    {group.items.map((post) => (
-                                        <PostCard
-                                            key={post.id}
-                                            post={post}
-                                            onLike={handleLike}
-                                            onRepost={handleRepost}
-                                            onDispute={handleDisputePost}
-                                            onVerify={handleVerifyPost}
-                                            integrityReport={integrityReports[post.id]}
-                                            currentUser={currentUser}
-                                            isFollowing={following.includes(post.userId)}
-                                            onFollow={handleFollow}
-                                            onBookmark={handleBookmark}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-
-                {nonPhotoPosts.map(post => (
+                {rankedFeedPosts.map(post => (
                     <PostCard
                         key={post.id}
                         post={post}

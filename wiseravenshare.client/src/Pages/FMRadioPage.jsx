@@ -1931,7 +1931,7 @@ const FMRadioPage = () => {
         onError={() => setCaptionPlaying(false)}
       />
 
-      {renderClassicTheme()}
+      {renderModernTheme()}
     </div>
   );
 };

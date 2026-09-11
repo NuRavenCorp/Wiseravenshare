@@ -122,17 +122,7 @@ const PostCard = ({
                 )}
             </div>
 
-            <p
-                style={{
-                    marginTop: '12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word'
-                }}
-            >
-                {post.content}
-            </p>
-
+            {/* Media block renders first so photos are never buried under text */}
             {(() => {
                 const rawMediaUrl = post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '';
                 const resolvedMedia = resolveMediaUrl(rawMediaUrl);
@@ -140,7 +130,7 @@ const PostCard = ({
                 const { isVideoPost, isImagePost, isAudioPost } = classifyPostMedia(post, resolvedMedia);
 
                 return (
-                    <div style={{ marginTop: '12px', borderRadius: '12px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
+                    <div style={{ marginTop: '12px', borderRadius: '12px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', zIndex: 1 }}>
                         {isVideoPost ? (
                             <video
                                 src={resolvedMedia}
@@ -153,7 +143,7 @@ const PostCard = ({
                             <img
                                 src={resolvedMedia}
                                 alt="Story media"
-                                style={{ width: '100%', maxHeight: '420px', objectFit: 'cover', display: 'block', borderRadius: '12px' }}
+                                style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
                             />
                         ) : isAudioPost ? (
                             <div style={{ padding: '14px', background: 'rgba(255,255,255,0.04)' }}>
@@ -175,6 +165,17 @@ const PostCard = ({
                     </div>
                 );
             })()}
+
+            <p
+                style={{
+                    marginTop: '12px',
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word'
+                }}
+            >
+                {post.content}
+            </p>
 
             {platformLinks.length > 0 && (
                 <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
