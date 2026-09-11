@@ -117,6 +117,9 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         following: 0
     });
     const [activeTab, setActiveTab] = useState('posts');
+    const [photoLightbox, setPhotoLightbox] = useState(null);
+    const [profileVideoIdx, setProfileVideoIdx] = useState(0);
+    const [profileVideoAutoPlay, setProfileVideoAutoPlay] = useState(true);
     const [followerProfiles, setFollowerProfiles] = useState([]);
     const [followingProfiles, setFollowingProfiles] = useState([]);
     const [associationView, setAssociationView] = useState('followers');
@@ -479,6 +482,16 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     });
 
     const mediaPosts = posts.filter((p) => p.mediaUrl || p.youtubeUrl || p.tiktokUrl || p.facebookUrl || p.podcastUrl);
+    const isPhotoMediaUrl = (url) => /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(String(url || ''));
+    const isVideoMediaUrl = (url) => /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(String(url || ''));
+    const photoProfilePosts = mediaPosts.filter((p) => {
+        const t = String(p.mediaType || p.type || '').toLowerCase();
+        return t === 'photo' || t === 'image' || isPhotoMediaUrl(p.mediaUrl);
+    });
+    const videoProfilePosts = mediaPosts.filter((p) => {
+        const t = String(p.mediaType || p.type || '').toLowerCase();
+        return t === 'video' || isVideoMediaUrl(p.mediaUrl || p.videoUrl);
+    });
 
     const tabCounts = {
         posts: derivedStats.posts,
@@ -1473,6 +1486,91 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                     likes: likedPosts
                 };
                 const visible = tabData[activeTab] || [];
+
+                // Dedicated photo gallery + video player for the Media tab.
+                if (activeTab === 'media') {
+                    const currentVideo = videoProfilePosts[profileVideoIdx];
+                    const currentVideoUrl = currentVideo?.mediaUrl || currentVideo?.videoUrl || '';
+                    return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                            {/* Photo Gallery */}
+                            <section>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>📷 Photos ({photoProfilePosts.length})</h3>
+                                </div>
+                                {photoProfilePosts.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No photos yet.</div>
+                                ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px' }}>
+                                        {photoProfilePosts.map((post) => (
+                                            <button key={post.id} type="button"
+                                                onClick={() => setPhotoLightbox(post.mediaUrl)}
+                                                style={{ padding: 0, border: 'none', borderRadius: '10px', overflow: 'hidden', aspectRatio: '1', cursor: 'zoom-in', background: 'rgba(255,255,255,0.06)' }}>
+                                                <img src={post.mediaUrl} alt={post.content?.slice(0, 40) || 'Photo'}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+
+                            {/* Video Player */}
+                            <section>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>🎬 Videos ({videoProfilePosts.length})</h3>
+                                    <button type="button"
+                                        onClick={() => setProfileVideoAutoPlay((v) => !v)}
+                                        style={{ fontSize: '12px', padding: '4px 12px', borderRadius: '999px', border: '1px solid var(--border-color)', background: profileVideoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
+                                        {profileVideoAutoPlay ? '▶▶ Auto-play on' : '⏸ Auto-play off'}
+                                    </button>
+                                </div>
+                                {videoProfilePosts.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No videos yet.</div>
+                                ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '14px' }}>
+                                        {/* Active player */}
+                                        <div style={{ borderRadius: '14px', overflow: 'hidden', background: '#000', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            {currentVideoUrl ? (
+                                                <video key={currentVideoUrl} src={currentVideoUrl} controls autoPlay={profileVideoAutoPlay}
+                                                    style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
+                                                    onEnded={() => {
+                                                        if (profileVideoAutoPlay && profileVideoIdx < videoProfilePosts.length - 1) {
+                                                            setProfileVideoIdx((i) => i + 1);
+                                                        }
+                                                    }} />
+                                            ) : (
+                                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>Select a video</span>
+                                            )}
+                                        </div>
+                                        {/* Playlist */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '420px', overflowY: 'auto' }}>
+                                            {videoProfilePosts.map((post, idx) => (
+                                                <button key={post.id} type="button"
+                                                    onClick={() => setProfileVideoIdx(idx)}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '10px', border: `1px solid ${profileVideoIdx === idx ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: profileVideoIdx === idx ? 'rgba(255,255,255,0.08)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', textAlign: 'left' }}>
+                                                    <span style={{ fontSize: '16px', flexShrink: 0 }}>{profileVideoIdx === idx ? '▶' : '○'}</span>
+                                                    <span style={{ fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                        {post.content?.slice(0, 36) || `Video ${idx + 1}`}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+
+                            {/* Lightbox */}
+                            {photoLightbox && (
+                                <div onClick={() => setPhotoLightbox(null)}
+                                    style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+                                    <img src={photoLightbox} alt="Full view"
+                                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
 
                 if (visible.length === 0) {
                     const emptyMessages = {
