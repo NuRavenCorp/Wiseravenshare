@@ -669,25 +669,6 @@
    MODERN THEME
    ═══════════════════════════════════════════════ */
 
-/* Theme toggle bar (always on top) */
-.wr-theme-toggle {
-  display: flex; gap: 6px; justify-content: flex-end;
-  padding: 10px 14px 0;
-}
-.wr-theme-btn {
-  padding: 6px 16px; border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: transparent; color: rgba(255,255,255,.45);
-  font-size: .75rem; font-weight: 700; cursor: pointer;
-  transition: all .16s; letter-spacing: .06em;
-}
-.wr-theme-btn:hover  { border-color: rgba(255,255,255,.3); color: rgba(255,255,255,.8); }
-.wr-theme-btn.active {
-  background: linear-gradient(135deg, #3b82f6, #a855f7);
-  border-color: transparent; color: #fff;
-  box-shadow: 0 4px 14px rgba(59,130,246,.35);
-}
-
 /* Modern shell */
 .wr-modern-shell { background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%); min-height: 100vh; }
 

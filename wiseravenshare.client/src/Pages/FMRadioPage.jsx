@@ -1666,57 +1666,46 @@ const FMRadioPage = () => {
         </div>
       )}
 
+      {tab === 'creator' && renderCreatorStudio(false)}
       {tab === 'caption' && (
-        <div className="wr-cassette-deck">
-          <div className="wr-deck-label">▸ CAPTION PHOTOS & VIDEOS WITH MUSIC</div>
-          <div className="wr-caption-panel">
-            <div className="wr-caption-label">▸ 1. ADD MUSIC TRACK SELECTOR</div>
-            {library.length === 0 ? (
-              <div className="wr-loading" style={{ animation: 'none', opacity: .55, padding: '6px 0' }}>Load tracks in Cassette tab first</div>
-            ) : (
-              <div className="wr-tape-rack" style={{ marginBottom: 12 }}>
-                {library.map((t) => (
-                  <button key={t.id} className={`wr-tape-item${captionTrack?.id === t.id ? ' active' : ''}`}
-                    onClick={() => { setCaptionTrack(t); setCaptionPlaying(false); if (captionAudioRef.current) captionAudioRef.current.src = ''; }}>
-                    <span>📼</span><span className="wr-tape-name">{t.title || t.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="wr-caption-label">▸ 2. SELECT PHOTO OR VIDEO</div>
-            <div className="wr-caption-grid">
-              <label className={`wr-caption-slot${captionMediaFile ? ' filled' : ''}`}>
-                {captionMediaFile ? `✓ ${captionMediaFile.name}` : '📁 Pick photo or video'}
+        <div className="wr-caption-wrap">
+          <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
+          <div className="wr-caption-cols">
+            <div>
+              <div className="wr-section-label">1. Add Music track selector</div>
+              {library.length === 0 ? (
+                <div className="wr-queue-empty">Load tracks in Media Player tab first</div>
+              ) : (
+                <div className="wr-queue-list">
+                  {library.map((t) => (
+                    <div key={t.id} className={`wr-queue-item${captionTrack?.id === t.id ? ' active' : ''}`}
+                      onClick={() => { setCaptionTrack(t); setCaptionPlaying(false); if (captionAudioRef.current) captionAudioRef.current.src = ''; }}>
+                      <span className="wr-q-name">🎵 {t.title || t.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="wr-section-label">2. Select photo or video</div>
+              <label className={`wr-media-drop${captionMediaFile ? ' filled' : ''}`}>
+                {captionMediaFile ? `✓ ${captionMediaFile.name}` : '+ Drop photo or video here'}
                 <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
               </label>
-              <div className="wr-caption-slot" style={{ cursor: 'default' }}>
-                <div style={{ fontSize: '.85rem', marginBottom: 4 }}>🎵</div>
-                <div style={{ fontSize: '.7rem', opacity: .7 }}>{captionTrack ? (captionTrack.title || captionTrack.name) : 'None selected'}</div>
+              {captionTrack && <div className="wr-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              <div className="wr-caption-preview-wrap">
+                {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
+                {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}
+                {!captionMediaUrl && <div className="wr-queue-empty">Preview appears here</div>}
               </div>
-            </div>
-            <div className="wr-caption-preview">
-              {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" />}
-              {captionMediaUrl && captionMediaType === 'video' && (
-                <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%' }} />
-              )}
-              {!captionMediaUrl && <span>▸ Preview appears here</span>}
-            </div>
-            {captionTrack && <div className="wr-caption-track-info">🎵 {captionTrack.title || captionTrack.name}</div>}
-            <div className="wr-transport">
-              <button className={`wr-key${captionPlaying ? ' active' : ''}`} onClick={captionPlay} disabled={!captionTrack || !captionMediaUrl}>▶ PLAY WITH MUSIC</button>
-              <button className="wr-key" onClick={captionStop} disabled={!captionPlaying}>■ STOP</button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="wr-insert-tape" style={{ flex: 1 }} onClick={captionPlay} disabled={!captionTrack || !captionMediaUrl}>▶ Play with music</button>
+                <button className="wr-insert-tape" onClick={captionStop} disabled={!captionPlaying}>⏹ Stop</button>
+              </div>
             </div>
           </div>
         </div>
       )}
-
-      {tab === 'creator' && renderCreatorStudio(false)}
-
-      <div className="wr-status">
-        <span><span className={`wr-status-dot${anyPlaying ? ' live' : ''}`} />{anyPlaying ? 'PLAYING' : 'STANDBY'}</span>
-        <span>{tab === 'radio' ? 'FM STEREO' : tab === 'cassette' ? `TAPE  ${repeat !== 'off' ? `REP:${repeat.toUpperCase()} ` : ''}${shuffle ? 'SHUF' : ''}` : tab === 'creator' ? 'CREATOR STUDIO' : 'CAPTION'}</span>
-        <span>WR-77</span>
-      </div>
     </div>
   );
 
@@ -1942,7 +1931,7 @@ const FMRadioPage = () => {
         onError={() => setCaptionPlaying(false)}
       />
 
-      {renderModernTheme()}
+      {renderClassicTheme()}
     </div>
   );
 };
