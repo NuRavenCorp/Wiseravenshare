@@ -1628,6 +1628,7 @@ builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
 builder.Services.AddScoped<IFrequencyIntegrityService, FrequencyIntegrityService>();
 builder.Services.AddScoped<IFMStationService, FMStationService>();
 builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationService>();
+builder.Services.AddScoped<IIcecastStreamService, IcecastStreamService>();
 builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
 builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
 builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();

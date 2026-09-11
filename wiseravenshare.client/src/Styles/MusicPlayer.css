@@ -1,17 +1,17 @@
 /* Music Player Page Styles */
 :root {
-  --mp-bg: #07111d;
-  --mp-bg-alt: #0b1727;
-  --mp-surface: rgba(12, 20, 33, 0.82);
-  --mp-surface-strong: rgba(16, 24, 38, 0.92);
-  --mp-text: #eef4ff;
-  --mp-light-text: #9fb1cb;
-  --mp-border: rgba(157, 175, 205, 0.18);
-  --mp-border-strong: rgba(157, 175, 205, 0.28);
-  --mp-accent: #69d6ff;
-  --mp-accent-hover: #3bbef3;
-  --mp-highlight: #42c9a1;
-  --mp-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+  --mp-bg: #0b1320;
+  --mp-bg-alt: #101b2b;
+  --mp-surface: rgba(16, 25, 39, 0.76);
+  --mp-surface-strong: rgba(17, 26, 40, 0.92);
+  --mp-text: #edf5ff;
+  --mp-light-text: #9fb2ce;
+  --mp-border: rgba(157, 175, 205, 0.14);
+  --mp-border-strong: rgba(157, 175, 205, 0.22);
+  --mp-accent: #7dd3fc;
+  --mp-accent-hover: #4fc0f4;
+  --mp-highlight: #34d399;
+  --mp-shadow: 0 18px 42px rgba(2, 6, 23, 0.28);
 }
 
 .music-player-page {
@@ -57,9 +57,9 @@
 .music-shell {
   position: relative;
   z-index: 1;
-  width: min(1440px, calc(100% - 2rem));
+  width: min(1380px, calc(100% - 1.5rem));
   margin: 0 auto;
-  padding: 1.25rem 0 3rem;
+  padding: 1rem 0 2.5rem;
 }
 
 /* Loading State */
@@ -114,16 +114,19 @@
   align-items: stretch;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.25rem;
+  padding: 1rem 1.1rem;
   border: 1px solid var(--mp-border);
-  border-radius: 28px;
-  background: linear-gradient(135deg, rgba(12, 20, 33, 0.92) 0%, rgba(18, 29, 47, 0.84) 100%);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(12, 20, 33, 0.9) 0%, rgba(17, 28, 44, 0.82) 100%);
   box-shadow: var(--mp-shadow);
   backdrop-filter: blur(20px);
 }
 
 .hero-copy {
   max-width: 44rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .hero-copy h1 {
@@ -160,18 +163,18 @@
 .hero-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  min-width: 18rem;
+  gap: 0.7rem;
+  min-width: 15rem;
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.9rem 1rem;
-  border-radius: 18px;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
   border: 1px solid var(--mp-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .stat-value {
@@ -191,10 +194,10 @@
 .player-surface,
 .sidebar-section,
 .tracks-section {
-  border-radius: 28px;
+  border-radius: 22px;
   border: 1px solid var(--mp-border);
   background: var(--mp-surface);
-  box-shadow: var(--mp-shadow);
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.18);
   backdrop-filter: blur(20px);
 }
 
@@ -204,13 +207,13 @@
 }
 
 .upload-panel {
-  padding: 1rem;
+  padding: 0.9rem;
 }
 
 .upload-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
 }
 
 .upload-form__header {
@@ -238,12 +241,13 @@
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.8rem 1rem;
-  border-radius: 16px;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
   border: 1px solid var(--mp-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   color: var(--mp-light-text);
   white-space: nowrap;
+  font-size: 0.76rem;
 }
 
 .spin {
@@ -254,10 +258,10 @@
   display: flex;
   align-items: center;
   gap: 0.8rem;
-  padding: 1rem 1.1rem;
-  border-radius: 18px;
-  border: 1px dashed rgba(105, 214, 255, 0.32);
-  background: rgba(105, 214, 255, 0.06);
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px dashed rgba(105, 214, 255, 0.26);
+  background: rgba(105, 214, 255, 0.04);
   color: var(--mp-light-text);
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
@@ -297,10 +301,10 @@
 .search-box input {
   width: 100%;
   border: 1px solid var(--mp-border);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--mp-text);
-  padding: 0.9rem 1rem;
+  padding: 0.8rem 0.9rem;
   outline: none;
 }
 
@@ -319,8 +323,9 @@
 
 .upload-actions {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.7rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .upload-btn,
@@ -447,7 +452,7 @@
 }
 
 .sidebar-section {
-  padding: 1rem;
+  padding: 0.9rem;
 }
 
 .section-header {
@@ -572,11 +577,11 @@
 }
 
 .playlist-item {
-  padding: 0.9rem 1rem;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 0.8rem 0.9rem;
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid transparent;
   color: var(--mp-light-text);
-  border-radius: 16px;
+  border-radius: 14px;
   cursor: pointer;
   text-align: left;
   font-size: 13px;
@@ -669,12 +674,12 @@
 }
 
 .queue-tools__actions .ghost-btn {
-  padding: 0.65rem 0.55rem;
+  padding: 0.6rem 0.5rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
 }
 
 .queue-upnext {
@@ -690,11 +695,11 @@
   background: rgba(255, 255, 255, 0.02);
   color: var(--mp-text);
   text-align: left;
-  padding: 0.65rem 0.75rem;
+  padding: 0.6rem 0.7rem;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.18rem;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 
@@ -770,7 +775,7 @@
 /* Tracks Section */
 .tracks-section {
   margin-top: 1rem;
-  padding: 1rem;
+  padding: 0.9rem;
   overflow-y: auto;
 }
 
@@ -836,8 +841,8 @@
 /* Tracks Grid */
 .tracks-grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
 
 .tracks-grid.list {
@@ -846,17 +851,17 @@
 
 /* Track Card */
 .track-card {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--mp-border);
-  border-radius: 24px;
-  padding: 1rem;
+  border-radius: 18px;
+  padding: 0.9rem;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .track-card:hover {
@@ -946,13 +951,13 @@
 
 .compact-player {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 0.9rem;
+  gap: 0.7rem;
+  padding: 0.7rem 0.85rem;
   border: 1px solid var(--mp-border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .compact-player__play {
@@ -1011,16 +1016,20 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
+  margin-top: auto;
 }
 
 .play-btn,
 .remove-btn,
 .add-btn {
-  padding: 0.65rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
   background: rgba(255, 255, 255, 0.06);
   border: none;
   color: var(--mp-text);
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
