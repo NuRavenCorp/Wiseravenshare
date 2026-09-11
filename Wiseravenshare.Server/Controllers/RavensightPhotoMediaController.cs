@@ -28,6 +28,39 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserPhotos(
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "photo", limit, cancellationToken);
+
+        var photos = assets.Select(a => new
+        {
+            id = a.Id,
+            title = a.FileName,
+            fileName = a.FileName,
+            description = (string?)null,
+            imageUrl = StreamingUrlHelper.ResolveMediaUrl(
+                a.PublicUrl,
+                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+            mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
+                a.PublicUrl,
+                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+            uploadedAt = a.SavedAtUtc.ToString("O"),
+            createdAt = a.SavedAtUtc.ToString("O"),
+            type = "photo"
+        }).ToList();
+
+        return Ok(new { data = photos, total = photos.Count });
+    }
+
     [HttpPost("save")]
     [RequestSizeLimit(100_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
@@ -44,7 +77,12 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         }
 
         var userStorageIdentity = ResolveUserStorageIdentity(userId);
-        var saved = await _photoService.SavePhotoAsync(dto.File, dto.DestinationFolder, userStorageIdentity, cancellationToken);
+        // Force user-scoped library path: users/{userStorageIdentity}/media/photos
+        var libraryDestination = $"users/{userStorageIdentity}/media/photos";
+        var resolved = string.IsNullOrWhiteSpace(dto.DestinationFolder)
+            ? libraryDestination
+            : StoragePathResolver.EnsureUserScopedDestination(dto.DestinationFolder, userStorageIdentity);
+        var saved = await _photoService.SavePhotoAsync(dto.File, resolved, userStorageIdentity, cancellationToken);
         RavensightMediaUserPreference? preference = null;
         RavensightMediaAssetRecord? mediaRecord = null;
         var persistenceStatus = "ready";
@@ -110,9 +148,9 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             mediaAssetId = mediaRecord?.Id,
             retention = new
             {
-                days = VideoRetentionPolicy.TemporaryRetentionDays,
+                days = (int?)null,
                 expiresAtUtc = mediaRecord?.ExpiresAtUtc,
-                warning = $"This Ravensight server copy will auto-delete in {VideoRetentionPolicy.TemporaryRetentionDays} days unless you save it to your local Ravensight folder.",
+                warning = (string?)null,
                 localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }

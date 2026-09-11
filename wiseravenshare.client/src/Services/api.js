@@ -1148,6 +1148,20 @@ export const apiService = {
             return { data: [] };
         }
     },
+    getPhotoLibrary: async () => {
+        try {
+            return await api.get('/ravensight/media/photos');
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to load photo library.');
+        }
+    },
+    getVideoLibrary: async () => {
+        try {
+            return await api.get('/ravensight/media/videos');
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to load video library.');
+        }
+    },
     getMusicPlayerState: async () => {
         try {
             return await api.get('/ravensight/media/music/player-state');
