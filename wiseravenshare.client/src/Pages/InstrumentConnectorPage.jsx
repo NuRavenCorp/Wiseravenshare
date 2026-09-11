@@ -25,7 +25,7 @@ import '../Styles/InstrumentConnector.css';
  * 5. Export recording to Music Studio for processing/effects
  */
 
-function InstrumentConnectorPage() {
+function InstrumentConnectorPage({ onNavigate }) {
   const { currentUser } = useAuth();
   const { showNotification } = useNotification();
   
@@ -57,6 +57,13 @@ function InstrumentConnectorPage() {
   });
   const [sourceCaptures, setSourceCaptures] = useState([]);
   const [isSavingRigProfile, setIsSavingRigProfile] = useState(false);
+  const [autoOpenMusicCreator, setAutoOpenMusicCreator] = useState(() => {
+    try {
+      return localStorage.getItem('wr_auto_open_music_creator') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   
   // Refs
   const audioContextRef = useRef(null);
@@ -154,6 +161,14 @@ function InstrumentConnectorPage() {
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [showNotification]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('wr_auto_open_music_creator', autoOpenMusicCreator ? 'true' : 'false');
+    } catch {
+      // Ignore storage failures and keep runtime state only.
+    }
+  }, [autoOpenMusicCreator]);
 
   useEffect(() => {
     const loadCaptureRig = async () => {
@@ -320,6 +335,24 @@ function InstrumentConnectorPage() {
       setTimeout(() => setConnectionSignal(false), 400);
       setTimeout(() => setConnectionSignal(true), 900);
       showNotification(`Connected to: ${device?.label || 'Unknown Device'}`, 'success');
+
+      if (autoOpenMusicCreator && typeof onNavigate === 'function') {
+        try {
+          localStorage.setItem('wr_instrument_handoff', JSON.stringify({
+            connectedAtUtc: new Date().toISOString(),
+            sourceName: device?.label || 'Unknown Device',
+            sourceType: device ? detectConnectionType(device.label) : 'analog',
+            deviceIdentifier: deviceId || 'unknown-device',
+            rigProfileId: studioRigProfile.id || null,
+          }));
+        } catch {
+          // Ignore local storage failures.
+        }
+
+        setTimeout(() => {
+          onNavigate('radio-creator');
+        }, 300);
+      }
 
       // Start visualizer
       startWaveformVisualization();
@@ -589,10 +622,28 @@ function InstrumentConnectorPage() {
       // Store blob separately
       sessionStorage.setItem('instrument_recording_blob', recording.blob);
 
+      try {
+        localStorage.setItem('wr_instrument_handoff', JSON.stringify({
+          connectedAtUtc: new Date().toISOString(),
+          sourceName: recording.deviceLabel || 'Instrument Input',
+          sourceType: recording.connectionType || 'analog',
+          deviceIdentifier: selectedDeviceId || 'unknown-device',
+          recordingName: recording.name,
+          recordingDurationSeconds: Number(recording.duration || 0),
+          recordingFingerprintHash: recording.fingerprintHash || null,
+        }));
+      } catch {
+        // Ignore local storage failures.
+      }
+
       showNotification('Recording ready in Music Studio', 'success');
 
-      // Navigate to Music Studio
-      window.location.href = '/music-player?source=instrument';
+      // Navigate within the app so Radio Creator can continue processing.
+      if (typeof onNavigate === 'function') {
+        onNavigate('radio-creator');
+      } else {
+        window.location.href = '/music-player?source=instrument';
+      }
     } catch (err) {
       console.error('Error exporting:', err);
       showNotification('Failed to export: ' + err.message, 'error');
@@ -621,6 +672,14 @@ function InstrumentConnectorPage() {
         <p className="ic-subtitle">
           Plug in or pair your instrument input and WiseRavenShare will auto-connect
         </p>
+        <label className="ic-note" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', marginTop: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={autoOpenMusicCreator}
+            onChange={(e) => setAutoOpenMusicCreator(e.target.checked)}
+          />
+          Auto-open Radio Creator after instrument connection
+        </label>
       </div>
 
       <div className="ic-container">
