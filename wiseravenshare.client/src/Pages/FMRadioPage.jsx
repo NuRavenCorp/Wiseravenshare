@@ -283,6 +283,16 @@ const FMRadioPage = () => {
   const [creatorUnusedFrequencies, setCreatorUnusedFrequencies] = useState([]);
   const [creatorUnusedInternetSlots, setCreatorUnusedInternetSlots] = useState([]);
 
+  const syncTunedFrequency = useCallback((value) => {
+    const parsed = Number.parseFloat(String(value ?? ''));
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+
+    const clamped = Math.min(FM_HIGH, Math.max(FM_LOW, parsed));
+    setTunedFreq((previous) => (Math.abs(previous - clamped) < 0.05 ? previous : clamped));
+  }, []);
+
   // Refs
   const howlRef         = useRef(null);   // current Howl instance
   const uploadRef       = useRef(null);
@@ -1509,7 +1519,7 @@ const FMRadioPage = () => {
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
-      {tab === 'radio' && <div className="wr-fm-section"><FMTunerModule /></div>}
+      {tab === 'radio' && <div className="wr-fm-section"><FMTunerModule onFrequencyChange={syncTunedFrequency} /></div>}
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
@@ -1736,7 +1746,7 @@ const FMRadioPage = () => {
               {[88, 92, 96, 100, 104, 108].map((n) => <span key={n}>{n}</span>)}
             </div>
           </div>
-          <FMTunerModule />
+          <FMTunerModule onFrequencyChange={syncTunedFrequency} />
         </div>
       )}
 

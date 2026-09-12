@@ -32,7 +32,26 @@ const resolveDefaultPinRegion = (location) => {
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isGuid = (value) => GUID_REGEX.test(String(value || '').trim());
 
-const FMTunerModule = () => {
+const FM_LOW = 88.0;
+const FM_HIGH = 108.0;
+
+const parseStationFrequency = (station) => {
+  const candidates = [station?.frequency, station?.name, station?.displayName];
+  for (const candidate of candidates) {
+    const raw = String(candidate || '').trim();
+    if (!raw) continue;
+    const match = raw.match(/(\d{2,3}(?:\.\d)?)/);
+    if (!match) continue;
+    const parsed = Number.parseFloat(match[1]);
+    if (!Number.isFinite(parsed)) continue;
+    if (parsed >= FM_LOW && parsed <= FM_HIGH) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const FMTunerModule = ({ onFrequencyChange }) => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('stations');
   const [isLoading, setIsLoading] = useState(false);
@@ -213,6 +232,10 @@ const FMTunerModule = () => {
 
       setCurrentStation(merged);
       setIsPlaying(true);
+      const tunedFrequency = parseStationFrequency(merged);
+      if (Number.isFinite(tunedFrequency)) {
+        onFrequencyChange?.(tunedFrequency);
+      }
       listeningStartRef.current = Date.now();
     } catch (error) {
       setErrorMessage(error?.message || 'Unable to play station.');

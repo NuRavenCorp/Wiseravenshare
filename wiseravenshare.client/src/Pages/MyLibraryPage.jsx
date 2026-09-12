@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload } from 'react-icons/fi';
+import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload, FiTrash2, FiX } from 'react-icons/fi';
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
 const PROTECTION_PLANS = [
@@ -87,20 +87,73 @@ const normalizeVideo = (video) => {
 
 const normalizePhoto = (photo) => {
     if (!photo || typeof photo !== 'object') return null;
-    const imageUrl = String(
-        photo.mediaUrl
-        || photo.url
-        || photo.imageUrl
-        || photo.fileUrl
-        || photo.publicUrl
+
+    const normalizePlaybackUrl = (value = '') => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+            try {
+                const parsed = new URL(raw);
+                return `${parsed.pathname}${parsed.search}`;
+            } catch {
+                return raw;
+            }
+        }
+
+        if (raw.startsWith('/')) return raw;
+        if (raw.startsWith('api/')) return `/${raw}`;
+        if (/^https?:\/\//i.test(raw)) return raw;
+        return '';
+    };
+
+    const toBlobStreamUrl = (relativePath = '') => {
+        const normalized = String(relativePath || '')
+            .trim()
+            .replace(/\\/g, '/')
+            .replace(/^\/+/, '');
+        if (!normalized) return '';
+
+        const encoded = normalized
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+
+        return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+    };
+
+    const relativePath = String(
+        photo.relativePath
+        || photo.RelativePath
+        || photo.objectKey
+        || photo.ObjectKey
         || ''
     ).trim();
+    const fileName = String(photo.fileName || photo.FileName || '').trim();
+
+    const sourceCandidates = [
+        toBlobStreamUrl(relativePath),
+        fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '',
+        normalizePlaybackUrl(photo.thumbnailUrl || photo.ThumbnailUrl || ''),
+        normalizePlaybackUrl(photo.mediaUrl || photo.MediaUrl || ''),
+        normalizePlaybackUrl(photo.imageUrl || photo.ImageUrl || ''),
+        normalizePlaybackUrl(photo.url || photo.Url || ''),
+        normalizePlaybackUrl(photo.fileUrl || photo.FileUrl || ''),
+        normalizePlaybackUrl(photo.publicUrl || photo.PublicUrl || '')
+    ].filter(Boolean);
+
+    const imageUrl = sourceCandidates[0] || '';
+    const thumbnailUrl = sourceCandidates[1] || sourceCandidates[0] || '';
 
     return {
         id: String(photo.id || `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`),
         title: String(photo.title || photo.fileName || 'Untitled photo').trim(),
         description: String(photo.description || '').trim(),
+        fileName,
+        relativePath,
         imageUrl,
+        thumbnailUrl,
         url: imageUrl,
         uploadedAt: String(photo.uploadedAt || photo.createdAt || new Date().toISOString()),
         type: 'photo'
@@ -124,6 +177,7 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [photoLightbox, setPhotoLightbox] = useState(null);
     const [playingVideoId, setPlayingVideoId] = useState(null);
+    const [removingPhotoId, setRemovingPhotoId] = useState('');
     const audioRef = useRef(null);
     const isMountedRef = useRef(true);
     const uploadInputRef = useRef(null);
@@ -164,6 +218,49 @@ const MyLibraryPage = ({ onNavigate }) => {
         }
         setSelectedPlanId(planId);
         addToast(`Selected ${PROTECTION_PLANS.find(p => p.id === planId)?.name || 'plan'} for: ${currentTrack.title}`, 'success');
+    };
+
+    const openPhotoLightbox = (photo) => {
+        const source = String(photo?.imageUrl || photo?.thumbnailUrl || photo?.url || '').trim();
+        if (!source) {
+            addToast('This photo does not have a visible source URL yet.', 'warning');
+            return;
+        }
+
+        setPhotoLightbox({
+            id: String(photo?.id || ''),
+            src: source,
+            title: String(photo?.title || 'Photo')
+        });
+    };
+
+    const handleRemovePhoto = async (photo, event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+
+        const photoId = String(photo?.id || '').trim();
+        if (!photoId) {
+            addToast('Unable to remove this photo because the id is missing.', 'error');
+            return;
+        }
+
+        const photoTitle = String(photo?.title || 'this photo').trim() || 'this photo';
+        const confirmed = window.confirm(`Remove "${photoTitle}" from your library? This cannot be undone.`);
+        if (!confirmed) {
+            return;
+        }
+
+        setRemovingPhotoId(photoId);
+        try {
+            await apiService.deletePhotoLibraryItem(photoId);
+            setPhotos((previous) => previous.filter((item) => item.id !== photoId));
+            setPhotoLightbox((previous) => (previous?.id === photoId ? null : previous));
+            addToast(`Removed ${photoTitle} from your library.`, 'success');
+        } catch (error) {
+            addToast(error?.message || 'Failed to remove photo.', 'error');
+        } finally {
+            setRemovingPhotoId('');
+        }
     };
 
     const loadLibrary = async () => {
@@ -344,8 +441,23 @@ const MyLibraryPage = ({ onNavigate }) => {
             {photoLightbox && (
                 <div onClick={() => setPhotoLightbox(null)}
                     style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
-                    <img src={photoLightbox} alt="Full view"
-                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
+                    <button
+                        type="button"
+                        aria-label="Close photo preview"
+                        onClick={() => setPhotoLightbox(null)}
+                        style={{ position: 'absolute', top: '20px', right: '20px', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(15,23,42,0.8)', color: '#fff', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+                    >
+                        <FiX />
+                    </button>
+                    <img
+                        src={photoLightbox.src}
+                        alt={photoLightbox.title}
+                        onClick={(event) => event.stopPropagation()}
+                        onError={(event) => {
+                            event.currentTarget.style.display = 'none';
+                        }}
+                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)', cursor: 'default' }}
+                    />
                 </div>
             )}
             <div style={{ border: '1px solid var(--border-color)', borderRadius: '14px', padding: '16px', background: 'var(--card-bg)' }}>
@@ -544,7 +656,14 @@ const MyLibraryPage = ({ onNavigate }) => {
                                         >
                                             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                                                 {item.type === 'photo' && (item.imageUrl || item.url) && (
-                                                    <img src={item.imageUrl || item.url} alt={item.title} style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'cover' }} />
+                                                    <img
+                                                        src={item.thumbnailUrl || item.imageUrl || item.url}
+                                                        alt={item.title}
+                                                        onError={(event) => {
+                                                            event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="120"%3E%3Crect fill="%23202b3d" width="120" height="120"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
+                                                        }}
+                                                        style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'cover' }}
+                                                    />
                                                 )}
                                                 {item.type === 'music' && <FiMusic style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
                                                 {item.type === 'video' && <FiVideo style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
@@ -557,6 +676,18 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                     )}
                                                 </div>
                                                 <FiPlay style={{ color: 'var(--light-color)', flexShrink: 0 }} />
+                                                {item.type === 'photo' && (
+                                                    <button
+                                                        type="button"
+                                                        title="Remove photo"
+                                                        aria-label={`Remove ${item.title}`}
+                                                        disabled={removingPhotoId === item.id}
+                                                        onClick={(event) => handleRemovePhoto(item, event)}
+                                                        style={{ marginLeft: '8px', border: '1px solid rgba(248,113,113,0.45)', background: removingPhotoId === item.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingPhotoId === item.id ? 'not-allowed' : 'pointer' }}
+                                                    >
+                                                        <FiTrash2 />
+                                                    </button>
+                                                )}
                                             </div>
                                             {/* Inline video for All tab */}
                                             {item.type === 'video' && playingVideoId === item.id && item.videoUrl && (
@@ -596,10 +727,17 @@ const MyLibraryPage = ({ onNavigate }) => {
                             ) : (
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
                                     {filteredPhotos.map((photo) => (
-                                        <button
+                                        <div
                                             key={photo.id}
-                                            type="button"
-                                            onClick={() => setPhotoLightbox(photo.imageUrl || photo.url)}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => openPhotoLightbox(photo)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    openPhotoLightbox(photo);
+                                                }
+                                            }}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 borderRadius: '10px',
@@ -608,12 +746,30 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                 cursor: 'zoom-in',
                                                 padding: 0,
                                                 textAlign: 'left',
-                                                transition: 'transform 0.15s, border-color 0.15s'
+                                                transition: 'transform 0.15s, border-color 0.15s',
+                                                position: 'relative'
                                             }}
                                             onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.borderColor = 'var(--highlight-color)'; }}
                                             onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
                                         >
-                                            <img src={photo.imageUrl || photo.url} alt={photo.title} style={{ width: '100%', height: '150px', objectFit: 'cover', display: 'block' }} />
+                                            <button
+                                                type="button"
+                                                title="Remove photo"
+                                                aria-label={`Remove ${photo.title}`}
+                                                disabled={removingPhotoId === photo.id}
+                                                onClick={(event) => handleRemovePhoto(photo, event)}
+                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 2, border: '1px solid rgba(248,113,113,0.55)', background: removingPhotoId === photo.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingPhotoId === photo.id ? 'not-allowed' : 'pointer' }}
+                                            >
+                                                <FiTrash2 />
+                                            </button>
+                                            <img
+                                                src={photo.thumbnailUrl || photo.imageUrl || photo.url}
+                                                alt={photo.title}
+                                                onError={(event) => {
+                                                    event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%23202b3d" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="16"%3ENo Preview%3C/text%3E%3C/svg%3E';
+                                                }}
+                                                style={{ width: '100%', height: '150px', objectFit: 'cover', display: 'block' }}
+                                            />
                                             <div style={{ padding: '8px', fontSize: '12px' }}>
                                                 <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                     {photo.title}
@@ -624,7 +780,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                     </div>
                                                 )}
                                             </div>
-                                        </button>
+                                        </div>
                                     ))}
                                 </div>
                             )}

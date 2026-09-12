@@ -16,15 +16,18 @@ public sealed class RavensightPhotoMediaController : ControllerBase
 {
     private readonly IRavensightPhotoService _photoService;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly IBlobStorageService _blobStorageService;
     private readonly ILogger<RavensightPhotoMediaController> _logger;
 
     public RavensightPhotoMediaController(
         IRavensightPhotoService photoService,
         RavensightMediaCatalogStore mediaCatalogStore,
+        IBlobStorageService blobStorageService,
         ILogger<RavensightPhotoMediaController> logger)
     {
         _photoService = photoService;
         _mediaCatalogStore = mediaCatalogStore;
+        _blobStorageService = blobStorageService;
         _logger = logger;
     }
 
@@ -44,8 +47,14 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             id = a.Id,
             title = a.FileName,
             fileName = a.FileName,
+            relativePath = a.RelativePath,
+            objectKey = a.RelativePath,
             description = (string?)null,
             imageUrl = StreamingUrlHelper.ResolveMediaUrl(
+                a.PublicUrl,
+                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+            thumbnailUrl = StreamingUrlHelper.ResolveMediaUrl(
                 a.PublicUrl,
                 StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
                     ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
@@ -59,6 +68,71 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         }).ToList();
 
         return Ok(new { data = photos, total = photos.Count });
+    }
+
+    [HttpDelete("{photoId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePhoto([FromRoute] string photoId, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var normalizedPhotoId = string.IsNullOrWhiteSpace(photoId) ? string.Empty : photoId.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPhotoId))
+        {
+            return BadRequest(new { message = "photoId is required." });
+        }
+
+        var asset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, normalizedPhotoId, cancellationToken);
+        if (asset is null || !string.Equals(asset.MediaType, "photo", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(new { message = "Photo not found." });
+        }
+
+        var blobDeleted = false;
+        var localDeleted = false;
+        var objectKey = string.IsNullOrWhiteSpace(asset.RelativePath)
+            ? _blobStorageService.ResolveObjectKey(asset.PublicUrl ?? string.Empty)
+            : asset.RelativePath;
+
+        if (!string.IsNullOrWhiteSpace(objectKey))
+        {
+            try
+            {
+                blobDeleted = await _blobStorageService.DeleteAsync(objectKey, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete blob for photo asset {PhotoId}", normalizedPhotoId);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(asset.AbsolutePath) && System.IO.File.Exists(asset.AbsolutePath))
+        {
+            try
+            {
+                System.IO.File.Delete(asset.AbsolutePath);
+                localDeleted = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete local file for photo asset {PhotoId}", normalizedPhotoId);
+            }
+        }
+
+        await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken);
+
+        return Ok(new
+        {
+            success = true,
+            id = asset.Id,
+            blobDeleted,
+            localDeleted,
+            objectKey
+        });
     }
 
     [HttpPost("save")]
