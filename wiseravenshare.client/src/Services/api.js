@@ -1063,8 +1063,12 @@ export const apiService = {
     uploadMedia: async (file, type, options = {}) => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Uploaded media');
         formData.append('description', options.description || 'Uploaded from Wise-Raven');
+        if (type === 'photo') {
+            formData.append('caption', options.caption || options.description || options.title || '');
+        }
         formData.append('publishToYouTube', String(Boolean(options.publishToYouTube && type === 'video')));
         formData.append('publishToTikTok', String(Boolean(options.publishToTikTok && type === 'video')));
         formData.append('publishToFacebook', String(Boolean(options.publishToFacebook && type === 'video')));
@@ -1077,7 +1081,6 @@ export const apiService = {
         formData.append('destinationFolder', options.destinationFolder || '');
 
         const requestConfig = {
-            headers: { 'Content-Type': 'multipart/form-data' },
             onUploadProgress: (progressEvent) => {
                 if (typeof options.onProgress === 'function') {
                     const total = progressEvent.total || progressEvent.loaded || 1;
@@ -1094,7 +1097,6 @@ export const apiService = {
                 const response = await axios.post(url, formData, {
                     ...requestConfig,
                     headers: {
-                        ...requestConfig.headers,
                         ...(getAuthToken()
                             ? { Authorization: `Bearer ${getAuthToken()}` }
                             : {})
@@ -1117,6 +1119,7 @@ export const apiService = {
     uploadMusicTrack: async (file, options = {}) => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Untitled track');
         formData.append('artist', options.artist || '');
         formData.append('album', options.album || '');
@@ -1127,11 +1130,7 @@ export const apiService = {
         }
 
         try {
-            return await api.post('/ravensight/media/music/save', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
+            return await api.post('/ravensight/media/music/save', formData);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
         }
