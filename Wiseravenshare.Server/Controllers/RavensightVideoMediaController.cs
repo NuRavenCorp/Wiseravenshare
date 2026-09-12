@@ -32,6 +32,17 @@ public sealed class RavensightVideoMediaController : ControllerBase
         _mediaCatalogStore = mediaCatalogStore;
     }
 
+    [HttpGet]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserVideos(CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        var videos = await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken);
+        return Ok(videos);
+    }
+
     [HttpPost("save")]
     [RequestSizeLimit(500_000_000)]
     [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
@@ -84,37 +95,45 @@ public sealed class RavensightVideoMediaController : ControllerBase
         };
 
         var preference = await _mediaCatalogStore.GetUserPreferenceAsync(userId, cancellationToken);
-        var mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+        RavensightMediaAssetRecord? mediaRecord = null;
+        try
         {
-            UserId = userId,
-            MediaType = RavensightMediaType.Video,
-            FileName = saved.File.FileName,
-            RelativePath = saved.File.RelativePath,
-            PublicUrl = saved.File.PublicUrl,
-            AbsolutePath = saved.File.AbsolutePath,
-            DestinationFolder = saved.File.DestinationFolder,
-            ContentType = saved.File.ContentType,
-            SizeBytes = saved.File.SizeBytes,
-            SavedAtUtc = saved.File.SavedAtUtc,
-            MetadataJson = JsonSerializer.Serialize(new
+            mediaRecord = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
             {
-                title = dto.Title,
-                description = dto.Description,
-                privacy = dto.Privacy,
-                storageMode = resolvedStorageMode,
-                music = string.IsNullOrWhiteSpace(dto.MusicTrackId)
-                    ? null
-                    : new
-                    {
-                        id = dto.MusicTrackId,
-                        title = dto.MusicTrackTitle,
-                        url = dto.MusicTrackUrl,
-                        artist = dto.MusicTrackArtist,
-                        album = dto.MusicTrackAlbum,
-                        genre = dto.MusicTrackGenre
-                    }
-            })
-        }, cancellationToken);
+                UserId = userId,
+                MediaType = RavensightMediaType.Video,
+                FileName = saved.File.FileName,
+                RelativePath = saved.File.RelativePath,
+                PublicUrl = saved.File.PublicUrl,
+                AbsolutePath = saved.File.AbsolutePath,
+                DestinationFolder = saved.File.DestinationFolder,
+                ContentType = saved.File.ContentType,
+                SizeBytes = saved.File.SizeBytes,
+                SavedAtUtc = saved.File.SavedAtUtc,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    title = dto.Title,
+                    description = dto.Description,
+                    privacy = dto.Privacy,
+                    storageMode = resolvedStorageMode,
+                    music = string.IsNullOrWhiteSpace(dto.MusicTrackId)
+                        ? null
+                        : new
+                        {
+                            id = dto.MusicTrackId,
+                            title = dto.MusicTrackTitle,
+                            url = dto.MusicTrackUrl,
+                            artist = dto.MusicTrackArtist,
+                            album = dto.MusicTrackAlbum,
+                            genre = dto.MusicTrackGenre
+                        }
+                })
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Video catalog entry failed for user {UserId}; continuing without catalog record.", userId);
+        }
 
         VideoLibraryVideo persistedVideo;
         try

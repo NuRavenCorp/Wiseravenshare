@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.DTOs;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -13,13 +15,16 @@ public sealed class RavensightMusicMediaController : ControllerBase
 {
     private readonly IMusicLibraryStore _musicLibraryStore;
     private readonly IMusicPlaybackStateStore _musicPlaybackStateStore;
+    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
-        IMusicPlaybackStateStore musicPlaybackStateStore)
+        IMusicPlaybackStateStore musicPlaybackStateStore,
+        RavensightMediaCatalogStore mediaCatalogStore)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
+        _mediaCatalogStore = mediaCatalogStore;
     }
 
     [HttpGet]
@@ -31,8 +36,38 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
-        return Ok(tracks);
+        var bucketTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        var bucketFileNames = new HashSet<string>(bucketTracks.Select(t => t.FileName), StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<UserMusicTrackDto> catalogTracks = [];
+        try
+        {
+            var catalogAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 200, cancellationToken);
+            catalogTracks = catalogAssets
+                .Where(a => !bucketFileNames.Contains(a.FileName))
+                .Select(a => new UserMusicTrackDto
+                {
+                    Id = a.Id,
+                    Title = ReadMusicMeta(a.MetadataJson, "title") is { Length: > 0 } t
+                        ? t
+                        : System.IO.Path.GetFileNameWithoutExtension(a.FileName),
+                    Artist = ReadMusicMeta(a.MetadataJson, "artist"),
+                    Album = ReadMusicMeta(a.MetadataJson, "album"),
+                    Genre = ReadMusicMeta(a.MetadataJson, "genre"),
+                    MediaUrl = StreamingUrlHelper.ResolveMediaUrl(
+                        a.PublicUrl,
+                        StreamingUrlHelper.StreamByFileName(a.FileName)),
+                    FileName = a.FileName,
+                    UploadedAt = a.SavedAtUtc.ToString("O"),
+                    SizeBytes = a.SizeBytes
+                });
+        }
+        catch
+        {
+            // Catalog unavailable — serve what bucket has
+        }
+
+        return Ok(bucketTracks.Concat(catalogTracks).ToList());
     }
 
     [HttpGet("player-state")]
@@ -134,6 +169,41 @@ public sealed class RavensightMusicMediaController : ControllerBase
             ? StreamingUrlHelper.StreamByFileName(track.FileName)
             : track.MediaUrl;
 
+        // Mirror to the unified media catalog so GetUserMusic can always find it.
+        var savedAtUtc = DateTime.TryParse(track.UploadedAt, out var uploadedAt) ? uploadedAt.ToUniversalTime() : DateTime.UtcNow;
+        try
+        {
+            await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+            {
+                UserId = userId,
+                MediaType = RavensightMediaType.Music,
+                FileName = track.FileName,
+                RelativePath = track.FileName,
+                PublicUrl = mediaUrl.StartsWith("/", StringComparison.Ordinal) ? null : mediaUrl,
+                AbsolutePath = string.Empty,
+                DestinationFolder = dto.DestinationFolder ?? string.Empty,
+                ContentType = dto.File.ContentType,
+                SizeBytes = track.SizeBytes,
+                SavedAtUtc = savedAtUtc,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    title = track.Title,
+                    artist = track.Artist,
+                    album = track.Album,
+                    genre = track.Genre,
+                    fingerprint = track.Fingerprint,
+                    mediaUrl
+                })
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Catalog write is best-effort; bucket_objects already has the record.
+            HttpContext.RequestServices
+                .GetService<ILogger<RavensightMusicMediaController>>()
+                ?.LogWarning(ex, "Music catalog entry failed for user {UserId}; track saved in bucket store.", userId);
+        }
+
         return Ok(new
         {
             track,
@@ -144,9 +214,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
                 DestinationFolder = dto.DestinationFolder ?? string.Empty,
                 ContentType = dto.File.ContentType,
                 SizeBytes = track.SizeBytes,
-                SavedAtUtc = DateTime.TryParse(track.UploadedAt, out var uploadedAt)
-                    ? uploadedAt.ToUniversalTime()
-                    : DateTime.UtcNow,
+                SavedAtUtc = savedAtUtc,
                 MediaUrl = mediaUrl
             },
             fileName = track.FileName,
@@ -169,5 +237,18 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var displayName = User.FindFirstValue(ClaimTypes.Name);
         var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
         return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
+    }
+
+    private static string ReadMusicMeta(string? metadataJson, string key)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson)) return string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(metadataJson);
+            if (doc.RootElement.TryGetProperty(key, out var val) && val.ValueKind == JsonValueKind.String)
+                return val.GetString() ?? string.Empty;
+        }
+        catch { /* ignore */ }
+        return string.Empty;
     }
 }
