@@ -1,5 +1,10 @@
 // wiseravenshare.client/src/Services/CommunicationService.js
 import { apiService } from './api';
+import {
+    checkCommuniqueVerification,
+    startCommuniqueVerification,
+    sendWhatsApp as sendCommuniqueWhatsApp
+} from './communiqueService';
 
 /**
  * Communication Service
@@ -41,12 +46,13 @@ export const communicationService = {
      */
     sendWhatsApp: async (message, phoneNumber = null, userId = null) => {
         try {
-            const response = await apiService.post('/communication/whatsapp/send', {
-                message,
-                phoneNumber,
-                userId
-            });
-            return response.data || { success: false };
+            const response = await sendCommuniqueWhatsApp(phoneNumber || '', message);
+            return {
+                success: true,
+                channel: 'whatsapp',
+                message: response?.message || 'WhatsApp message sent successfully',
+                ...response
+            };
         } catch (error) {
             console.error('Failed to send WhatsApp message:', error);
             return { success: false, error: error.message };
@@ -58,11 +64,13 @@ export const communicationService = {
      */
     requestVerification: async (phoneNumber, channel = 'sms') => {
         try {
-            const response = await apiService.post('/communication/verify/request', {
-                phoneNumber,
-                channel
-            });
-            return response.data || { success: false };
+            const response = await startCommuniqueVerification(phoneNumber, channel);
+            return {
+                success: true,
+                verificationSid: response?.sid || '',
+                status: response?.status || '',
+                channel: response?.channel || channel
+            };
         } catch (error) {
             console.error('Failed to request verification:', error);
             return { success: false, error: error.message };
@@ -74,11 +82,14 @@ export const communicationService = {
      */
     confirmVerification: async (phoneNumber, code) => {
         try {
-            const response = await apiService.post('/communication/verify/confirm', {
-                phoneNumber,
-                code
-            });
-            return response.data || { success: false };
+            const response = await checkCommuniqueVerification(phoneNumber, code);
+            return {
+                success: true,
+                isVerified: !!response?.approved,
+                verificationSid: response?.sid || '',
+                status: response?.status || '',
+                channel: response?.channel || 'sms'
+            };
         } catch (error) {
             console.error('Failed to confirm verification:', error);
             return { success: false, error: error.message };
