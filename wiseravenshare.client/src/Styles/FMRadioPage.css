@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   WISERAVENSHARE  ·  FM RADIO / CASSETTE DECK  ·  WR-77
+  WISERAVENSHARE  ·  FM RADIO / TRACK PLAYER  ·  WR-77
    Retro wood-cabinet aesthetic
    ───────────────────────────────────────────────────────────── */
 
@@ -101,7 +101,7 @@
   position: relative; overflow: hidden;
 }
 .wr-grille::after {
-  content: 'WISERAVENSHARE  ·  FM STEREO / CASSETTE  ·  WR-77';
+  content: 'WISERAVENSHARE  ·  FM STEREO / TRACK PLAYER  ·  WR-77';
   position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;
   font-size: .5rem; letter-spacing: .3em; color: rgba(200,180,150,.4);
 }

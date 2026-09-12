@@ -32,6 +32,7 @@ const FM_LOW  = 88.0;
 const FM_HIGH = 108.0;
 const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 const INSTRUMENT_HANDOFF_KEY = 'wr_instrument_handoff';
+const TRACK_PLAYER_HANDOFF_KEY = 'wr_track_player_handoff';
 
 const EQ_BANDS = [
   { freq: 31,    label: '31Hz',  type: 'lowshelf'  },
@@ -63,6 +64,12 @@ const FALLBACK_AUDIO_CANDIDATES = [
   'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
   'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
 ];
+
+// Keep track player audio alive across route/tab navigation.
+let persistentHowl = null;
+let persistentTrack = null;
+let persistentTrackIndex = 0;
+let persistentLibrary = [];
 
 // Map extension → MIME so Howler picks the right codec
 const EXT_MIME = {
@@ -324,6 +331,13 @@ const FMRadioPage = () => {
   useEffect(() => { playingRef.current  = isPlaying;  }, [isPlaying]);
   useEffect(() => { repeatRef.current   = repeat;     }, [repeat]);
   useEffect(() => { shuffleRef.current  = shuffle;    }, [shuffle]);
+  useEffect(() => {
+    persistentLibrary = Array.isArray(library) ? [...library] : [];
+  }, [library]);
+  useEffect(() => {
+    persistentTrack = currentTrack || null;
+    persistentTrackIndex = Number.isFinite(trackIndex) ? trackIndex : 0;
+  }, [currentTrack, trackIndex]);
 
   // Pull durable tracks that Music Player has already cached so FM cassette/radio creator
   // can reuse the original uploaded media list instead of appearing empty.
@@ -884,6 +898,9 @@ const FMRadioPage = () => {
 
     // Stop + destroy previous Howl
     if (howlRef.current) {
+      if (persistentHowl === howlRef.current) {
+        persistentHowl = null;
+      }
       howlRef.current.stop();
       howlRef.current.unload();
       howlRef.current = null;
@@ -1072,6 +1089,54 @@ const FMRadioPage = () => {
     stop();
   }, [stop]);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(TRACK_PLAYER_HANDOFF_KEY);
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      const normalizedTrack = normalizeLibraryTrack(parsed?.track || parsed);
+      if (!normalizedTrack || !(normalizedTrack.mediaUrl || normalizedTrack.file || normalizedTrack.objectUrl)) {
+        localStorage.removeItem(TRACK_PLAYER_HANDOFF_KEY);
+        return;
+      }
+
+      const currentLibrary = Array.isArray(libraryRef.current) ? libraryRef.current : [];
+      const existingIndex = currentLibrary.findIndex((item) => {
+        const sameId = String(item?.id || '').trim() && String(item?.id || '').trim() === String(normalizedTrack.id || '').trim();
+        const sameUrl = String(item?.mediaUrl || item?.url || '').trim()
+          && String(item?.mediaUrl || item?.url || '').trim() === String(normalizedTrack.mediaUrl || normalizedTrack.url || '').trim();
+        const sameName = String(item?.name || item?.fileName || '').trim()
+          && String(item?.name || item?.fileName || '').trim() === String(normalizedTrack.name || normalizedTrack.fileName || '').trim();
+        return Boolean(sameId || sameUrl || sameName);
+      });
+
+      let nextLibrary = currentLibrary;
+      let targetIndex = existingIndex;
+      let targetTrack = normalizedTrack;
+
+      if (existingIndex >= 0) {
+        targetTrack = currentLibrary[existingIndex];
+      } else {
+        targetTrack = {
+          ...normalizedTrack,
+          id: String(normalizedTrack.id || `${normalizedTrack.name || normalizedTrack.title || 'track'}-${Date.now()}`)
+        };
+        nextLibrary = [targetTrack, ...currentLibrary];
+        targetIndex = 0;
+        setLibrary(nextLibrary);
+      }
+
+      setTab('cassette');
+      loadTrack(targetTrack, Math.max(0, targetIndex), true);
+      localStorage.removeItem(TRACK_PLAYER_HANDOFF_KEY);
+    } catch {
+      localStorage.removeItem(TRACK_PLAYER_HANDOFF_KEY);
+    }
+  }, [loadTrack]);
+
   const moveTrack = useCallback((id, dir) => {
     setLibrary((prev) => {
       const i  = prev.findIndex((t) => t.id === id);
@@ -1083,6 +1148,43 @@ const FMRadioPage = () => {
       return n;
     });
   }, [currentTrack]);
+
+  useEffect(() => {
+    if (!persistentHowl) {
+      return;
+    }
+
+    howlRef.current = persistentHowl;
+    if (persistentTrack) {
+      setCurrentTrack(persistentTrack);
+    }
+    setTrackIndex(Number.isFinite(persistentTrackIndex) ? persistentTrackIndex : 0);
+
+    if (Array.isArray(persistentLibrary) && persistentLibrary.length > 0) {
+      setLibrary((prev) => {
+        if (Array.isArray(prev) && prev.length > 0) {
+          return prev;
+        }
+        return [...persistentLibrary];
+      });
+    }
+
+    const durationValue = Number(howlRef.current?.duration?.() || 0);
+    if (Number.isFinite(durationValue) && durationValue > 0) {
+      setDuration(durationValue);
+    }
+
+    const currentSeek = howlRef.current?.seek?.();
+    if (typeof currentSeek === 'number' && Number.isFinite(currentSeek)) {
+      setCurrentTime(currentSeek);
+    }
+
+    const active = Boolean(howlRef.current?.playing?.());
+    setIsPlaying(active);
+    if (active) {
+      startTicker();
+    }
+  }, [startTicker]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1117,10 +1219,24 @@ const FMRadioPage = () => {
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => () => {
-    howlRef.current?.unload();
+    const activeHowl = howlRef.current;
+    if (activeHowl?.playing?.()) {
+      persistentHowl = activeHowl;
+      persistentTrack = currentTrack || persistentTrack;
+      persistentTrackIndex = Number.isFinite(trackIndex) ? trackIndex : persistentTrackIndex;
+      persistentLibrary = Array.isArray(libraryRef.current) ? [...libraryRef.current] : persistentLibrary;
+    } else {
+      activeHowl?.unload?.();
+      if (persistentHowl === activeHowl) {
+        persistentHowl = null;
+        persistentTrack = null;
+        persistentTrackIndex = 0;
+        persistentLibrary = [];
+      }
+    }
     stopViz();
     stopTicker();
-  }, [stopViz, stopTicker]);
+  }, [currentTrack, stopViz, stopTicker, trackIndex]);
 
   // ── Caption tab ───────────────────────────────────────────────────────────
   const handleCaptionMediaPick = (e) => {
@@ -1471,7 +1587,7 @@ const FMRadioPage = () => {
     <div className="wr-cabinet">
       <div className="wr-brand">
         <h1>WISERAVENSHARE</h1>
-        <div className="wr-model">WR-77 · FM · CASSETTE · 10-BAND EQ · ALL CODECS</div>
+        <div className="wr-model">WR-77 · FM · TRACK PLAYER · 10-BAND EQ · ALL CODECS</div>
       </div>
 
       <div className="wr-grille" />
@@ -1514,7 +1630,7 @@ const FMRadioPage = () => {
 
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
-        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 CASSETTE</button>
+        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 TRACK PLAYER</button>
         <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
@@ -1523,7 +1639,7 @@ const FMRadioPage = () => {
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
-          <div className="wr-deck-label">◄◄ CASSETTE · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
+          <div className="wr-deck-label">◄◄ TRACK PLAYER · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
 
           <div className="wr-viz-wrap">
             <canvas ref={canvasRef} className="wr-canvas" width={800} height={72} />
@@ -1725,7 +1841,7 @@ const FMRadioPage = () => {
         <div className="mod-logo">🎧 WiseRaven</div>
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
-          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Media Player</button>
+          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Track Player</button>
           <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>

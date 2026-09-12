@@ -50,6 +50,28 @@ import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
 import { ravensightAPI } from '../Services/RavensightAPI';
 
+const TRACK_PLAYER_HANDOFF_KEY = 'wr_track_player_handoff';
+const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const inferUploadTypeFromFile = (file, fallback = 'photo') => {
+    const mime = String(file?.type || '').toLowerCase();
+    const fileName = String(file?.name || '').toLowerCase();
+
+    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(fileName)) {
+        return 'music';
+    }
+
+    if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(fileName)) {
+        return 'video';
+    }
+
+    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|svg)$/i.test(fileName)) {
+        return 'photo';
+    }
+
+    return fallback;
+};
+
 const normalizeTrack = (track) => {
     if (!track || typeof track !== 'object') return null;
     const mediaUrl = String(
@@ -190,8 +212,34 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [uploading, setUploading] = useState(false);
 
     const playTrack = (track) => {
+        if (!track) {
+            return;
+        }
+
+        const payload = {
+            source: 'my-library',
+            requestedAtUtc: new Date().toISOString(),
+            track: {
+                id: String(track.id || '').trim(),
+                title: String(track.title || '').trim(),
+                artist: String(track.artist || '').trim(),
+                album: String(track.album || '').trim(),
+                fileName: String(track.fileName || track.title || '').trim(),
+                mediaUrl: String(track.mediaUrl || track.url || '').trim(),
+                url: String(track.mediaUrl || track.url || '').trim(),
+                relativePath: String(track.relativePath || '').trim()
+            }
+        };
+
+        try {
+            localStorage.setItem(TRACK_PLAYER_HANDOFF_KEY, JSON.stringify(payload));
+        } catch {
+            // If storage write fails, continue and still navigate so user can load manually.
+        }
+
         setCurrentTrack(track);
         setIsPlaying(true);
+        onNavigate?.('radio-creator');
     };
 
     const togglePlayPause = () => {
@@ -252,7 +300,17 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         setRemovingPhotoId(photoId);
         try {
-            await apiService.deletePhotoLibraryItem(photoId);
+            try {
+                await apiService.deletePhotoLibraryItem(photoId);
+            } catch (error) {
+                const status = Number(error?.status || error?.response?.status || 0);
+                if ((status === 404 || status === 400) && GUID_REGEX.test(photoId)) {
+                    await apiService.deleteSavedMediaItem(photoId);
+                } else {
+                    throw error;
+                }
+            }
+
             setPhotos((previous) => previous.filter((item) => item.id !== photoId));
             setPhotoLightbox((previous) => (previous?.id === photoId ? null : previous));
             addToast(`Removed ${photoTitle} from your library.`, 'success');
@@ -326,11 +384,12 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         const title = String(uploadTitle || uploadFile.name || 'Uploaded media').trim();
         const description = String(uploadDescription || '').trim();
-        const type = uploadType === 'music' ? 'audio' : uploadType;
+        const resolvedUploadType = inferUploadTypeFromFile(uploadFile, uploadType);
+        const type = resolvedUploadType === 'music' ? 'audio' : resolvedUploadType;
 
         setUploading(true);
         try {
-            if (uploadType === 'music') {
+            if (resolvedUploadType === 'music') {
                 await apiService.uploadMusicTrack(uploadFile, {
                     title,
                     artist: '',
@@ -346,7 +405,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 });
             }
 
-            addToast(`${uploadType === 'music' ? 'Music' : uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} uploaded successfully.`, 'success');
+            addToast(`${resolvedUploadType === 'music' ? 'Music' : resolvedUploadType.charAt(0).toUpperCase() + resolvedUploadType.slice(1)} uploaded successfully.`, 'success');
             setUploadFile(null);
             setUploadTitle('');
             setUploadDescription('');
@@ -492,8 +551,14 @@ const MyLibraryPage = ({ onNavigate }) => {
                         <input
                             ref={uploadInputRef}
                             type="file"
-                            accept={uploadType === 'photo' ? 'image/*' : uploadType === 'music' ? 'audio/*' : 'video/*'}
-                            onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                            accept="image/*,audio/*,video/*,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.weba,.mp4,.mov,.webm,.mkv,.avi,.m4v"
+                            onChange={(event) => {
+                                const file = event.target.files?.[0] || null;
+                                setUploadFile(file);
+                                if (file) {
+                                    setUploadType(inferUploadTypeFromFile(file, uploadType));
+                                }
+                            }}
                             style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
                         />
                     </div>

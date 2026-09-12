@@ -1166,6 +1166,18 @@ export const apiService = {
             throw normalizeApiError(error, 'Failed to remove photo from your library.');
         }
     },
+    deleteSavedMediaItem: async (mediaId) => {
+        const normalizedMediaId = String(mediaId || '').trim();
+        if (!normalizedMediaId) {
+            throw new Error('Media id is required.');
+        }
+
+        try {
+            return await api.delete(`/SavedMedia/${encodeURIComponent(normalizedMediaId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove saved media item.');
+        }
+    },
     getVideoLibrary: async () => {
         try {
             return await api.get('/ravensight/media/videos');

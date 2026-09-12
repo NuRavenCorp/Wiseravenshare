@@ -19,6 +19,16 @@ const MediaUpload = ({ onMediaUploaded }) => {
     isVisibleInFeed: false
   });
 
+  const inferMediaType = (file) => {
+    const mime = String(file?.type || '').toLowerCase();
+    const fileName = String(file?.name || '').toLowerCase();
+
+    if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(fileName)) return 'Video';
+    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(fileName)) return 'Music';
+    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|svg)$/i.test(fileName)) return 'Photo';
+    return 'Photo';
+  };
+
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -44,10 +54,12 @@ const MediaUpload = ({ onMediaUploaded }) => {
     // TODO: Implement file upload to cloud storage (DigitalOcean Spaces, etc.)
     // For now, we'll create a local URL
     const url = URL.createObjectURL(file);
+    const inferredType = inferMediaType(file);
     setFormData(prev => ({
       ...prev,
       mediaUrl: url,
-      title: file.name
+      title: file.name,
+      mediaType: inferredType
     }));
   };
 
@@ -112,6 +124,12 @@ const MediaUpload = ({ onMediaUploaded }) => {
             id="file-input"
             multiple
             accept="image/*,video/*,audio/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                handleFileUpload(file);
+              }
+            }}
             style={{ display: 'none' }}
           />
           <label htmlFor="file-input" className="drop-label">
