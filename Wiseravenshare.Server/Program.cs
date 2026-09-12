@@ -1995,7 +1995,12 @@ using (var scope = app.Services.CreateScope())
 
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
+    var mediaCatalogStore = scope.ServiceProvider.GetRequiredService<RavensightMediaCatalogStore>();
     var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
+
+    // Bootstrap media catalog schema (photos, music, videos unified table).
+    try { await mediaCatalogStore.EnsureSchemaAsync(); }
+    catch (Exception ex) { app.Logger.LogWarning(ex, "Media catalog schema bootstrap failed at startup; will retry on first use."); }
 
     var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
     var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
