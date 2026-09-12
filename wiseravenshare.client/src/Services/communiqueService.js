@@ -30,15 +30,17 @@ const getAuthHeader = () => {
     }
 };
 
-const request = async (path, init = {}) => {
+const request = async (path, method = 'POST', body = null) => {
+    const isGet = method.toUpperCase() === 'GET';
+    const headers = {
+        ...getAuthHeader(),
+        ...(!isGet ? { 'Content-Type': 'application/json' } : {})
+    };
+
     const res = await fetch(`${COMMUNIQUE_BASE_URL}${path}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeader(),
-            ...(init.headers || {})
-        },
-        ...init
+        method,
+        headers,
+        ...(body !== null ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {})
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -47,11 +49,7 @@ const request = async (path, init = {}) => {
     return data;
 };
 
-const post = async (path, body) =>
-    request(path, {
-        method: 'POST',
-        body: JSON.stringify(body)
-    });
+const post = (path, body) => request(path, 'POST', body);
 
 /** Send an SMS via Twilio */
 export const sendSms = (to, message) =>
@@ -80,7 +78,5 @@ export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) =
     if (Number.isFinite(limit) && limit > 0) query.set('limit', String(Math.floor(limit)));
     const suffix = query.toString() ? `?${query.toString()}` : '';
 
-    return request(`/communique/messages${suffix}`, {
-        method: 'GET'
-    });
+    return request(`/communique/messages${suffix}`, 'GET');
 };
