@@ -1154,6 +1154,18 @@ export const apiService = {
             throw normalizeApiError(error, 'Failed to load photo library.');
         }
     },
+    deletePhotoLibraryItem: async (photoId) => {
+        const normalizedPhotoId = String(photoId || '').trim();
+        if (!normalizedPhotoId) {
+            throw new Error('Photo id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/media/photos/${encodeURIComponent(normalizedPhotoId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove photo from your library.');
+        }
+    },
     getVideoLibrary: async () => {
         try {
             return await api.get('/ravensight/media/videos');
