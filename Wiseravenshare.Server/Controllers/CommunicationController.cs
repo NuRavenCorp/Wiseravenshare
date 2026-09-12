@@ -138,7 +138,9 @@ public class CommunicationController : ControllerBase
 
         try
         {
-            var verificationResult = await _communicationService.SendVerificationAsync(request.PhoneNumber);
+            var verificationResult = await _communicationService.SendVerificationAsync(
+                request.PhoneNumber,
+                request.Channel ?? "sms");
 
             return Ok(new VerificationResponse
             {

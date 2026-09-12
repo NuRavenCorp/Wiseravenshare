@@ -9,7 +9,7 @@ namespace Wiseravenshare.Server.Services.Communication;
 public interface ICommunicationService
 {
     Task<bool> SendNotificationAsync(string userId, string message, string? phoneNumber = null, string channel = "sms");
-    Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber);
+    Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber, string channel = "sms");
     Task<bool> VerifyPhoneNumberAsync(string phoneNumber, string code);
     Task<bool> NotifyEngagementAsync(string userId, string contentTitle, string activityType);
     Task<bool> SendBulkNotificationAsync(List<string> userIds, string message);
@@ -110,7 +110,7 @@ public class CommunicationService : ICommunicationService
     /// <summary>
     /// Send verification code to phone number
     /// </summary>
-    public async Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber)
+    public async Task<(bool Success, string VerificationSid)> SendVerificationAsync(string phoneNumber, string channel = "sms")
     {
         if (!_twilioService.IsEnabled)
         {
@@ -120,12 +120,15 @@ public class CommunicationService : ICommunicationService
 
         try
         {
-            var verificationSid = await _twilioService.SendVerificationCodeAsync(phoneNumber, "sms");
+            var normalizedChannel = string.Equals(channel, "whatsapp", StringComparison.OrdinalIgnoreCase)
+                ? "whatsapp"
+                : "sms";
+            var verificationSid = await _twilioService.SendVerificationCodeAsync(phoneNumber, normalizedChannel);
             return (!string.IsNullOrEmpty(verificationSid), verificationSid ?? string.Empty);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending verification code to {PhoneNumber}", phoneNumber);
+            _logger.LogError(ex, "Error sending verification code to {PhoneNumber} via {Channel}", phoneNumber, channel);
             return (false, string.Empty);
         }
     }
