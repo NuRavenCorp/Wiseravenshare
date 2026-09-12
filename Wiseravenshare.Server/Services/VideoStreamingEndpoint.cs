@@ -33,59 +33,7 @@ public class VideoStreamingController : ControllerBase
             return BadRequest("Invalid fileName.");
         }
 
-        var storageFolderNames = ResolveStorageFolderNames();
-        var defaultDestinations = ResolveDefaultDestinations();
-        var candidatePaths = new List<string>();
-
-        foreach (var storageFolderName in storageFolderNames)
-        {
-            foreach (var destination in defaultDestinations)
-            {
-                var destinationParts = destination.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
-                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
-                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
-            }
-        }
-
-        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName));
-        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName));
-        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName));
-
-        var filePath = candidatePaths.FirstOrDefault(System.IO.File.Exists);
-
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            var searchRoots = new List<string>();
-            foreach (var storageFolderName in storageFolderNames)
-            {
-                searchRoots.Add(Path.Combine(_environment.ContentRootPath, storageFolderName));
-                searchRoots.Add(Path.Combine(AppContext.BaseDirectory, storageFolderName));
-                searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName));
-            }
-
-            foreach (var root in searchRoots)
-            {
-                if (!Directory.Exists(root))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var match = Directory.EnumerateFiles(root, safeFileName, SearchOption.AllDirectories).FirstOrDefault();
-                    if (!string.IsNullOrWhiteSpace(match))
-                    {
-                        filePath = match;
-                        break;
-                    }
-                }
-                catch
-                {
-                    // Continue through remaining search roots.
-                }
-            }
-        }
+        var filePath = FindLocalFile(safeFileName);
 
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -124,7 +72,81 @@ public class VideoStreamingController : ControllerBase
             }
         }
 
+        // Blob storage unavailable or object not found — try the local filesystem.
+        var safeFileName = Path.GetFileName(fileName.Replace('\\', '/'));
+        if (!string.IsNullOrWhiteSpace(safeFileName))
+        {
+            var localPath = FindLocalFile(safeFileName);
+            if (localPath is not null)
+            {
+                var localStream = System.IO.File.OpenRead(localPath);
+                if (!_contentTypeProvider.TryGetContentType(localPath, out var localContentType))
+                {
+                    localContentType = "application/octet-stream";
+                }
+                return File(localStream, localContentType, enableRangeProcessing: true);
+            }
+        }
+
         return NotFound();
+    }
+
+    /// <summary>
+    /// Searches all configured local storage roots for a file by name.
+    /// Used as a fallback when blob storage is unavailable.
+    /// </summary>
+    private string? FindLocalFile(string safeFileName)
+    {
+        var storageFolderNames = ResolveStorageFolderNames();
+        var defaultDestinations = ResolveDefaultDestinations();
+        var candidatePaths = new List<string>();
+
+        foreach (var storageFolderName in storageFolderNames)
+        {
+            foreach (var destination in defaultDestinations)
+            {
+                var destinationParts = destination.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+            }
+        }
+
+        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName));
+
+        var filePath = candidatePaths.FirstOrDefault(System.IO.File.Exists);
+        if (!string.IsNullOrWhiteSpace(filePath))
+            return filePath;
+
+        // Recursive fallback across all known storage roots.
+        var searchRoots = new List<string>();
+        foreach (var storageFolderName in storageFolderNames)
+        {
+            searchRoots.Add(Path.Combine(_environment.ContentRootPath, storageFolderName));
+            searchRoots.Add(Path.Combine(AppContext.BaseDirectory, storageFolderName));
+            searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName));
+        }
+
+        foreach (var root in searchRoots)
+        {
+            if (!Directory.Exists(root))
+                continue;
+
+            try
+            {
+                var match = Directory.EnumerateFiles(root, safeFileName, SearchOption.AllDirectories).FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(match))
+                    return match;
+            }
+            catch
+            {
+                // Continue through remaining search roots.
+            }
+        }
+
+        return null;
     }
 
     private IEnumerable<string> BuildObjectKeyCandidates(string fileName)
