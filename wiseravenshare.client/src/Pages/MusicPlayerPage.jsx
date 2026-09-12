@@ -515,8 +515,18 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
   // Handlers
   const handleTrackSelect = (track, index) => {
+    const candidates = buildTrackSourceCandidates(track);
+    if (!candidates.length) {
+      musicPlayIntentRef.current = false;
+      addToast('This file has no playable source URL yet.', 'warning');
+      return;
+    }
+
+    // Treat selecting a track as an explicit user intent to play.
+    musicPlayIntentRef.current = true;
     setCurrentTrack(track);
     setCurrentTrackIndex(index);
+    setIsPlayerPlaying(false);
 
     const updatedHistory = [
       {
