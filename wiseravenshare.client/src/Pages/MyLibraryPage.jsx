@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward } from 'react-icons/fi';
+import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload } from 'react-icons/fi';
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
 const PROTECTION_PLANS = [
@@ -123,7 +123,15 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [photoLightbox, setPhotoLightbox] = useState(null);
     const [playingVideoId, setPlayingVideoId] = useState(null);
     const audioRef = useRef(null);
+    const isMountedRef = useRef(true);
+    const uploadInputRef = useRef(null);
     const [selectedPlanId, setSelectedPlanId] = useState(null);
+    const [libraryVersion, setLibraryVersion] = useState(0);
+    const [uploadType, setUploadType] = useState('photo');
+    const [uploadFile, setUploadFile] = useState(null);
+    const [uploadTitle, setUploadTitle] = useState('');
+    const [uploadDescription, setUploadDescription] = useState('');
+    const [uploading, setUploading] = useState(false);
 
     const playTrack = (track) => {
         setCurrentTrack(track);
@@ -156,63 +164,107 @@ const MyLibraryPage = ({ onNavigate }) => {
         addToast(`Selected ${PROTECTION_PLANS.find(p => p.id === planId)?.name || 'plan'} for: ${currentTrack.title}`, 'success');
     };
 
-    useEffect(() => {
-        let isMounted = true;
-        const loadLibrary = async () => {
-            setIsLoading(true);
-            try {
-                const [musicResult, videoResult, photoResult] = await Promise.allSettled([
-                    apiService.getMusicLibrary(),
-                    apiService.getVideoLibrary
-                        ? apiService.getVideoLibrary()
-                        : ravensightAPI.getUserVideos(user?.id || null),
-                    apiService.getPhotoLibrary ? apiService.getPhotoLibrary() : Promise.resolve({ data: [] })
-                ]);
+    const loadLibrary = async () => {
+        setIsLoading(true);
+        try {
+            const [musicResult, videoResult, photoResult] = await Promise.allSettled([
+                apiService.getMusicLibrary(),
+                apiService.getVideoLibrary
+                    ? apiService.getVideoLibrary()
+                    : ravensightAPI.getUserVideos(user?.id || null),
+                apiService.getPhotoLibrary ? apiService.getPhotoLibrary() : Promise.resolve({ data: [] })
+            ]);
 
-                if (!isMounted) return;
+            if (!isMountedRef.current) return;
 
-                const nextTracks = musicResult.status === 'fulfilled'
-                    ? (Array.isArray(musicResult.value?.data) ? musicResult.value.data : [])
-                        .map(normalizeTrack)
-                        .filter(Boolean)
-                    : [];
-                const nextVideos = videoResult.status === 'fulfilled'
-                    ? (Array.isArray(videoResult.value?.videos)
-                        ? videoResult.value.videos
-                        : Array.isArray(videoResult.value?.data)
-                            ? videoResult.value.data
-                            : [])
-                        .map(normalizeVideo)
-                        .filter(Boolean)
-                    : [];
-                const nextPhotos = photoResult.status === 'fulfilled'
-                    ? (Array.isArray(photoResult.value?.data) ? photoResult.value.data : [])
-                        .map(normalizePhoto)
-                        .filter(Boolean)
-                    : [];
+            const nextTracks = musicResult.status === 'fulfilled'
+                ? (Array.isArray(musicResult.value?.data) ? musicResult.value.data : [])
+                    .map(normalizeTrack)
+                    .filter(Boolean)
+                : [];
+            const nextVideos = videoResult.status === 'fulfilled'
+                ? (Array.isArray(videoResult.value?.videos)
+                    ? videoResult.value.videos
+                    : Array.isArray(videoResult.value?.data)
+                        ? videoResult.value.data
+                        : [])
+                    .map(normalizeVideo)
+                    .filter(Boolean)
+                : [];
+            const nextPhotos = photoResult.status === 'fulfilled'
+                ? (Array.isArray(photoResult.value?.data) ? photoResult.value.data : [])
+                    .map(normalizePhoto)
+                    .filter(Boolean)
+                : [];
 
-                setMusicTracks(nextTracks);
-                setVideos(nextVideos);
-                setPhotos(nextPhotos);
-                if (nextTracks.length > 0) {
-                    setCurrentTrack(nextTracks[0]);
-                } else {
-                    setCurrentTrack(null);
-                }
-            } catch (error) {
-                addToast(error?.message || 'Unable to load your library.', 'error');
-            } finally {
-                if (isMounted) {
-                    setIsLoading(false);
-                }
+            setMusicTracks(nextTracks);
+            setVideos(nextVideos);
+            setPhotos(nextPhotos);
+            if (nextTracks.length > 0) {
+                setCurrentTrack(nextTracks[0]);
+            } else {
+                setCurrentTrack(null);
             }
-        };
+        } catch (error) {
+            addToast(error?.message || 'Unable to load your library.', 'error');
+        } finally {
+            if (isMountedRef.current) {
+                setIsLoading(false);
+            }
+        }
+    };
 
+    const handleUpload = async (event) => {
+        event.preventDefault();
+        if (!uploadFile) {
+            addToast('Choose a file to upload first.', 'info');
+            return;
+        }
+
+        const title = String(uploadTitle || uploadFile.name || 'Uploaded media').trim();
+        const description = String(uploadDescription || '').trim();
+        const type = uploadType === 'music' ? 'audio' : uploadType;
+
+        setUploading(true);
+        try {
+            if (uploadType === 'music') {
+                await apiService.uploadMusicTrack(uploadFile, {
+                    title,
+                    artist: '',
+                    album: '',
+                    genre: '',
+                    destinationFolder: '',
+                    fingerprint: ''
+                });
+            } else {
+                await apiService.uploadMedia(uploadFile, type, {
+                    title,
+                    description
+                });
+            }
+
+            addToast(`${uploadType === 'music' ? 'Music' : uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} uploaded successfully.`, 'success');
+            setUploadFile(null);
+            setUploadTitle('');
+            setUploadDescription('');
+            if (uploadInputRef.current) {
+                uploadInputRef.current.value = '';
+            }
+            setLibraryVersion((value) => value + 1);
+        } catch (error) {
+            addToast(error?.message || 'Upload failed. Please try again.', 'error');
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    useEffect(() => {
+        isMountedRef.current = true;
         void loadLibrary();
         return () => {
-            isMounted = false;
+            isMountedRef.current = false;
         };
-    }, [addToast, user?.id]);
+    }, [addToast, user?.id, libraryVersion]);
 
     const filteredTracks = useMemo(() => {
         const query = musicSearch.trim().toLowerCase();
@@ -297,6 +349,71 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <div style={{ marginTop: '6px', color: 'var(--light-color)', fontSize: '13px' }}>
                     All your uploaded photos, music, videos, and more in one unified library.
                 </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                        Photos ({totalItems.photos})
+                    </span>
+                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                        Music ({totalItems.music})
+                    </span>
+                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                        Videos ({totalItems.videos})
+                    </span>
+                </div>
+                <form onSubmit={handleUpload} style={{ display: 'grid', gap: '10px', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+                        <select
+                            value={uploadType}
+                            onChange={(event) => setUploadType(event.target.value)}
+                            style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
+                        >
+                            <option value="photo">Photo</option>
+                            <option value="music">Music</option>
+                            <option value="video">Video</option>
+                        </select>
+                        <input
+                            ref={uploadInputRef}
+                            type="file"
+                            accept={uploadType === 'photo' ? 'image/*' : uploadType === 'music' ? 'audio/*' : 'video/*'}
+                            onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                            style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
+                        />
+                    </div>
+                    <input
+                        type="text"
+                        value={uploadTitle}
+                        onChange={(event) => setUploadTitle(event.target.value)}
+                        placeholder={`${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} title`}
+                        style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
+                    />
+                    <textarea
+                        value={uploadDescription}
+                        onChange={(event) => setUploadDescription(event.target.value)}
+                        placeholder="Optional description"
+                        rows={2}
+                        style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
+                    />
+                    <button
+                        type="submit"
+                        disabled={uploading || !uploadFile}
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '10px 14px',
+                            background: uploading ? 'rgba(148,163,184,0.35)' : 'linear-gradient(135deg, #3b82f6, #a855f7)',
+                            color: '#fff',
+                            cursor: uploading || !uploadFile ? 'not-allowed' : 'pointer',
+                            fontWeight: 700
+                        }}
+                    >
+                        <FiUpload />
+                        {uploading ? 'Uploading…' : 'Upload to Library'}
+                    </button>
+                </form>
             </div>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
