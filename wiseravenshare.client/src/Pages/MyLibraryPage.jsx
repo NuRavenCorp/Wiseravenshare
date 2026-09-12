@@ -107,6 +107,8 @@ const normalizePhoto = (photo) => {
     };
 };
 
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
@@ -178,21 +180,25 @@ const MyLibraryPage = ({ onNavigate }) => {
             if (!isMountedRef.current) return;
 
             const nextTracks = musicResult.status === 'fulfilled'
-                ? (Array.isArray(musicResult.value?.data) ? musicResult.value.data : [])
+                ? asArray(musicResult.value?.data?.data ?? musicResult.value?.data)
                     .map(normalizeTrack)
                     .filter(Boolean)
                 : [];
             const nextVideos = videoResult.status === 'fulfilled'
-                ? (Array.isArray(videoResult.value?.videos)
-                    ? videoResult.value.videos
-                    : Array.isArray(videoResult.value?.data)
-                        ? videoResult.value.data
-                        : [])
+                ? asArray(
+                    videoResult.value?.data?.videos
+                    ?? videoResult.value?.videos
+                    ?? videoResult.value?.data
+                )
                     .map(normalizeVideo)
                     .filter(Boolean)
                 : [];
             const nextPhotos = photoResult.status === 'fulfilled'
-                ? (Array.isArray(photoResult.value?.data) ? photoResult.value.data : [])
+                ? asArray(
+                    photoResult.value?.data?.data
+                    ?? photoResult.value?.photos
+                    ?? photoResult.value?.data
+                )
                     .map(normalizePhoto)
                     .filter(Boolean)
                 : [];
