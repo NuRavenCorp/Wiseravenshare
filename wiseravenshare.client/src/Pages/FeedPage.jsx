@@ -309,21 +309,30 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleLike = async (postId) => {
         try {
-            const currentPost = posts.find((post) => post.id === postId);
-            if (currentPost?.isLiked) {
-                addTruthAlert('info', 'You already liked this post.', null);
+            // Only backend-stored posts (valid UUIDs) can be liked via API.
+            const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId);
+            if (!isValidGuid) {
+                addTruthAlert('info', 'Likes are only available for WiseRaven posts.', null);
                 return;
             }
 
-            const updated = await apiService.likePost(postId);
-            // Track the like interaction for personalization.
-            const post = posts.find((p) => p.id === postId);
-            if (post) {
-                track('Like', 'Post', postId, {
-                    title: post.content?.slice(0, 100) || '',
-                    tags: extractPostTags(post),
-                });
+            const currentPost = posts.find((post) => post.id === postId);
+            const isCurrentlyLiked = Boolean(currentPost?.isLiked);
+
+            const updated = isCurrentlyLiked
+                ? await apiService.unlikePost(postId)
+                : await apiService.likePost(postId);
+
+            if (!isCurrentlyLiked) {
+                // Track the like interaction for personalization.
+                if (currentPost) {
+                    track('Like', 'Post', postId, {
+                        title: currentPost.content?.slice(0, 100) || '',
+                        tags: extractPostTags(currentPost),
+                    });
+                }
             }
+
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
