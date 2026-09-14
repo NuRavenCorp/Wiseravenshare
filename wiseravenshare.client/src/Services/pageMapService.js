@@ -21,6 +21,7 @@ const PAGE_NODES = [
   { id: 'ainews', label: 'AI News', category: 'news', icon: 'fas fa-newspaper', tags: ['news', 'articles', 'trends'], related: ['breakingnews', 'truthseeker'] },
   { id: 'ravensight', label: 'Ravensight', category: 'studio', icon: 'fas fa-video', tags: ['studio', 'video', 'media'], related: ['newsroom-video', 'canvas'] },
   { id: 'profile', label: 'Profile', category: 'account', icon: 'fas fa-user', tags: ['user', 'settings'], related: ['team-launchpad', 'messages'] },
+  { id: 'wisecoin', label: 'WiseCoin', category: 'currency', icon: 'fas fa-coins', tags: ['currency', 'wallet', 'rewards'], related: ['feed', 'profile'] },
   { id: 'privacy', label: 'Privacy Policy', category: 'legal', icon: 'fas fa-user-shield', tags: ['legal', 'compliance'] },
   { id: 'terms', label: 'Terms of Service', category: 'legal', icon: 'fas fa-file-contract', tags: ['legal', 'compliance'] },
   { id: 'revenue', label: 'Revenue', category: 'admin', icon: 'fas fa-chart-line', tags: ['admin', 'growth'], adminOnly: true, related: ['team-access-admin'] },
@@ -48,6 +49,7 @@ const DEFAULT_NAV_ORDER = [
   'ai-assistant',
   'ainews',
   'ravensight',
+  'wisecoin',
   'profile'
 ];
 

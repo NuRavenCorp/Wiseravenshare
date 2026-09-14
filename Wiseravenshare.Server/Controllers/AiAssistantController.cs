@@ -2,7 +2,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using System.Text;
 using Wiseravenshare.Server.Services.AiAssistant;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -13,12 +16,24 @@ public class AiAssistantController : ControllerBase
 {
     private readonly IOllamaChatService _chatService;
     private readonly IAiJobQueue _jobQueue;
+    private readonly ISiteCrawlerService _siteCrawlerService;
+    private readonly IContentCrawlerService _contentCrawlerService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AiAssistantController> _logger;
 
-    public AiAssistantController(IOllamaChatService chatService, IAiJobQueue jobQueue, ILogger<AiAssistantController> logger)
+    public AiAssistantController(
+        IOllamaChatService chatService,
+        IAiJobQueue jobQueue,
+        ISiteCrawlerService siteCrawlerService,
+        IContentCrawlerService contentCrawlerService,
+        IConfiguration configuration,
+        ILogger<AiAssistantController> logger)
     {
         _chatService = chatService;
         _jobQueue = jobQueue;
+        _siteCrawlerService = siteCrawlerService;
+        _contentCrawlerService = contentCrawlerService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -83,7 +98,8 @@ public class AiAssistantController : ControllerBase
             return BadRequest(new { message = "Message is required." });
         }
 
-        var result = await _chatService.ChatAsync(request);
+        var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
+        var result = await _chatService.ChatAsync(enrichedRequest);
         return Ok(result);
     }
 
@@ -107,7 +123,8 @@ public class AiAssistantController : ControllerBase
         Response.StatusCode = StatusCodes.Status200OK;
         Response.ContentType = "text/event-stream";
 
-        await foreach (var token in _chatService.ChatStreamAsync(request, ct))
+        var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, ct);
+        await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
         {
             await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
         }
@@ -130,7 +147,8 @@ public class AiAssistantController : ControllerBase
 
         try
         {
-            var jobId = _jobQueue.Enqueue(request);
+            var enrichedRequest = BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted).GetAwaiter().GetResult();
+            var jobId = _jobQueue.Enqueue(enrichedRequest);
             var snapshot = _jobQueue.Get(jobId)!;
             // 202 Accepted; cached jobs are already Succeeded and carry their reply.
             return AcceptedAtAction(nameof(GetJob), new { jobId }, snapshot);
@@ -150,5 +168,109 @@ public class AiAssistantController : ControllerBase
     {
         var snapshot = _jobQueue.Get(jobId);
         return snapshot is null ? NotFound() : Ok(snapshot);
+    }
+
+    private async Task<AiChatRequest> BuildCrawlerAwareRequestAsync(AiChatRequest request, CancellationToken ct)
+    {
+        var contextBlock = await BuildCrawlerContextBlockAsync(ct);
+        if (string.IsNullOrWhiteSpace(contextBlock))
+        {
+            return request;
+        }
+
+        return new AiChatRequest
+        {
+            Message = $"{contextBlock}\n\nUser question:\n{request.Message}",
+            History = request.History,
+            Model = request.Model
+        };
+    }
+
+    private async Task<string> BuildCrawlerContextBlockAsync(CancellationToken ct)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Use this live Wiseravenshare crawler context when answering:");
+
+            if (IsAdminRequest())
+            {
+                var siteSummary = await _siteCrawlerService.GetSummaryAsync(null, "core", ct);
+                AppendSiteSummary(sb, siteSummary);
+            }
+
+            var contentSummary = await _contentCrawlerService.GetTrendingAsync(null, null, 6, ct);
+            if (contentSummary.TrendingContent.Count > 0)
+            {
+                sb.AppendLine("- Trending content:");
+                foreach (var item in contentSummary.TrendingContent.Take(5))
+                {
+                    sb.AppendLine($"  - {item.ContentType}: {item.Title} (engagement={item.EngagementCount}, score={item.TrendingScore:0.###})");
+                }
+            }
+
+            if (contentSummary.EmergingTopics.Count > 0)
+            {
+                sb.AppendLine($"- Emerging topics: {string.Join(", ", contentSummary.EmergingTopics.Take(8))}");
+            }
+
+            return sb.ToString().Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to enrich AI request with crawler context.");
+            return string.Empty;
+        }
+    }
+
+    private static void AppendSiteSummary(StringBuilder sb, SiteCrawlerSummaryDto? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        sb.AppendLine($"- Site crawler indexed pages: {summary.TotalIndexedPages}");
+        if (summary.TopConnectedPages.Count > 0)
+        {
+            sb.AppendLine("- Top connected pages:");
+            foreach (var page in summary.TopConnectedPages.Take(5))
+            {
+                sb.AppendLine($"  - {page.PageId}: {page.Label} [{page.Category}] score={page.Score:0.###}");
+            }
+        }
+
+        if (summary.RelatedInCategory.Count > 0)
+        {
+            sb.AppendLine("- Related pages:");
+            foreach (var page in summary.RelatedInCategory.Take(4))
+            {
+                sb.AppendLine($"  - {page.PageId}: {page.Label} [{page.Category}]");
+            }
+        }
+    }
+
+    private bool IsAdminRequest()
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return false;
+        }
+
+        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
+        if (configuredAdminEmails.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var configuredAuthUsers = _configuration.GetSection("Authentication:Users").GetChildren()
+            .Select(section => section["Email"]?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+
+        return configuredAuthUsers.Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
     }
 }

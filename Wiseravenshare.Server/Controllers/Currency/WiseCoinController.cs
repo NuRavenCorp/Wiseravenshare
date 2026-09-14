@@ -16,13 +16,20 @@ public class WiseCoinController : ControllerBase
     private readonly IWiseCoinService _wiseCoinService;
     private readonly IBadgeService _badgeService;
     private readonly ILedgerHashService _ledger;
+    private readonly IWiseCoinRolloutService _rolloutService;
     private readonly ILogger<WiseCoinController> _logger;
 
-    public WiseCoinController(IWiseCoinService wiseCoinService, IBadgeService badgeService, ILedgerHashService ledger, ILogger<WiseCoinController> logger)
+    public WiseCoinController(
+        IWiseCoinService wiseCoinService,
+        IBadgeService badgeService,
+        ILedgerHashService ledger,
+        IWiseCoinRolloutService rolloutService,
+        ILogger<WiseCoinController> logger)
     {
         _wiseCoinService = wiseCoinService;
         _badgeService = badgeService;
         _ledger = ledger;
+        _rolloutService = rolloutService;
         _logger = logger;
     }
 
@@ -45,7 +52,10 @@ public class WiseCoinController : ControllerBase
             badgeMultiplier = wallet.BadgeMultiplier,
             skillMultiplier = wallet.SkillMultiplier,
             reputationMultiplier = wallet.ReputationMultiplier,
-            totalMultiplier = wallet.TotalMultiplier
+            totalMultiplier = wallet.TotalMultiplier,
+            hasReceivedInitialAllocation = wallet.HasReceivedInitialAllocation,
+            initialAllocationDate = wallet.InitialAllocationDate,
+            initialAllocationAmount = wallet.InitialAllocationAmount
         });
     }
 
@@ -227,6 +237,59 @@ public class WiseCoinController : ControllerBase
             return BadRequest(new { error = ex.Message });
         }
     }
+
+    // === WiseCoin Rollout Endpoints ===
+
+    /// <summary>Claim initial WSC allocation for the current user (one-time, 100 WSC).</summary>
+    [HttpPost("rollout/claim-initial")]
+    public async Task<IActionResult> ClaimInitialAllocation()
+    {
+        var userId = User.GetUserId();
+        var success = await _rolloutService.AllocateInitialWSCAsync(userId);
+        
+        if (!success)
+            return BadRequest(new { error = "Already received initial allocation or allocation failed" });
+
+        var wallet = await _wiseCoinService.GetOrCreateWalletAsync(userId);
+        return Ok(new
+        {
+            message = "Initial allocation claimed successfully",
+            balance = wallet.Balance,
+            allocated = wallet.InitialAllocationAmount,
+            timestamp = wallet.InitialAllocationDate
+        });
+    }
+
+    /// <summary>Get rollout status and progress (admin/public info).</summary>
+    [HttpGet("rollout/status")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetRolloutStatus()
+    {
+        var status = await _rolloutService.GetRolloutStatusAsync();
+        return Ok(status);
+    }
+
+    /// <summary>Batch allocate initial WSC to all eligible users (admin only).</summary>
+    [HttpPost("rollout/allocate-all")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> AllocateAllUsers([FromBody] RolloutRequest? request = null)
+    {
+        var amountPerUser = request?.AmountPerUser ?? 100m;
+        var result = await _rolloutService.AllocateAllAsync(amountPerUser);
+        
+        _logger.LogInformation(
+            "Rollout complete: {Successful}/{Total} allocations, {Total} WSC distributed",
+            result.SuccessfulAllocations,
+            result.TotalUsersEligible,
+            result.TotalDistributed);
+
+        return Ok(result);
+    }
+}
+
+public class RolloutRequest
+{
+    public decimal AmountPerUser { get; set; } = 100m;
 }
 
 public class TransferRequest

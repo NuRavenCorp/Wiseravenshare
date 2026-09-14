@@ -661,6 +661,17 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         e?.preventDefault();
         if (!postMessage.trim()) return;
 
+        if (!publishFacebook && !publishTikTok && !publishYouTube) {
+            setPublishResults([
+                {
+                    platform: 'general',
+                    success: false,
+                    error: 'Select at least one platform before publishing.'
+                }
+            ]);
+            return;
+        }
+
         setIsPublishing(true);
         setPublishResults(null);
 
@@ -681,8 +692,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 photoUrl: isPhotoUrl ? mediaUrl : undefined,
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
-                publishToTikTok: publishTikTok && isVideoUrl,
-                publishToYouTube: publishYouTube && isVideoUrl
+                publishToTikTok: publishTikTok,
+                publishToYouTube: publishYouTube
             });
 
             setPublishResults(response?.results || []);
