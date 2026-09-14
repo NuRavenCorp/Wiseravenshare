@@ -79,11 +79,12 @@ export const aiAssistantService = {
      * history: [{ role: 'user'|'assistant', content: string }, ...]
      * Returns { success, reply, model, error? }
      */
-    chat: async (message, history = [], model = null) => {
+    chat: async (message, history = [], model = null, useCrawlerContext = true) => {
         try {
             const response = await client.post('/aiassistant/chat', {
                 message,
                 history,
+                useCrawlerContext,
                 ...(model ? { model } : {})
             });
             return response.data;
@@ -100,7 +101,7 @@ export const aiAssistantService = {
      * Streams a chat reply via SSE. Calls onToken(fragment) for each delta.
      * Returns the full concatenated reply, or throws on failure.
      */
-    chatStream: async (message, history = [], model = null, onToken = () => {}, signal = null) => {
+    chatStream: async (message, history = [], model = null, onToken = () => {}, signal = null, useCrawlerContext = true) => {
         const base = resolveBase();
         const token = getAuthToken();
         const response = await fetch(`${base}/aiassistant/chat/stream`, {
@@ -109,7 +110,7 @@ export const aiAssistantService = {
                 'Content-Type': 'application/json',
                 ...(token ? { Authorization: `Bearer ${token}` } : {})
             },
-            body: JSON.stringify({ message, history, ...(model ? { model } : {}) }),
+            body: JSON.stringify({ message, history, useCrawlerContext, ...(model ? { model } : {}) }),
             signal: signal || undefined
         });
 
@@ -159,11 +160,12 @@ export const aiAssistantService = {
      * Returns { success, reply, model, error? } when the job completes.
      * pollMs: poll interval, timeoutMs: give up point.
      */
-    generate: async (message, history = [], model = null, { pollMs = 1200, timeoutMs = 120000 } = {}) => {
+    generate: async (message, history = [], model = null, { pollMs = 1200, timeoutMs = 120000, useCrawlerContext = true } = {}) => {
         try {
             const enqueue = await client.post('/aiassistant/jobs', {
                 message,
                 history,
+                useCrawlerContext,
                 ...(model ? { model } : {})
             });
 

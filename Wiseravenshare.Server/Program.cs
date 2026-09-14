@@ -1654,12 +1654,13 @@ builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
-// AI assistant — select provider via AiProvider config (deepseek|ollama|llamacpp).
+// AI assistant — select provider via AiProvider config (deepseek|ollama|llamacpp|digitalocean).
 // DeepSeek: Uses cloud API with advanced reasoning.
 // Ollama: Uses local OpenAI-compatible API (requires Ollama container).
 // LlamaCPP: Uses local llama-server (default, inside compose network).
+// DigitalOcean: alias to DeepSeek-backed cloud assistant for app deployments.
 var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
-if (aiProvider == "deepseek")
+if (aiProvider is "deepseek" or "digitalocean" or "dochatbot" or "do-chatbot")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }

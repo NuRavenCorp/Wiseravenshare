@@ -138,7 +138,7 @@ public class AiAssistantController : ControllerBase
     [Authorize]
     [HttpPost("jobs")]
     [ProducesResponseType(typeof(object), StatusCodes.Status202Accepted)]
-    public IActionResult EnqueueJob([FromBody] AiChatRequest request)
+    public async Task<IActionResult> EnqueueJob([FromBody] AiChatRequest request)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Message))
         {
@@ -147,7 +147,7 @@ public class AiAssistantController : ControllerBase
 
         try
         {
-            var enrichedRequest = BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted).GetAwaiter().GetResult();
+            var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
             var jobId = _jobQueue.Enqueue(enrichedRequest);
             var snapshot = _jobQueue.Get(jobId)!;
             // 202 Accepted; cached jobs are already Succeeded and carry their reply.
@@ -172,6 +172,11 @@ public class AiAssistantController : ControllerBase
 
     private async Task<AiChatRequest> BuildCrawlerAwareRequestAsync(AiChatRequest request, CancellationToken ct)
     {
+        if (!request.UseCrawlerContext)
+        {
+            return request;
+        }
+
         var contextBlock = await BuildCrawlerContextBlockAsync(ct);
         if (string.IsNullOrWhiteSpace(contextBlock))
         {
@@ -182,7 +187,8 @@ public class AiAssistantController : ControllerBase
         {
             Message = $"{contextBlock}\n\nUser question:\n{request.Message}",
             History = request.History,
-            Model = request.Model
+            Model = request.Model,
+            UseCrawlerContext = request.UseCrawlerContext
         };
     }
 
@@ -230,7 +236,7 @@ public class AiAssistantController : ControllerBase
             return;
         }
 
-        sb.AppendLine($"- Site crawler indexed pages: {summary.TotalIndexedPages}");
+        sb.AppendLine($"- Site crawler indexed pages: {summary.TotalPages}");
         if (summary.TopConnectedPages.Count > 0)
         {
             sb.AppendLine("- Top connected pages:");
