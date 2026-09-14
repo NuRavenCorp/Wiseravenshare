@@ -189,6 +189,34 @@ namespace Wiseravenshare.Server.Controllers
         }
 
         /// <summary>
+        /// Get comments for a post
+        /// </summary>
+        [HttpGet("{id}/comments")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostCommentDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetComments(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var comments = await _postService.GetCommentsAsync(id, page, pageSize);
+            return Ok(comments);
+        }
+
+        /// <summary>
+        /// Add a comment to a post
+        /// </summary>
+        [HttpPost("{id}/comments")]
+        [ProducesResponseType(typeof(PostCommentDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> AddComment(Guid id, [FromBody] AddPostCommentDto dto)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            var comment = await _postService.AddCommentAsync(userId, id, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return Ok(comment);
+        }
+
+        /// <summary>
         /// Bookmark a post
         /// </summary>
         [HttpPost("{id}/bookmark")]

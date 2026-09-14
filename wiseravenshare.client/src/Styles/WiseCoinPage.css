@@ -1,0 +1,491 @@
+/* wiseravenshare.client/src/Styles/WiseCoinPage.css */
+
+.wisecoin-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #e0e0e0;
+  border-radius: 8px;
+}
+
+.wisecoin-container.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #ff6b6b;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 18px;
+  color: #00d4ff;
+}
+
+/* Hero Section */
+.wisecoin-hero {
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  padding: 40px;
+  border-radius: 12px;
+  margin-bottom: 30px;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.hero-content h1 {
+  font-size: 40px;
+  margin: 0 0 10px 0;
+  font-weight: 700;
+}
+
+.hero-content p {
+  font-size: 18px;
+  margin: 0;
+  opacity: 0.95;
+}
+
+/* Stats Grid */
+.wisecoin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.stat-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #00d4ff;
+  margin-bottom: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 5px;
+}
+
+.stat-value.positive {
+  color: #4caf50;
+}
+
+.stat-sublabel {
+  font-size: 12px;
+  color: #999;
+}
+
+/* Allocation Banner */
+.allocation-banner {
+  background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+  padding: 30px;
+  border-radius: 12px;
+  margin-bottom: 30px;
+  text-align: center;
+  color: #333;
+  box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+}
+
+.allocation-banner h3 {
+  margin: 0 0 10px 0;
+  font-size: 24px;
+}
+
+.allocation-banner p {
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  opacity: 0.95;
+}
+
+.claim-btn {
+  background: linear-gradient(135deg, #ff6b00 0%, #ff8c00 100%);
+  color: white;
+  border: none;
+  padding: 12px 30px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 10px rgba(255, 107, 0, 0.3);
+}
+
+.claim-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(255, 107, 0, 0.4);
+}
+
+.claim-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Tabs */
+.wisecoin-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 30px;
+  border-bottom: 2px solid rgba(0, 212, 255, 0.2);
+  flex-wrap: wrap;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: #999;
+  padding: 12px 20px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+
+.tab:hover {
+  color: #00d4ff;
+}
+
+.tab.active {
+  color: #00d4ff;
+  border-bottom-color: #00d4ff;
+}
+
+/* Tab Content */
+.wisecoin-content {
+  background: rgba(0, 212, 255, 0.05);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  padding: 30px;
+}
+
+.tab-panel h2 {
+  margin-top: 0;
+  color: #00d4ff;
+  margin-bottom: 20px;
+}
+
+/* Info Cards */
+.info-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.info-card {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.info-card h3 {
+  color: #00d4ff;
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.info-card p {
+  margin: 10px 0;
+  line-height: 1.6;
+}
+
+/* Progress Bar */
+.progress-info {
+  margin: 15px 0;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4ff 0%, #0099ff 100%);
+  transition: width 0.5s ease;
+}
+
+/* Earning Guide */
+.earning-guide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.earning-item {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 25px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.earning-item:hover {
+  background: rgba(0, 212, 255, 0.1);
+  transform: translateY(-5px);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+.earning-icon {
+  font-size: 40px;
+  margin-bottom: 15px;
+}
+
+.earning-item h3 {
+  color: #00d4ff;
+  margin: 15px 0;
+}
+
+.earning-item p {
+  color: #ccc;
+  margin: 10px 0;
+  line-height: 1.6;
+}
+
+.reward-badge {
+  background: linear-gradient(135deg, #00d4ff, #0099ff);
+  color: #000;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 12px;
+  display: inline-block;
+  margin-top: 10px;
+}
+
+/* Transactions Table */
+.transactions-list {
+  overflow-x: auto;
+}
+
+.transactions-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.transactions-table th {
+  background: rgba(0, 212, 255, 0.1);
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #00d4ff;
+  border-bottom: 2px solid rgba(0, 212, 255, 0.3);
+}
+
+.transactions-table td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+}
+
+.tx-type {
+  background: rgba(0, 212, 255, 0.2);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00d4ff;
+}
+
+.transactions-table td.positive {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.transactions-table td.negative {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.status {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status.completed {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+
+.status.pending {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+}
+
+.status.failed {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ff6b6b;
+}
+
+/* Badges Grid */
+.badges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.badge-card {
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.badge-card:before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #00d4ff, #0099ff);
+}
+
+.badge-card.rarity-common {
+  border-color: rgba(100, 100, 100, 0.4);
+}
+
+.badge-card.rarity-rare {
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+.badge-card.rarity-epic {
+  border-color: rgba(200, 100, 255, 0.4);
+}
+
+.badge-card.rarity-legendary {
+  border-color: rgba(255, 215, 0, 0.4);
+}
+
+.badge-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 10px 25px rgba(0, 212, 255, 0.2);
+}
+
+.badge-icon {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 15px;
+}
+
+.badge-card h4 {
+  color: #00d4ff;
+  margin: 10px 0;
+  font-size: 16px;
+}
+
+.badge-card p {
+  color: #999;
+  font-size: 12px;
+  margin: 8px 0;
+  line-height: 1.4;
+}
+
+.badge-meta {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 10px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.badge-type {
+  background: rgba(0, 212, 255, 0.2);
+  padding: 3px 6px;
+  border-radius: 3px;
+  color: #00d4ff;
+}
+
+.badge-multiplier {
+  background: rgba(76, 175, 80, 0.2);
+  padding: 3px 6px;
+  border-radius: 3px;
+  color: #4caf50;
+}
+
+.earned-date {
+  font-size: 11px;
+  color: #666;
+  margin-top: 10px;
+}
+
+.empty-state {
+  text-align: center;
+  color: #666;
+  padding: 40px 20px;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .wisecoin-hero {
+    padding: 25px;
+  }
+
+  .hero-content h1 {
+    font-size: 28px;
+  }
+
+  .wisecoin-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .earning-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .badges-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .transactions-table {
+    font-size: 12px;
+  }
+
+  .wisecoin-tabs {
+    gap: 5px;
+  }
+
+  .tab {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}
