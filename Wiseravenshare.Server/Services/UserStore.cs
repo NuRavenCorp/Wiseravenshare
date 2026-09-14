@@ -556,7 +556,6 @@ public sealed class UserStore
             "openai" => "openai",
             "deepseek" => "deepseek",
             "gradient" => "gradient",
-            "ollama" => "ollama",
             "llamacpp" or "llama.cpp" or "llama-cpp" => "llamacpp",
             _ => "openai"
         };

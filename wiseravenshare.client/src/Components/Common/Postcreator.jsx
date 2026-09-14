@@ -71,6 +71,10 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     const [isUploading, setIsUploading] = useState(false);
     const [destinationFolder, setDestinationFolder] = useState(resolveRavensightDestination('video'));
     const [localSaveRoot, setLocalSaveRoot] = useState(getRavensightLocalSaveRootPreference());
+    const [sourceUrl, setSourceUrl] = useState('');
+    const [evidenceSummary, setEvidenceSummary] = useState('');
+    const [verificationStatus, setVerificationStatus] = useState('unverified');
+    const [correctionReferenceUrl, setCorrectionReferenceUrl] = useState('');
     const autoSavedFilesRef = useRef(new WeakSet());
     const addTruthAlertRef = useRef(addTruthAlert);
     const mediaInputRef = useRef(null);
@@ -420,6 +424,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             youtubeUrl: uploadedYoutubeUrl,
             tiktokUrl: uploadedTikTokUrl,
             facebookUrl: uploadedFacebookUrl,
+            provenance: {
+                sourceUrl: sourceUrl.trim() || null,
+                evidenceSummary: evidenceSummary.trim() || null,
+                verificationStatus: verificationStatus || null,
+                correctionReferenceUrl: correctionReferenceUrl.trim() || null
+            },
             isSensitive: false
         };
 
@@ -435,7 +445,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     mediaUrls: createResponse?.data?.mediaUrls || createResponse?.mediaUrls || (uploadedMediaUrl ? [uploadedMediaUrl] : []),
                     youtubeUrl: createResponse?.data?.youtubeUrl || createResponse?.youtubeUrl || uploadedYoutubeUrl,
                     tiktokUrl: createResponse?.data?.tiktokUrl || createResponse?.tiktokUrl || uploadedTikTokUrl,
-                    facebookUrl: createResponse?.data?.facebookUrl || createResponse?.facebookUrl || uploadedFacebookUrl
+                    facebookUrl: createResponse?.data?.facebookUrl || createResponse?.facebookUrl || uploadedFacebookUrl,
+                    provenance: createResponse?.data?.provenance || createResponse?.provenance || payload.provenance
                 };
                 if (!createdPost?.id) {
                     throw new Error('Post API did not return a created post.');
@@ -480,6 +491,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     youtubeUrl: uploadedYoutubeUrl,
                     tiktokUrl: uploadedTikTokUrl,
                     facebookUrl: uploadedFacebookUrl,
+                    provenance: payload.provenance,
                     createdAt: new Date().toISOString(),
                     user: { id: currentUser?.id || 'local-user', name: currentUser?.name || 'You', username: currentUser?.username || 'you', handle: currentUser?.handle || '@you', avatar: currentUser?.avatar || 'Y' },
                     likesCount: 0,
@@ -511,6 +523,10 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             setTikTokPermissionGranted(false);
             setFacebookPermissionGranted(false);
             setDestinationFolder(resolveRavensightDestination('video'));
+            setSourceUrl('');
+            setEvidenceSummary('');
+            setVerificationStatus('unverified');
+            setCorrectionReferenceUrl('');
             setUploadProgress(0);
             setIsUploading(false);
 
@@ -738,6 +754,92 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     Select a video file to enable YouTube, TikTok, or Facebook publishing.
                 </div>
             )}
+
+            <div style={{ marginTop: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                    Source URL (optional)
+                </label>
+                <input
+                    type="url"
+                    value={sourceUrl}
+                    onChange={(e) => setSourceUrl(e.target.value)}
+                    placeholder="https://source.example/report"
+                    style={{
+                        width: '100%',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-color)'
+                    }}
+                />
+            </div>
+
+            <div style={{ marginTop: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                    Evidence Summary (optional)
+                </label>
+                <textarea
+                    value={evidenceSummary}
+                    onChange={(e) => setEvidenceSummary(e.target.value)}
+                    rows={2}
+                    placeholder="Short evidence note for this post"
+                    style={{
+                        width: '100%',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-color)',
+                        resize: 'vertical'
+                    }}
+                />
+            </div>
+
+            <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
+                <div>
+                    <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                        Verification Status
+                    </label>
+                    <select
+                        value={verificationStatus}
+                        onChange={(e) => setVerificationStatus(e.target.value)}
+                        style={{
+                            width: '100%',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px 10px',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    >
+                        <option value="unverified">Unverified</option>
+                        <option value="community-reviewed">Community Reviewed</option>
+                        <option value="verified">Verified</option>
+                        <option value="contested">Contested</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>
+                        Correction Reference URL (optional)
+                    </label>
+                    <input
+                        type="url"
+                        value={correctionReferenceUrl}
+                        onChange={(e) => setCorrectionReferenceUrl(e.target.value)}
+                        placeholder="https://source.example/correction"
+                        style={{
+                            width: '100%',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px 10px',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            color: 'var(--text-color)'
+                        }}
+                    />
+                </div>
+            </div>
 
             <div style={{ marginTop: '12px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: 'var(--light-color)' }}>

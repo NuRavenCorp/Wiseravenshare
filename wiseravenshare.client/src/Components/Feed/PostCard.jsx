@@ -67,6 +67,46 @@ const PostCard = ({
         };
     }, [post.predictedEngagementScore, post.confidence]);
 
+    const provenance = useMemo(() => {
+        const raw = post.provenance && typeof post.provenance === 'object' ? post.provenance : null;
+        if (!raw) {
+            return null;
+        }
+
+        const sourceUrl = typeof raw.sourceUrl === 'string' ? raw.sourceUrl.trim() : '';
+        const evidenceSummary = typeof raw.evidenceSummary === 'string' ? raw.evidenceSummary.trim() : '';
+        const verificationStatus = typeof raw.verificationStatus === 'string' ? raw.verificationStatus.trim().toLowerCase() : '';
+        const correctionReferenceUrl = typeof raw.correctionReferenceUrl === 'string' ? raw.correctionReferenceUrl.trim() : '';
+
+        if (!sourceUrl && !evidenceSummary && !verificationStatus && !correctionReferenceUrl) {
+            return null;
+        }
+
+        const labelByStatus = {
+            unverified: 'Unverified',
+            'community-reviewed': 'Community Reviewed',
+            verified: 'Verified',
+            contested: 'Contested'
+        };
+
+        const statusLabel = labelByStatus[verificationStatus] || (verificationStatus ? verificationStatus : 'Unverified');
+        const statusStyleByStatus = {
+            unverified: { border: '1px solid rgba(250, 204, 21, 0.6)', background: 'rgba(250, 204, 21, 0.12)', color: '#fde68a' },
+            'community-reviewed': { border: '1px solid rgba(56, 189, 248, 0.6)', background: 'rgba(56, 189, 248, 0.12)', color: '#bae6fd' },
+            verified: { border: '1px solid rgba(74, 222, 128, 0.6)', background: 'rgba(74, 222, 128, 0.12)', color: '#bbf7d0' },
+            contested: { border: '1px solid rgba(248, 113, 113, 0.6)', background: 'rgba(248, 113, 113, 0.12)', color: '#fecaca' }
+        };
+
+        return {
+            sourceUrl,
+            evidenceSummary,
+            verificationStatus,
+            correctionReferenceUrl,
+            statusLabel,
+            statusStyle: statusStyleByStatus[verificationStatus] || statusStyleByStatus.unverified
+        };
+    }, [post.provenance]);
+
     const platformLinks = [
         post.youtubeUrl && { href: post.youtubeUrl, label: 'YouTube', color: '#ff0000' },
         post.tiktokUrl && { href: post.tiktokUrl, label: 'TikTok', color: '#ffffff' },
@@ -222,6 +262,54 @@ const PostCard = ({
             >
                 {post.content}
             </p>
+
+            {provenance && (
+                <div
+                    style={{
+                        marginTop: '10px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '10px',
+                        padding: '10px',
+                        background: 'rgba(255,255,255,0.03)',
+                        display: 'grid',
+                        gap: '8px'
+                    }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>Provenance</strong>
+                        <span
+                            style={{
+                                ...provenance.statusStyle,
+                                borderRadius: '999px',
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                fontWeight: 700
+                            }}
+                        >
+                            {provenance.statusLabel}
+                        </span>
+                    </div>
+
+                    {provenance.evidenceSummary && (
+                        <div style={{ fontSize: '12px', color: 'var(--text-color)', whiteSpace: 'pre-wrap' }}>
+                            {provenance.evidenceSummary}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {provenance.sourceUrl && (
+                            <a href={provenance.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                Source Reference
+                            </a>
+                        )}
+                        {provenance.correctionReferenceUrl && (
+                            <a href={provenance.correctionReferenceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                Correction Reference
+                            </a>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {platformLinks.length > 0 && (
                 <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
