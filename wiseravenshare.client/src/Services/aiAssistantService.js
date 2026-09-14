@@ -68,7 +68,7 @@ export const aiAssistantService = {
         };
     },
 
-    /** Lists models available on the backend's Ollama instance. */
+    /** Lists models available on the backend AI provider. */
     getModels: async () => {
         try {
             const response = await client.get('/aiassistant/models');

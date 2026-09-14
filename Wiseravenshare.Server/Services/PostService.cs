@@ -132,6 +132,7 @@ public class PostService : IPostService
             Type = Enum.Parse<PostType>(dto.Type, true),
             MediaUrls = mediaUrls,
             MediaMetadata = BuildMediaMetadata(dto, mediaUrls),
+            TruthSources = BuildProvenanceMetadata(dto.Provenance),
             ReplyToId = dto.ReplyToId,
             RepostOfId = dto.RepostOfId,
             QuoteOfId = dto.QuoteOfId,
@@ -696,6 +697,7 @@ public class PostService : IPostService
             FacebookUrl = ReadMediaMetadataValue(post.MediaMetadata, "facebookUrl"),
             TruthScore = post.TruthScore,
             TruthCorrection = post.TruthCorrection,
+            Provenance = ReadProvenanceMetadata(post.TruthSources),
             LocationName = post.LocationName,
             IsTruthDispatch = post.IsTruthDispatch,
             TruthDeclarationAccepted = post.TruthDeclarationAccepted,
@@ -748,6 +750,66 @@ public class PostService : IPostService
         }
 
         return JsonDocument.Parse(JsonSerializer.Serialize(metadata));
+    }
+
+    private static JsonDocument? BuildProvenanceMetadata(PostProvenanceDto? provenance)
+    {
+        if (provenance is null)
+        {
+            return null;
+        }
+
+        var sourceUrl = NormalizeMetadataValue(provenance.SourceUrl);
+        var evidenceSummary = NormalizeMetadataValue(provenance.EvidenceSummary);
+        var verificationStatus = NormalizeMetadataValue(provenance.VerificationStatus);
+        var correctionReferenceUrl = NormalizeMetadataValue(provenance.CorrectionReferenceUrl);
+        var capturedAtUtc = NormalizeMetadataValue(provenance.CapturedAtUtc) ?? DateTime.UtcNow.ToString("O");
+
+        if (sourceUrl is null && evidenceSummary is null && verificationStatus is null && correctionReferenceUrl is null)
+        {
+            return null;
+        }
+
+        var payload = new Dictionary<string, string?>
+        {
+            ["sourceUrl"] = sourceUrl,
+            ["evidenceSummary"] = evidenceSummary,
+            ["verificationStatus"] = verificationStatus,
+            ["correctionReferenceUrl"] = correctionReferenceUrl,
+            ["capturedAtUtc"] = capturedAtUtc
+        };
+
+        return JsonDocument.Parse(JsonSerializer.Serialize(payload));
+    }
+
+    private static PostProvenanceDto? ReadProvenanceMetadata(JsonDocument? metadata)
+    {
+        if (metadata?.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var provenance = new PostProvenanceDto
+        {
+            SourceUrl = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "sourceUrl")),
+            EvidenceSummary = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "evidenceSummary")),
+            VerificationStatus = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "verificationStatus")),
+            CorrectionReferenceUrl = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "correctionReferenceUrl")),
+            CapturedAtUtc = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "capturedAtUtc"))
+        };
+
+        var hasValue = provenance.SourceUrl is not null
+            || provenance.EvidenceSummary is not null
+            || provenance.VerificationStatus is not null
+            || provenance.CorrectionReferenceUrl is not null
+            || provenance.CapturedAtUtc is not null;
+
+        return hasValue ? provenance : null;
+    }
+
+    private static string? NormalizeMetadataValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static string[]? NormalizeMediaUrls(CreatePostDto dto)

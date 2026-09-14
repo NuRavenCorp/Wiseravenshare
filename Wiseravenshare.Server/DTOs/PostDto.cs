@@ -5,6 +5,28 @@ using System.Text.Json.Serialization;
 namespace Wiseravenshare.Server.DTOs.Post
 {
 
+    public class PostProvenanceDto
+    {
+        [MaxLength(500)]
+        [JsonPropertyName("sourceUrl")]
+        public string? SourceUrl { get; set; }
+
+        [MaxLength(2000)]
+        [JsonPropertyName("evidenceSummary")]
+        public string? EvidenceSummary { get; set; }
+
+        [MaxLength(100)]
+        [JsonPropertyName("verificationStatus")]
+        public string? VerificationStatus { get; set; }
+
+        [MaxLength(500)]
+        [JsonPropertyName("correctionReferenceUrl")]
+        public string? CorrectionReferenceUrl { get; set; }
+
+        [JsonPropertyName("capturedAtUtc")]
+        public string? CapturedAtUtc { get; set; }
+    }
+
     public class PostDto
     {
         public Guid Id { get; set; }
@@ -23,6 +45,8 @@ namespace Wiseravenshare.Server.DTOs.Post
         public string? FacebookUrl { get; set; }
         public decimal? TruthScore { get; set; }
         public string? TruthCorrection { get; set; }
+        [JsonPropertyName("provenance")]
+        public PostProvenanceDto? Provenance { get; set; }
         public string? LocationName { get; set; }
         [JsonPropertyName("truthDispatch")]
         public bool IsTruthDispatch { get; set; }
@@ -99,6 +123,8 @@ namespace Wiseravenshare.Server.DTOs.Post
 
         [JsonPropertyName("facebookUrl")]
         public string? FacebookUrl { get; set; }
+        [JsonPropertyName("provenance")]
+        public PostProvenanceDto? Provenance { get; set; }
         public string Type { get; set; } = "Text";
         public Guid? ReplyToId { get; set; }
         public Guid? RepostOfId { get; set; }
