@@ -8,11 +8,10 @@ import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
 
-const initialTeamMembers = [
-    { name: 'Maya', role: 'Host', locale: 'New York, USA', device: 'Laptop', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Luis', role: 'Guest', locale: 'Madrid, Spain', device: 'Tablet', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Nia', role: 'Producer', locale: 'Nairobi, Kenya', device: 'Phone', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Ari', role: 'Script Lead', locale: 'Toronto, Canada', device: 'Camera rig', status: 'Synced in Tandem', syncedAt: 'Active' }
+const initialTeamMembers = [];
+
+const defaultWorkspacePages = [
+    { id: 'script-main', type: 'Script', title: '', content: '' }
 ];
 
 const scriptBlocks = [
@@ -21,6 +20,23 @@ const scriptBlocks = [
     'Three key takeaways and proof points',
     'Call-to-action and audience prompt'
 ];
+
+const scriptPipelineSegments = [
+    { key: 'segment1', label: 'Segment 1', helper: 'Opening hook and audience framing' },
+    { key: 'segment2', label: 'Segment 2', helper: 'Guest introduction with context and tone' },
+    { key: 'segment3', label: 'Segment 3', helper: 'Three key takeaways and proof points' },
+    { key: 'segment4', label: 'Segment 4', helper: 'Call-to-action and audience prompt' }
+];
+
+const createEmptyScriptPipeline = () => ({
+    segment1: '',
+    segment2: '',
+    segment3: '',
+    segment4: ''
+});
+
+const SHARED_SCRIPT_STORAGE_KEY = 'wiseSharedPodcastScriptPayload';
+const PODCAST_AUTOSAVE_STORAGE_KEY = 'wisePodcastSessionAutosave';
 
 const studioModes = ['Phone', 'Tablet', 'Desktop', 'Camera', 'Remote guest'];
 const controlRoles = ['Owner', 'Producer', 'Host', 'Editor', 'Script Lead', 'Guest'];
@@ -162,6 +178,21 @@ const inferIdentifierType = (identifier) => {
     return 'username';
 };
 
+const resolveMemberKey = (member) => normalizeLoginIdentifier(
+    member?.identifier || member?.email || member?.handle || member?.username || member?.name || ''
+);
+
+const createWorkspacePage = (type, title = '') => {
+    const normalizedType = String(type || 'Script').trim() || 'Script';
+    const label = String(title || '').trim() || `${normalizedType} ${new Date().toLocaleTimeString()}`;
+    return {
+        id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: normalizedType,
+        title: label,
+        content: ''
+    };
+};
+
 const resolveUploadedMediaUrl = (payload, fallback = '') => {
     const source = payload && typeof payload === 'object' ? payload : {};
     const direct = String(
@@ -205,18 +236,23 @@ const resolveUploadedMediaUrl = (payload, fallback = '') => {
 
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
-    const [title, setTitle] = useState('Ravensight Podcast Studio');
+    const [title, setTitle] = useState('');
     const [format, setFormat] = useState('Interview');
     const [status, setStatus] = useState('Ready to record');
     const [selectedMode, setSelectedMode] = useState('Desktop');
-    const [scriptText, setScriptText] = useState(
-        'Welcome to Ravensight Podcast Studio. We are covering the story, verifying the facts, and shaping the live discussion for our audience with clarity and accountability.'
-    );
+    const [scriptText, setScriptText] = useState('');
+    const [scriptPipeline, setScriptPipeline] = useState(createEmptyScriptPipeline);
     const [controlRole, setControlRole] = useState('Owner');
-    const [storyAngle, setStoryAngle] = useState('Verified reporting, audience impact, and live community response');
+    const [storyAngle, setStoryAngle] = useState('');
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
+    const [workflowStage, setWorkflowStage] = useState('Plan');
+    const [teamCreatorId, setTeamCreatorId] = useState('');
+    const [teamCreatorLabel, setTeamCreatorLabel] = useState('');
+    const [designeeKeys, setDesigneeKeys] = useState([]);
+    const [workspacePages, setWorkspacePages] = useState(defaultWorkspacePages);
+    const [activeWorkspacePageId, setActiveWorkspacePageId] = useState('script-main');
     const [quickJoinInput, setQuickJoinInput] = useState('');
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
@@ -252,6 +288,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [tandemSyncedAt, setTandemSyncedAt] = useState(null);
     const [syncMessage, setSyncMessage] = useState('');
     const [guestNameInput, setGuestNameInput] = useState('');
+    const [newPageType, setNewPageType] = useState('Script');
+    const [newPageTitle, setNewPageTitle] = useState('');
+    const [lastAutosavedAt, setLastAutosavedAt] = useState('');
 
     // Refs
     const videoRef = useRef(null);
@@ -261,6 +300,121 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const broadcastChannelRef = useRef(null);
+    const sharedScriptVersionRef = useRef('');
+    const autosaveVersionRef = useRef('');
+    const autosaveRestoreAppliedRef = useRef(false);
+
+    const actorKeys = useMemo(() => {
+        const keys = [
+            normalizeLoginIdentifier(user?.id),
+            normalizeLoginIdentifier(user?.email),
+            normalizeLoginIdentifier(user?.handle),
+            normalizeLoginIdentifier(user?.username),
+            normalizeLoginIdentifier(user?.displayName),
+            normalizeLoginIdentifier(user?.name)
+        ].filter(Boolean);
+        return Array.from(new Set(keys));
+    }, [user]);
+
+    const creatorKey = normalizeLoginIdentifier(teamCreatorId);
+    const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
+    const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
+    const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
+    const canEditScriptPipeline = ['Owner', 'Producer', 'Host', 'Editor'].includes(controlRole);
+    const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
+
+    const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
+
+    const buildSessionSnapshot = () => ({
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    });
+
+    const applySessionSnapshot = (snapshot) => {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'title')) setTitle(String(snapshot.title || ''));
+        if (snapshot.format && formatDefinitions[snapshot.format]) setFormat(snapshot.format);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'scriptText')) setScriptText(String(snapshot.scriptText || ''));
+
+        if (snapshot.scriptPipeline && typeof snapshot.scriptPipeline === 'object') {
+            setScriptPipeline({
+                segment1: String(snapshot.scriptPipeline.segment1 || ''),
+                segment2: String(snapshot.scriptPipeline.segment2 || ''),
+                segment3: String(snapshot.scriptPipeline.segment3 || ''),
+                segment4: String(snapshot.scriptPipeline.segment4 || '')
+            });
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'storyAngle')) setStoryAngle(String(snapshot.storyAngle || ''));
+        if (snapshot.urgency) setUrgency(String(snapshot.urgency));
+        if (snapshot.selectedMode) setSelectedMode(String(snapshot.selectedMode));
+        if (typeof snapshot.runOrderApproved === 'boolean') setRunOrderApproved(snapshot.runOrderApproved);
+        if (Array.isArray(snapshot.teamMembersList)) setTeamMembersList(snapshot.teamMembersList);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorId')) setTeamCreatorId(String(snapshot.teamCreatorId || ''));
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorLabel')) setTeamCreatorLabel(String(snapshot.teamCreatorLabel || ''));
+        if (Array.isArray(snapshot.designeeKeys)) setDesigneeKeys(snapshot.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+        if (Array.isArray(snapshot.workspacePages) && snapshot.workspacePages.length > 0) setWorkspacePages(snapshot.workspacePages);
+        if (snapshot.activeWorkspacePageId) setActiveWorkspacePageId(String(snapshot.activeWorkspacePageId));
+        if (snapshot.workflowStage) setWorkflowStage(String(snapshot.workflowStage));
+        if (typeof snapshot.isCameraOn === 'boolean') setIsCameraOn(snapshot.isCameraOn);
+        if (typeof snapshot.isMuted === 'boolean') setIsMuted(snapshot.isMuted);
+        if (typeof snapshot.guestCamOn === 'boolean') setGuestCamOn(snapshot.guestCamOn);
+        if (typeof snapshot.guestMuted === 'boolean') setGuestMuted(snapshot.guestMuted);
+        if (typeof snapshot.guestConnected === 'boolean') setGuestConnected(snapshot.guestConnected);
+    };
+
+    useEffect(() => {
+        if (teamCreatorId || !user?.id) {
+            return;
+        }
+
+        const creatorId = String(user.id);
+        const creatorName = String(user?.name || user?.displayName || user?.username || user?.email || 'Team Creator');
+        setTeamCreatorId(creatorId);
+        setTeamCreatorLabel(creatorName);
+    }, [teamCreatorId, user]);
+
+    useEffect(() => {
+        if (!activeWorkspacePageId && workspacePages[0]?.id) {
+            setActiveWorkspacePageId(workspacePages[0].id);
+        }
+
+        if (activeWorkspacePageId && !workspacePages.some((page) => page.id === activeWorkspacePageId)) {
+            setActiveWorkspacePageId(workspacePages[0]?.id || '');
+        }
+    }, [activeWorkspacePageId, workspacePages]);
+
+    useEffect(() => {
+        if (activeWorkspacePage?.type !== 'Script') {
+            return;
+        }
+
+        const pageContent = String(activeWorkspacePage?.content || '');
+        if (pageContent !== scriptText) {
+            setScriptText(pageContent);
+        }
+    }, [activeWorkspacePage, scriptText]);
 
     const normalizePermissions = (value) => ({
         canGoLive: Boolean(value?.canGoLive),
@@ -324,7 +478,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
             identifier: identifier || '',
             identifierType: inferIdentifierType(identifier),
             loginState,
-            loginStatus
+            loginStatus,
+            coupled: true
         }, ...deduped];
     };
 
@@ -413,12 +568,26 @@ const PodcastStudioPage = ({ onNavigate }) => {
             title: overrides.title ?? title,
             format: overrides.format ?? format,
             scriptText: overrides.scriptText ?? scriptText,
+            scriptPipeline: overrides.scriptPipeline ?? scriptPipeline,
             storyAngle: overrides.storyAngle ?? storyAngle,
             urgency: overrides.urgency ?? urgency,
             selectedMode: overrides.selectedMode ?? selectedMode,
             runOrderApproved: overrides.runOrderApproved ?? runOrderApproved,
             hasSavedRecording: overrides.hasSavedRecording ?? hasSavedRecording,
             teamMembersList: overrides.teamMembersList ?? teamMembersList,
+            teamCreatorId: overrides.teamCreatorId ?? teamCreatorId,
+            teamCreatorLabel: overrides.teamCreatorLabel ?? teamCreatorLabel,
+            designeeKeys: overrides.designeeKeys ?? designeeKeys,
+            workspacePages: overrides.workspacePages ?? workspacePages,
+            activeWorkspacePageId: overrides.activeWorkspacePageId ?? activeWorkspacePageId,
+            workflowStage: overrides.workflowStage ?? workflowStage,
+            isCameraOn: overrides.isCameraOn ?? isCameraOn,
+            isMuted: overrides.isMuted ?? isMuted,
+            guestCamOn: overrides.guestCamOn ?? guestCamOn,
+            guestMuted: overrides.guestMuted ?? guestMuted,
+            guestConnected: overrides.guestConnected ?? guestConnected,
+            forceStopCamera: Boolean(overrides.forceStopCamera),
+            forceStopFeed: Boolean(overrides.forceStopFeed),
             senderRole: controlRole,
             timestamp: new Date().toISOString()
         };
@@ -440,6 +609,72 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setTandemSyncedAt(new Date().toLocaleTimeString());
     };
 
+    const applyFeedShutdown = (statusMessage) => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch {
+                // Ignore stop errors while forcing feed shutdown.
+            }
+        }
+
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+        }
+
+        if (streamRef.current) {
+            try {
+                streamRef.current.getTracks().forEach((track) => track.stop());
+            } catch {
+                // Ignore track shutdown errors.
+            }
+            streamRef.current = null;
+        }
+
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+
+        if (guestVideoRef.current) {
+            guestVideoRef.current.srcObject = null;
+        }
+
+        setIsRecording(false);
+        setIsPaused(false);
+        setIsCameraOn(false);
+        setIsMuted(true);
+        setGuestCamOn(false);
+        setGuestMuted(true);
+        setGuestConnected(false);
+        setStatus(statusMessage);
+    };
+
+    const handleForceShutdownFeed = () => {
+        if (!canForceShutdownFeed) {
+            setStatus('Only upper-level designated studio members can shut down camera and footage feeds.');
+            return;
+        }
+
+        applyFeedShutdown('Studio camera and footage feeds shut down by upper-level control.');
+        broadcastTandemState({
+            isCameraOn: false,
+            isMuted: true,
+            guestCamOn: false,
+            guestMuted: true,
+            guestConnected: false,
+            forceStopCamera: true,
+            forceStopFeed: true
+        });
+    };
+
+    useEffect(() => {
+        if (!teamCreatorId || !teamCreatorLabel) {
+            return;
+        }
+
+        broadcastTandemState({ teamCreatorId, teamCreatorLabel });
+    }, [teamCreatorId, teamCreatorLabel]);
+
     useEffect(() => {
         loadPodcastControlPolicy();
 
@@ -452,13 +687,36 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 if (data?.type === 'PODCAST_TANDEM_SYNC') {
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                    if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                    if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                    if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                    if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                    if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                    if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 }
             };
@@ -472,13 +730,36 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     const data = JSON.parse(e.newValue);
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                    if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                    if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                    if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                    if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                    if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                    if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 } catch {
                     // Ignore parse error
@@ -492,13 +773,36 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 const data = JSON.parse(savedState);
                 if (data.title) setTitle(data.title);
                 if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                if (data.scriptText) setScriptText(data.scriptText);
+                if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                    setScriptPipeline({
+                        segment1: String(data.scriptPipeline.segment1 || ''),
+                        segment2: String(data.scriptPipeline.segment2 || ''),
+                        segment3: String(data.scriptPipeline.segment3 || ''),
+                        segment4: String(data.scriptPipeline.segment4 || '')
+                    });
+                }
                 if (data.storyAngle) setStoryAngle(data.storyAngle);
                 if (data.urgency) setUrgency(data.urgency);
                 if (data.selectedMode) setSelectedMode(data.selectedMode);
+                if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                 if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                 if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                 if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                if (data.forceStopCamera || data.forceStopFeed) {
+                    applyFeedShutdown('Studio camera and footage feeds restored in shutdown state by upper-level control.');
+                }
+                if (data.shared) setStatus('Shared script restored for dissemination.');
             }
         } catch {
             // Ignore restore parse error.
@@ -610,6 +914,276 @@ const PodcastStudioPage = ({ onNavigate }) => {
             // Ignore local storage restore failures.
         }
     }, []);
+
+    useEffect(() => {
+        if (autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        autosaveRestoreAppliedRef.current = true;
+
+        const restoreFromLocalAutosave = () => {
+            try {
+                const raw = localStorage.getItem(PODCAST_AUTOSAVE_STORAGE_KEY);
+                if (!raw) {
+                    return false;
+                }
+
+                const parsed = JSON.parse(raw);
+                const snapshot = parsed?.snapshot;
+                const version = String(parsed?.version || '').trim();
+
+                if (!snapshot || typeof snapshot !== 'object') {
+                    return false;
+                }
+
+                applySessionSnapshot(snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from local autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoreFromServerAutosave = async () => {
+            try {
+                const response = await authService.getPodcastSessionSnapshot('main');
+                if (!response?.hasSnapshot || !response?.snapshot) {
+                    return false;
+                }
+
+                const version = String(response.version || '').trim();
+                if (version && version === autosaveVersionRef.current) {
+                    return true;
+                }
+
+                applySessionSnapshot(response.snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from cloud autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoredLocal = restoreFromLocalAutosave();
+        if (!restoredLocal) {
+            void restoreFromServerAutosave();
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        const persistAutosave = async () => {
+            const snapshot = buildSessionSnapshot();
+            const version = Date.now().toString();
+
+            try {
+                localStorage.setItem(PODCAST_AUTOSAVE_STORAGE_KEY, JSON.stringify({ version, snapshot }));
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Ignore local autosave errors.
+            }
+
+            try {
+                const response = await authService.savePodcastSessionSnapshot({
+                    roomId: 'main',
+                    version,
+                    snapshot
+                });
+
+                const committedVersion = String(response?.version || version).trim();
+                autosaveVersionRef.current = committedVersion;
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Keep local autosave even if cloud snapshot fails.
+            }
+        };
+
+        const timeoutId = window.setTimeout(() => {
+            void persistAutosave();
+        }, 1000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    ]);
+
+    useEffect(() => {
+        let active = true;
+
+        const applyRemoteSharedScript = (payload) => {
+            const hasSharedScript = payload?.hasSharedScript === true;
+            if (!hasSharedScript) {
+                return;
+            }
+
+            const incomingVersion = String(payload?.version || payload?.sharedAtUtc || '').trim();
+            if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                return;
+            }
+
+            if (incomingVersion) {
+                sharedScriptVersionRef.current = incomingVersion;
+            }
+
+            const incomingScript = String(payload?.scriptText || '').trim();
+            const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                ? {
+                    segment1: String(payload.scriptPipeline.segment1 || ''),
+                    segment2: String(payload.scriptPipeline.segment2 || ''),
+                    segment3: String(payload.scriptPipeline.segment3 || ''),
+                    segment4: String(payload.scriptPipeline.segment4 || '')
+                }
+                : null;
+
+            if (incomingScript) {
+                setScriptText(incomingScript);
+            }
+
+            if (incomingPipeline) {
+                setScriptPipeline(incomingPipeline);
+            }
+
+            if (incomingScript && activeWorkspacePage) {
+                setWorkspacePages((previous) => previous.map((page) => (
+                    page.id === activeWorkspacePage.id
+                        ? { ...page, content: incomingScript }
+                        : page
+                )));
+            }
+
+            setStatus('Shared script synced from the team cloud room.');
+        };
+
+        const loadSharedScriptFromServer = async () => {
+            try {
+                const payload = await authService.getSharedPodcastScript('main');
+                if (!active) {
+                    return;
+                }
+
+                applyRemoteSharedScript(payload);
+            } catch {
+                // Server sync unavailable; keep local tandem sync active.
+            }
+        };
+
+        void loadSharedScriptFromServer();
+
+        const intervalId = window.setInterval(() => {
+            void loadSharedScriptFromServer();
+        }, 10000);
+
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                void loadSharedScriptFromServer();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            active = false;
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
+    }, [activeWorkspacePage]);
+
+    useEffect(() => {
+        const applySharedPayload = (raw) => {
+            try {
+                if (!raw) {
+                    return;
+                }
+
+                const payload = JSON.parse(raw);
+                const incomingVersion = String(payload?.version || payload?.sharedAt || '').trim();
+                if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                    return;
+                }
+
+                if (incomingVersion) {
+                    sharedScriptVersionRef.current = incomingVersion;
+                }
+
+                const incomingScript = String(payload?.scriptText || '').trim();
+                const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                    ? {
+                        segment1: String(payload.scriptPipeline.segment1 || ''),
+                        segment2: String(payload.scriptPipeline.segment2 || ''),
+                        segment3: String(payload.scriptPipeline.segment3 || ''),
+                        segment4: String(payload.scriptPipeline.segment4 || '')
+                    }
+                    : null;
+
+                if (incomingScript) {
+                    setScriptText(incomingScript);
+                }
+
+                if (incomingPipeline) {
+                    setScriptPipeline(incomingPipeline);
+                }
+
+                if (incomingScript && activeWorkspacePage) {
+                    setWorkspacePages((previous) => previous.map((page) => (
+                        page.id === activeWorkspacePage.id
+                            ? { ...page, content: incomingScript }
+                            : page
+                    )));
+                }
+
+                if (payload?.shared) {
+                    setStatus('Shared script received for dissemination.');
+                }
+            } catch {
+                // Ignore malformed shared payload
+            }
+        };
+
+        const handleSharedPayloadStorage = (event) => {
+            if (event.key === SHARED_SCRIPT_STORAGE_KEY && event.newValue) {
+                applySharedPayload(event.newValue);
+            }
+        };
+
+        window.addEventListener('storage', handleSharedPayloadStorage);
+        applySharedPayload(localStorage.getItem(SHARED_SCRIPT_STORAGE_KEY));
+        return () => {
+            window.removeEventListener('storage', handleSharedPayloadStorage);
+        };
+    }, [activeWorkspacePage]);
 
     // Recording Functions
     const startRecording = async () => {
@@ -873,8 +1447,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const handleApproveRunOrder = () => {
-        if (!permissions.canApproveSegments) {
-            setStatus(`${controlRole} cannot approve segment order. Switch to Owner, Producer or Editor.`);
+        if (!canApproveWorkflow) {
+            setStatus('Only the team creator or an assigned designee with approval permission can approve this workflow.');
             return;
         }
 
@@ -886,24 +1460,29 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleStartRecordingFromFlow = () => {
         if (!String(title || '').trim()) {
             setStatus('Add a podcast title before starting recording.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!String(storyAngle || '').trim()) {
             setStatus('Add a story angle before starting recording.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!String(scriptText || '').trim()) {
             setStatus('Prepare a live script before starting recording.');
+            setWorkflowStage('Script');
             return;
         }
 
         if (!runOrderApproved) {
             setStatus('Approve run order before going live.');
+            setWorkflowStage('Script');
             return;
         }
 
+        setWorkflowStage('Record');
         startRecording();
     };
 
@@ -983,14 +1562,224 @@ const PodcastStudioPage = ({ onNavigate }) => {
         });
     };
 
+    const toggleDesignee = (member) => {
+        if (!isCreator) {
+            setStatus('Only the team creator can assign or remove a workflow designee.');
+            return;
+        }
+
+        const key = resolveMemberKey(member);
+        if (!key) {
+            setStatus('This team member must have a username or email before designation.');
+            return;
+        }
+
+        const next = designeeKeys.includes(key)
+            ? designeeKeys.filter((entry) => entry !== key)
+            : [...designeeKeys, key];
+
+        setDesigneeKeys(next);
+        broadcastTandemState({ designeeKeys: next });
+        setStatus(next.includes(key)
+            ? `${member.name} is now a workflow designee.`
+            : `${member.name} is no longer a workflow designee.`);
+    };
+
+    const decoupleTeamMember = (member) => {
+        if (!isCreator && !isDesignee) {
+            setStatus('Only the team creator or a workflow designee can break podcast sync connections.');
+            return;
+        }
+
+        const targetKey = resolveMemberKey(member);
+        const updatedList = teamMembersList.map((entry) => {
+            if (resolveMemberKey(entry) !== targetKey) {
+                return entry;
+            }
+
+            return {
+                ...entry,
+                coupled: false,
+                status: 'Decoupled from tandem',
+                loginState: 'offline',
+                loginStatus: 'Decoupled',
+                syncedAt: new Date().toLocaleTimeString()
+            };
+        });
+
+        setTeamMembersList(updatedList);
+        broadcastTandemState({ teamMembersList: updatedList });
+        setStatus(`Connection broken for ${member?.name || 'team member'}.`);
+    };
+
+    const toggleJoinRoom = (member) => {
+        if (!isCreator && !isDesignee) {
+            setStatus('Only the team creator or a workflow designee can admit members into the room.');
+            return;
+        }
+
+        const targetKey = resolveMemberKey(member);
+        if (!targetKey) {
+            setStatus('This person needs a username/email before room admission can be toggled.');
+            return;
+        }
+
+        const updatedList = teamMembersList.map((entry) => {
+            if (resolveMemberKey(entry) !== targetKey) {
+                return entry;
+            }
+
+            const currentlyJoined = String(entry?.loginState || '').toLowerCase() === 'online';
+            return {
+                ...entry,
+                coupled: !currentlyJoined,
+                loginState: currentlyJoined ? 'pending' : 'online',
+                loginStatus: currentlyJoined ? 'Awaiting login in room' : 'Joined room',
+                status: currentlyJoined ? 'Waiting for room admission' : 'Synced in Tandem',
+                syncedAt: new Date().toLocaleTimeString()
+            };
+        });
+
+        setTeamMembersList(updatedList);
+        broadcastTandemState({ teamMembersList: updatedList });
+        setStatus(`Room admission updated for ${member?.name || 'team member'}.`);
+    };
+
+    const addWorkspacePage = () => {
+        const page = createWorkspacePage(newPageType, newPageTitle);
+        const nextPages = [page, ...workspacePages];
+        setWorkspacePages(nextPages);
+        setActiveWorkspacePageId(page.id);
+        setNewPageTitle('');
+        broadcastTandemState({ workspacePages: nextPages, activeWorkspacePageId: page.id });
+        setStatus(`${page.type} page created and synced.`);
+    };
+
+    const updateWorkspacePage = (pageId, updates) => {
+        const nextPages = workspacePages.map((page) => (
+            page.id === pageId ? { ...page, ...updates } : page
+        ));
+        setWorkspacePages(nextPages);
+
+        const current = nextPages.find((page) => page.id === pageId);
+        if (current?.type === 'Script' && typeof updates.content === 'string') {
+            setScriptText(updates.content);
+            setRunOrderApproved(false);
+            broadcastTandemState({ workspacePages: nextPages, scriptText: updates.content, runOrderApproved: false });
+            return;
+        }
+
+        broadcastTandemState({ workspacePages: nextPages });
+    };
+
+    const removeWorkspacePage = (pageId) => {
+        if (workspacePages.length <= 1) {
+            setStatus('Keep at least one workspace page active.');
+            return;
+        }
+
+        const nextPages = workspacePages.filter((page) => page.id !== pageId);
+        const nextActiveId = pageId === activeWorkspacePageId
+            ? (nextPages[0]?.id || '')
+            : activeWorkspacePageId;
+
+        setWorkspacePages(nextPages);
+        setActiveWorkspacePageId(nextActiveId);
+        broadcastTandemState({ workspacePages: nextPages, activeWorkspacePageId: nextActiveId });
+        setStatus('Workspace page removed and team sync updated.');
+    };
+
     const handleShareScript = () => {
+        const sharedAt = new Date().toISOString();
+        const sharedPayload = {
+            scriptText,
+            scriptPipeline,
+            shared: true,
+            sharedAt,
+            version: sharedAt,
+            senderRole: controlRole
+        };
+
         try {
             localStorage.setItem('wiseSharedPodcastScript', scriptText);
+            localStorage.setItem(SHARED_SCRIPT_STORAGE_KEY, JSON.stringify(sharedPayload));
         } catch {
             // Best effort only.
         }
-        broadcastTandemState({ scriptText, shared: true });
-        setStatus('Script shared and synced across all connected tandem team members.');
+
+        broadcastTandemState({ scriptText, scriptPipeline, shared: true, sharedAt });
+
+        const remotePayload = {
+            roomId: 'main',
+            scriptText,
+            scriptPipeline: {
+                segment1: String(scriptPipeline.segment1 || ''),
+                segment2: String(scriptPipeline.segment2 || ''),
+                segment3: String(scriptPipeline.segment3 || ''),
+                segment4: String(scriptPipeline.segment4 || '')
+            }
+        };
+
+        void authService.sharePodcastScript(remotePayload)
+            .then((response) => {
+                if (response?.version) {
+                    sharedScriptVersionRef.current = String(response.version);
+                }
+                setStatus('Script shared for dissemination across all connected tandem team members.');
+            })
+            .catch(() => {
+                setStatus('Script shared locally. Team cloud sync will retry on next refresh.');
+            });
+    };
+
+    const updateScriptPipelineSegment = (segmentKey, value) => {
+        if (!canEditScriptPipeline) {
+            setStatus('Only Owner, Producer, Director/Editor, or Host can fill script pipeline segments.');
+            return;
+        }
+
+        const nextPipeline = {
+            ...scriptPipeline,
+            [segmentKey]: value
+        };
+        setScriptPipeline(nextPipeline);
+        setRunOrderApproved(false);
+        broadcastTandemState({ scriptPipeline: nextPipeline, runOrderApproved: false });
+    };
+
+    const applyScriptPipelineToScript = () => {
+        const composed = scriptPipelineSegments
+            .map((segment) => {
+                const value = String(scriptPipeline[segment.key] || '').trim();
+                if (!value) {
+                    return '';
+                }
+                return `${segment.label}:\n${value}`;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+
+        if (!composed) {
+            setStatus('Fill at least one script pipeline segment before applying to live script.');
+            return;
+        }
+
+        setScriptText(composed);
+        setRunOrderApproved(false);
+        if (activeWorkspacePage) {
+            const updatedPages = workspacePages.map((page) => (
+                page.id === activeWorkspacePage.id
+                    ? { ...page, content: composed }
+                    : page
+            ));
+            setWorkspacePages(updatedPages);
+            broadcastTandemState({ scriptText: composed, scriptPipeline, workspacePages: updatedPages, runOrderApproved: false });
+            setStatus('Script pipeline applied to live script.');
+            return;
+        }
+
+        broadcastTandemState({ scriptText: composed, scriptPipeline, runOrderApproved: false });
+        setStatus('Script pipeline applied to live script.');
     };
 
     const setRemoteGuestMode = () => {
@@ -1002,6 +1791,52 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
     const runWorkflowNavigator = () => {
         void runNextStudioAction();
+    };
+
+    const handleClearForms = () => {
+        if (isRecording) {
+            setStatus('Stop recording before clearing podcast forms.');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            'Are you sure you want to clear podcast forms? This will erase title, story angle, script, workspace page content, and current run-order approval.'
+        );
+
+        if (!confirmed) {
+            setStatus('Clear forms canceled.');
+            return;
+        }
+
+        const clearedPages = workspacePages.map((page) => ({
+            ...page,
+            content: ''
+        }));
+
+        setTitle('');
+        setStoryAngle('');
+        setScriptText('');
+        setScriptPipeline(createEmptyScriptPipeline());
+        setRunOrderApproved(false);
+        setWorkspacePages(clearedPages);
+        setWorkflowStage('Plan');
+        setVideoTitle('');
+        setQuickJoinInput('');
+        setSyncInput('');
+        setGuestNameInput('');
+        setNewPageTitle('');
+
+        broadcastTandemState({
+            title: '',
+            storyAngle: '',
+            scriptText: '',
+            scriptPipeline: createEmptyScriptPipeline(),
+            runOrderApproved: false,
+            workspacePages: clearedPages,
+            workflowStage: 'Plan'
+        });
+
+        setStatus('Podcast forms cleared and synced.');
     };
 
     const handleQuickJoin = () => {
@@ -1030,6 +1865,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     ...member,
                     loginState: 'online',
                     loginStatus: 'Joined room',
+                    coupled: true,
                     syncedAt: new Date().toLocaleTimeString()
                 };
             }));
@@ -1047,9 +1883,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         setFormat(nextFormat);
         setRunOrderApproved(false);
-        setScriptText(definition.segments.join('\n'));
-        setStatus(`${definition.icon} ${definition.label} format: ${definition.description}`);
-        broadcastTandemState({ format: nextFormat, scriptText: definition.segments.join('\n'), runOrderApproved: false });
+        setStatus(`${definition.icon} ${definition.label} format selected. Use your own script and structure for this episode.`);
+        broadcastTandemState({ format: nextFormat, runOrderApproved: false });
     };
 
     // Urgency buttons set their namesake dispatch posture:
@@ -1074,15 +1909,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const hasCoreBrief = Boolean(String(title || '').trim()) && Boolean(String(storyAngle || '').trim());
-    const hasScript = String(scriptText || '').trim().length >= 40;
-    const hasTeamReady = teamMembersList.length > 0;
+    const hasScriptPipeline = scriptPipelineSegments.some((segment) => Boolean(String(scriptPipeline[segment.key] || '').trim()));
+    const hasScript = Boolean(String(scriptText || '').trim()) || hasScriptPipeline;
+    const hasTeamReady = teamMembersList.some((member) => member?.coupled !== false);
     const hasRecording = Boolean(recordedVideoUrl);
 
     const flowSteps = [
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
         { id: 'format', label: 'Format and urgency selected', done: Boolean(format && urgency), hint: 'Pick show structure and dispatch priority' },
         { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
-        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Use format template, then tailor the script' },
+        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Fill Script Pipeline segments or write your own script' },
         { id: 'approval', label: 'Run order approved', done: runOrderApproved, hint: 'Lock segment order before recording' },
         { id: 'publish', label: 'Recording saved to library', done: hasSavedRecording, hint: 'Record, review, then save to Ravensight Library' }
     ];
@@ -1090,38 +1926,53 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const completedFlowCount = flowSteps.filter((step) => step.done).length;
     const flowProgressPercent = Math.round((completedFlowCount / flowSteps.length) * 100);
 
+    const workflowStages = [
+        { id: 'Plan', hint: 'Brief, format, and urgency' },
+        { id: 'Script', hint: 'Script and approvals' },
+        { id: 'Team', hint: 'Guests and tandem sync' },
+        { id: 'Record', hint: 'Live monitor and recording' },
+        { id: 'Review', hint: 'Playback and library save' },
+        { id: 'Ship', hint: 'Publish and handoff' }
+    ];
+
     const runNextStudioAction = async () => {
         if (!hasCoreBrief) {
             setStatus('Complete episode title and story angle to lock your recording brief.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!hasScript) {
-            handleFormatChange(format);
+            setWorkflowStage('Script');
+            setStatus('Fill Script Pipeline segments or add your own script content before continuing. No prewritten script is inserted.');
             return;
         }
 
         if (!runOrderApproved) {
+            setWorkflowStage('Script');
             handleApproveRunOrder();
             return;
         }
 
         if (!isRecording && !hasRecording) {
+            setWorkflowStage('Record');
             handleStartRecordingFromFlow();
             return;
         }
 
         if (hasRecording && !hasSavedRecording) {
+            setWorkflowStage('Review');
             await saveRecordingToLibrary();
             return;
         }
 
+        setWorkflowStage('Ship');
         setStatus('Podcast flow complete. Recording is saved and ready for Ravensight publishing.');
     };
 
     const nextFlowActionLabel = (() => {
         if (!hasCoreBrief) return 'Complete episode brief';
-        if (!hasScript) return 'Load script template';
+        if (!hasScript) return 'Write your script';
         if (!runOrderApproved) return 'Approve run order';
         if (!isRecording && !hasRecording) return 'Start recording';
         if (hasRecording && !hasSavedRecording) return 'Save recording';
@@ -1201,10 +2052,32 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
                         {/* Top Action Buttons */}
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={handleForceShutdownFeed}
+                                disabled={!canForceShutdownFeed}
+                                style={{
+                                    border: '1px solid rgba(248, 113, 113, 0.7)',
+                                    background: 'rgba(127, 29, 29, 0.5)',
+                                    color: '#fecaca',
+                                    borderRadius: '999px',
+                                    padding: '10px 16px',
+                                    fontWeight: '700',
+                                    cursor: canForceShutdownFeed ? 'pointer' : 'not-allowed',
+                                    opacity: canForceShutdownFeed ? 1 : 0.55
+                                }}
+                                title="Upper-level control: shut down all active camera and footage feeds"
+                            >
+                                Cut footage feed
+                            </button>
+
                             {!isRecording ? (
                                 <button
                                     type="button"
-                                    onClick={handleStartRecordingFromFlow}
+                                    onClick={() => {
+                                        setWorkflowStage('Record');
+                                        handleStartRecordingFromFlow();
+                                    }}
                                     style={{
                                         border: 'none',
                                         background: 'linear-gradient(135deg, #ef4444, #dc2626)',
@@ -1297,11 +2170,63 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 </div>
 
                 <div style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '12px',
+                    padding: '10px 12px',
+                    background: 'rgba(15, 23, 42, 0.55)',
+                    display: 'grid',
+                    gap: '6px'
+                }}>
+                    <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
+                        Live Workflow Status
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 700 }}>
+                        {status}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        Creator: {teamCreatorLabel || 'Pending'} · Designees: {designeeKeys.length} · Current stage: {workflowStage}
+                    </div>
+                    {lastAutosavedAt && (
+                        <div style={{ fontSize: '12px', color: '#86efac' }}>
+                            Autosaved at {lastAutosavedAt}
+                        </div>
+                    )}
+                </div>
+
+                <div style={{
                     background: 'linear-gradient(160deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85))',
                     border: '1px solid rgba(16, 185, 129, 0.35)',
                     borderRadius: '18px',
                     padding: '20px'
                 }}>
+                    <div style={{ marginBottom: '14px', display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#99f6e4', fontWeight: 700 }}>
+                            Guided Studio Flow
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {workflowStages.map((stage) => (
+                                <button
+                                    key={stage.id}
+                                    type="button"
+                                    onClick={() => setWorkflowStage(stage.id)}
+                                    style={{
+                                        border: workflowStage === stage.id ? '1px solid #34d399' : '1px solid var(--border-color)',
+                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '7px 12px',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: workflowStage === stage.id ? 700 : 500
+                                    }}
+                                    title={stage.hint}
+                                >
+                                    {stage.id}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <div>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#34d399', fontWeight: 700 }}>
@@ -1347,26 +2272,47 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     </div>
 
                     <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                            type="button"
-                            onClick={runNextStudioAction}
-                            disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
-                            style={{
-                                border: 'none',
-                                background: 'linear-gradient(135deg, #10b981, #059669)',
-                                color: '#fff',
-                                borderRadius: '10px',
-                                padding: '11px 16px',
-                                fontWeight: 700,
-                                cursor: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 'not-allowed' : 'pointer',
-                                opacity: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 0.65 : 1
-                            }}
-                        >
-                            {isSavingRecording ? 'Saving...' : `Next: ${nextFlowActionLabel}`}
-                        </button>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={handleClearForms}
+                                disabled={isRecording || isSavingRecording}
+                                style={{
+                                    border: '1px solid rgba(248, 113, 113, 0.55)',
+                                    background: 'rgba(127, 29, 29, 0.35)',
+                                    color: '#fecaca',
+                                    borderRadius: '10px',
+                                    padding: '11px 16px',
+                                    fontWeight: 700,
+                                    cursor: (isRecording || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                    opacity: (isRecording || isSavingRecording) ? 0.55 : 1
+                                }}
+                                title="Clear podcast forms with confirmation"
+                            >
+                                Clear Forms
+                            </button>
+                            <button
+                                type="button"
+                                onClick={runNextStudioAction}
+                                disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
+                                style={{
+                                    border: 'none',
+                                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                                    color: '#fff',
+                                    borderRadius: '10px',
+                                    padding: '11px 16px',
+                                    fontWeight: 700,
+                                    cursor: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                    opacity: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 0.65 : 1
+                                }}
+                            >
+                                {isSavingRecording ? 'Saving...' : `Next: ${nextFlowActionLabel}`}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
+                {(workflowStage === 'Ship') && (
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(79, 70, 229, 0.14), rgba(15, 23, 42, 0.85))',
                     border: '1px solid rgba(129, 140, 248, 0.35)',
@@ -1400,8 +2346,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </button>
                     </div>
                 </div>
+                )}
 
                 {/* Tandem Sync Connection Panel (Pairing by Username or Email) */}
+                {(workflowStage === 'Team') && (
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(14, 116, 144, 0.15), rgba(15, 23, 42, 0.8))',
                     border: '1px solid rgba(56, 189, 248, 0.3)',
@@ -1521,8 +2469,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </button>
                     </div>
                 </div>
+                )}
 
                 {/* Video Monitor Grid & Remote Feeds */}
+                {(workflowStage === 'Record' || workflowStage === 'Review') && (
                 <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                     <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                         Multi-monitor vision wall & live preview
@@ -1588,7 +2538,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
                                 <div style={{ fontSize: '32px' }}>👤</div>
                                 <div style={{ fontWeight: 700, marginTop: '6px' }}>
-                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'Luis (Madrid)'}
+                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'No guest paired'}
                                 </div>
                                 <div style={{ fontSize: '12px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
                                     {guestCamOn ? 'Connected · Audio Active' : 'Camera Muted'}
@@ -1660,9 +2610,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </div>
                     </div>
                 </div>
+                )}
 
                 {/* Recorded Session Preview & Library Export */}
-                {recordedVideoUrl && (
+                {(workflowStage === 'Review' || workflowStage === 'Ship') && recordedVideoUrl && (
                     <div style={{
                         background: 'var(--card-bg)',
                         border: '1px solid var(--highlight-color)',
@@ -1756,6 +2707,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 )}
 
                 {/* Main Control Controls & Session Form */}
+                {(workflowStage === 'Plan' || workflowStage === 'Script' || workflowStage === 'Team') && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
                     <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                         <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
@@ -1801,12 +2753,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         {permissions.canApproveSegments ? '✓ Can approve segments' : '✗ Cannot approve'}
                                     </span>
                                 </div>
+                                <div style={{ marginTop: '6px', fontSize: '12px', color: '#bfdbfe' }}>
+                                    Workflow approval gate: Creator ({teamCreatorLabel || 'unassigned'}) or creator designee only.
+                                </div>
                             </div>
 
                             <label style={{ display: 'grid', gap: '6px' }}>
                                 <span style={{ color: 'var(--light-color)' }}>Podcast Title</span>
                                 <input
                                     value={title}
+                                    placeholder="Enter your episode title"
                                     onChange={(event) => {
                                         setTitle(event.target.value);
                                         setRunOrderApproved(false);
@@ -1882,6 +2838,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <span style={{ color: 'var(--light-color)' }}>Story Angle</span>
                                 <input
                                     value={storyAngle}
+                                    placeholder="Describe your own angle, goal, or audience impact"
                                     onChange={(event) => {
                                         setStoryAngle(event.target.value);
                                         setRunOrderApproved(false);
@@ -1925,9 +2882,21 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <span style={{ color: 'var(--light-color)' }}>Live Script (Synced across paired team)</span>
                                 <textarea
                                     value={scriptText}
+                                    placeholder="Write your own script, producer notes, direction cues, and optional music loop plan"
                                     onChange={(event) => {
                                         setScriptText(event.target.value);
                                         setRunOrderApproved(false);
+                                        if (activeWorkspacePage) {
+                                            const updatedPages = workspacePages.map((page) => (
+                                                page.id === activeWorkspacePage.id
+                                                    ? { ...page, content: event.target.value }
+                                                    : page
+                                            ));
+                                            setWorkspacePages(updatedPages);
+                                            broadcastTandemState({ scriptText: event.target.value, workspacePages: updatedPages, runOrderApproved: false });
+                                            return;
+                                        }
+
                                         broadcastTandemState({ scriptText: event.target.value, runOrderApproved: false });
                                     }}
                                     rows={8}
@@ -1942,9 +2911,76 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         opacity: permissions.canEditScript ? 1 : 0.6
                                     }}
                                 />
+                                <div style={{ fontSize: '12px', color: '#93c5fd' }}>
+                                    Helper only: no prewritten script is inserted. Define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
+                                </div>
                             </label>
 
+                            <div style={{ display: 'grid', gap: '10px', marginTop: '6px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                    <span style={{ color: 'var(--light-color)', fontWeight: 700 }}>Script Pipeline Segment Form (1-4)</span>
+                                    <button
+                                        type="button"
+                                        onClick={applyScriptPipelineToScript}
+                                        disabled={!canEditScriptPipeline}
+                                        style={{
+                                            border: '1px solid var(--highlight-color)',
+                                            background: 'rgba(56, 189, 248, 0.15)',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '10px',
+                                            padding: '8px 12px',
+                                            cursor: canEditScriptPipeline ? 'pointer' : 'not-allowed',
+                                            opacity: canEditScriptPipeline ? 1 : 0.65,
+                                            fontWeight: 700
+                                        }}
+                                    >
+                                        Apply Pipeline to Live Script
+                                    </button>
+                                </div>
+
+                                {scriptPipelineSegments.map((segment) => (
+                                    <label key={segment.key} style={{ display: 'grid', gap: '6px' }}>
+                                        <span style={{ color: 'var(--light-color)' }}>{segment.label}</span>
+                                        <textarea
+                                            value={scriptPipeline[segment.key] || ''}
+                                            placeholder={segment.helper}
+                                            onChange={(event) => updateScriptPipelineSegment(segment.key, event.target.value)}
+                                            rows={3}
+                                            disabled={!canEditScriptPipeline}
+                                            style={{
+                                                padding: '10px',
+                                                borderRadius: '10px',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255,255,255,0.03)',
+                                                color: 'var(--text-color)',
+                                                resize: 'vertical',
+                                                opacity: canEditScriptPipeline ? 1 : 0.65
+                                            }}
+                                        />
+                                        <span style={{ fontSize: '12px', color: '#93c5fd' }}>{segment.helper}</span>
+                                    </label>
+                                ))}
+                            </div>
+
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    onClick={handleClearForms}
+                                    disabled={isRecording || isSavingRecording}
+                                    style={{
+                                        border: '1px solid rgba(248, 113, 113, 0.55)',
+                                        background: 'rgba(127, 29, 29, 0.35)',
+                                        color: '#fecaca',
+                                        borderRadius: '10px',
+                                        padding: '10px 14px',
+                                        fontWeight: 700,
+                                        cursor: (isRecording || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                        opacity: (isRecording || isSavingRecording) ? 0.55 : 1
+                                    }}
+                                    title="Clear podcast forms with confirmation"
+                                >
+                                    Clear Forms
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -1983,7 +3019,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <button
                                     type="button"
                                     onClick={handleApproveRunOrder}
-                                    disabled={!permissions.canApproveSegments}
+                                    disabled={!canApproveWorkflow}
                                     style={{
                                         border: runOrderApproved ? '1px solid #22c55e' : '1px solid var(--border-color)',
                                         background: runOrderApproved ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.03)',
@@ -1991,8 +3027,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         borderRadius: '10px',
                                         padding: '10px 14px',
                                         fontWeight: runOrderApproved ? 700 : 400,
-                                        cursor: permissions.canApproveSegments ? 'pointer' : 'not-allowed',
-                                        opacity: permissions.canApproveSegments ? 1 : 0.65
+                                        cursor: canApproveWorkflow ? 'pointer' : 'not-allowed',
+                                        opacity: canApproveWorkflow ? 1 : 0.65
                                     }}
                                 >
                                     {runOrderApproved ? '✓ Run order approved' : 'Approve run order'}
@@ -2004,6 +3040,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     {/* Team Room & Guest Management */}
                     <div style={{ display: 'grid', gap: '20px' }}>
                         {/* Guest Quick Connect Box */}
+                        {(workflowStage === 'Team') && (
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                                 Guest Room & Quick Join
@@ -2067,11 +3104,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 </button>
                             </div>
                         </div>
+                        )}
 
                         {/* Synced Tandem Team Roster */}
+                        {(workflowStage === 'Team') && (
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                                 Synced Tandem Team ({teamMembersList.length})
+                            </div>
+                            <div style={{ marginTop: '8px', fontSize: '12px', color: '#bfdbfe' }}>
+                                Creator can designate approvers and decouple persistent links.
                             </div>
                             <div style={{ display: 'grid', gap: '10px', marginTop: '14px' }}>
                                 {teamMembersList.map((member, i) => (
@@ -2090,6 +3132,26 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         <div>
                                             <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 {member.name}
+                                                <span style={{
+                                                    fontSize: '10px',
+                                                    borderRadius: '4px',
+                                                    padding: '2px 6px',
+                                                    background: member.coupled === false ? 'rgba(248, 113, 113, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                                                    color: member.coupled === false ? '#fca5a5' : '#86efac'
+                                                }}>
+                                                    {member.coupled === false ? 'Decoupled' : 'Coupled'}
+                                                </span>
+                                                {designeeKeys.includes(resolveMemberKey(member)) && (
+                                                    <span style={{
+                                                        fontSize: '10px',
+                                                        borderRadius: '4px',
+                                                        padding: '2px 6px',
+                                                        background: 'rgba(59, 130, 246, 0.25)',
+                                                        color: '#bfdbfe'
+                                                    }}>
+                                                        Designee
+                                                    </span>
+                                                )}
                                                 <span style={{
                                                     fontSize: '10px',
                                                     background: member.loginState === 'online'
@@ -2118,11 +3180,69 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         <div style={{ textAlign: 'right', color: 'var(--light-color)', fontSize: '12px' }}>
                                             <div>{member.locale}</div>
                                             <div>{member.device}</div>
+                                            <div style={{ display: 'flex', gap: '6px', marginTop: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleJoinRoom(member)}
+                                                    disabled={!isCreator && !isDesignee}
+                                                    style={{
+                                                        border: '1px solid rgba(16, 185, 129, 0.55)',
+                                                        borderRadius: '6px',
+                                                        background: member.loginState === 'online'
+                                                            ? 'rgba(14, 116, 144, 0.25)'
+                                                            : 'rgba(16, 185, 129, 0.25)',
+                                                        color: member.loginState === 'online' ? '#bae6fd' : '#86efac',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: (isCreator || isDesignee) ? 'pointer' : 'not-allowed',
+                                                        opacity: (isCreator || isDesignee) ? 1 : 0.65,
+                                                        fontWeight: 700
+                                                    }}
+                                                    title="JoinRoom toggle admission"
+                                                >
+                                                    {member.loginState === 'online' ? 'JoinRoom: ON' : 'JoinRoom: OFF'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleDesignee(member)}
+                                                    disabled={!isCreator}
+                                                    style={{
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: '6px',
+                                                        background: designeeKeys.includes(resolveMemberKey(member)) ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.03)',
+                                                        color: 'var(--text-color)',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: isCreator ? 'pointer' : 'not-allowed',
+                                                        opacity: isCreator ? 1 : 0.65
+                                                    }}
+                                                >
+                                                    {designeeKeys.includes(resolveMemberKey(member)) ? 'Remove designee' : 'Assign designee'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => decoupleTeamMember(member)}
+                                                    disabled={!isCreator && !isDesignee}
+                                                    style={{
+                                                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                                                        borderRadius: '6px',
+                                                        background: 'rgba(239, 68, 68, 0.16)',
+                                                        color: '#fecaca',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: (isCreator || isDesignee) ? 'pointer' : 'not-allowed',
+                                                        opacity: (isCreator || isDesignee) ? 1 : 0.65
+                                                    }}
+                                                >
+                                                    Decouple
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
+                        )}
 
                         {/* Session Status */}
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
@@ -2142,29 +3262,144 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </div>
                     </div>
                 </div>
+                )}
 
-                {/* Script Pipeline */}
+                {(workflowStage === 'Plan' || workflowStage === 'Script' || workflowStage === 'Team' || workflowStage === 'Ship') && (
                 <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                     <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                        Script Pipeline
+                        Persistent Workspace Pages
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '14px' }}>
-                        {scriptBlocks.map((segment, index) => (
-                            <div
-                                key={segment}
+                    <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--light-color)' }}>
+                        Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px' }}>
+                        <input
+                            type="text"
+                            value={newPageTitle}
+                            onChange={(event) => setNewPageTitle(event.target.value)}
+                            placeholder="Page title (optional: Producer Notes, Director Plan, Music Bed, Intro Loop)"
+                            style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)'
+                            }}
+                        />
+                        <select
+                            value={newPageType}
+                            onChange={(event) => setNewPageType(event.target.value)}
+                            style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)'
+                            }}
+                        >
+                            <option value="Script">Script</option>
+                            <option value="Subject">Subject</option>
+                            <option value="Props">Props</option>
+                            <option value="Reference">Reference</option>
+                        </select>
+                        <button
+                            type="button"
+                            onClick={addWorkspacePage}
+                            style={{
+                                border: 'none',
+                                borderRadius: '8px',
+                                background: 'linear-gradient(135deg, #0ea5e9, #0369a1)',
+                                color: '#fff',
+                                padding: '10px 12px',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Add page
+                        </button>
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {workspacePages.map((page) => (
+                            <button
+                                key={page.id}
+                                type="button"
+                                onClick={() => {
+                                    setActiveWorkspacePageId(page.id);
+                                    if (page.type === 'Script') {
+                                        setScriptText(page.content || '');
+                                    }
+                                    broadcastTandemState({ activeWorkspacePageId: page.id });
+                                }}
                                 style={{
-                                    background: 'rgba(255,255,255,0.03)',
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '12px',
-                                    padding: '12px'
+                                    border: page.id === activeWorkspacePageId ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                                    borderRadius: '999px',
+                                    background: page.id === activeWorkspacePageId ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.03)',
+                                    color: 'var(--text-color)',
+                                    padding: '6px 10px',
+                                    fontSize: '12px',
+                                    cursor: 'pointer'
                                 }}
                             >
-                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>Segment {index + 1}</div>
-                                <div>{segment}</div>
-                            </div>
+                                {page.type}: {String(page.title || '').trim() || 'Untitled'}
+                            </button>
                         ))}
                     </div>
+
+                    {activeWorkspacePage && (
+                        <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                            <input
+                                type="text"
+                                value={activeWorkspacePage.title}
+                                onChange={(event) => updateWorkspacePage(activeWorkspacePage.id, { title: event.target.value })}
+                                placeholder="Page title"
+                                style={{
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    color: 'var(--text-color)'
+                                }}
+                            />
+                            <textarea
+                                value={activeWorkspacePage.content || ''}
+                                onChange={(event) => updateWorkspacePage(activeWorkspacePage.id, { content: event.target.value })}
+                                rows={8}
+                                placeholder="Add your own page content"
+                                style={{
+                                    padding: '12px',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    color: 'var(--text-color)',
+                                    resize: 'vertical'
+                                }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                                    Type: {activeWorkspacePage.type}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => removeWorkspacePage(activeWorkspacePage.id)}
+                                    style={{
+                                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                                        borderRadius: '8px',
+                                        background: 'rgba(239, 68, 68, 0.16)',
+                                        color: '#fecaca',
+                                        padding: '8px 10px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Remove page
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
+                )}
             </div>
         </Compartment>
     );
