@@ -1,11 +1,23 @@
-const isHttpUrl = (value) => {
-    if (typeof value !== 'string') return false;
+const normalizeImageUrl = (value) => {
+    if (typeof value !== 'string') return null;
+
     const trimmed = value.trim();
-    if (!trimmed) return false;
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+
+    return trimmed;
+};
+
+const isHttpUrl = (value) => {
+    const normalized = normalizeImageUrl(value);
+    if (!normalized) return false;
 
     try {
-        const parsed = new URL(trimmed);
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        const parsed = new URL(normalized);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'blob:' || parsed.protocol === 'data:';
     } catch {
         return false;
     }
@@ -42,5 +54,5 @@ export const resolveArticleImage = (article = {}) => {
     ];
 
     const resolved = candidates.find((value) => isHttpUrl(value));
-    return resolved || buildFallbackImage(article);
+    return resolved ? normalizeImageUrl(resolved) : buildFallbackImage(article);
 };

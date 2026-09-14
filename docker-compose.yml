@@ -152,9 +152,10 @@ services:
       # Database
       ConnectionStrings__DefaultConnection: ${EXTERNAL_POSTGRES_CONNECTION:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare-db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-CHANGE_ME};SSL Mode=Disable;Trust Server Certificate=true}
       # Ollama AI
-      AiProvider: ${AI_PROVIDER:-ollama}
-      Ollama__BaseUrl: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      Ollama__DefaultModel: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+      AiProvider: ${AI_PROVIDER:-gradient}
+      Gradient__BaseUrl: ${GRADIENT_BASE_URL:-https://ingress.do-ai.run/v1}
+      Gradient__DefaultModel: ${GRADIENT_DEFAULT_MODEL:-gpt-4o-mini}
+      Gradient__InferenceKey: ${GRADIENT_INFERENCE_KEY:-}
       # Redis Cache
       Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
       # S3 Blob Storage

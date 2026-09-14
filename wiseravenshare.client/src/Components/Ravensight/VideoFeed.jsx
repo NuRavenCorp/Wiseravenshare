@@ -8,6 +8,7 @@ import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLoc
 import CollaborativeScriptRoom from './CollaborativeScriptRoom';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
+import { useCollaborationHub } from '../../hooks/useCollaborationHub';
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -56,12 +57,51 @@ const VideoFeed = ({ onNotification }) => {
     const [sharingVideoIds, setSharingVideoIds] = useState([]);
     const [savingVideoIds, setSavingVideoIds] = useState([]);
     const [scriptVideo, setScriptVideo] = useState(null);
+    const [activePodcastCommand, setActivePodcastCommand] = useState(null);
     const observerRef = useRef();
     const { user } = useAuth();
+    const {
+        joinPodcastBridge,
+        leavePodcastBridge,
+        publishPodcastFootageSelection,
+        acknowledgePodcastCommand,
+        onEvent
+    } = useCollaborationHub();
 
     useEffect(() => {
         loadVideos();
     }, [filter, page]);
+
+    useEffect(() => {
+        joinPodcastBridge('main').catch(() => null);
+
+        const disposeCommand = onEvent('PodcastCommandIssued', (event) => {
+            const command = event?.command;
+            if (!command) {
+                return;
+            }
+
+            setActivePodcastCommand(command);
+            if (String(command.command || '').toLowerCase() === 'cut') {
+                onNotification?.('Podcast team issued CUT on live footage.', 'warning');
+            }
+        });
+
+        const disposeResponse = onEvent('PodcastCommandResponse', (event) => {
+            const command = event?.command;
+            if (!command) {
+                return;
+            }
+
+            setActivePodcastCommand(command);
+        });
+
+        return () => {
+            disposeCommand?.();
+            disposeResponse?.();
+            leavePodcastBridge('main').catch(() => null);
+        };
+    }, [joinPodcastBridge, leavePodcastBridge, onEvent, onNotification]);
 
     useEffect(() => {
         const handleVideoSaved = () => {
@@ -261,6 +301,43 @@ const VideoFeed = ({ onNotification }) => {
             await sharePost({ item: video, currentUser: null, onNotification });
         } finally {
             setSharingVideoIds((prev) => prev.filter((id) => id !== videoId));
+        }
+    };
+
+    const sendVideoToPodcastBridge = async (video) => {
+        const mediaUrl = String(video?.videoUrl || video?.mediaUrl || '').trim();
+        if (!mediaUrl) {
+            onNotification('Cannot send to podcast bridge without a playable video URL.', 'warning');
+            return;
+        }
+
+        try {
+            await publishPodcastFootageSelection('main', {
+                footageId: String(video?.id || '').trim() || undefined,
+                videoId: String(video?.id || '').trim(),
+                title: String(video?.title || 'Ravensight Footage').trim(),
+                mediaUrl,
+                thumbnailUrl: String(video?.thumbnailUrl || '').trim(),
+                sourceUserId: String(user?.id || '').trim(),
+                sourceUserName: String(user?.name || user?.displayName || user?.username || 'Videographer').trim()
+            });
+            onNotification('Footage sent to Podcast Control Room.', 'success');
+        } catch (error) {
+            onNotification(error?.message || 'Unable to send footage to podcast bridge.', 'error');
+        }
+    };
+
+    const acknowledgeCutCommand = async () => {
+        const commandId = String(activePodcastCommand?.commandId || '').trim();
+        if (!commandId) {
+            return;
+        }
+
+        try {
+            await acknowledgePodcastCommand('main', commandId, 'CUT acknowledged by videographer. Switching framing now.');
+            onNotification('Cut command acknowledged to podcast team.', 'success');
+        } catch (error) {
+            onNotification(error?.message || 'Unable to acknowledge command.', 'error');
         }
     };
 
@@ -604,6 +681,21 @@ const VideoFeed = ({ onNotification }) => {
                             <FaUsers /> Script Room
                         </button>
                         <button
+                            onClick={() => sendVideoToPodcastBridge(video)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#86efac',
+                                cursor: 'pointer'
+                            }}
+                            title="Send this footage to Podcast Control Room"
+                        >
+                            🎙 Send to Podcast
+                        </button>
+                        <button
                             onClick={() => handleDeleteVideo(video)}
                             style={{
                                 display: 'flex',
@@ -634,6 +726,45 @@ const VideoFeed = ({ onNotification }) => {
 
     return (
         <div>
+            {activePodcastCommand && (
+                <div style={{
+                    marginBottom: '14px',
+                    border: '1px solid rgba(248, 113, 113, 0.45)',
+                    borderRadius: '12px',
+                    background: 'rgba(127, 29, 29, 0.25)',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '10px',
+                    flexWrap: 'wrap'
+                }}>
+                    <div>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#fecaca', fontWeight: 700 }}>
+                            Podcast Team Command
+                        </div>
+                        <div style={{ fontWeight: 700 }}>
+                            {String(activePodcastCommand.command || '').toUpperCase()} {activePodcastCommand.note ? `- ${activePodcastCommand.note}` : ''}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={acknowledgeCutCommand}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(255,255,255,0.1)',
+                            color: 'var(--text-color)',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            cursor: 'pointer',
+                            fontWeight: 700
+                        }}
+                    >
+                        Acknowledge
+                    </button>
+                </div>
+            )}
+
             {/* Filter Bar */}
             <div style={{
                 display: 'flex',
