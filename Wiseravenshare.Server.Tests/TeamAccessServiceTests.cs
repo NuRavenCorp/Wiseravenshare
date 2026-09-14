@@ -156,6 +156,7 @@ public sealed class TeamAccessServiceTests
             null!,
             null!,
             null!,
+            null!,
             NullLogger<AuthController>.Instance,
             new RefreshTokenStore(
                 new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build(),
@@ -177,6 +178,7 @@ public sealed class TeamAccessServiceTests
             null!,
             null!,
             new TeamAccessService(new FakeWebHostEnvironment(CreateTempRoot()), NullLogger<TeamAccessService>.Instance),
+            null!,
             null!,
             NullLogger<AuthController>.Instance,
             new RefreshTokenStore(

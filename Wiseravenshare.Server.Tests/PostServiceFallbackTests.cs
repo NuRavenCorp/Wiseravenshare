@@ -91,6 +91,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetTrendingPostsAsync(int count) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetRepliesAsync(Guid postId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<int> GetPostCountAsync(Guid userId) => System.Threading.Tasks.Task.FromResult(0);
+        public System.Threading.Tasks.Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<Comment>>(Array.Empty<Comment>());
+        public System.Threading.Tasks.Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null) => throw new NotImplementedException();
         public System.Threading.Tasks.Task LikePostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task UnlikePostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task RepostPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
@@ -98,7 +100,7 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
-            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, 0, false, false, false));
     }
 
     private sealed class StubPostRepository : IPostRepository
@@ -119,6 +121,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetTrendingPostsAsync(int count) => System.Threading.Tasks.Task.FromResult<IEnumerable<Post>>(Array.Empty<Post>());
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetRepliesAsync(Guid postId) => System.Threading.Tasks.Task.FromResult<IEnumerable<Post>>(Array.Empty<Post>());
         public System.Threading.Tasks.Task<int> GetPostCountAsync(Guid userId) => System.Threading.Tasks.Task.FromResult(0);
+        public System.Threading.Tasks.Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<Comment>>(Array.Empty<Comment>());
+        public System.Threading.Tasks.Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null) => System.Threading.Tasks.Task.FromResult(new Comment { Id = Guid.NewGuid(), PostId = postId, UserId = userId, Content = content, ParentCommentId = parentCommentId, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
         public System.Threading.Tasks.Task LikePostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task UnlikePostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task RepostPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
@@ -126,7 +130,7 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
-            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, 0, false, false, false));
     }
 
     private sealed class StubUserRepository : IUserRepository
