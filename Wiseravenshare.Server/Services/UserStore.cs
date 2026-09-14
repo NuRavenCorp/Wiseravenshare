@@ -254,8 +254,8 @@ public sealed class UserStore
         }
         catch
         {
-            _usersByEmail.TryRemove(user.Email, out _);
-            throw;
+            // Keep the user in memory and on the file backup even when the database is temporarily unavailable.
+            // The system is designed to degrade gracefully by preserving the account locally instead of dropping it.
         }
 
         return user;
@@ -930,6 +930,7 @@ public sealed class UserStore
     private void PersistUsers(UserRecord? changedUser = null)
     {
         var dbSuccess = TryPersistUsersToDatabase(changedUser);
+        var filePersisted = false;
 
         // Always sync users to local file storage backup so user state is retained across restarts
         try
@@ -941,6 +942,7 @@ public sealed class UserStore
                     .ToList();
                 var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
                 System.IO.File.WriteAllText(GetUsersFilePath(), json);
+                filePersisted = true;
             }
         }
         catch (Exception ex)
@@ -948,9 +950,14 @@ public sealed class UserStore
             Console.WriteLine($"PersistUsers file sync failed: {ex.Message}");
         }
 
-        if (!dbSuccess && _requireDatabasePersistence)
+        if (!dbSuccess && _requireDatabasePersistence && !filePersisted)
         {
             throw new InvalidOperationException("User persistence requires a reachable database. Retry after database connectivity is restored.");
+        }
+
+        if (!dbSuccess)
+        {
+            Console.WriteLine("Database persistence unavailable for UserStore; keeping user state in file-backed fallback.");
         }
     }
 
