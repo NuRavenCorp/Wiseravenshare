@@ -290,6 +290,52 @@ class AuthService {
         }
     }
 
+    async getSharedPodcastScript(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-shared-script', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async sharePodcastScript(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-shared-script', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async getPodcastSessionSnapshot(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-session-snapshot', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async savePodcastSessionSnapshot(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-session-snapshot', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
     async issueAdminPassToken() {
         try {
             const response = await this.postAuth('/admin-pass', {}, { withAuth: true });
