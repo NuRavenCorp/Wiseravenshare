@@ -145,22 +145,56 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             }
         }
 
+        public async Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize)
+        {
+            var safePage = Math.Max(1, page);
+            var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+            return await _context.Set<Comment>()
+                .Where(c => c.PostId == postId && !c.IsDeleted)
+                .OrderByDescending(c => c.CreatedAt)
+                .Skip((safePage - 1) * safePageSize)
+                .Take(safePageSize)
+                .Include(c => c.User)
+                .ToListAsync();
+        }
+
+        public async Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null)
+        {
+            var comment = new Comment
+            {
+                PostId = postId,
+                UserId = userId,
+                ParentCommentId = parentCommentId,
+                Content = content
+            };
+
+            await _context.Set<Comment>().AddAsync(comment);
+            await RefreshPostCountersAsync(postId);
+            await _context.SaveChangesAsync();
+
+            await _context.Entry(comment).Reference(c => c.User).LoadAsync();
+            return comment;
+        }
+
         public async Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
         {
             var likesCount = await _context.PostLikes.CountAsync(l => l.PostId == postId);
             var repostsCount = await _context.PostReposts.CountAsync(r => r.PostId == postId);
+            var commentsCount = await _context.Set<Comment>().CountAsync(c => c.PostId == postId && !c.IsDeleted);
             var bookmarksCount = await _context.PostBookmarks.CountAsync(b => b.PostId == postId);
 
             var isLiked = userId.HasValue && await _context.PostLikes.AnyAsync(l => l.PostId == postId && l.UserId == userId.Value);
             var isReposted = userId.HasValue && await _context.PostReposts.AnyAsync(r => r.PostId == postId && r.UserId == userId.Value);
             var isBookmarked = userId.HasValue && await _context.PostBookmarks.AnyAsync(b => b.PostId == postId && b.UserId == userId.Value);
 
-            await RefreshPostCountersAsync(postId, likesCount, repostsCount, bookmarksCount);
+            await RefreshPostCountersAsync(postId, likesCount, repostsCount, commentsCount, bookmarksCount);
             await _context.SaveChangesAsync();
 
             return new PostInteractionState(
                 likesCount,
                 repostsCount,
+                commentsCount,
                 bookmarksCount,
                 isLiked,
                 isReposted,
@@ -171,6 +205,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             Guid postId,
             int? likesCount = null,
             int? repostsCount = null,
+            int? commentsCount = null,
             int? bookmarksCount = null)
         {
             var post = await _dbSet.FirstOrDefaultAsync(p => p.Id == postId);
@@ -181,10 +216,12 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var resolvedLikesCount = likesCount ?? await _context.PostLikes.CountAsync(l => l.PostId == postId);
             var resolvedRepostsCount = repostsCount ?? await _context.PostReposts.CountAsync(r => r.PostId == postId);
+            var resolvedCommentsCount = commentsCount ?? await _context.Set<Comment>().CountAsync(c => c.PostId == postId && !c.IsDeleted);
             var resolvedBookmarksCount = bookmarksCount ?? await _context.PostBookmarks.CountAsync(b => b.PostId == postId);
 
             post.LikesCount = resolvedLikesCount;
             post.RepostsCount = resolvedRepostsCount;
+            post.CommentsCount = resolvedCommentsCount;
             post.BookmarksCount = resolvedBookmarksCount;
         }
     }

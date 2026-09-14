@@ -54,10 +54,33 @@ namespace Wiseravenshare.Server.DTOs.Post
         public Guid PostId { get; set; }
         public int LikesCount { get; set; }
         public int RepostsCount { get; set; }
+        public int CommentsCount { get; set; }
         public int BookmarksCount { get; set; }
         public bool IsLiked { get; set; }
         public bool IsReposted { get; set; }
         public bool IsBookmarked { get; set; }
+    }
+
+    public class PostCommentDto
+    {
+        public Guid Id { get; set; }
+        public Guid PostId { get; set; }
+        public Guid UserId { get; set; }
+        public Guid? ParentCommentId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public int LikesCount { get; set; }
+        public int RepliesCount { get; set; }
+        public int CommentsCount { get; set; }
+        public UserDto User { get; set; } = new();
+    }
+
+    public class AddPostCommentDto
+    {
+        [MaxLength(500)]
+        public string Content { get; set; } = string.Empty;
+
+        public Guid? ParentCommentId { get; set; }
     }
 
     public class CreatePostDto

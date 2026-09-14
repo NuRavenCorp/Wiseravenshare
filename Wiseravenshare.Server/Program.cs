@@ -1528,13 +1528,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
     options.KnownProxies.Clear();
 });
 
-builder.Services.AddScoped<FeatureCompartmentLockFilter>();
-builder.Services.AddScoped<IFeatureCompartmentService, FeatureCompartmentService>();
-builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
-builder.Services.AddControllers(options =>
-{
-    options.Filters.AddService<FeatureCompartmentLockFilter>();
-});
+builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
@@ -1589,7 +1583,7 @@ builder.Services.AddOutputCache(options =>
 
 builder.Services.AddSignalR();
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
-builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
+builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
@@ -1660,17 +1654,13 @@ builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
-// AI assistant — select provider via AiProvider config (gradient|deepseek|ollama|llamacpp).
-// Gradient: Uses DigitalOcean Gradient Agentic Cloud inference endpoint.
+// AI assistant — select provider via AiProvider config (deepseek|ollama|llamacpp|digitalocean).
 // DeepSeek: Uses cloud API with advanced reasoning.
 // Ollama: Uses local OpenAI-compatible API (requires Ollama container).
 // LlamaCPP: Uses local llama-server (default, inside compose network).
+// DigitalOcean: alias to DeepSeek-backed cloud assistant for app deployments.
 var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
-if (aiProvider == "gradient")
-{
-    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
-}
-else if (aiProvider == "deepseek")
+if (aiProvider is "deepseek" or "digitalocean" or "dochatbot" or "do-chatbot")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
@@ -1682,7 +1672,6 @@ else
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
-builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
 builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
 builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
@@ -1707,6 +1696,7 @@ builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinRolloutService, Wiseravenshare.Server.Services.Currency.WiseCoinRolloutService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IEngagementMultiplierService, Wiseravenshare.Server.Services.Currency.EngagementMultiplierService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
 // Daily ledger anchor + integrity check (hash chain tamper-evidence).

@@ -3,9 +3,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
-using Wiseravenshare.Server.Models;
-using Wiseravenshare.Server.Services;
+using System.Text;
 using Wiseravenshare.Server.Services.AiAssistant;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -14,103 +14,27 @@ namespace Wiseravenshare.Server.Controllers;
 [Produces("application/json")]
 public class AiAssistantController : ControllerBase
 {
-    private readonly IOllamaChatService _defaultChatService;
-    private readonly IUserAiConnectorChatService _userConnectorChatService;
-    private readonly UserStore _userStore;
+    private readonly IOllamaChatService _chatService;
     private readonly IAiJobQueue _jobQueue;
+    private readonly ISiteCrawlerService _siteCrawlerService;
+    private readonly IContentCrawlerService _contentCrawlerService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AiAssistantController> _logger;
 
     public AiAssistantController(
-        IOllamaChatService defaultChatService,
-        IUserAiConnectorChatService userConnectorChatService,
-        UserStore userStore,
+        IOllamaChatService chatService,
         IAiJobQueue jobQueue,
+        ISiteCrawlerService siteCrawlerService,
+        IContentCrawlerService contentCrawlerService,
+        IConfiguration configuration,
         ILogger<AiAssistantController> logger)
     {
-        _defaultChatService = defaultChatService;
-        _userConnectorChatService = userConnectorChatService;
-        _userStore = userStore;
+        _chatService = chatService;
         _jobQueue = jobQueue;
+        _siteCrawlerService = siteCrawlerService;
+        _contentCrawlerService = contentCrawlerService;
+        _configuration = configuration;
         _logger = logger;
-    }
-
-    [Authorize]
-    [HttpGet("connector")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public IActionResult GetConnectorSettings()
-    {
-        var userId = CurrentUserId();
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return Unauthorized();
-        }
-
-        try
-        {
-            var settings = _userStore.GetAiConnectorSettings(userId);
-            return Ok(new
-            {
-                settings.Enabled,
-                settings.Provider,
-                settings.BaseUrl,
-                settings.DefaultModel,
-                hasApiKey = settings.HasApiKey,
-                apiKeyMasked = settings.ApiKeyMasked,
-                settings.UpdatedAtUtc
-            });
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound(new { message = "User not found." });
-        }
-    }
-
-    [Authorize]
-    [HttpPut("connector")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public IActionResult UpdateConnectorSettings([FromBody] UpdateUserAiConnectorRequest request)
-    {
-        var userId = CurrentUserId();
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return Unauthorized();
-        }
-
-        if (request is null)
-        {
-            return BadRequest(new { message = "Connector settings payload is required." });
-        }
-
-        if (request.Enabled && string.IsNullOrWhiteSpace(request.BaseUrl))
-        {
-            return BadRequest(new { message = "Base URL is required when connector is enabled." });
-        }
-
-        try
-        {
-            var settings = _userStore.UpdateAiConnectorSettings(userId, request);
-            return Ok(new
-            {
-                settings.Enabled,
-                settings.Provider,
-                settings.BaseUrl,
-                settings.DefaultModel,
-                hasApiKey = settings.HasApiKey,
-                apiKeyMasked = settings.ApiKeyMasked,
-                settings.UpdatedAtUtc
-            });
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound(new { message = "User not found." });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
-        }
     }
 
     /// <summary>Health check + initializes Ollama connection. Called when AI Assistant page loads.</summary>
@@ -119,55 +43,36 @@ public class AiAssistantController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Health()
     {
-        var connector = ResolveCurrentUserConnectorSettings();
-        var usingConnector = _userConnectorChatService.IsConfigured(connector);
-
         try
         {
-            var models = usingConnector
-                ? await _userConnectorChatService.GetModelsAsync(connector!)
-                : await _defaultChatService.GetModelsAsync();
-
+            var models = await _chatService.GetModelsAsync();
             var isOnline = models.Count > 0;
-            var provider = usingConnector
-                ? (connector?.Provider ?? "user-ai")
-                : "platform-default";
             
             if (!isOnline)
             {
-                _logger.LogWarning("AI health check: no models available for provider {Provider}", provider);
+                _logger.LogWarning("Ollama health check: no models available");
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = usingConnector
-                        ? "Your AI connector is not ready yet."
-                        : "AI backend is not ready yet.",
-                    provider,
-                    usingUserConnector = usingConnector
+                    message = "Ollama is not ready yet. Please wait or ensure Ollama is running." 
                 });
             }
 
             return Ok(new 
             { 
                 online = true, 
-                message = usingConnector ? "Your AI connector is online and ready" : "AI backend is online and ready", 
+                message = "Ollama is online and ready", 
                 modelCount = models.Count,
-                models = models,
-                provider,
-                usingUserConnector = usingConnector
+                models = models
             });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AI health check failed");
+            _logger.LogWarning(ex, "Ollama health check failed");
             return StatusCode(503, new 
             { 
                 online = false, 
-                message = usingConnector
-                    ? "Your AI connector is offline. Check your URL/key and try again."
-                    : "AI backend is offline. Please try again.",
-                provider = usingConnector ? (connector?.Provider ?? "user-ai") : "platform-default",
-                usingUserConnector = usingConnector,
+                message = "Ollama is offline. Please start Ollama and try again.",
                 error = ex.Message 
             });
         }
@@ -178,17 +83,8 @@ public class AiAssistantController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetModels()
     {
-        var connector = ResolveCurrentUserConnectorSettings();
-        var usingConnector = _userConnectorChatService.IsConfigured(connector);
-        var models = usingConnector
-            ? await _userConnectorChatService.GetModelsAsync(connector!)
-            : await _defaultChatService.GetModelsAsync();
-        return Ok(new
-        {
-            models,
-            provider = usingConnector ? (connector?.Provider ?? "user-ai") : "platform-default",
-            usingUserConnector = usingConnector
-        });
+        var models = await _chatService.GetModelsAsync();
+        return Ok(new { models });
     }
 
     /// <summary>Sends a chat message (with optional history) to the AI assistant.</summary>
@@ -202,24 +98,8 @@ public class AiAssistantController : ControllerBase
             return BadRequest(new { message = "Message is required." });
         }
 
-        var connector = ResolveCurrentUserConnectorSettings();
-        var usingConnector = _userConnectorChatService.IsConfigured(connector);
-        AiChatResponse result;
-
-        if (usingConnector)
-        {
-            result = await _userConnectorChatService.ChatAsync(request, connector!);
-            if (!result.Success)
-            {
-                _logger.LogWarning("User AI connector chat failed. Falling back to platform provider.");
-                result = await _defaultChatService.ChatAsync(request);
-            }
-        }
-        else
-        {
-            result = await _defaultChatService.ChatAsync(request);
-        }
-
+        var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
+        var result = await _chatService.ChatAsync(enrichedRequest);
         return Ok(result);
     }
 
@@ -243,44 +123,13 @@ public class AiAssistantController : ControllerBase
         Response.StatusCode = StatusCodes.Status200OK;
         Response.ContentType = "text/event-stream";
 
-        var connector = ResolveCurrentUserConnectorSettings();
-        var usingConnector = _userConnectorChatService.IsConfigured(connector);
-
-        var stream = usingConnector
-            ? _userConnectorChatService.ChatStreamAsync(request, connector!, ct)
-            : _defaultChatService.ChatStreamAsync(request, ct);
-
-        await foreach (var token in stream)
+        var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, ct);
+        await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
         {
             await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
         }
 
         await Response.WriteAsync("data: [DONE]\n\n", ct);
-    }
-
-    private string CurrentUserId()
-    {
-        return User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue("sub")
-            ?? string.Empty;
-    }
-
-    private UserAiConnectorSettings? ResolveCurrentUserConnectorSettings()
-    {
-        var userId = CurrentUserId();
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return null;
-        }
-
-        try
-        {
-            return _userStore.GetAiConnectorSettingsInternal(userId);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     // ---- Background AI jobs (queue + poll) — for bursty creator features ----
@@ -289,7 +138,7 @@ public class AiAssistantController : ControllerBase
     [Authorize]
     [HttpPost("jobs")]
     [ProducesResponseType(typeof(object), StatusCodes.Status202Accepted)]
-    public IActionResult EnqueueJob([FromBody] AiChatRequest request)
+    public async Task<IActionResult> EnqueueJob([FromBody] AiChatRequest request)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Message))
         {
@@ -298,7 +147,8 @@ public class AiAssistantController : ControllerBase
 
         try
         {
-            var jobId = _jobQueue.Enqueue(request);
+            var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
+            var jobId = _jobQueue.Enqueue(enrichedRequest);
             var snapshot = _jobQueue.Get(jobId)!;
             // 202 Accepted; cached jobs are already Succeeded and carry their reply.
             return AcceptedAtAction(nameof(GetJob), new { jobId }, snapshot);
@@ -318,5 +168,115 @@ public class AiAssistantController : ControllerBase
     {
         var snapshot = _jobQueue.Get(jobId);
         return snapshot is null ? NotFound() : Ok(snapshot);
+    }
+
+    private async Task<AiChatRequest> BuildCrawlerAwareRequestAsync(AiChatRequest request, CancellationToken ct)
+    {
+        if (!request.UseCrawlerContext)
+        {
+            return request;
+        }
+
+        var contextBlock = await BuildCrawlerContextBlockAsync(ct);
+        if (string.IsNullOrWhiteSpace(contextBlock))
+        {
+            return request;
+        }
+
+        return new AiChatRequest
+        {
+            Message = $"{contextBlock}\n\nUser question:\n{request.Message}",
+            History = request.History,
+            Model = request.Model,
+            UseCrawlerContext = request.UseCrawlerContext
+        };
+    }
+
+    private async Task<string> BuildCrawlerContextBlockAsync(CancellationToken ct)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Use this live Wiseravenshare crawler context when answering:");
+
+            if (IsAdminRequest())
+            {
+                var siteSummary = await _siteCrawlerService.GetSummaryAsync(null, "core", ct);
+                AppendSiteSummary(sb, siteSummary);
+            }
+
+            var contentSummary = await _contentCrawlerService.GetTrendingAsync(null, null, 6, ct);
+            if (contentSummary.TrendingContent.Count > 0)
+            {
+                sb.AppendLine("- Trending content:");
+                foreach (var item in contentSummary.TrendingContent.Take(5))
+                {
+                    sb.AppendLine($"  - {item.ContentType}: {item.Title} (engagement={item.EngagementCount}, score={item.TrendingScore:0.###})");
+                }
+            }
+
+            if (contentSummary.EmergingTopics.Count > 0)
+            {
+                sb.AppendLine($"- Emerging topics: {string.Join(", ", contentSummary.EmergingTopics.Take(8))}");
+            }
+
+            return sb.ToString().Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to enrich AI request with crawler context.");
+            return string.Empty;
+        }
+    }
+
+    private static void AppendSiteSummary(StringBuilder sb, SiteCrawlerSummaryDto? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        sb.AppendLine($"- Site crawler indexed pages: {summary.TotalPages}");
+        if (summary.TopConnectedPages.Count > 0)
+        {
+            sb.AppendLine("- Top connected pages:");
+            foreach (var page in summary.TopConnectedPages.Take(5))
+            {
+                sb.AppendLine($"  - {page.PageId}: {page.Label} [{page.Category}] score={page.Score:0.###}");
+            }
+        }
+
+        if (summary.RelatedInCategory.Count > 0)
+        {
+            sb.AppendLine("- Related pages:");
+            foreach (var page in summary.RelatedInCategory.Take(4))
+            {
+                sb.AppendLine($"  - {page.PageId}: {page.Label} [{page.Category}]");
+            }
+        }
+    }
+
+    private bool IsAdminRequest()
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return false;
+        }
+
+        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
+        if (configuredAdminEmails.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var configuredAuthUsers = _configuration.GetSection("Authentication:Users").GetChildren()
+            .Select(section => section["Email"]?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+
+        return configuredAuthUsers.Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
     }
 }

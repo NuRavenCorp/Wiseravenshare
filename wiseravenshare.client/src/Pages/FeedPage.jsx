@@ -26,6 +26,42 @@ const parseAdminEmails = () => {
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
 };
 
+const readReactionIds = (storageKey) => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        if (!Array.isArray(raw)) {
+            return new Set();
+        }
+
+        return new Set(
+            raw
+                .map((item) => String(item?.id || '').trim())
+                .filter(Boolean)
+        );
+    } catch {
+        return new Set();
+    }
+};
+
+const applyStoredReactions = (items) => {
+    const source = Array.isArray(items) ? items : [];
+    const likedIds = readReactionIds('wiseLikedPosts');
+    const repostedIds = readReactionIds('wiseRepostedPosts');
+
+    return source.map((post) => {
+        const postId = String(post?.id || '').trim();
+        if (!postId) {
+            return post;
+        }
+
+        return {
+            ...post,
+            isLiked: Boolean(post?.isLiked) || likedIds.has(postId),
+            isReposted: Boolean(post?.isReposted) || repostedIds.has(postId)
+        };
+    });
+};
+
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const { track } = usePersonalization();
     const [posts, setPosts] = useState([]);
@@ -162,10 +198,10 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                 const normalizedPayload = normalizePostsPayload(response?.data ?? response);
                 const backendPosts = normalizedPayload.map(normalizePost);
                 const storedPosts = readStoredFeedPosts().map(normalizePost);
-                const mergedPosts = mergeFeedPosts(storedPosts, backendPosts);
+                const mergedPosts = applyStoredReactions(mergeFeedPosts(storedPosts, backendPosts));
                 setPosts(mergedPosts.length > 0 ? mergedPosts : samplePosts);
             } catch {
-                const storedPosts = readStoredFeedPosts().map(normalizePost);
+                const storedPosts = applyStoredReactions(readStoredFeedPosts().map(normalizePost));
                 setPosts(storedPosts.length > 0 ? storedPosts : samplePosts);
             }
         };
@@ -273,24 +309,13 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleLike = async (postId) => {
         try {
-            const currentPost = posts.find((item) => item.id === postId);
-            const updated = currentPost?.isLiked
-                ? await apiService.unlikePost(postId)
-                : await apiService.likePost(postId);
+            const currentPost = posts.find((post) => post.id === postId);
+            if (currentPost?.isLiked) {
+                addTruthAlert('info', 'You already liked this post.', null);
+                return;
+            }
 
-            const nextLikesCount = Number(
-                updated?.likesCount
-                ?? updated?.LikesCount
-                ?? currentPost?.likes
-                ?? currentPost?.likesCount
-                ?? 0
-            );
-            const nextIsLiked = Boolean(
-                updated?.isLiked
-                ?? updated?.IsLiked
-                ?? !currentPost?.isLiked
-            );
-
+            const updated = await apiService.likePost(postId);
             // Track the like interaction for personalization.
             const post = posts.find((p) => p.id === postId);
             if (post) {
@@ -304,9 +329,9 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                     post.id === postId
                         ? {
                             ...post,
-                            likes: nextLikesCount,
-                            likesCount: nextLikesCount,
-                            isLiked: nextIsLiked
+                            likes: Number(updated?.likesCount ?? post.likes ?? 0),
+                            likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
+                            isLiked: Boolean(updated?.isLiked)
                         }
                         : post
                 );
@@ -331,41 +356,68 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleRepost = async (postId) => {
         try {
-            const currentPost = posts.find((item) => item.id === postId);
-            const updated = currentPost?.isReposted
-                ? await apiService.unrepostPost(postId)
-                : await apiService.repostPost(postId);
+            const currentPost = posts.find((post) => post.id === postId);
+            if (currentPost?.isReposted) {
+                addTruthAlert('info', 'You already reposted this post.', null);
+                return;
+            }
 
-            const nextRepostsCount = Number(
-                updated?.repostsCount
-                ?? updated?.RepostsCount
-                ?? currentPost?.reposts
-                ?? currentPost?.repostsCount
-                ?? 0
-            );
-            const nextIsReposted = Boolean(
-                updated?.isReposted
-                ?? updated?.IsReposted
-                ?? !currentPost?.isReposted
-            );
+            const updated = await apiService.repostPost(postId);
+            setPosts((prev) => {
+                const next = prev.map((post) =>
+                    post.id === postId
+                        ? {
+                            ...post,
+                            reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
+                            repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
+                            isReposted: Boolean(updated?.isReposted)
+                        }
+                        : post
+                );
 
-            setPosts((prev) => prev.map((post) =>
-                post.id === postId
-                    ? {
-                        ...post,
-                        reposts: nextRepostsCount,
-                        repostsCount: nextRepostsCount,
-                        isReposted: nextIsReposted
-                    }
-                    : post
-            ));
-            addTruthAlert('success', nextIsReposted ? 'Repost saved.' : 'Repost removed.', null);
+                try {
+                    const reposted = next.filter((p) => p.isReposted);
+                    localStorage.setItem('wiseRepostedPosts', JSON.stringify(reposted));
+                    window.dispatchEvent(new Event('wiseraven:reposts-updated'));
+                } catch {
+                    // Ignore local cache sync failures.
+                }
+
+                return next;
+            });
+            addTruthAlert('success', 'Repost saved.', null);
         } catch (error) {
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
                 : 'Failed to update repost.';
             addTruthAlert('error', message, null);
         }
+    };
+
+    const handleLoadComments = async (postId) => {
+        const response = await apiService.getComments(postId);
+        return Array.isArray(response?.data) ? response.data : [];
+    };
+
+    const handleAddComment = async (postId, content) => {
+        const response = await apiService.addComment(postId, content);
+        const comment = response?.data || response;
+
+        setPosts((prev) => prev.map((post) => {
+            if (post.id !== postId) {
+                return post;
+            }
+
+            const nextCommentsCount = Number(comment?.commentsCount);
+            const fallbackCount = Number(post.commentsCount ?? post.comments?.length ?? 0) + 1;
+
+            return {
+                ...post,
+                commentsCount: Number.isFinite(nextCommentsCount) ? nextCommentsCount : fallbackCount
+            };
+        }));
+
+        return comment;
     };
 
     const handleFollow = (userId) => {
@@ -382,52 +434,17 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         setFollowing(socialGraphService.getFollowingIds(currentUser.id));
     };
 
-    const handleBookmark = async (post) => {
-        try {
-            const updated = post?.isBookmarked
-                ? await apiService.removeBookmark(post.id)
-                : await apiService.addBookmark(post.id);
+    const handleBookmark = (post) => {
+        const existing = JSON.parse(localStorage.getItem('wiseBookmarks') || '[]');
+        const alreadySaved = existing.some((item) => item.id === post.id);
 
-            const nextBookmarksCount = Number(
-                updated?.data?.bookmarksCount
-                ?? updated?.data?.BookmarksCount
-                ?? post?.bookmarksCount
-                ?? 0
-            );
-            const nextIsBookmarked = Boolean(
-                updated?.data?.isBookmarked
-                ?? updated?.data?.IsBookmarked
-                ?? !post?.isBookmarked
-            );
-
-            setPosts((prev) => prev.map((item) => (
-                item.id === post.id
-                    ? {
-                        ...item,
-                        isBookmarked: nextIsBookmarked,
-                        bookmarksCount: nextBookmarksCount
-                    }
-                    : item
-            )));
-
-            addTruthAlert('success', nextIsBookmarked ? 'Post saved to bookmarks.' : 'Bookmark removed.', null);
-        } catch (error) {
-            const message = typeof error?.message === 'string' && error.message.trim().length > 0
-                ? error.message.trim()
-                : 'Failed to update bookmark.';
-            addTruthAlert('error', message, null);
+        if (alreadySaved) {
+            addTruthAlert('info', 'Post is already in bookmarks.', null);
+            return;
         }
-    };
 
-    const handleCommentCountChange = (postId, commentsCount) => {
-        setPosts((prev) => prev.map((post) => (
-            post.id === postId
-                ? {
-                    ...post,
-                    commentsCount: Number(commentsCount || 0)
-                }
-                : post
-        )));
+        localStorage.setItem('wiseBookmarks', JSON.stringify([post, ...existing]));
+        addTruthAlert('success', 'Post saved to bookmarks.', null);
     };
 
     const handleVerifyPost = (post) => {
@@ -610,6 +627,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         post={post}
                         onLike={handleLike}
                         onRepost={handleRepost}
+                        onLoadComments={handleLoadComments}
+                        onAddComment={handleAddComment}
                         onDispute={handleDisputePost}
                         onVerify={handleVerifyPost}
                         integrityReport={integrityReports[post.id]}
@@ -617,8 +636,6 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         isFollowing={following.includes(post.userId)}
                         onFollow={handleFollow}
                         onBookmark={handleBookmark}
-                        bookmarkLabel={post.isBookmarked ? 'Bookmarked' : 'Bookmark'}
-                        onCommentCountChange={handleCommentCountChange}
                     />
                 ))}
             </div>

@@ -12,6 +12,7 @@ public class AiChatRequest
     public string Message { get; set; } = string.Empty;
     public List<AiChatMessage>? History { get; set; }
     public string? Model { get; set; }
+    public bool UseCrawlerContext { get; set; } = true;
 }
 
 public class AiChatResponse

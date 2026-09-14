@@ -50,12 +50,15 @@ public interface IPostRepository : IRepository<Post>
     Task UnrepostPostAsync(Guid postId, Guid userId);
     Task BookmarkPostAsync(Guid postId, Guid userId);
     Task UnbookmarkPostAsync(Guid postId, Guid userId);
+    Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize);
+    Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null);
     Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null);
 }
 
 public sealed record PostInteractionState(
     int LikesCount,
     int RepostsCount,
+    int CommentsCount,
     int BookmarksCount,
     bool IsLiked,
     bool IsReposted,
