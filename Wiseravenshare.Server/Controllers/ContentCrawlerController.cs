@@ -7,6 +7,7 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Route("api/contentcrawler")]
 [Authorize]
+[FeatureCompartment("content-crawler")]
 public class ContentCrawlerController : ControllerBase
 {
     private readonly IContentCrawlerService _service;

@@ -144,6 +144,8 @@ export const useCollaborationHub = () => {
         invoke('UpdatePresence', status, activity), [invoke]);
     const bridgeToExternalPlatform = useCallback((platform, targetUserId, data) =>
         invoke('BridgeToExternalPlatform', platform, targetUserId, data), [invoke]);
+    const getMyRooms = useCallback((take = 25) =>
+        invoke('GetMyRooms', take), [invoke]);
 
     useEffect(() => {
         connect();
@@ -166,6 +168,7 @@ export const useCollaborationHub = () => {
         startFileTransfer,
         sendFileChunk,
         updatePresence,
-        bridgeToExternalPlatform
+        bridgeToExternalPlatform,
+        getMyRooms
     };
 };

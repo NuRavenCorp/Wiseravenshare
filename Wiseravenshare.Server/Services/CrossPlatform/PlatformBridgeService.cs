@@ -1,90 +1,131 @@
 // Wiseravenshare.Server/Services/CrossPlatform/PlatformBridgeService.cs
-using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities.CrossPlatform;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
 
 namespace Wiseravenshare.Server.Services.CrossPlatform;
 
 public class PlatformBridgeService : IPlatformBridgeService
 {
-    private static readonly ConcurrentDictionary<string, BridgeSession> Sessions = new();
+    private readonly AppDbContext _dbContext;
     private readonly ILogger<PlatformBridgeService> _logger;
 
-    public PlatformBridgeService(ILogger<PlatformBridgeService> logger)
+    public PlatformBridgeService(AppDbContext dbContext, ILogger<PlatformBridgeService> logger)
     {
+        _dbContext = dbContext;
         _logger = logger;
     }
 
-    public Task<BridgeSession> CreateBridgeSessionAsync(string platform, string externalUserId, string sessionData)
+    public async Task<BridgeSession> CreateBridgeSessionAsync(string platform, string externalUserId, string sessionData)
     {
+        var nowUtc = DateTime.UtcNow;
         var session = new BridgeSession
         {
+            Id = Guid.NewGuid(),
             SessionId = Guid.NewGuid().ToString(),
-            Platform = platform,
-            ExternalUserId = externalUserId,
+            Platform = (platform ?? string.Empty).Trim(),
+            ExternalUserId = (externalUserId ?? string.Empty).Trim(),
             SessionDataJson = sessionData,
-            CreatedAt = DateTime.UtcNow,
-            LastActivity = DateTime.UtcNow,
+            Status = "active",
+            CreatedAt = nowUtc,
+            LastActivity = nowUtc,
             IsActive = true
         };
 
-        Sessions[session.SessionId] = session;
-        _logger.LogInformation("Bridge session created: {SessionId} for {Platform} user {ExternalUserId}",
-            session.SessionId, platform, externalUserId);
+        _dbContext.BridgeSessions.Add(session);
+        await _dbContext.SaveChangesAsync();
 
-        return Task.FromResult(session);
+        _logger.LogInformation("Bridge session created: {SessionId} for {Platform} user {ExternalUserId}",
+            session.SessionId, session.Platform, session.ExternalUserId);
+
+        return session;
     }
 
     public Task<BridgeSession?> GetBridgeSessionAsync(string sessionId)
-        => Task.FromResult(Sessions.TryGetValue(sessionId, out var session) ? session : null);
+        => _dbContext.BridgeSessions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.SessionId == sessionId);
 
-    public Task<string> EnsureBridgeSessionAsync(string platform, string externalUserId)
+    public async Task<string> EnsureBridgeSessionAsync(string platform, string externalUserId)
     {
-        var existing = Sessions.Values.FirstOrDefault(s =>
-            s.IsActive && s.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase)
-            && s.ExternalUserId == externalUserId);
+        var safePlatform = (platform ?? string.Empty).Trim();
+        var safeExternalUserId = (externalUserId ?? string.Empty).Trim();
+        var existing = await _dbContext.BridgeSessions
+            .OrderByDescending(s => s.LastActivity)
+            .FirstOrDefaultAsync(s =>
+                s.IsActive
+                && s.Platform == safePlatform
+                && s.ExternalUserId == safeExternalUserId);
 
         if (existing is not null)
         {
             existing.LastActivity = DateTime.UtcNow;
-            return Task.FromResult(existing.SessionId);
+            await _dbContext.SaveChangesAsync();
+            return existing.SessionId;
         }
 
-        return CreateBridgeSessionAsync(platform, externalUserId, "{}").ContinueWith(t => t.Result.SessionId);
+        var created = await CreateBridgeSessionAsync(safePlatform, safeExternalUserId, "{}");
+        return created.SessionId;
     }
 
     public async Task<bool> BridgeMessageAsync(string sessionId, string message, string source)
     {
-        if (!Sessions.TryGetValue(sessionId, out var session)) return false;
+        var session = await _dbContext.BridgeSessions.FirstOrDefaultAsync(s => s.SessionId == sessionId && s.IsActive);
+        if (session is null) return false;
 
         session.LastActivity = DateTime.UtcNow;
+        _dbContext.BridgeMessages.Add(new BridgeMessage
+        {
+            Id = Guid.NewGuid(),
+            SessionId = sessionId,
+            Source = source,
+            Target = session.Platform,
+            MessageType = "message",
+            Content = message,
+            CreatedAt = DateTime.UtcNow,
+            ProcessedAt = DateTime.UtcNow,
+            IsProcessed = true
+        });
         await ProcessPlatformMessage(session.Platform, session.ExternalUserId, message);
+        await _dbContext.SaveChangesAsync();
+
         _logger.LogInformation("Bridged message from {Source} to {Platform}: {Length} chars",
             source, session.Platform, message.Length);
         return true;
     }
 
-    public Task<bool> SyncPresenceAsync(string sessionId, string status)
+    public async Task<bool> SyncPresenceAsync(string sessionId, string status)
     {
-        if (!Sessions.TryGetValue(sessionId, out var session)) return Task.FromResult(false);
+        var session = await _dbContext.BridgeSessions.FirstOrDefaultAsync(s => s.SessionId == sessionId && s.IsActive);
+        if (session is null) return false;
 
         session.Status = status;
         session.LastActivity = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
         _logger.LogInformation("Syncing presence to {Platform} for {ExternalUserId}: {Status}",
             session.Platform, session.ExternalUserId, status);
-        return Task.FromResult(true);
+        return true;
     }
 
-    public Task<IEnumerable<BridgeSession>> GetActiveSessionsAsync()
-        => Task.FromResult(Sessions.Values.Where(s =>
-            s.IsActive && s.LastActivity > DateTime.UtcNow.AddMinutes(-30)));
+    public async Task<IEnumerable<BridgeSession>> GetActiveSessionsAsync()
+        => await _dbContext.BridgeSessions
+            .AsNoTracking()
+            .Where(s => s.IsActive && s.LastActivity > DateTime.UtcNow.AddMinutes(-30))
+            .ToListAsync();
 
-    public Task<bool> TerminateSessionAsync(string sessionId)
+    public async Task<bool> TerminateSessionAsync(string sessionId)
     {
-        if (!Sessions.TryGetValue(sessionId, out var session)) return Task.FromResult(false);
+        var session = await _dbContext.BridgeSessions.FirstOrDefaultAsync(s => s.SessionId == sessionId);
+        if (session is null) return false;
+
         session.IsActive = false;
+        session.LastActivity = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
         _logger.LogInformation("Bridge session terminated: {SessionId}", sessionId);
-        return Task.FromResult(true);
+        return true;
     }
 
     private async Task ProcessPlatformMessage(string platform, string externalUserId, string message)
@@ -94,9 +135,13 @@ public class PlatformBridgeService : IPlatformBridgeService
             case "tiktok":
             case "facebook":
             case "instagram":
+            case "youtube":
+            case "linkedin":
             case "twitter":
+            case "snapchat":
+            case "web":
                 // Real webhook/API integrations (Messenger Platform, Instagram Graph API,
-                // TikTok Content Posting API) plug in here; services already exist in
+                // TikTok Content Posting API, YouTube Data API) plug in here; services already exist in
                 // SocialNetworkPublishers / MetaPlatformPublishers for outbound publishing.
                 _logger.LogInformation("Queued {Platform} message for {ExternalUserId}", platform, externalUserId);
                 await Task.CompletedTask;

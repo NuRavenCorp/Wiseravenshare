@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Collaboration;
+using Wiseravenshare.Server.Entities.Access;
 using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Entities.FM;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
+using Wiseravenshare.Server.Entities.CrossPlatform;
 using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
 namespace Wiseravenshare.Server.Infrastructure.Data;
@@ -28,6 +30,10 @@ public class AppDbContext : DbContext
     public DbSet<AgentInteraction> AgentInteractions => Set<AgentInteraction>();
     public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<UserCompartmentAssignment> UserCompartmentAssignments => Set<UserCompartmentAssignment>();
+    public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
+    public DbSet<UserPresence> UserPresence => Set<UserPresence>();
+    public DbSet<FeatureAuditLog> FeatureAuditLogs => Set<FeatureAuditLog>();
     public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
     public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
     public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
@@ -74,6 +80,9 @@ public class AppDbContext : DbContext
     public DbSet<Wiseravenshare.Server.Entities.Communique.NotificationCost> NotificationCosts => Set<Wiseravenshare.Server.Entities.Communique.NotificationCost>();
 
     // Collaboration
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+    public DbSet<Message> Messages => Set<Message>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<ProjectContent> ProjectContents => Set<ProjectContent>();
@@ -82,6 +91,11 @@ public class AppDbContext : DbContext
     public DbSet<ProjectComment> ProjectComments => Set<ProjectComment>();
     public DbSet<ProjectActivity> ProjectActivities => Set<ProjectActivity>();
     public DbSet<PlatformPublish> PlatformPublishes => Set<PlatformPublish>();
+    public DbSet<BridgeSession> BridgeSessions => Set<BridgeSession>();
+    public DbSet<CollaborationRoom> CollaborationRooms => Set<CollaborationRoom>();
+    public DbSet<RoomParticipant> RoomParticipants => Set<RoomParticipant>();
+    public DbSet<BridgeMessage> BridgeMessages => Set<BridgeMessage>();
+    public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
 
     // Roles
     public DbSet<Wiseravenshare.Server.Entities.Roles.UserRole> UserRoles => Set<Wiseravenshare.Server.Entities.Roles.UserRole>();
@@ -124,6 +138,30 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("UserSettings");
             entity.Property(s => s.Theme).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<UserCompartmentAssignment>(entity =>
+        {
+            entity.ToTable("UserCompartmentAssignments");
+            entity.HasIndex(x => new { x.UserId, x.Compartment }).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureFlag>(entity =>
+        {
+            entity.ToTable("FeatureFlags");
+            entity.HasIndex(x => new { x.FeatureKey, x.Scope, x.ScopeValue }).IsUnique();
+        });
+
+        modelBuilder.Entity<UserPresence>(entity =>
+        {
+            entity.ToTable("UserPresence");
+            entity.HasIndex(x => x.UserId).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureAuditLog>(entity =>
+        {
+            entity.ToTable("FeatureAuditLogs");
+            entity.HasIndex(x => x.FeatureKey);
         });
 
         modelBuilder.Entity<Follow>(entity =>
@@ -207,6 +245,91 @@ public class AppDbContext : DbContext
                 .WithMany(m => m.Replies)
                 .HasForeignKey(m => m.ReplyToId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BridgeSession>(entity =>
+        {
+            entity.ToTable("bridge_sessions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.SessionId).HasColumnName("session_id").HasMaxLength(255);
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(255);
+            entity.Property(x => x.SessionDataJson).HasColumnName("session_data").HasColumnType("jsonb");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.LastActivity).HasColumnName("last_activity");
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.SessionId).IsUnique();
+        });
+
+        modelBuilder.Entity<CollaborationRoom>(entity =>
+        {
+            entity.ToTable("collaboration_rooms");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.RoomName).HasColumnName("room_name").HasMaxLength(255);
+            entity.Property(x => x.OwnerId).HasColumnName("owner_id");
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.RoomId).IsUnique();
+        });
+
+        modelBuilder.Entity<RoomParticipant>(entity =>
+        {
+            entity.ToTable("room_participants");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(255);
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.JoinedAt).HasColumnName("joined_at");
+            entity.Property(x => x.LeftAt).HasColumnName("left_at");
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => new { x.RoomId, x.IsActive });
+        });
+
+        modelBuilder.Entity<BridgeMessage>(entity =>
+        {
+            entity.ToTable("bridge_messages");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.SessionId).HasColumnName("session_id").HasMaxLength(255);
+            entity.Property(x => x.Source).HasColumnName("source").HasMaxLength(50);
+            entity.Property(x => x.Target).HasColumnName("target").HasMaxLength(50);
+            entity.Property(x => x.MessageType).HasColumnName("message_type").HasMaxLength(50);
+            entity.Property(x => x.Content).HasColumnName("content").HasColumnType("text");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.ProcessedAt).HasColumnName("processed_at");
+            entity.Property(x => x.IsProcessed).HasColumnName("is_processed");
+        });
+
+        modelBuilder.Entity<FileTransfer>(entity =>
+        {
+            entity.ToTable("file_transfers");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.TransferId).HasColumnName("transfer_id").HasMaxLength(255);
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.FileName).HasColumnName("file_name").HasMaxLength(255);
+            entity.Property(x => x.FileSize).HasColumnName("file_size");
+            entity.Property(x => x.FileType).HasColumnName("file_type").HasMaxLength(100);
+            entity.Property(x => x.FileUrl).HasColumnName("file_url").HasColumnType("text");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
+            entity.Property(x => x.ChunkCount).HasColumnName("chunk_count");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.TransferId).IsUnique();
         });
 
         modelBuilder.Entity<VideoComment>(entity =>

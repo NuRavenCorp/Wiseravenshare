@@ -6,6 +6,7 @@ import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import { usePersonalization } from '../hooks/usePersonalization';
 import { crawlerService } from '../Services/crawlerService';
+import { resolveArticleImage } from '../utils/newsImageUtils';
 
 const MAX_STORED_POSTS = 120;
 
@@ -161,6 +162,7 @@ const normalizeNewsItem = (item, index) => ({
     title: item.title || 'AI News update',
     source: item.source || 'WiseRaven',
     summary: item.summary || item.content || 'News summary unavailable.',
+    imageUrl: resolveArticleImage(item),
     externalUrl: toSafeAbsoluteUrl(item.externalUrl || item.url || item.link || item.sourceUrl)
         || buildSearchUrl(item.title, item.source),
     category: inferNewsCategory(item)
@@ -688,21 +690,64 @@ const DiscoverPage = ({ onNavigate }) => {
                 return (
                     <div style={{ display: 'grid', gap: '10px' }}>
                         {laneItems.map((item) => (
-                            <div key={item.id} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '12px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'start' }}>
-                                    <strong>{item.title}</strong>
-                                    <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', padding: '4px 8px', borderRadius: '999px', whiteSpace: 'nowrap' }}>
-                                        {item.category || laneTitle}
-                                    </span>
+                            <div
+                                key={item.id}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '16px',
+                                    overflow: 'hidden',
+                                    background: 'rgba(255,255,255,0.03)'
+                                }}
+                            >
+                                <div style={{ position: 'relative' }}>
+                                    <img
+                                        src={item.imageUrl}
+                                        alt={item.title}
+                                        loading="lazy"
+                                        referrerPolicy="no-referrer"
+                                        style={{
+                                            width: '100%',
+                                            height: '180px',
+                                            objectFit: 'cover',
+                                            display: 'block',
+                                            background: '#0f172a'
+                                        }}
+                                        onError={(event) => {
+                                            event.currentTarget.src = resolveArticleImage({
+                                                title: item.title,
+                                                source: item.source,
+                                                category: item.category
+                                            });
+                                        }}
+                                    />
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 'auto 0 0 0',
+                                            padding: '18px 14px 12px',
+                                            background: 'linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.82) 100%)',
+                                            color: '#fff'
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '12px', opacity: 0.9 }}>{item.source}</div>
+                                        <div style={{ fontWeight: 800, fontSize: '18px', lineHeight: 1.25 }}>{item.title}</div>
+                                    </div>
                                 </div>
-                                <div style={{ fontSize: '14px', color: 'var(--light-color)' }}>{item.summary}</div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{item.source}</span>
-                                    {item.externalUrl && (
-                                        <a href={item.externalUrl} target="_blank" rel="noreferrer noopener" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            Open source
-                                        </a>
-                                    )}
+                                <div style={{ padding: '12px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'start' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', padding: '4px 8px', borderRadius: '999px', whiteSpace: 'nowrap' }}>
+                                            {item.category || laneTitle}
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '14px', color: 'var(--light-color)', lineHeight: 1.6 }}>{item.summary}</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{item.source}</span>
+                                        {item.externalUrl && (
+                                            <a href={item.externalUrl} target="_blank" rel="noreferrer noopener" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                                Open source
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}

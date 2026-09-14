@@ -41,11 +41,23 @@ services:
         type: SECRET
       - key: Authentication__Jwt__ExpiresMinutes
         value: "1440"
+      - key: DATABASE_URL
+        value: ${wiseravenshare-db.DATABASE_URL}
+        type: SECRET
       - key: ConnectionStrings__DefaultConnection
         value: ${wiseravenshare-db.DATABASE_URL}
         type: SECRET
       - key: Database__ExpectedName
         value: defaultdb
+      - key: AiProvider
+        value: gradient
+      - key: Gradient__BaseUrl
+        value: https://ingress.do-ai.run/v1
+      - key: Gradient__DefaultModel
+        value: gpt-4o-mini
+      - key: Gradient__InferenceKey
+        value: ${DO_GRADIENT_INFERENCE_KEY}
+        type: SECRET
       - key: Storage__Blob__ProjectFolder
         value: wiseravenshare/
       - key: Storage__Blob__BucketName
@@ -217,7 +229,7 @@ static_sites:
       branch: main
       deploy_on_push: true
     source_dir: wiseravenshare.client
-    build_command: npm ci && npx -y node@22 node_modules/vite/bin/vite.js build
+    build_command: npm ci --include=dev --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 && npx -y node@22 node_modules/vite/bin/vite.js build
     output_dir: dist
     index_document: index.html
     error_document: index.html
@@ -227,7 +239,8 @@ static_sites:
       - key: VITE_RAVENSIGHT_API_URL
         value: ${APP_URL}/api/ravensight
       - key: VITE_STRIPE_PUBLISHABLE_KEY
-        value: ${STRIPE_PUBLISHABLE_API}
+        value: EV[1:G9aZdQZLfzrKlwuFuwMUwK5GhbzysXM0:LOLkU0IxJrC+N4f7P6VtsJJYsWnuDKs/TdR+AfOqXZWhkjqHtwlGh1E=]
+        type: SECRET
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID
         value: prod_VC3xoP4UjLvOF2
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID

@@ -273,7 +273,24 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleLike = async (postId) => {
         try {
-            const updated = await apiService.likePost(postId);
+            const currentPost = posts.find((item) => item.id === postId);
+            const updated = currentPost?.isLiked
+                ? await apiService.unlikePost(postId)
+                : await apiService.likePost(postId);
+
+            const nextLikesCount = Number(
+                updated?.likesCount
+                ?? updated?.LikesCount
+                ?? currentPost?.likes
+                ?? currentPost?.likesCount
+                ?? 0
+            );
+            const nextIsLiked = Boolean(
+                updated?.isLiked
+                ?? updated?.IsLiked
+                ?? !currentPost?.isLiked
+            );
+
             // Track the like interaction for personalization.
             const post = posts.find((p) => p.id === postId);
             if (post) {
@@ -287,9 +304,9 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                     post.id === postId
                         ? {
                             ...post,
-                            likes: Number(updated?.likesCount ?? post.likes ?? 0),
-                            likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
-                            isLiked: Boolean(updated?.isLiked)
+                            likes: nextLikesCount,
+                            likesCount: nextLikesCount,
+                            isLiked: nextIsLiked
                         }
                         : post
                 );
@@ -314,18 +331,35 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleRepost = async (postId) => {
         try {
-            const updated = await apiService.repostPost(postId);
+            const currentPost = posts.find((item) => item.id === postId);
+            const updated = currentPost?.isReposted
+                ? await apiService.unrepostPost(postId)
+                : await apiService.repostPost(postId);
+
+            const nextRepostsCount = Number(
+                updated?.repostsCount
+                ?? updated?.RepostsCount
+                ?? currentPost?.reposts
+                ?? currentPost?.repostsCount
+                ?? 0
+            );
+            const nextIsReposted = Boolean(
+                updated?.isReposted
+                ?? updated?.IsReposted
+                ?? !currentPost?.isReposted
+            );
+
             setPosts((prev) => prev.map((post) =>
                 post.id === postId
                     ? {
                         ...post,
-                        reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
-                        repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
-                        isReposted: Boolean(updated?.isReposted)
+                        reposts: nextRepostsCount,
+                        repostsCount: nextRepostsCount,
+                        isReposted: nextIsReposted
                     }
                     : post
             ));
-            addTruthAlert('success', 'Repost saved.', null);
+            addTruthAlert('success', nextIsReposted ? 'Repost saved.' : 'Repost removed.', null);
         } catch (error) {
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
@@ -348,17 +382,52 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         setFollowing(socialGraphService.getFollowingIds(currentUser.id));
     };
 
-    const handleBookmark = (post) => {
-        const existing = JSON.parse(localStorage.getItem('wiseBookmarks') || '[]');
-        const alreadySaved = existing.some((item) => item.id === post.id);
+    const handleBookmark = async (post) => {
+        try {
+            const updated = post?.isBookmarked
+                ? await apiService.removeBookmark(post.id)
+                : await apiService.addBookmark(post.id);
 
-        if (alreadySaved) {
-            addTruthAlert('info', 'Post is already in bookmarks.', null);
-            return;
+            const nextBookmarksCount = Number(
+                updated?.data?.bookmarksCount
+                ?? updated?.data?.BookmarksCount
+                ?? post?.bookmarksCount
+                ?? 0
+            );
+            const nextIsBookmarked = Boolean(
+                updated?.data?.isBookmarked
+                ?? updated?.data?.IsBookmarked
+                ?? !post?.isBookmarked
+            );
+
+            setPosts((prev) => prev.map((item) => (
+                item.id === post.id
+                    ? {
+                        ...item,
+                        isBookmarked: nextIsBookmarked,
+                        bookmarksCount: nextBookmarksCount
+                    }
+                    : item
+            )));
+
+            addTruthAlert('success', nextIsBookmarked ? 'Post saved to bookmarks.' : 'Bookmark removed.', null);
+        } catch (error) {
+            const message = typeof error?.message === 'string' && error.message.trim().length > 0
+                ? error.message.trim()
+                : 'Failed to update bookmark.';
+            addTruthAlert('error', message, null);
         }
+    };
 
-        localStorage.setItem('wiseBookmarks', JSON.stringify([post, ...existing]));
-        addTruthAlert('success', 'Post saved to bookmarks.', null);
+    const handleCommentCountChange = (postId, commentsCount) => {
+        setPosts((prev) => prev.map((post) => (
+            post.id === postId
+                ? {
+                    ...post,
+                    commentsCount: Number(commentsCount || 0)
+                }
+                : post
+        )));
     };
 
     const handleVerifyPost = (post) => {
@@ -548,6 +617,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         isFollowing={following.includes(post.userId)}
                         onFollow={handleFollow}
                         onBookmark={handleBookmark}
+                        bookmarkLabel={post.isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                        onCommentCountChange={handleCommentCountChange}
                     />
                 ))}
             </div>

@@ -1027,7 +1027,7 @@ export const apiService = {
     },
     addBookmark: async (postId) => {
         try {
-            return await api.post(`/bookmarks/${postId}`);
+            return await api.post(`/posts/${postId}/bookmark`);
         } catch (error) {
             const status = Number(error?.response?.status || 0);
             if (!isMissingEndpointStatus(status)) {
@@ -1040,12 +1040,12 @@ export const apiService = {
                 normalized.unshift({ id: postId, createdAt: new Date().toISOString() });
             }
             safeWriteJson('wiseBookmarks', normalized);
-            return { data: { success: true, fallback: true } };
+            return { data: { success: true, fallback: true, isBookmarked: true } };
         }
     },
     removeBookmark: async (postId) => {
         try {
-            return await api.delete(`/bookmarks/${postId}`);
+            return await api.delete(`/posts/${postId}/bookmark`);
         } catch (error) {
             const status = Number(error?.response?.status || 0);
             if (!isMissingEndpointStatus(status)) {
@@ -1055,7 +1055,7 @@ export const apiService = {
             const bookmarks = safeReadJson('wiseBookmarks', []);
             const normalized = (Array.isArray(bookmarks) ? bookmarks : []).filter((item) => item?.id !== postId);
             safeWriteJson('wiseBookmarks', normalized);
-            return { data: { success: true, fallback: true } };
+            return { data: { success: true, fallback: true, isBookmarked: false } };
         }
     },
 
@@ -1176,6 +1176,39 @@ export const apiService = {
             return await api.delete(`/SavedMedia/${encodeURIComponent(normalizedMediaId)}`);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to remove saved media item.');
+        }
+    },
+    deleteMusicLibraryItem: async (trackId) => {
+        const normalizedTrackId = String(trackId || '').trim();
+        if (!normalizedTrackId) {
+            throw new Error('Track id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/media/music/${encodeURIComponent(normalizedTrackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove track from your library.');
+        }
+    },
+    deleteVideoLibraryItem: async (videoId) => {
+        const normalizedVideoId = String(videoId || '').trim();
+        if (!normalizedVideoId) {
+            throw new Error('Video id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/videos/${encodeURIComponent(normalizedVideoId)}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (status === 404 || status === 405) {
+                try {
+                    return await api.delete(`/video/${encodeURIComponent(normalizedVideoId)}`);
+                } catch (fallbackError) {
+                    throw normalizeApiError(fallbackError, 'Failed to remove video from your library.');
+                }
+            }
+
+            throw normalizeApiError(error, 'Failed to remove video from your library.');
         }
     },
     getVideoLibrary: async () => {

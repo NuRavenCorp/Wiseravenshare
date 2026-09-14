@@ -323,7 +323,7 @@ export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
                     Cross-platform share
                 </div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {['tiktok', 'facebook', 'instagram', 'twitter', 'web'].map((targetPlatform) => (
+                    {['tiktok', 'facebook', 'instagram', 'youtube', 'linkedin', 'twitter', 'snapchat', 'web'].map((targetPlatform) => (
                         <button
                             key={targetPlatform}
                             type="button"

@@ -1118,3 +1118,61 @@
 .mod-media-drop:hover, .mod-media-drop.filled { background: rgba(59,130,246,.08); border-color: #3b82f6; }
 .mod-caption-track { font-size: .75rem; color: rgba(255,255,255,.55); margin-bottom: 10px; }
 .mod-caption-preview-wrap { min-height: 80px; background: rgba(0,0,0,.25); border-radius: 10px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+
+/* Global quick transport for active track playback outside Track Player tab */
+.mod-mini-transport {
+  position: sticky;
+  bottom: 10px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.mod-mini-track {
+  min-width: 0;
+  flex: 1;
+}
+
+.mod-mini-title {
+  font-size: .78rem;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mod-mini-artist {
+  font-size: .66rem;
+  color: rgba(226, 232, 240, .65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mod-mini-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .mod-mini-transport {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mod-mini-controls {
+    justify-content: center;
+  }
+}

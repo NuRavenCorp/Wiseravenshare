@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
@@ -16,15 +17,21 @@ public sealed class RavensightMusicMediaController : ControllerBase
     private readonly IMusicLibraryStore _musicLibraryStore;
     private readonly IMusicPlaybackStateStore _musicPlaybackStateStore;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly IBlobStorageService _blobStorageService;
+    private readonly ILogger<RavensightMusicMediaController> _logger;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
         IMusicPlaybackStateStore musicPlaybackStateStore,
-        RavensightMediaCatalogStore mediaCatalogStore)
+        RavensightMediaCatalogStore mediaCatalogStore,
+        IBlobStorageService blobStorageService,
+        ILogger<RavensightMusicMediaController> logger)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
         _mediaCatalogStore = mediaCatalogStore;
+        _blobStorageService = blobStorageService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -145,6 +152,120 @@ public sealed class RavensightMusicMediaController : ControllerBase
             cancellationToken);
 
         return Ok(state);
+    }
+
+    [HttpDelete("{trackId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteTrack([FromRoute] string trackId, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        var normalizedTrackId = string.IsNullOrWhiteSpace(trackId) ? string.Empty : trackId.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTrackId))
+        {
+            return BadRequest(new { message = "trackId is required." });
+        }
+
+        var deletedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var blobDeleted = false;
+
+        var bucketDeleted = await _musicLibraryStore.DeleteMusicAsync(userId, normalizedTrackId, cancellationToken);
+        if (bucketDeleted is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(bucketDeleted.FileName))
+            {
+                deletedFileNames.Add(bucketDeleted.FileName);
+            }
+
+            var bucketObjectKey = string.IsNullOrWhiteSpace(bucketDeleted.ObjectKey)
+                ? _blobStorageService.ResolveObjectKey(bucketDeleted.PublicUrl)
+                : bucketDeleted.ObjectKey;
+
+            if (!string.IsNullOrWhiteSpace(bucketObjectKey))
+            {
+                try
+                {
+                    blobDeleted = await _blobStorageService.DeleteAsync(bucketObjectKey, cancellationToken) || blobDeleted;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete music blob for track {TrackId}", normalizedTrackId);
+                }
+            }
+        }
+
+        var catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, normalizedTrackId, cancellationToken);
+        if (catalogAsset is not null && string.Equals(catalogAsset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
+        {
+            deletedFileNames.Add(catalogAsset.FileName);
+
+            var catalogObjectKey = string.IsNullOrWhiteSpace(catalogAsset.RelativePath)
+                ? _blobStorageService.ResolveObjectKey(catalogAsset.PublicUrl ?? string.Empty)
+                : catalogAsset.RelativePath;
+
+            if (!string.IsNullOrWhiteSpace(catalogObjectKey))
+            {
+                try
+                {
+                    blobDeleted = await _blobStorageService.DeleteAsync(catalogObjectKey, cancellationToken) || blobDeleted;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete catalog music blob for track {TrackId}", normalizedTrackId);
+                }
+            }
+
+            await _mediaCatalogStore.MarkAssetDeletedAsync(catalogAsset.Id, DateTime.UtcNow, cancellationToken);
+        }
+
+        foreach (var fileName in deletedFileNames)
+        {
+            var bucketRows = await _musicLibraryStore.DeleteMusicByFileNameAsync(userId, fileName, cancellationToken);
+            foreach (var row in bucketRows)
+            {
+                var objectKey = string.IsNullOrWhiteSpace(row.ObjectKey)
+                    ? _blobStorageService.ResolveObjectKey(row.PublicUrl)
+                    : row.ObjectKey;
+
+                if (!string.IsNullOrWhiteSpace(objectKey))
+                {
+                    try
+                    {
+                        blobDeleted = await _blobStorageService.DeleteAsync(objectKey, cancellationToken) || blobDeleted;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed deleting music blob by filename {FileName}", fileName);
+                    }
+                }
+            }
+        }
+
+        if (deletedFileNames.Count > 0)
+        {
+            var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 500, cancellationToken);
+            foreach (var asset in assets.Where(a => deletedFileNames.Contains(a.FileName)))
+            {
+                await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken);
+            }
+        }
+
+        if (bucketDeleted is null && catalogAsset is null)
+        {
+            return NotFound(new { message = "Track not found." });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            id = normalizedTrackId,
+            blobDeleted,
+            removedFileNames = deletedFileNames.ToArray()
+        });
     }
 
     [HttpPost("save")]

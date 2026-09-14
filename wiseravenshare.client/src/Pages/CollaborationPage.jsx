@@ -111,8 +111,17 @@ const buildSuggestedHashtags = (roomName) => {
     return Array.from(new Set([...normalized, ...defaults]));
 };
 
+const formatRoomTime = (value) => {
+    if (!value) return 'No recent activity';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'No recent activity';
+
+    return date.toLocaleString();
+};
+
 const CollaborationPage = ({ initialRoomId }) => {
-    const { isConnected, isConnecting, error: hubError, connect, createRoom, joinRoom } = useCollaborationHub();
+    const { isConnected, isConnecting, error: hubError, connect, createRoom, joinRoom, getMyRooms } = useCollaborationHub();
     const [platform, setPlatform] = useState('web');
     const [activeRoomId, setActiveRoomId] = useState(initialRoomId || null);
     const [tab, setTab] = useState('create');
@@ -124,6 +133,23 @@ const CollaborationPage = ({ initialRoomId }) => {
     const [hashtagsExpanded, setHashtagsExpanded] = useState(false);
     const [mediaNotes, setMediaNotes] = useState('');
     const [hashtagsInput, setHashtagsInput] = useState('');
+    const [myRooms, setMyRooms] = useState([]);
+    const [myRoomsLoading, setMyRoomsLoading] = useState(false);
+
+    const loadMyRooms = async () => {
+        setMyRoomsLoading(true);
+        try {
+            if (!isConnected) {
+                await connect();
+            }
+            const rooms = await getMyRooms(20);
+            setMyRooms(Array.isArray(rooms) ? rooms : []);
+        } catch {
+            setMyRooms([]);
+        } finally {
+            setMyRoomsLoading(false);
+        }
+    };
 
     useEffect(() => {
         setPlatform(detectPlatform().platform);
@@ -145,6 +171,10 @@ const CollaborationPage = ({ initialRoomId }) => {
         setRoomName(String(handoff.roomName || '').trim());
     }, []);
 
+    useEffect(() => {
+        loadMyRooms();
+    }, []);
+
     // Support deep links like /?room=ROOMID
     useEffect(() => {
         if (!activeRoomId && typeof window !== 'undefined') {
@@ -163,7 +193,10 @@ const CollaborationPage = ({ initialRoomId }) => {
             }
             const room = await createRoom(roomName.trim(), platform);
             const roomId = extractRoomId(room);
-            if (roomId) setActiveRoomId(roomId);
+            if (roomId) {
+                setActiveRoomId(roomId);
+                await loadMyRooms();
+            }
             else setError('Room created but no ID was returned.');
         } catch (err) {
             setError(err?.message || 'Failed to create room.');
@@ -181,8 +214,14 @@ const CollaborationPage = ({ initialRoomId }) => {
             if (!isConnected) {
                 await connect();
             }
-            await joinRoom(roomId);
-            setActiveRoomId(roomId);
+            const joinedRoom = await joinRoom(roomId);
+            const joinedId = extractRoomId(joinedRoom) || roomId;
+            const joinedName = String(joinedRoom?.name || '').trim();
+            if (joinedName) {
+                setRoomName(joinedName);
+            }
+            setActiveRoomId(joinedId);
+            await loadMyRooms();
         } catch (err) {
             setError(err?.message || 'Failed to join room.');
         } finally {
@@ -265,6 +304,74 @@ const CollaborationPage = ({ initialRoomId }) => {
                 {tab === 'create' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                         <div>
+
+                        <div style={card}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700 }}>My Rooms</div>
+                                <button
+                                    type="button"
+                                    onClick={loadMyRooms}
+                                    disabled={myRoomsLoading}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        background: 'transparent',
+                                        color: 'var(--light-color)',
+                                        borderRadius: '8px',
+                                        padding: '5px 10px',
+                                        fontSize: '11px',
+                                        cursor: myRoomsLoading ? 'default' : 'pointer',
+                                        opacity: myRoomsLoading ? 0.6 : 1
+                                    }}
+                                >
+                                    {myRoomsLoading ? 'Loading...' : 'Refresh'}
+                                </button>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                {myRooms.length === 0 && !myRoomsLoading && (
+                                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--light-color)' }}>
+                                        No saved collaboration rooms yet. Create or join a room to persist it here.
+                                    </p>
+                                )}
+
+                                {myRooms.map((room) => {
+                                    const roomId = String(room?.roomId || '').trim();
+                                    if (!roomId) {
+                                        return null;
+                                    }
+
+                                    const roomDisplayName = String(room?.name || '').trim() || `Room ${roomId.slice(0, 8)}`;
+                                    return (
+                                        <button
+                                            key={roomId}
+                                            type="button"
+                                            onClick={() => {
+                                                setRoomName(roomDisplayName);
+                                                setActiveRoomId(roomId);
+                                            }}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255,255,255,0.02)',
+                                                color: 'var(--text-color)',
+                                                borderRadius: '10px',
+                                                padding: '10px 12px',
+                                                textAlign: 'left',
+                                                cursor: 'pointer',
+                                                display: 'grid',
+                                                gap: '2px'
+                                            }}
+                                        >
+                                            <span style={{ fontSize: '13px', fontWeight: 600 }}>{roomDisplayName}</span>
+                                            <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>{roomId}</span>
+                                            <span style={{ fontSize: '10px', color: 'var(--light-color)' }}>
+                                                Last activity: {formatRoomTime(room?.lastActivityAt)}
+                                                {room?.isOnline ? ' • You are online' : ''}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                             <label style={{ display: 'block', fontSize: '12px', color: 'var(--light-color)', marginBottom: '6px' }}>
                                 Room Name
                             </label>

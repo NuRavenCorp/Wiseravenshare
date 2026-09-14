@@ -1299,6 +1299,7 @@ const FMRadioPage = () => {
         artist: String(currentTrack.artist || '').trim() || parseMeta(currentTrack.name || '').artist,
       }
     : null;
+  const showGlobalTransport = Boolean(currentTrack) && tab !== 'cassette';
 
   const renderCreatorStudio = (isModern = false) => (
     <div className={isModern ? 'mod-creator-shell' : 'wr-creator-shell'}>
@@ -2045,6 +2046,24 @@ const FMRadioPage = () => {
       )}
 
       {tab === 'creator' && renderCreatorStudio(true)}
+
+      {showGlobalTransport && (
+        <div className="mod-mini-transport" role="region" aria-label="Track player quick controls">
+          <div className="mod-mini-track">
+            <div className="mod-mini-title">{meta?.title || currentTrack?.name || 'Track loaded'}</div>
+            <div className="mod-mini-artist">{meta?.artist || 'Unknown artist'}</div>
+          </div>
+          <div className="mod-mini-controls">
+            <button className="mod-ctrl sm" onClick={skipPrev} disabled={!library.length} title="Previous">⏮</button>
+            <button className={`mod-ctrl play${isPlaying ? ' playing' : ''}`} onClick={isPlaying ? pause : play} title={isPlaying ? 'Pause' : 'Play'}>
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+            <button className="mod-ctrl" onClick={stop} title="Stop">⏹</button>
+            <button className="mod-ctrl sm" onClick={skipNext} disabled={!library.length} title="Next">⏭</button>
+            <button className="mod-pill" onClick={() => setTab('cassette')} title="Open track player">Open Player</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 

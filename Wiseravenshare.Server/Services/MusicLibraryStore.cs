@@ -15,6 +15,24 @@ public interface IMusicLibraryStore
         SaveRavensightMusicDto dto,
         string? userStorageIdentity,
         CancellationToken cancellationToken = default);
+
+    Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class MusicLibraryDeleteResult
+{
+    public string TrackId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ObjectKey { get; init; } = string.Empty;
+    public string PublicUrl { get; init; } = string.Empty;
 }
 
 public sealed class BucketMusicLibraryStore : IMusicLibraryStore
@@ -139,6 +157,146 @@ ORDER BY created_at DESC;";
             UploadedAt = saved.SavedAtUtc.ToString("O"),
             SizeBytes = saved.SizeBytes
         };
+    }
+
+    public async Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+        {
+            return null;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE owner_user_id = @user_id
+  AND id = @track_id
+  AND deleted_at IS NULL
+LIMIT 1;";
+
+        await using var read = new NpgsqlCommand(readSql, connection);
+        read.Parameters.AddWithValue("user_id", userId);
+        read.Parameters.AddWithValue("track_id", trackId.Trim());
+
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+        var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+        var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+        var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+        var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+        await reader.CloseAsync();
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE owner_user_id = @user_id
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("track_id", trackId.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return new MusicLibraryDeleteResult
+        {
+            TrackId = id,
+            FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+            ObjectKey = objectKey,
+            PublicUrl = publicUrl
+        };
+    }
+
+    public async Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE owner_user_id = @user_id
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  )
+ORDER BY created_at DESC;";
+
+        var results = new List<MusicLibraryDeleteResult>();
+        await using (var read = new NpgsqlCommand(readSql, connection))
+        {
+            read.Parameters.AddWithValue("user_id", userId);
+            read.Parameters.AddWithValue("file_name", fileName.Trim());
+
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+                var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+                results.Add(new MusicLibraryDeleteResult
+                {
+                    TrackId = id,
+                    FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+                    ObjectKey = objectKey,
+                    PublicUrl = publicUrl
+                });
+            }
+        }
+
+        if (results.Count == 0)
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE owner_user_id = @user_id
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  );";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("file_name", fileName.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return results;
     }
 
     private async Task InsertBucketObjectAsync(

@@ -1528,7 +1528,13 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
     options.KnownProxies.Clear();
 });
 
-builder.Services.AddControllers();
+builder.Services.AddScoped<FeatureCompartmentLockFilter>();
+builder.Services.AddScoped<IFeatureCompartmentService, FeatureCompartmentService>();
+builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.AddService<FeatureCompartmentLockFilter>();
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
@@ -1583,7 +1589,7 @@ builder.Services.AddOutputCache(options =>
 
 builder.Services.AddSignalR();
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
-builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
+builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
@@ -1654,12 +1660,17 @@ builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
-// AI assistant — select provider via AiProvider config (deepseek|ollama|llamacpp).
+// AI assistant — select provider via AiProvider config (gradient|deepseek|ollama|llamacpp).
+// Gradient: Uses DigitalOcean Gradient Agentic Cloud inference endpoint.
 // DeepSeek: Uses cloud API with advanced reasoning.
 // Ollama: Uses local OpenAI-compatible API (requires Ollama container).
 // LlamaCPP: Uses local llama-server (default, inside compose network).
 var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
-if (aiProvider == "deepseek")
+if (aiProvider == "gradient")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
+}
+else if (aiProvider == "deepseek")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
@@ -1671,6 +1682,7 @@ else
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
+builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
 builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
 builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
