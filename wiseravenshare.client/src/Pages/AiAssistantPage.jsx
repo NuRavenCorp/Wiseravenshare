@@ -23,6 +23,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const [streaming, setStreaming] = useState(false);
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState('');
+    const [useCrawlerContext, setUseCrawlerContext] = useState(true);
     const [ollmaInitializing, setOllamaInitializing] = useState(true);
     const [ollmaError, setOllamaError] = useState(null);
     const scrollRef = useRef(null);
@@ -104,7 +105,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         return next;
                     });
                 },
-                controller.signal
+                controller.signal,
+                useCrawlerContext
             );
             if (!acc.trim()) {
                 setMessages((prev) => {
@@ -207,6 +209,14 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--light-color)' }}>
+                        <input
+                            type="checkbox"
+                            checked={useCrawlerContext}
+                            onChange={(e) => setUseCrawlerContext(e.target.checked)}
+                        />
+                        Crawler context
+                    </label>
                     {models.length > 0 && (
                         <select
                             value={selectedModel}
