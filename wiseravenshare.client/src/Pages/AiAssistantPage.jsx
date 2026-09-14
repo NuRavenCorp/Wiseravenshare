@@ -7,14 +7,15 @@ const SUGGESTIONS = [
     'How do I cross-post to all platforms?',
     'Why did my TikTok share fail?',
     'How do I connect my Instagram account?',
-    'What is the Truth Engine?'
+    'What is the Truth Engine?',
+    'What pages are trending in the crawler map right now?'
 ];
 
 const AiAssistantPage = ({ addTruthAlert }) => {
     const [messages, setMessages] = useState([
         {
             role: 'assistant',
-            content: "Hi! I'm the Wiseravenshare Assistant. Ask me anything about posting, cross-sharing, or using the platform."
+            content: "Hi! I'm the AI Assistant. I can answer platform questions and use crawler insights about site pathways and trending content."
         }
     ]);
     const [input, setInput] = useState('');
@@ -145,7 +146,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
         setMessages([
             {
                 role: 'assistant',
-                content: "Hi! I'm the Wiseravenshare Assistant. Ask me anything about posting, cross-sharing, or using the platform."
+                content: "Hi! I'm the AI Assistant. I can answer platform questions and use crawler insights about site pathways and trending content."
             }
         ]);
     };
@@ -200,9 +201,9 @@ const AiAssistantPage = ({ addTruthAlert }) => {
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '10px', flexWrap: 'wrap' }}>
                 <div>
-                    <h2 style={{ margin: 0, fontSize: '20px' }}>🦉 Raven Assistant</h2>
+                    <h2 style={{ margin: 0, fontSize: '20px' }}>🦉 AI Assistant</h2>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Your in-app AI helper for platform questions and support.
+                        DigitalOcean AI assistant with crawler-aware platform guidance.
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -332,7 +333,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={ollmaInitializing ? "Waiting for Ollama to initialize..." : ollmaError ? "Ollama is offline. Please start it." : "Ask the Raven Assistant…"}
+                    placeholder={ollmaInitializing ? "Waiting for Ollama to initialize..." : ollmaError ? "Ollama is offline. Please start it." : "Ask the AI Assistant..."}
                     rows={2}
                     disabled={loading || ollmaInitializing || ollmaError}
                     style={{
