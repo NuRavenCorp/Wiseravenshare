@@ -21,6 +21,23 @@ const scriptBlocks = [
     'Call-to-action and audience prompt'
 ];
 
+const scriptPipelineSegments = [
+    { key: 'segment1', label: 'Segment 1', helper: 'Opening hook and audience framing' },
+    { key: 'segment2', label: 'Segment 2', helper: 'Guest introduction with context and tone' },
+    { key: 'segment3', label: 'Segment 3', helper: 'Three key takeaways and proof points' },
+    { key: 'segment4', label: 'Segment 4', helper: 'Call-to-action and audience prompt' }
+];
+
+const createEmptyScriptPipeline = () => ({
+    segment1: '',
+    segment2: '',
+    segment3: '',
+    segment4: ''
+});
+
+const SHARED_SCRIPT_STORAGE_KEY = 'wiseSharedPodcastScriptPayload';
+const PODCAST_AUTOSAVE_STORAGE_KEY = 'wisePodcastSessionAutosave';
+
 const studioModes = ['Phone', 'Tablet', 'Desktop', 'Camera', 'Remote guest'];
 const controlRoles = ['Owner', 'Producer', 'Host', 'Editor', 'Script Lead', 'Guest'];
 
@@ -224,6 +241,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [status, setStatus] = useState('Ready to record');
     const [selectedMode, setSelectedMode] = useState('Desktop');
     const [scriptText, setScriptText] = useState('');
+    const [scriptPipeline, setScriptPipeline] = useState(createEmptyScriptPipeline);
     const [controlRole, setControlRole] = useState('Owner');
     const [storyAngle, setStoryAngle] = useState('');
     const [urgency, setUrgency] = useState('Standard');
@@ -272,6 +290,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [guestNameInput, setGuestNameInput] = useState('');
     const [newPageType, setNewPageType] = useState('Script');
     const [newPageTitle, setNewPageTitle] = useState('');
+    const [lastAutosavedAt, setLastAutosavedAt] = useState('');
 
     // Refs
     const videoRef = useRef(null);
@@ -281,6 +300,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const broadcastChannelRef = useRef(null);
+    const sharedScriptVersionRef = useRef('');
+    const autosaveVersionRef = useRef('');
+    const autosaveRestoreAppliedRef = useRef(false);
 
     const actorKeys = useMemo(() => {
         const keys = [
@@ -298,8 +320,69 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
     const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
     const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
+    const canEditScriptPipeline = ['Owner', 'Producer', 'Host', 'Editor'].includes(controlRole);
+    const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
 
     const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
+
+    const buildSessionSnapshot = () => ({
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    });
+
+    const applySessionSnapshot = (snapshot) => {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'title')) setTitle(String(snapshot.title || ''));
+        if (snapshot.format && formatDefinitions[snapshot.format]) setFormat(snapshot.format);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'scriptText')) setScriptText(String(snapshot.scriptText || ''));
+
+        if (snapshot.scriptPipeline && typeof snapshot.scriptPipeline === 'object') {
+            setScriptPipeline({
+                segment1: String(snapshot.scriptPipeline.segment1 || ''),
+                segment2: String(snapshot.scriptPipeline.segment2 || ''),
+                segment3: String(snapshot.scriptPipeline.segment3 || ''),
+                segment4: String(snapshot.scriptPipeline.segment4 || '')
+            });
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'storyAngle')) setStoryAngle(String(snapshot.storyAngle || ''));
+        if (snapshot.urgency) setUrgency(String(snapshot.urgency));
+        if (snapshot.selectedMode) setSelectedMode(String(snapshot.selectedMode));
+        if (typeof snapshot.runOrderApproved === 'boolean') setRunOrderApproved(snapshot.runOrderApproved);
+        if (Array.isArray(snapshot.teamMembersList)) setTeamMembersList(snapshot.teamMembersList);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorId')) setTeamCreatorId(String(snapshot.teamCreatorId || ''));
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorLabel')) setTeamCreatorLabel(String(snapshot.teamCreatorLabel || ''));
+        if (Array.isArray(snapshot.designeeKeys)) setDesigneeKeys(snapshot.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+        if (Array.isArray(snapshot.workspacePages) && snapshot.workspacePages.length > 0) setWorkspacePages(snapshot.workspacePages);
+        if (snapshot.activeWorkspacePageId) setActiveWorkspacePageId(String(snapshot.activeWorkspacePageId));
+        if (snapshot.workflowStage) setWorkflowStage(String(snapshot.workflowStage));
+        if (typeof snapshot.isCameraOn === 'boolean') setIsCameraOn(snapshot.isCameraOn);
+        if (typeof snapshot.isMuted === 'boolean') setIsMuted(snapshot.isMuted);
+        if (typeof snapshot.guestCamOn === 'boolean') setGuestCamOn(snapshot.guestCamOn);
+        if (typeof snapshot.guestMuted === 'boolean') setGuestMuted(snapshot.guestMuted);
+        if (typeof snapshot.guestConnected === 'boolean') setGuestConnected(snapshot.guestConnected);
+    };
 
     useEffect(() => {
         if (teamCreatorId || !user?.id) {
@@ -485,6 +568,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             title: overrides.title ?? title,
             format: overrides.format ?? format,
             scriptText: overrides.scriptText ?? scriptText,
+            scriptPipeline: overrides.scriptPipeline ?? scriptPipeline,
             storyAngle: overrides.storyAngle ?? storyAngle,
             urgency: overrides.urgency ?? urgency,
             selectedMode: overrides.selectedMode ?? selectedMode,
@@ -497,6 +581,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
             workspacePages: overrides.workspacePages ?? workspacePages,
             activeWorkspacePageId: overrides.activeWorkspacePageId ?? activeWorkspacePageId,
             workflowStage: overrides.workflowStage ?? workflowStage,
+            isCameraOn: overrides.isCameraOn ?? isCameraOn,
+            isMuted: overrides.isMuted ?? isMuted,
+            guestCamOn: overrides.guestCamOn ?? guestCamOn,
+            guestMuted: overrides.guestMuted ?? guestMuted,
+            guestConnected: overrides.guestConnected ?? guestConnected,
+            forceStopCamera: Boolean(overrides.forceStopCamera),
+            forceStopFeed: Boolean(overrides.forceStopFeed),
             senderRole: controlRole,
             timestamp: new Date().toISOString()
         };
@@ -516,6 +607,64 @@ const PodcastStudioPage = ({ onNavigate }) => {
         }
 
         setTandemSyncedAt(new Date().toLocaleTimeString());
+    };
+
+    const applyFeedShutdown = (statusMessage) => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch {
+                // Ignore stop errors while forcing feed shutdown.
+            }
+        }
+
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+        }
+
+        if (streamRef.current) {
+            try {
+                streamRef.current.getTracks().forEach((track) => track.stop());
+            } catch {
+                // Ignore track shutdown errors.
+            }
+            streamRef.current = null;
+        }
+
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+
+        if (guestVideoRef.current) {
+            guestVideoRef.current.srcObject = null;
+        }
+
+        setIsRecording(false);
+        setIsPaused(false);
+        setIsCameraOn(false);
+        setIsMuted(true);
+        setGuestCamOn(false);
+        setGuestMuted(true);
+        setGuestConnected(false);
+        setStatus(statusMessage);
+    };
+
+    const handleForceShutdownFeed = () => {
+        if (!canForceShutdownFeed) {
+            setStatus('Only upper-level designated studio members can shut down camera and footage feeds.');
+            return;
+        }
+
+        applyFeedShutdown('Studio camera and footage feeds shut down by upper-level control.');
+        broadcastTandemState({
+            isCameraOn: false,
+            isMuted: true,
+            guestCamOn: false,
+            guestMuted: true,
+            guestConnected: false,
+            forceStopCamera: true,
+            forceStopFeed: true
+        });
     };
 
     useEffect(() => {
@@ -538,10 +687,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 if (data?.type === 'PODCAST_TANDEM_SYNC') {
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -551,6 +713,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                     if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                     if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 }
             };
@@ -564,10 +730,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     const data = JSON.parse(e.newValue);
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -577,6 +756,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                     if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                     if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 } catch {
                     // Ignore parse error
@@ -590,10 +773,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 const data = JSON.parse(savedState);
                 if (data.title) setTitle(data.title);
                 if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                if (data.scriptText) setScriptText(data.scriptText);
+                if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                    setScriptPipeline({
+                        segment1: String(data.scriptPipeline.segment1 || ''),
+                        segment2: String(data.scriptPipeline.segment2 || ''),
+                        segment3: String(data.scriptPipeline.segment3 || ''),
+                        segment4: String(data.scriptPipeline.segment4 || '')
+                    });
+                }
                 if (data.storyAngle) setStoryAngle(data.storyAngle);
                 if (data.urgency) setUrgency(data.urgency);
                 if (data.selectedMode) setSelectedMode(data.selectedMode);
+                if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                 if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                 if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                 if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -603,6 +799,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                 if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                 if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                if (data.forceStopCamera || data.forceStopFeed) {
+                    applyFeedShutdown('Studio camera and footage feeds restored in shutdown state by upper-level control.');
+                }
+                if (data.shared) setStatus('Shared script restored for dissemination.');
             }
         } catch {
             // Ignore restore parse error.
@@ -714,6 +914,276 @@ const PodcastStudioPage = ({ onNavigate }) => {
             // Ignore local storage restore failures.
         }
     }, []);
+
+    useEffect(() => {
+        if (autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        autosaveRestoreAppliedRef.current = true;
+
+        const restoreFromLocalAutosave = () => {
+            try {
+                const raw = localStorage.getItem(PODCAST_AUTOSAVE_STORAGE_KEY);
+                if (!raw) {
+                    return false;
+                }
+
+                const parsed = JSON.parse(raw);
+                const snapshot = parsed?.snapshot;
+                const version = String(parsed?.version || '').trim();
+
+                if (!snapshot || typeof snapshot !== 'object') {
+                    return false;
+                }
+
+                applySessionSnapshot(snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from local autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoreFromServerAutosave = async () => {
+            try {
+                const response = await authService.getPodcastSessionSnapshot('main');
+                if (!response?.hasSnapshot || !response?.snapshot) {
+                    return false;
+                }
+
+                const version = String(response.version || '').trim();
+                if (version && version === autosaveVersionRef.current) {
+                    return true;
+                }
+
+                applySessionSnapshot(response.snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from cloud autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoredLocal = restoreFromLocalAutosave();
+        if (!restoredLocal) {
+            void restoreFromServerAutosave();
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        const persistAutosave = async () => {
+            const snapshot = buildSessionSnapshot();
+            const version = Date.now().toString();
+
+            try {
+                localStorage.setItem(PODCAST_AUTOSAVE_STORAGE_KEY, JSON.stringify({ version, snapshot }));
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Ignore local autosave errors.
+            }
+
+            try {
+                const response = await authService.savePodcastSessionSnapshot({
+                    roomId: 'main',
+                    version,
+                    snapshot
+                });
+
+                const committedVersion = String(response?.version || version).trim();
+                autosaveVersionRef.current = committedVersion;
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Keep local autosave even if cloud snapshot fails.
+            }
+        };
+
+        const timeoutId = window.setTimeout(() => {
+            void persistAutosave();
+        }, 1000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    ]);
+
+    useEffect(() => {
+        let active = true;
+
+        const applyRemoteSharedScript = (payload) => {
+            const hasSharedScript = payload?.hasSharedScript === true;
+            if (!hasSharedScript) {
+                return;
+            }
+
+            const incomingVersion = String(payload?.version || payload?.sharedAtUtc || '').trim();
+            if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                return;
+            }
+
+            if (incomingVersion) {
+                sharedScriptVersionRef.current = incomingVersion;
+            }
+
+            const incomingScript = String(payload?.scriptText || '').trim();
+            const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                ? {
+                    segment1: String(payload.scriptPipeline.segment1 || ''),
+                    segment2: String(payload.scriptPipeline.segment2 || ''),
+                    segment3: String(payload.scriptPipeline.segment3 || ''),
+                    segment4: String(payload.scriptPipeline.segment4 || '')
+                }
+                : null;
+
+            if (incomingScript) {
+                setScriptText(incomingScript);
+            }
+
+            if (incomingPipeline) {
+                setScriptPipeline(incomingPipeline);
+            }
+
+            if (incomingScript && activeWorkspacePage) {
+                setWorkspacePages((previous) => previous.map((page) => (
+                    page.id === activeWorkspacePage.id
+                        ? { ...page, content: incomingScript }
+                        : page
+                )));
+            }
+
+            setStatus('Shared script synced from the team cloud room.');
+        };
+
+        const loadSharedScriptFromServer = async () => {
+            try {
+                const payload = await authService.getSharedPodcastScript('main');
+                if (!active) {
+                    return;
+                }
+
+                applyRemoteSharedScript(payload);
+            } catch {
+                // Server sync unavailable; keep local tandem sync active.
+            }
+        };
+
+        void loadSharedScriptFromServer();
+
+        const intervalId = window.setInterval(() => {
+            void loadSharedScriptFromServer();
+        }, 10000);
+
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                void loadSharedScriptFromServer();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            active = false;
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
+    }, [activeWorkspacePage]);
+
+    useEffect(() => {
+        const applySharedPayload = (raw) => {
+            try {
+                if (!raw) {
+                    return;
+                }
+
+                const payload = JSON.parse(raw);
+                const incomingVersion = String(payload?.version || payload?.sharedAt || '').trim();
+                if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                    return;
+                }
+
+                if (incomingVersion) {
+                    sharedScriptVersionRef.current = incomingVersion;
+                }
+
+                const incomingScript = String(payload?.scriptText || '').trim();
+                const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                    ? {
+                        segment1: String(payload.scriptPipeline.segment1 || ''),
+                        segment2: String(payload.scriptPipeline.segment2 || ''),
+                        segment3: String(payload.scriptPipeline.segment3 || ''),
+                        segment4: String(payload.scriptPipeline.segment4 || '')
+                    }
+                    : null;
+
+                if (incomingScript) {
+                    setScriptText(incomingScript);
+                }
+
+                if (incomingPipeline) {
+                    setScriptPipeline(incomingPipeline);
+                }
+
+                if (incomingScript && activeWorkspacePage) {
+                    setWorkspacePages((previous) => previous.map((page) => (
+                        page.id === activeWorkspacePage.id
+                            ? { ...page, content: incomingScript }
+                            : page
+                    )));
+                }
+
+                if (payload?.shared) {
+                    setStatus('Shared script received for dissemination.');
+                }
+            } catch {
+                // Ignore malformed shared payload
+            }
+        };
+
+        const handleSharedPayloadStorage = (event) => {
+            if (event.key === SHARED_SCRIPT_STORAGE_KEY && event.newValue) {
+                applySharedPayload(event.newValue);
+            }
+        };
+
+        window.addEventListener('storage', handleSharedPayloadStorage);
+        applySharedPayload(localStorage.getItem(SHARED_SCRIPT_STORAGE_KEY));
+        return () => {
+            window.removeEventListener('storage', handleSharedPayloadStorage);
+        };
+    }, [activeWorkspacePage]);
 
     // Recording Functions
     const startRecording = async () => {
@@ -1142,6 +1612,39 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setStatus(`Connection broken for ${member?.name || 'team member'}.`);
     };
 
+    const toggleJoinRoom = (member) => {
+        if (!isCreator && !isDesignee) {
+            setStatus('Only the team creator or a workflow designee can admit members into the room.');
+            return;
+        }
+
+        const targetKey = resolveMemberKey(member);
+        if (!targetKey) {
+            setStatus('This person needs a username/email before room admission can be toggled.');
+            return;
+        }
+
+        const updatedList = teamMembersList.map((entry) => {
+            if (resolveMemberKey(entry) !== targetKey) {
+                return entry;
+            }
+
+            const currentlyJoined = String(entry?.loginState || '').toLowerCase() === 'online';
+            return {
+                ...entry,
+                coupled: !currentlyJoined,
+                loginState: currentlyJoined ? 'pending' : 'online',
+                loginStatus: currentlyJoined ? 'Awaiting login in room' : 'Joined room',
+                status: currentlyJoined ? 'Waiting for room admission' : 'Synced in Tandem',
+                syncedAt: new Date().toLocaleTimeString()
+            };
+        });
+
+        setTeamMembersList(updatedList);
+        broadcastTandemState({ teamMembersList: updatedList });
+        setStatus(`Room admission updated for ${member?.name || 'team member'}.`);
+    };
+
     const addWorkspacePage = () => {
         const page = createWorkspacePage(newPageType, newPageTitle);
         const nextPages = [page, ...workspacePages];
@@ -1187,13 +1690,96 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const handleShareScript = () => {
+        const sharedAt = new Date().toISOString();
+        const sharedPayload = {
+            scriptText,
+            scriptPipeline,
+            shared: true,
+            sharedAt,
+            version: sharedAt,
+            senderRole: controlRole
+        };
+
         try {
             localStorage.setItem('wiseSharedPodcastScript', scriptText);
+            localStorage.setItem(SHARED_SCRIPT_STORAGE_KEY, JSON.stringify(sharedPayload));
         } catch {
             // Best effort only.
         }
-        broadcastTandemState({ scriptText, shared: true });
-        setStatus('Script shared and synced across all connected tandem team members.');
+
+        broadcastTandemState({ scriptText, scriptPipeline, shared: true, sharedAt });
+
+        const remotePayload = {
+            roomId: 'main',
+            scriptText,
+            scriptPipeline: {
+                segment1: String(scriptPipeline.segment1 || ''),
+                segment2: String(scriptPipeline.segment2 || ''),
+                segment3: String(scriptPipeline.segment3 || ''),
+                segment4: String(scriptPipeline.segment4 || '')
+            }
+        };
+
+        void authService.sharePodcastScript(remotePayload)
+            .then((response) => {
+                if (response?.version) {
+                    sharedScriptVersionRef.current = String(response.version);
+                }
+                setStatus('Script shared for dissemination across all connected tandem team members.');
+            })
+            .catch(() => {
+                setStatus('Script shared locally. Team cloud sync will retry on next refresh.');
+            });
+    };
+
+    const updateScriptPipelineSegment = (segmentKey, value) => {
+        if (!canEditScriptPipeline) {
+            setStatus('Only Owner, Producer, Director/Editor, or Host can fill script pipeline segments.');
+            return;
+        }
+
+        const nextPipeline = {
+            ...scriptPipeline,
+            [segmentKey]: value
+        };
+        setScriptPipeline(nextPipeline);
+        setRunOrderApproved(false);
+        broadcastTandemState({ scriptPipeline: nextPipeline, runOrderApproved: false });
+    };
+
+    const applyScriptPipelineToScript = () => {
+        const composed = scriptPipelineSegments
+            .map((segment) => {
+                const value = String(scriptPipeline[segment.key] || '').trim();
+                if (!value) {
+                    return '';
+                }
+                return `${segment.label}:\n${value}`;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+
+        if (!composed) {
+            setStatus('Fill at least one script pipeline segment before applying to live script.');
+            return;
+        }
+
+        setScriptText(composed);
+        setRunOrderApproved(false);
+        if (activeWorkspacePage) {
+            const updatedPages = workspacePages.map((page) => (
+                page.id === activeWorkspacePage.id
+                    ? { ...page, content: composed }
+                    : page
+            ));
+            setWorkspacePages(updatedPages);
+            broadcastTandemState({ scriptText: composed, scriptPipeline, workspacePages: updatedPages, runOrderApproved: false });
+            setStatus('Script pipeline applied to live script.');
+            return;
+        }
+
+        broadcastTandemState({ scriptText: composed, scriptPipeline, runOrderApproved: false });
+        setStatus('Script pipeline applied to live script.');
     };
 
     const setRemoteGuestMode = () => {
@@ -1230,6 +1816,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setTitle('');
         setStoryAngle('');
         setScriptText('');
+        setScriptPipeline(createEmptyScriptPipeline());
         setRunOrderApproved(false);
         setWorkspacePages(clearedPages);
         setWorkflowStage('Plan');
@@ -1243,6 +1830,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             title: '',
             storyAngle: '',
             scriptText: '',
+            scriptPipeline: createEmptyScriptPipeline(),
             runOrderApproved: false,
             workspacePages: clearedPages,
             workflowStage: 'Plan'
@@ -1321,7 +1909,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const hasCoreBrief = Boolean(String(title || '').trim()) && Boolean(String(storyAngle || '').trim());
-    const hasScript = Boolean(String(scriptText || '').trim());
+    const hasScriptPipeline = scriptPipelineSegments.some((segment) => Boolean(String(scriptPipeline[segment.key] || '').trim()));
+    const hasScript = Boolean(String(scriptText || '').trim()) || hasScriptPipeline;
     const hasTeamReady = teamMembersList.some((member) => member?.coupled !== false);
     const hasRecording = Boolean(recordedVideoUrl);
 
@@ -1329,7 +1918,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
         { id: 'format', label: 'Format and urgency selected', done: Boolean(format && urgency), hint: 'Pick show structure and dispatch priority' },
         { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
-        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Write your own script using the helper prompts' },
+        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Fill Script Pipeline segments or write your own script' },
         { id: 'approval', label: 'Run order approved', done: runOrderApproved, hint: 'Lock segment order before recording' },
         { id: 'publish', label: 'Recording saved to library', done: hasSavedRecording, hint: 'Record, review, then save to Ravensight Library' }
     ];
@@ -1355,7 +1944,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         if (!hasScript) {
             setWorkflowStage('Script');
-            setStatus('Add your own script content before continuing. Helpers are shown, but no script is prefilled.');
+            setStatus('Fill Script Pipeline segments or add your own script content before continuing. No prewritten script is inserted.');
             return;
         }
 
@@ -1463,6 +2052,25 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
                         {/* Top Action Buttons */}
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={handleForceShutdownFeed}
+                                disabled={!canForceShutdownFeed}
+                                style={{
+                                    border: '1px solid rgba(248, 113, 113, 0.7)',
+                                    background: 'rgba(127, 29, 29, 0.5)',
+                                    color: '#fecaca',
+                                    borderRadius: '999px',
+                                    padding: '10px 16px',
+                                    fontWeight: '700',
+                                    cursor: canForceShutdownFeed ? 'pointer' : 'not-allowed',
+                                    opacity: canForceShutdownFeed ? 1 : 0.55
+                                }}
+                                title="Upper-level control: shut down all active camera and footage feeds"
+                            >
+                                Cut footage feed
+                            </button>
+
                             {!isRecording ? (
                                 <button
                                     type="button"
@@ -1578,6 +2186,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
                         Creator: {teamCreatorLabel || 'Pending'} · Designees: {designeeKeys.length} · Current stage: {workflowStage}
                     </div>
+                    {lastAutosavedAt && (
+                        <div style={{ fontSize: '12px', color: '#86efac' }}>
+                            Autosaved at {lastAutosavedAt}
+                        </div>
+                    )}
                 </div>
 
                 <div style={{
@@ -2299,9 +2912,55 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     }}
                                 />
                                 <div style={{ fontSize: '12px', color: '#93c5fd' }}>
-                                    Helper only: define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
+                                    Helper only: no prewritten script is inserted. Define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
                                 </div>
                             </label>
+
+                            <div style={{ display: 'grid', gap: '10px', marginTop: '6px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                    <span style={{ color: 'var(--light-color)', fontWeight: 700 }}>Script Pipeline Segment Form (1-4)</span>
+                                    <button
+                                        type="button"
+                                        onClick={applyScriptPipelineToScript}
+                                        disabled={!canEditScriptPipeline}
+                                        style={{
+                                            border: '1px solid var(--highlight-color)',
+                                            background: 'rgba(56, 189, 248, 0.15)',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '10px',
+                                            padding: '8px 12px',
+                                            cursor: canEditScriptPipeline ? 'pointer' : 'not-allowed',
+                                            opacity: canEditScriptPipeline ? 1 : 0.65,
+                                            fontWeight: 700
+                                        }}
+                                    >
+                                        Apply Pipeline to Live Script
+                                    </button>
+                                </div>
+
+                                {scriptPipelineSegments.map((segment) => (
+                                    <label key={segment.key} style={{ display: 'grid', gap: '6px' }}>
+                                        <span style={{ color: 'var(--light-color)' }}>{segment.label}</span>
+                                        <textarea
+                                            value={scriptPipeline[segment.key] || ''}
+                                            placeholder={segment.helper}
+                                            onChange={(event) => updateScriptPipelineSegment(segment.key, event.target.value)}
+                                            rows={3}
+                                            disabled={!canEditScriptPipeline}
+                                            style={{
+                                                padding: '10px',
+                                                borderRadius: '10px',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255,255,255,0.03)',
+                                                color: 'var(--text-color)',
+                                                resize: 'vertical',
+                                                opacity: canEditScriptPipeline ? 1 : 0.65
+                                            }}
+                                        />
+                                        <span style={{ fontSize: '12px', color: '#93c5fd' }}>{segment.helper}</span>
+                                    </label>
+                                ))}
+                            </div>
 
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                                 <button
@@ -2522,6 +3181,27 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                             <div>{member.locale}</div>
                                             <div>{member.device}</div>
                                             <div style={{ display: 'flex', gap: '6px', marginTop: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleJoinRoom(member)}
+                                                    disabled={!isCreator && !isDesignee}
+                                                    style={{
+                                                        border: '1px solid rgba(16, 185, 129, 0.55)',
+                                                        borderRadius: '6px',
+                                                        background: member.loginState === 'online'
+                                                            ? 'rgba(14, 116, 144, 0.25)'
+                                                            : 'rgba(16, 185, 129, 0.25)',
+                                                        color: member.loginState === 'online' ? '#bae6fd' : '#86efac',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: (isCreator || isDesignee) ? 'pointer' : 'not-allowed',
+                                                        opacity: (isCreator || isDesignee) ? 1 : 0.65,
+                                                        fontWeight: 700
+                                                    }}
+                                                    title="JoinRoom toggle admission"
+                                                >
+                                                    {member.loginState === 'online' ? 'JoinRoom: ON' : 'JoinRoom: OFF'}
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => toggleDesignee(member)}
