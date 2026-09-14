@@ -7,6 +7,7 @@ using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers
@@ -140,10 +141,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> LikePost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.LikePostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.LikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error liking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to like post. Please try again." });
+            }
         }
 
         /// <summary>
@@ -154,10 +167,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnlikePost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.UnlikePostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnlikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unliking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to unlike post. Please try again." });
+            }
         }
 
         /// <summary>
