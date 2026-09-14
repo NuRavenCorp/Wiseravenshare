@@ -125,11 +125,17 @@ public class PostService : IPostService
 
         // Create post
         var mediaUrls = NormalizeMediaUrls(dto);
+        if (!Enum.TryParse<PostType>(dto.Type, true, out var parsedPostType))
+        {
+            _logger.LogWarning("Unknown post type '{PostType}' received during post creation for user {UserId}; defaulting to Text.", dto.Type, userId);
+            parsedPostType = PostType.Text;
+        }
+
         var post = new Post
         {
             UserId = userId,
             Content = dto.Content,
-            Type = Enum.Parse<PostType>(dto.Type, true),
+            Type = parsedPostType,
             MediaUrls = mediaUrls,
             MediaMetadata = BuildMediaMetadata(dto, mediaUrls),
             TruthSources = BuildProvenanceMetadata(dto.Provenance),

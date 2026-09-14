@@ -193,7 +193,7 @@ const AmateurJournalistPage = ({ onNavigate }) => {
 
         const kind = getMediaKind(file);
         if (!kind) {
-            setErrorMessage('Only image or video files are allowed.');
+            setErrorMessage('Only image, video, or document files are allowed.');
             setSelectedFile(null);
             return;
         }
@@ -258,7 +258,8 @@ const AmateurJournalistPage = ({ onNavigate }) => {
 
             if (selectedFile) {
                 const mediaType = getMediaKind(selectedFile);
-                postType = mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : 'Document';
+                // Server post types do not include "Document", so keep document-backed posts as Text with media attachment.
+                postType = mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : 'Text';
                 setUploadStatus('Uploading story file...');
 
                 try {
