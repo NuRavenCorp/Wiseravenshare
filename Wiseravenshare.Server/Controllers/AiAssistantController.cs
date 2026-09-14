@@ -45,18 +45,34 @@ public class AiAssistantController : ControllerBase
     {
         try
         {
-            var provider = (_configuration["AiProvider"] ?? "gradient").Trim();
+            var provider = (_configuration["AiProvider"] ?? "digitalocean").Trim();
             var models = await _chatService.GetModelsAsync();
             var isOnline = models.Count > 0;
             
             if (!isOnline)
             {
+                var hasPlatformConfig = IsPlatformAiConfigured(provider);
+                if (hasPlatformConfig)
+                {
+                    _logger.LogWarning("AI provider model discovery returned no models for provider {Provider}, but configuration is present.", provider);
+                    return Ok(new
+                    {
+                        online = true,
+                        message = "AI connector is configured. Model discovery may still be warming up.",
+                        provider,
+                        modelCount = 0,
+                        models = Array.Empty<string>(),
+                        degraded = true
+                    });
+                }
+
                 _logger.LogWarning("AI provider health check: no models available for provider {Provider}", provider);
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = "The AI assistant is not ready yet. Please wait a moment and try again.",
-                    provider
+                    message = "AI backend is not configured. Set Gradient:InferenceKey (or DO_GRADIENT_INFERENCE_KEY) and redeploy.",
+                    provider,
+                    configured = false
                 });
             }
 
@@ -71,7 +87,7 @@ public class AiAssistantController : ControllerBase
         }
         catch (Exception ex)
         {
-            var provider = (_configuration["AiProvider"] ?? "gradient").Trim();
+            var provider = (_configuration["AiProvider"] ?? "digitalocean").Trim();
             _logger.LogWarning(ex, "AI provider health check failed for provider {Provider}", provider);
             return StatusCode(503, new 
             { 
@@ -81,6 +97,43 @@ public class AiAssistantController : ControllerBase
                 error = ex.Message 
             });
         }
+    }
+
+    private bool IsPlatformAiConfigured(string provider)
+    {
+        var normalized = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized is "gradient" or "deepseek" or "digitalocean" or "dochatbot" or "do-chatbot")
+        {
+            var key = FirstNonEmpty(
+                _configuration["Gradient:InferenceKey"],
+                _configuration["DO_GRADIENT_INFERENCE_KEY"],
+                _configuration["GRADIENT_INFERENCE_KEY"],
+                _configuration["DIGITALOCEAN_AI_INFERENCE_KEY"],
+                _configuration["OPENAI_API_KEY"]);
+            return !string.IsNullOrWhiteSpace(key);
+        }
+
+        if (normalized is "llamacpp" or "llama.cpp" or "llama-cpp" or "local")
+        {
+            var baseUrl = FirstNonEmpty(_configuration["Ollama:BaseUrl"], _configuration["OLLAMA_BASE_URL"]);
+            return !string.IsNullOrWhiteSpace(baseUrl);
+        }
+
+        return false;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            var trimmed = (value ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                return trimmed;
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>Lists models available on the configured AI backend.</summary>
