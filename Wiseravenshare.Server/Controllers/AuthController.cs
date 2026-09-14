@@ -914,6 +914,182 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpGet("team-access/podcast-shared-script")]
+    [Authorize]
+    public IActionResult GetSharedPodcastScript([FromQuery] string? roomId = null)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var shared = _teamAccessService.GetSharedPodcastScript(roomId);
+        if (shared is null)
+        {
+            return Ok(new
+            {
+                roomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim(),
+                hasSharedScript = false,
+                syncedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        return Ok(new
+        {
+            roomId = shared.RoomId,
+            hasSharedScript = true,
+            scriptText = shared.ScriptText,
+            scriptPipeline = new
+            {
+                segment1 = shared.ScriptPipeline.Segment1,
+                segment2 = shared.ScriptPipeline.Segment2,
+                segment3 = shared.ScriptPipeline.Segment3,
+                segment4 = shared.ScriptPipeline.Segment4
+            },
+            sharedByEmail = shared.SharedByEmail,
+            sharedByRole = shared.SharedByRole,
+            sharedAtUtc = shared.SharedAtUtc,
+            version = shared.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost("team-access/podcast-shared-script")]
+    [Authorize]
+    public IActionResult SharePodcastScript([FromBody] PodcastSharedScriptRequest? request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var teamRole = NormalizePodcastRole(ResolveTeamRole(actorEmail));
+        if (teamRole == "guest")
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Guests cannot share the studio script." });
+        }
+
+        var roomId = string.IsNullOrWhiteSpace(request?.RoomId) ? "main" : request!.RoomId.Trim();
+        var scriptText = request?.ScriptText ?? string.Empty;
+        var scriptPipeline = request?.ScriptPipeline;
+
+        var hasScriptText = !string.IsNullOrWhiteSpace(scriptText);
+        var hasPipeline = !string.IsNullOrWhiteSpace(scriptPipeline?.Segment1)
+            || !string.IsNullOrWhiteSpace(scriptPipeline?.Segment2)
+            || !string.IsNullOrWhiteSpace(scriptPipeline?.Segment3)
+            || !string.IsNullOrWhiteSpace(scriptPipeline?.Segment4);
+
+        if (!hasScriptText && !hasPipeline)
+        {
+            return BadRequest(new { message = "Provide script text or at least one script pipeline segment before sharing." });
+        }
+
+        var shared = _teamAccessService.UpsertSharedPodcastScript(
+            actorEmail,
+            teamRole,
+            roomId,
+            scriptText,
+            new TeamSharedPodcastScriptPipeline
+            {
+                Segment1 = scriptPipeline?.Segment1 ?? string.Empty,
+                Segment2 = scriptPipeline?.Segment2 ?? string.Empty,
+                Segment3 = scriptPipeline?.Segment3 ?? string.Empty,
+                Segment4 = scriptPipeline?.Segment4 ?? string.Empty
+            });
+
+        return Ok(new
+        {
+            success = true,
+            roomId = shared.RoomId,
+            scriptText = shared.ScriptText,
+            scriptPipeline = new
+            {
+                segment1 = shared.ScriptPipeline.Segment1,
+                segment2 = shared.ScriptPipeline.Segment2,
+                segment3 = shared.ScriptPipeline.Segment3,
+                segment4 = shared.ScriptPipeline.Segment4
+            },
+            sharedByEmail = shared.SharedByEmail,
+            sharedByRole = shared.SharedByRole,
+            sharedAtUtc = shared.SharedAtUtc,
+            version = shared.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpGet("team-access/podcast-session-snapshot")]
+    [Authorize]
+    public IActionResult GetPodcastSessionSnapshot([FromQuery] string? roomId = null)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var snapshot = _teamAccessService.GetPodcastSessionSnapshot(roomId);
+        if (snapshot is null)
+        {
+            return Ok(new
+            {
+                roomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim(),
+                hasSnapshot = false,
+                syncedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        JsonElement payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<JsonElement>(snapshot.SnapshotJson);
+        }
+        catch
+        {
+            payload = JsonDocument.Parse("{}").RootElement;
+        }
+
+        return Ok(new
+        {
+            roomId = snapshot.RoomId,
+            hasSnapshot = true,
+            snapshot = payload,
+            savedByEmail = snapshot.SavedByEmail,
+            savedAtUtc = snapshot.SavedAtUtc,
+            version = snapshot.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost("team-access/podcast-session-snapshot")]
+    [Authorize]
+    public IActionResult SavePodcastSessionSnapshot([FromBody] PodcastSessionSnapshotRequest? request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var roomId = string.IsNullOrWhiteSpace(request?.RoomId) ? "main" : request!.RoomId.Trim();
+        var snapshotJson = request?.Snapshot.ValueKind == JsonValueKind.Undefined
+            ? "{}"
+            : request?.Snapshot.GetRawText() ?? "{}";
+
+        if (string.IsNullOrWhiteSpace(snapshotJson) || snapshotJson == "{}")
+        {
+            return BadRequest(new { message = "A non-empty podcast session snapshot is required." });
+        }
+
+        var saved = _teamAccessService.UpsertPodcastSessionSnapshot(actorEmail, roomId, snapshotJson, request?.Version);
+        return Ok(new
+        {
+            success = true,
+            roomId = saved.RoomId,
+            savedByEmail = saved.SavedByEmail,
+            savedAtUtc = saved.SavedAtUtc,
+            version = saved.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
     [HttpPost("team-access/accept")]
     [AllowAnonymous]
     public async Task<IActionResult> AcceptTeamInvite([FromBody] TeamInviteAcceptRequest request)
@@ -2546,4 +2722,26 @@ public sealed class TeamMemberStatusUpdateRequest
 public sealed class PodcastControlRoleRequest
 {
     public string RequestedRole { get; set; } = string.Empty;
+}
+
+public sealed class PodcastSharedScriptRequest
+{
+    public string RoomId { get; set; } = "main";
+    public string ScriptText { get; set; } = string.Empty;
+    public PodcastSharedScriptPipelineRequest ScriptPipeline { get; set; } = new();
+}
+
+public sealed class PodcastSharedScriptPipelineRequest
+{
+    public string Segment1 { get; set; } = string.Empty;
+    public string Segment2 { get; set; } = string.Empty;
+    public string Segment3 { get; set; } = string.Empty;
+    public string Segment4 { get; set; } = string.Empty;
+}
+
+public sealed class PodcastSessionSnapshotRequest
+{
+    public string RoomId { get; set; } = "main";
+    public JsonElement Snapshot { get; set; }
+    public string Version { get; set; } = string.Empty;
 }
