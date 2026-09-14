@@ -677,13 +677,31 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
         try {
             const mediaUrl = mediaUrlInput.trim();
-            const isVideoUrl = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl)
+
+            // Treat URL as video if it has a video extension, a known video platform,
+            // a streaming path, OR if a video-only platform (YouTube/TikTok) is selected.
+            const hasVideoExtension = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl);
+            const isKnownVideoHost = /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts|vimeo\.com\/|dailymotion\.com\/video)/i.test(mediaUrl)
                 || mediaUrl.includes('videostreaming')
                 || /^data:video\//i.test(mediaUrl);
-            const isPhotoUrl = !isVideoUrl && (
+            const forceVideoByPlatform = (publishYouTube || publishTikTok) && mediaUrl.length > 0;
+            const isVideoUrl = hasVideoExtension || isKnownVideoHost || forceVideoByPlatform;
+
+            const isPhotoUrl = !isVideoUrl && mediaUrl.length > 0 && (
                 /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(mediaUrl)
                 || /^data:image\//i.test(mediaUrl)
             );
+
+            // Guard: YouTube/TikTok require a video URL.
+            if ((publishYouTube || publishTikTok) && !mediaUrl) {
+                setPublishResults([{
+                    platform: publishYouTube ? 'youtube' : 'tiktok',
+                    success: false,
+                    error: `${publishYouTube ? 'YouTube' : 'TikTok'} requires a public video URL. Paste one in the Video/Photo URL field.`
+                }]);
+                setIsPublishing(false);
+                return;
+            }
 
             const response = await socialService.publishContent({
                 message: postMessage.trim(),
@@ -1291,8 +1309,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         type="url"
                         value={mediaUrlInput}
                         onChange={(e) => setMediaUrlInput(e.target.value)}
-                        placeholder="Video / Photo URL (optional for TikTok/YouTube)"
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        placeholder={(publishYouTube || publishTikTok) ? "Required: Public video URL (youtube.com, direct .mp4, etc.)" : "Video / Photo URL (optional for TikTok/YouTube)"}
+                        style={{ padding: '8px 10px', borderRadius: '6px', border: `1px solid ${(publishYouTube || publishTikTok) && !mediaUrlInput ? '#f59e0b' : 'var(--border-color)'}`, background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                     <input
                         type="url"
