@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import aiAssistantService from '../Services/aiAssistantService';
 
-const OLLAMA_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ollama-offline-alerted';
+const AI_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ai-offline-alerted';
 
 const SUGGESTIONS = [
     'How do I cross-post to all platforms?',
@@ -24,43 +24,43 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState('');
     const [useCrawlerContext, setUseCrawlerContext] = useState(true);
-    const [ollmaInitializing, setOllamaInitializing] = useState(true);
-    const [ollmaError, setOllamaError] = useState(null);
+    const [aiInitializing, setAiInitializing] = useState(true);
+    const [aiError, setAiError] = useState(null);
     const scrollRef = useRef(null);
     const abortRef = useRef(null);
 
-    // Initialize Ollama health check on page load (once only)
+    // Initialize provider health check on page load (once only)
     useEffect(() => {
         let cancelled = false;
         
-        const initOllama = async () => {
-            setOllamaInitializing(true);
-            setOllamaError(null);
+        const initAi = async () => {
+            setAiInitializing(true);
+            setAiError(null);
             
             const health = await aiAssistantService.healthCheck(5, 1000);
             
             if (cancelled) return;
             
             if (health.online) {
-                setOllamaError(null);
+                setAiError(null);
                 setModels(health.models || []);
                 if (health.models && health.models.length > 0) {
                     setSelectedModel(health.models[0]);
                 }
             } else {
-                setOllamaError(health.message);
+                setAiError(health.message);
                 // Alert once per browser session to avoid duplicate offline noise.
-                const alreadyAlerted = sessionStorage.getItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY) === '1';
+                const alreadyAlerted = sessionStorage.getItem(AI_OFFLINE_ALERT_SESSION_KEY) === '1';
                 if (addTruthAlert && !alreadyAlerted) {
-                    sessionStorage.setItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY, '1');
-                    addTruthAlert('error', 'Ollama Offline', health.message);
+                    sessionStorage.setItem(AI_OFFLINE_ALERT_SESSION_KEY, '1');
+                    addTruthAlert('error', 'AI Assistant Offline', health.message);
                 }
             }
             
-            setOllamaInitializing(false);
+            setAiInitializing(false);
         };
         
-        initOllama();
+        initAi();
         
         return () => {
             cancelled = true;
@@ -162,8 +162,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '480px' }}>
-            {/* Ollama Initialization Status */}
-            {ollmaInitializing && (
+            {/* AI Initialization Status */}
+            {aiInitializing && (
                 <div style={{
                     background: 'rgba(59, 130, 246, 0.15)',
                     border: '1px solid rgba(59, 130, 246, 0.5)',
@@ -177,11 +177,11 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     gap: '10px'
                 }}>
                     <span style={{ animation: 'spin 1s linear infinite' }}>⟳</span>
-                    <span>Initializing Ollama... This may take a moment if it's starting up.</span>
+                    <span>Initializing the AI assistant...</span>
                 </div>
             )}
             
-            {ollmaError && !ollmaInitializing && (
+            {aiError && !aiInitializing && (
                 <div style={{
                     background: 'rgba(239, 68, 68, 0.15)',
                     border: '1px solid rgba(239, 68, 68, 0.5)',
@@ -191,12 +191,9 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     fontSize: '14px',
                     color: '#f87171'
                 }}>
-                    <strong>⚠️ Ollama Offline</strong>
+                    <strong>⚠️ AI Assistant Offline</strong>
                     <div style={{ marginTop: '6px', fontSize: '13px', opacity: 0.9 }}>
-                        {ollmaError}
-                    </div>
-                    <div style={{ marginTop: '6px', fontSize: '12px', opacity: 0.8 }}>
-                        Make sure Ollama is running: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '3px' }}>ollama serve</code>
+                        {aiError}
                     </div>
                 </div>
             )}
@@ -320,7 +317,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                             key={s}
                             type="button"
                             onClick={() => send(s)}
-                            disabled={ollmaInitializing || ollmaError}
+                            disabled={aiInitializing || aiError}
                             style={{
                                 border: '1px solid var(--border-color)',
                                 background: 'rgba(17,24,39,0.7)',
@@ -328,8 +325,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                                 borderRadius: '999px',
                                 padding: '6px 12px',
                                 fontSize: '12px',
-                                cursor: (ollmaInitializing || ollmaError) ? 'not-allowed' : 'pointer',
-                                opacity: (ollmaInitializing || ollmaError) ? 0.5 : 1
+                                cursor: (aiInitializing || aiError) ? 'not-allowed' : 'pointer',
+                                opacity: (aiInitializing || aiError) ? 0.5 : 1
                             }}
                         >
                             {s}
@@ -343,9 +340,9 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={ollmaInitializing ? "Waiting for Ollama to initialize..." : ollmaError ? "Ollama is offline. Please start it." : "Ask the AI Assistant..."}
+                    placeholder={aiInitializing ? "Waiting for the AI assistant..." : aiError ? "The AI assistant is offline right now." : "Ask the AI Assistant..."}
                     rows={2}
-                    disabled={loading || ollmaInitializing || ollmaError}
+                    disabled={loading || aiInitializing || aiError}
                     style={{
                         flex: 1,
                         resize: 'none',
@@ -356,14 +353,14 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         color: 'var(--text-color)',
                         fontSize: '14px',
                         fontFamily: 'inherit',
-                        opacity: (loading || ollmaInitializing || ollmaError) ? 0.6 : 1,
-                        cursor: (loading || ollmaInitializing || ollmaError) ? 'not-allowed' : 'text'
+                        opacity: (loading || aiInitializing || aiError) ? 0.6 : 1,
+                        cursor: (loading || aiInitializing || aiError) ? 'not-allowed' : 'text'
                     }}
                 />
                 <button
                     type="button"
                     onClick={() => send(input)}
-                    disabled={loading || !input.trim() || ollmaInitializing || ollmaError}
+                    disabled={loading || !input.trim() || aiInitializing || aiError}
                     style={{
                         border: 'none',
                         borderRadius: '12px',
@@ -371,8 +368,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         background: 'var(--highlight-color)',
                         color: '#10151f',
                         fontWeight: 700,
-                        cursor: (loading || !input.trim() || ollmaInitializing || ollmaError) ? 'not-allowed' : 'pointer',
-                        opacity: (loading || !input.trim() || ollmaInitializing || ollmaError) ? 0.5 : 1
+                        cursor: (loading || !input.trim() || aiInitializing || aiError) ? 'not-allowed' : 'pointer',
+                        opacity: (loading || !input.trim() || aiInitializing || aiError) ? 0.5 : 1
                     }}
                 >
                     Send

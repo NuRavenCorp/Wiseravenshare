@@ -37,7 +37,7 @@ public class AiAssistantController : ControllerBase
         _logger = logger;
     }
 
-    /// <summary>Health check + initializes Ollama connection. Called when AI Assistant page loads.</summary>
+    /// <summary>Health check for the active AI provider. Called when the AI Assistant page loads.</summary>
     [HttpGet("health")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status503ServiceUnavailable)]
@@ -45,40 +45,45 @@ public class AiAssistantController : ControllerBase
     {
         try
         {
+            var provider = (_configuration["AiProvider"] ?? "gradient").Trim();
             var models = await _chatService.GetModelsAsync();
             var isOnline = models.Count > 0;
             
             if (!isOnline)
             {
-                _logger.LogWarning("Ollama health check: no models available");
+                _logger.LogWarning("AI provider health check: no models available for provider {Provider}", provider);
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = "Ollama is not ready yet. Please wait or ensure Ollama is running." 
+                    message = "The AI assistant is not ready yet. Please wait a moment and try again.",
+                    provider
                 });
             }
 
             return Ok(new 
             { 
                 online = true, 
-                message = "Ollama is online and ready", 
+                message = "AI assistant is online and ready",
+                provider,
                 modelCount = models.Count,
                 models = models
             });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Ollama health check failed");
+            var provider = (_configuration["AiProvider"] ?? "gradient").Trim();
+            _logger.LogWarning(ex, "AI provider health check failed for provider {Provider}", provider);
             return StatusCode(503, new 
             { 
                 online = false, 
-                message = "Ollama is offline. Please start Ollama and try again.",
+                message = "The AI assistant is unavailable right now. Please try again in a moment.",
+                provider,
                 error = ex.Message 
             });
         }
     }
 
-    /// <summary>Lists models available on the configured Ollama backend.</summary>
+    /// <summary>Lists models available on the configured AI backend.</summary>
     [HttpGet("models")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetModels()

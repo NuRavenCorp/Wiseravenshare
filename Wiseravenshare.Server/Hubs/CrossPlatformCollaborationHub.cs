@@ -14,6 +14,7 @@ using Wiseravenshare.Server.Entities.CrossPlatform;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Interfaces.Services;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Hubs;
@@ -27,15 +28,18 @@ public class CrossPlatformCollaborationHub : Hub
 
     private readonly AppDbContext _dbContext;
     private readonly IPlatformBridgeService _bridgeService;
+    private readonly PodcastVideoBridgeStateService _podcastBridgeStateService;
     private readonly ILogger<CrossPlatformCollaborationHub> _logger;
 
     public CrossPlatformCollaborationHub(
         AppDbContext dbContext,
         IPlatformBridgeService bridgeService,
+        PodcastVideoBridgeStateService podcastBridgeStateService,
         ILogger<CrossPlatformCollaborationHub> logger)
     {
         _dbContext = dbContext;
         _bridgeService = bridgeService;
+        _podcastBridgeStateService = podcastBridgeStateService;
         _logger = logger;
     }
 
@@ -542,6 +546,122 @@ public class CrossPlatformCollaborationHub : Hub
             userId, safeTarget, platform);
     }
 
+    public async Task JoinPodcastBridge(string roomKey = "main")
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId.ToString();
+
+        AddActiveUser(groupName, userId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+        var snapshot = _podcastBridgeStateService.GetSnapshot(normalizedRoomKey);
+        await Clients.Caller.SendAsync("PodcastBridgeSnapshot", snapshot);
+        await Clients.Group(groupName).SendAsync("PodcastBridgePresence", new
+        {
+            roomKey = normalizedRoomKey,
+            userId,
+            action = "joined",
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public async Task LeavePodcastBridge(string roomKey = "main")
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId.ToString();
+
+        RemoveActiveUser(groupName, userId);
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+        await Clients.Group(groupName).SendAsync("PodcastBridgePresence", new
+        {
+            roomKey = normalizedRoomKey,
+            userId,
+            action = "left",
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public async Task PublishPodcastFootageSelection(string roomKey, PodcastBridgeFootageSelection selection)
+    {
+        if (selection is null || string.IsNullOrWhiteSpace(selection.MediaUrl))
+        {
+            throw new HubException("A playable media URL is required for podcast footage selection.");
+        }
+
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        selection.SourceUserId = userId.ToString();
+        if (string.IsNullOrWhiteSpace(selection.SourceUserName))
+        {
+            selection.SourceUserName = Context.User?.Identity?.Name ?? "Videographer";
+        }
+
+        var snapshot = _podcastBridgeStateService.UpsertFootage(normalizedRoomKey, selection);
+        await Clients.Group(groupName).SendAsync("PodcastFootageSelected", new
+        {
+            roomKey = normalizedRoomKey,
+            footage = snapshot.ActiveFootage,
+            updatedAtUtc = snapshot.UpdatedAtUtc
+        });
+    }
+
+    public async Task IssuePodcastCommand(string roomKey, string command, string? note = null, string? targetUserId = null)
+    {
+        var safeCommand = (command ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(safeCommand))
+        {
+            throw new HubException("A command is required.");
+        }
+
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        var created = _podcastBridgeStateService.AddCommand(normalizedRoomKey, new PodcastBridgeCommandRecord
+        {
+            Command = safeCommand,
+            Note = note ?? string.Empty,
+            IssuedByUserId = userId.ToString(),
+            IssuedByUserName = Context.User?.Identity?.Name ?? "Podcast Team",
+            TargetUserId = targetUserId ?? string.Empty
+        });
+
+        await Clients.Group(groupName).SendAsync("PodcastCommandIssued", new
+        {
+            roomKey = normalizedRoomKey,
+            command = created
+        });
+    }
+
+    public async Task AcknowledgePodcastCommand(string roomKey, string commandId, string responseMessage)
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        var updatedCommand = _podcastBridgeStateService.AddCommandResponse(normalizedRoomKey, commandId, new PodcastBridgeCommandResponse
+        {
+            ResponderUserId = userId.ToString(),
+            ResponderUserName = Context.User?.Identity?.Name ?? "Operator",
+            Message = responseMessage ?? string.Empty
+        });
+
+        if (updatedCommand is null)
+        {
+            throw new HubException("Command not found.");
+        }
+
+        await Clients.Group(groupName).SendAsync("PodcastCommandResponse", new
+        {
+            roomKey = normalizedRoomKey,
+            command = updatedCommand
+        });
+    }
+
     private static Guid ParseRoomId(string roomId)
     {
         if (!Guid.TryParse(roomId, out var parsedRoomId) || parsedRoomId == Guid.Empty)
@@ -551,6 +671,20 @@ public class CrossPlatformCollaborationHub : Hub
 
         return parsedRoomId;
     }
+
+    private static string NormalizePodcastRoomKey(string? roomKey)
+    {
+        var normalized = (roomKey ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "main";
+        }
+
+        var safe = new string(normalized.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "main" : safe;
+    }
+
+    private static string BuildPodcastGroupName(string roomKey) => $"podcast:{roomKey}";
 
     private async Task EnsureMembershipAsync(Guid roomId, Guid userId)
     {

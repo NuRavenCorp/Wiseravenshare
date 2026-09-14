@@ -15,7 +15,8 @@ const EVENT_NAMES = [
     'UserJoined', 'UserLeft', 'RoomJoined',
     'ReceiveMessage', 'UserTyping',
     'FileTransferStarted', 'FileTransferProgress', 'FileTransferComplete', 'FileChunkAcknowledged',
-    'PresenceUpdated', 'ExternalBridge'
+    'PresenceUpdated', 'ExternalBridge',
+    'PodcastBridgeSnapshot', 'PodcastBridgePresence', 'PodcastFootageSelected', 'PodcastCommandIssued', 'PodcastCommandResponse'
 ];
 
 export const useCollaborationHub = () => {
@@ -146,6 +147,16 @@ export const useCollaborationHub = () => {
         invoke('BridgeToExternalPlatform', platform, targetUserId, data), [invoke]);
     const getMyRooms = useCallback((take = 25) =>
         invoke('GetMyRooms', take), [invoke]);
+    const joinPodcastBridge = useCallback((roomKey = 'main') =>
+        invoke('JoinPodcastBridge', roomKey), [invoke]);
+    const leavePodcastBridge = useCallback((roomKey = 'main') =>
+        invoke('LeavePodcastBridge', roomKey), [invoke]);
+    const publishPodcastFootageSelection = useCallback((roomKey, selection) =>
+        invoke('PublishPodcastFootageSelection', roomKey, selection), [invoke]);
+    const issuePodcastCommand = useCallback((roomKey, command, note = '', targetUserId = '') =>
+        invoke('IssuePodcastCommand', roomKey, command, note, targetUserId), [invoke]);
+    const acknowledgePodcastCommand = useCallback((roomKey, commandId, responseMessage) =>
+        invoke('AcknowledgePodcastCommand', roomKey, commandId, responseMessage), [invoke]);
 
     useEffect(() => {
         connect();
@@ -169,6 +180,11 @@ export const useCollaborationHub = () => {
         sendFileChunk,
         updatePresence,
         bridgeToExternalPlatform,
-        getMyRooms
+        getMyRooms,
+        joinPodcastBridge,
+        leavePodcastBridge,
+        publishPodcastFootageSelection,
+        issuePodcastCommand,
+        acknowledgePodcastCommand
     };
 };

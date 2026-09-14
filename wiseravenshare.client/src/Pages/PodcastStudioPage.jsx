@@ -7,6 +7,7 @@ import { apiService } from '../Services/api';
 import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
+import { useCollaborationHub } from '../hooks/useCollaborationHub';
 
 const initialTeamMembers = [];
 
@@ -291,6 +292,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [newPageType, setNewPageType] = useState('Script');
     const [newPageTitle, setNewPageTitle] = useState('');
     const [lastAutosavedAt, setLastAutosavedAt] = useState('');
+    const [podcastBridgeState, setPodcastBridgeState] = useState({
+        connected: false,
+        roomKey: 'main',
+        activeFootage: null,
+        latestCommand: null,
+        commandResponses: []
+    });
 
     // Refs
     const videoRef = useRef(null);
@@ -303,6 +311,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const sharedScriptVersionRef = useRef('');
     const autosaveVersionRef = useRef('');
     const autosaveRestoreAppliedRef = useRef(false);
+    const podcastBridgeVideoRef = useRef(null);
+    const {
+        joinPodcastBridge,
+        leavePodcastBridge,
+        issuePodcastCommand,
+        onEvent
+    } = useCollaborationHub();
 
     const actorKeys = useMemo(() => {
         const keys = [
@@ -655,6 +670,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             return;
         }
 
+        void issueControlCommand('cut', 'Upper-level shutdown requested.');
         applyFeedShutdown('Studio camera and footage feeds shut down by upper-level control.');
         broadcastTandemState({
             isCameraOn: false,
@@ -667,6 +683,15 @@ const PodcastStudioPage = ({ onNavigate }) => {
         });
     };
 
+    const issueControlCommand = async (command, note = '') => {
+        try {
+            await issuePodcastCommand('main', command, note, '');
+            setStatus(`Command sent to videographer: ${String(command || '').toUpperCase()}`);
+        } catch (error) {
+            setStatus(error?.message || 'Unable to send command to videographer right now.');
+        }
+    };
+
     useEffect(() => {
         if (!teamCreatorId || !teamCreatorLabel) {
             return;
@@ -674,6 +699,71 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         broadcastTandemState({ teamCreatorId, teamCreatorLabel });
     }, [teamCreatorId, teamCreatorLabel]);
+
+    useEffect(() => {
+        joinPodcastBridge('main')
+            .then(() => {
+                setPodcastBridgeState((prev) => ({ ...prev, connected: true }));
+            })
+            .catch(() => {
+                setPodcastBridgeState((prev) => ({ ...prev, connected: false }));
+            });
+
+        const disposeSnapshot = onEvent('PodcastBridgeSnapshot', (payload) => {
+            const commandLog = Array.isArray(payload?.commandLog) ? payload.commandLog : [];
+            const latestCommand = commandLog.length > 0 ? commandLog[commandLog.length - 1] : null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                connected: true,
+                roomKey: String(payload?.roomKey || 'main'),
+                activeFootage: payload?.activeFootage || null,
+                latestCommand,
+                commandResponses: latestCommand?.responses || []
+            }));
+        });
+
+        const disposeFootage = onEvent('PodcastFootageSelected', (payload) => {
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                connected: true,
+                roomKey: String(payload?.roomKey || 'main'),
+                activeFootage: payload?.footage || null
+            }));
+            if (payload?.footage?.title) {
+                setStatus(`Podcast bridge switched to footage: ${payload.footage.title}`);
+            }
+        });
+
+        const disposeCommand = onEvent('PodcastCommandIssued', (payload) => {
+            const command = payload?.command || null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                latestCommand: command,
+                commandResponses: command?.responses || []
+            }));
+
+            if (String(command?.command || '').toLowerCase() === 'cut') {
+                applyFeedShutdown('CUT command received. Local camera and feed were stopped.');
+            }
+        });
+
+        const disposeResponse = onEvent('PodcastCommandResponse', (payload) => {
+            const command = payload?.command || null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                latestCommand: command,
+                commandResponses: command?.responses || []
+            }));
+        });
+
+        return () => {
+            disposeSnapshot?.();
+            disposeFootage?.();
+            disposeCommand?.();
+            disposeResponse?.();
+            leavePodcastBridge('main').catch(() => null);
+        };
+    }, [joinPodcastBridge, leavePodcastBridge, onEvent]);
 
     useEffect(() => {
         loadPodcastControlPolicy();
@@ -2526,6 +2616,54 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                         </div>
 
+                        <div style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '14px',
+                            background: 'rgba(15, 23, 42, 0.7)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                            minHeight: '180px',
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
+                            <div style={{
+                                padding: '8px 10px',
+                                borderBottom: '1px solid var(--border-color)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}>
+                                <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#86efac', fontWeight: 700 }}>
+                                    Live Video Feed Bridge
+                                </span>
+                                <span style={{ fontSize: '11px', color: podcastBridgeState.connected ? '#4ade80' : '#fca5a5' }}>
+                                    {podcastBridgeState.connected ? 'SignalR connected' : 'SignalR reconnecting'}
+                                </span>
+                            </div>
+
+                            {podcastBridgeState.activeFootage?.mediaUrl ? (
+                                <>
+                                    <video
+                                        ref={podcastBridgeVideoRef}
+                                        src={podcastBridgeState.activeFootage.mediaUrl}
+                                        poster={podcastBridgeState.activeFootage.thumbnailUrl || undefined}
+                                        controls
+                                        autoPlay
+                                        playsInline
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', flex: 1 }}
+                                    />
+                                    <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border-color)', fontSize: '12px', color: 'var(--light-color)' }}>
+                                        {podcastBridgeState.activeFootage.title || 'Incoming footage'}
+                                    </div>
+                                </>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '18px', color: 'var(--light-color)', marginTop: 'auto', marginBottom: 'auto' }}>
+                                    Waiting for videographer feed selection from Ravensight Video Feed.
+                                </div>
+                            )}
+                        </div>
+
                         {/* Guest Cam A Stream */}
                         <div style={{
                             border: '1px solid var(--border-color)',
@@ -2606,6 +2744,49 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                             <div style={{ marginTop: '8px', fontSize: '11px', color: '#c084fc' }}>
                                 Auto-synced with Script Lead edits
+                            </div>
+
+                            <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#fca5a5' }}>
+                                    Director Commands
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('cut', 'Cut to next frame now.')}
+                                        style={{ border: '1px solid rgba(248, 113, 113, 0.5)', background: 'rgba(127, 29, 29, 0.35)', color: '#fecaca', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        CUT
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('hold', 'Hold this shot for continuity.')}
+                                        style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.08)', color: 'var(--text-color)', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        HOLD
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('resume', 'Resume normal camera movement.')}
+                                        style={{ border: '1px solid rgba(74, 222, 128, 0.45)', background: 'rgba(22, 163, 74, 0.22)', color: '#bbf7d0', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        RESUME
+                                    </button>
+                                </div>
+                                {podcastBridgeState.latestCommand && (
+                                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                                        Last command: {String(podcastBridgeState.latestCommand.command || '').toUpperCase()} {podcastBridgeState.latestCommand.status ? `(${podcastBridgeState.latestCommand.status})` : ''}
+                                    </div>
+                                )}
+                                {podcastBridgeState.commandResponses?.length > 0 && (
+                                    <div style={{ maxHeight: '80px', overflowY: 'auto', fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 8px', background: 'rgba(0,0,0,0.2)' }}>
+                                        {podcastBridgeState.commandResponses.slice(-3).map((response) => (
+                                            <div key={response.responseId || `${response.responderUserId}-${response.respondedAtUtc}`}>
+                                                {response.responderUserName || 'Operator'}: {response.message || 'Acknowledged'}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
