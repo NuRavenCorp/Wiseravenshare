@@ -29,6 +29,8 @@ public interface IPostService
     Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId);
     Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId);
     Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId);
+    Task<IReadOnlyList<PostCommentDto>> GetCommentsAsync(Guid postId, int page, int pageSize);
+    Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto);
     Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count);
     Task<int> GetPostCountAsync(Guid userId);
 }
@@ -600,6 +602,54 @@ public class PostService : IPostService
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
+    public async Task<IReadOnlyList<PostCommentDto>> GetCommentsAsync(Guid postId, int page, int pageSize)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        var comments = await _postRepository.GetCommentsAsync(postId, page, pageSize);
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, null);
+
+        return comments
+            .Select(comment => BuildPostCommentDto(comment, interaction.CommentsCount))
+            .ToList();
+    }
+
+    public async Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        var content = (dto.Content ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new BadRequestException("Comment text is required.");
+        }
+
+        var created = await _postRepository.AddCommentAsync(postId, userId, content, dto.ParentCommentId);
+
+        if (post.UserId != userId)
+        {
+            var commenter = await _userRepository.GetByIdAsync(userId);
+            var commenterName = commenter?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostCommentedAsync(
+                post.UserId,
+                postId,
+                commenterName,
+                post.Content ?? "your post"
+            );
+        }
+
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        return BuildPostCommentDto(created, interaction.CommentsCount);
+    }
+
     public async Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count)
     {
         try
@@ -787,10 +837,28 @@ public class PostService : IPostService
             PostId = postId,
             LikesCount = interaction.LikesCount,
             RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
             BookmarksCount = interaction.BookmarksCount,
             IsLiked = interaction.IsLiked,
             IsReposted = interaction.IsReposted,
             IsBookmarked = interaction.IsBookmarked
+        };
+    }
+
+    private PostCommentDto BuildPostCommentDto(Comment comment, int commentsCount)
+    {
+        return new PostCommentDto
+        {
+            Id = comment.Id,
+            PostId = comment.PostId,
+            UserId = comment.UserId,
+            ParentCommentId = comment.ParentCommentId,
+            Content = comment.Content,
+            CreatedAt = comment.CreatedAt,
+            LikesCount = comment.LikesCount,
+            RepliesCount = comment.RepliesCount,
+            CommentsCount = commentsCount,
+            User = comment.User is null ? new UserDto() : MapToUserDto(comment.User)
         };
     }
 

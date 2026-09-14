@@ -1,0 +1,290 @@
+name: wiseravenshare
+region: nyc
+
+# ── API service (ASP.NET Core / Docker) ──────────────────────────────────────
+services:
+  - name: api
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: deploy/podcast-autosave-clean
+      deploy_on_push: true
+    dockerfile_path: Wiseravenshare.Server/Dockerfile
+    source_dir: /
+    http_port: 10000
+    instance_size_slug: basic-s
+    instance_count: 1
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 20
+      period_seconds: 30
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: CLIENT_ORIGIN
+        value: ${web.PUBLIC_URL}
+      - key: Admin__Emails
+        value: admin@wise-ravens.com
+      - key: Authentication__AllowSelfRegistration
+        value: "true"
+      - key: Authentication__Users__0__Name
+        value: admin
+      - key: Authentication__Users__0__Email
+        value: admin@wise-ravens.com
+      - key: Authentication__Users__0__Password
+        value: 1@Chinchin234
+      - key: Authentication__Jwt__Key
+        value: WRS_prod_jwt_7f3Kp9xQm2Vn8Ls4Td1Ry6Bh0Jc5EaZg_wiseravenshare_2026
+        type: SECRET
+      - key: Authentication__Jwt__ExpiresMinutes
+        value: "1440"
+      - key: ConnectionStrings__DefaultConnection
+        value: ${wiseravenshare-db.DATABASE_URL}
+        type: SECRET
+      - key: Database__ExpectedName
+        value: defaultdb
+      - key: Storage__Blob__ProjectFolder
+        value: wiseravenshare/
+      - key: Storage__Blob__BucketName
+        value: bucket-wrs-01010
+      - key: Storage__Blob__Endpoint
+        value: ${DO_SPACES_ENDPOINT}
+        type: SECRET
+      - key: Storage__Blob__Region
+        value: ${DO_SPACES_REGION}
+        type: SECRET
+      - key: Storage__Blob__AccessKey
+        value: ${DO_SPACES_ACCESS_KEY}
+        type: SECRET
+      - key: Storage__Blob__SecretKey
+        value: ${DO_SPACES_SECRET_KEY}
+        type: SECRET
+      - key: Storage__Blob__PublicBaseUrl
+        value: ${DO_SPACES_PUBLIC_BASE_URL}
+        type: SECRET
+      - key: Persistence__RequireDatabase
+        value: "true"
+      - key: STRIPE_PUBLISHABLE_API
+        value: ${STRIPE_PUBLISHABLE_API}
+        type: SECRET
+      - key: STRIPE_SECRET_KEY
+        value: ${STRIPE_SECRET_API}
+        type: SECRET
+      - key: STRIPE_RESTRICTED_API
+        value: ${STRIPE_RESTRICTED_API}
+        type: SECRET
+      - key: STRIPE_SECRET_API
+        value: ${STRIPE_SECRET_API}
+        type: SECRET
+      - key: STRIPE_WEBHOOK_SECRET
+        value: ${STRIPE_WEBHOOK_SECRET}
+        type: SECRET
+      - key: STRIPE_PRICE_MONTHLY_ID
+        value: ${STRIPE_PRICE_MONTHLY_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_ANNUAL_ID
+        value: ${STRIPE_PRICE_ANNUAL_ID}
+        type: SECRET
+      - key: Stripe_WiseravenShare_MusicStudioRights_BasicProdId
+        value: prod_VC3xoP4UjLvOF2
+        type: SECRET
+      - key: Stripe_WiseravenShare_MusicStudioRights_StandardProdId
+        value: prod_VC3yeDSQcWcgqG
+        type: SECRET
+      - key: Stripe_WiseravenShare_MusicStudioRights_ProProdId
+        value: prod_VC3zXy445DbV0w
+        type: SECRET
+      - key: Authentication__OAuthProviders__Google__ClientId
+        value: ${GOOGLE_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Google__ClientSecret
+        value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Google__RedirectUri
+        value: ${GOOGLE_OAUTH_REDIRECT_URI}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__ClientId
+        value: ${MICROSOFT_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__ClientSecret
+        value: ${MICROSOFT_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__TenantId
+        value: ${MICROSOFT_OAUTH_TENANT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Microsoft__RedirectUri
+        value: ${MICROSOFT_OAUTH_REDIRECT_URI}
+        type: SECRET
+      - key: Social__Facebook__PageId
+        value: ${SOCIAL_FACEBOOK_PAGE_ID}
+        type: SECRET
+      - key: Social__Facebook__PageAccessToken
+        value: ${SOCIAL_FACEBOOK_PAGE_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Facebook__Provider
+        value: zernio
+      - key: Social__TikTok__Provider
+        value: zernio
+      - key: Social__TikTok__Username
+        value: ${SOCIAL_TIKTOK_USERNAME}
+        type: SECRET
+      - key: Social__TikTok__AccessToken
+        value: ${SOCIAL_TIKTOK_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Zernio__ApiKey
+        value: ${ZERNIO_API_KEY}
+        type: SECRET
+      - key: Social_Zernio_APIKey
+        value: ${ZERNIO_API_KEY}
+        type: SECRET
+      - key: Social__Zernio__BaseUrl
+        value: https://api.zernio.com
+      - key: Social__Zernio__WebhookSecret
+        value: ${ZERNIO_WEBHOOK_SECRET}
+        type: SECRET
+      - key: ZERNIO_WEBHOOK_SECRET
+        value: ${ZERNIO_WEBHOOK_SECRET}
+        type: SECRET
+      - key: Social__Publish__MiddlewareWebhookUrl
+        value: ${SOCIAL_PUBLISH_MIDDLEWARE_WEBHOOK_URL}
+        type: SECRET
+      - key: Social__Publish__WebhookToken
+        value: ${SOCIAL_PUBLISH_WEBHOOK_TOKEN}
+        type: SECRET
+      - key: Social__Instagram__Username
+        value: ${SOCIAL_INSTAGRAM_USERNAME}
+        type: SECRET
+      - key: Social__Instagram__ProfileUrl
+        value: ${SOCIAL_INSTAGRAM_PROFILE_URL}
+        type: SECRET
+      - key: ReminderNotifications__Email__FromName
+        value: ${REMINDER_EMAIL_FROM_NAME}
+        type: SECRET
+      - key: ReminderNotifications__Email__FromAddress
+        value: ${REMINDER_EMAIL_FROM_ADDRESS}
+        type: SECRET
+      - key: ReminderNotifications__Email__SmtpHost
+        value: ${REMINDER_EMAIL_SMTP_HOST}
+        type: SECRET
+      - key: ReminderNotifications__Email__SmtpPort
+        value: ${REMINDER_EMAIL_SMTP_PORT}
+        type: SECRET
+      - key: ReminderNotifications__Email__EnableSsl
+        value: ${REMINDER_EMAIL_ENABLE_SSL}
+        type: SECRET
+      - key: ReminderNotifications__Email__Username
+        value: ${REMINDER_EMAIL_USERNAME}
+        type: SECRET
+      - key: ReminderNotifications__Email__Password
+        value: ${REMINDER_EMAIL_PASSWORD}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioAccountSid
+        value: ${TWILIO_ACCOUNT_SID}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioAuthToken
+        value: ${TWILIO_AUTH_TOKEN}
+        type: SECRET
+      - key: ReminderNotifications__Sms__TwilioFromNumber
+        value: ${TWILIO_FROM_NUMBER}
+        type: SECRET
+      - key: Communique__Twilio__Enabled
+        value: ${COMMUNIQUE_TWILIO_ENABLED}
+        type: SECRET
+      - key: Communique__Twilio__AccountSid
+        value: ${TWILIO_ACCOUNT_SID}
+        type: SECRET
+      - key: Communique__Twilio__AuthToken
+        value: ${TWILIO_AUTH_TOKEN}
+        type: SECRET
+      - key: Communique__Twilio__FromNumber
+        value: ${TWILIO_FROM_NUMBER}
+        type: SECRET
+      - key: Communique__Twilio__WhatsAppFrom
+        value: ${COMMUNIQUE_TWILIO_WHATSAPP_FROM}
+        type: SECRET
+      - key: Communique__Twilio__VerifyServiceSid
+        value: ${TWILIO_VERIFY_SERVICE_SID}
+        type: SECRET
+
+# ── Frontend static site ──────────────────────────────────────────────────────
+static_sites:
+  - name: web
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: deploy/podcast-autosave-clean
+      deploy_on_push: true
+    source_dir: wiseravenshare.client
+    build_command: npm ci && npx -y node@22 node_modules/vite/bin/vite.js build
+    output_dir: dist
+    index_document: index.html
+    error_document: index.html
+    envs:
+      - key: VITE_API_URL
+        value: ${APP_URL}/api
+      - key: VITE_RAVENSIGHT_API_URL
+        value: ${APP_URL}/api/ravensight
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        value: ${STRIPE_PUBLISHABLE_API}
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID
+        value: prod_VC3xoP4UjLvOF2
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID
+        value: prod_VC3yeDSQcWcgqG
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID
+        value: prod_VC3zXy445DbV0w
+      - key: VITE_ADMIN_EMAILS
+        value: admin@wise-ravens.com
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /hubs
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /health
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /weatherforecast
+      component:
+        name: api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /
+      component:
+        name: web
+
+# ── Managed Postgres database ─────────────────────────────────────────────────
+databases:
+  - name: wiseravenshare-db
+    cluster_name: wiseravenshare-db
+    db_name: defaultdb
+    db_user: wiseravenshare_app
+    engine: PG
+    version: "16"
+    production: true
+
+domains:
+  - domain: wiseravenshare.com
+    type: PRIMARY
+  - domain: www.wiseravenshare.com
+    type: ALIAS
+  - domain: wise-ravens.com
+    type: ALIAS
+  - domain: www.wise-ravens.com
+    type: ALIAS

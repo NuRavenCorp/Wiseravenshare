@@ -34,6 +34,7 @@ import FMRadioPage from './Pages/FMRadioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
+import WiseCoinPage from './Pages/WiseCoinPage';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
@@ -544,6 +545,8 @@ const App = () => {
                 return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
+            case 'wisecoin':
+                return <WiseCoinPage />;
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             case 'terms':

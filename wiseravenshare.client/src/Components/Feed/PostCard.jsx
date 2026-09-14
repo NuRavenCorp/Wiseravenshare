@@ -8,6 +8,8 @@ const PostCard = ({
     post,
     onLike,
     onRepost,
+    onLoadComments,
+    onAddComment,
     onDispute,
     onVerify,
     integrityReport,
@@ -20,6 +22,8 @@ const PostCard = ({
     const [showComments, setShowComments] = useState(false);
     const [commentText, setCommentText] = useState('');
     const [comments, setComments] = useState(post.comments || []);
+    const [isLoadingComments, setIsLoadingComments] = useState(false);
+    const [isSavingComment, setIsSavingComment] = useState(false);
 
     const displayUser = useMemo(() => {
         const postUser = post.user || {};
@@ -69,19 +73,61 @@ const PostCard = ({
         post.facebookUrl && { href: post.facebookUrl, label: 'Facebook', color: '#1877f2' }
     ].filter(Boolean);
 
-    const addComment = () => {
+    const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
+
+    const handleToggleComments = async () => {
+        const shouldOpen = !showComments;
+        setShowComments(shouldOpen);
+
+        if (!shouldOpen || typeof onLoadComments !== 'function') {
+            return;
+        }
+
+        setIsLoadingComments(true);
+        try {
+            const loaded = await onLoadComments(post.id);
+            setComments(Array.isArray(loaded) ? loaded : []);
+        } catch {
+            // Keep existing comments on transient load failures.
+        } finally {
+            setIsLoadingComments(false);
+        }
+    };
+
+    const addComment = async () => {
         if (!commentText.trim()) {
+            return;
+        }
+
+        const content = commentText.trim();
+
+        if (typeof onAddComment === 'function') {
+            setIsSavingComment(true);
+            try {
+                const saved = await onAddComment(post.id, content);
+                if (saved?.id) {
+                    setComments((prev) => {
+                        const exists = prev.some((item) => item?.id === saved.id);
+                        return exists ? prev : [saved, ...prev];
+                    });
+                }
+                setCommentText('');
+            } catch {
+                // Preserve text when save fails so user can retry.
+            } finally {
+                setIsSavingComment(false);
+            }
             return;
         }
 
         const comment = {
             id: Date.now(),
             user: currentUser,
-            content: commentText,
+            content,
             createdAt: new Date()
         };
 
-        setComments((prev) => [...prev, comment]);
+        setComments((prev) => [comment, ...prev]);
         setCommentText('');
     };
 
@@ -227,13 +273,13 @@ const PostCard = ({
             </div>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                <button onClick={() => onLike?.(post.id)}>Like ({post.likes ?? 0})</button>
-                <button onClick={() => onRepost?.(post.id)}>Repost ({post.reposts ?? 0})</button>
+                <button onClick={() => onLike?.(post.id)}>{post.isLiked ? 'Liked' : 'Like'} ({post.likes ?? 0})</button>
+                <button onClick={() => onRepost?.(post.id)}>{post.isReposted ? 'Reposted' : 'Repost'} ({post.reposts ?? 0})</button>
                 <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
                 <button onClick={() => onVerify?.(post)}>Verify</button>
                 <button onClick={() => onDispute?.(post)}>Dispute</button>
-                <button onClick={() => setShowComments((prev) => !prev)}>
-                    Comments ({comments.length})
+                <button onClick={handleToggleComments}>
+                    Comments ({commentCount})
                 </button>
             </div>
 
@@ -290,6 +336,11 @@ const PostCard = ({
                         />
                         <button onClick={addComment}>Send</button>
                     </div>
+                    {isLoadingComments && (
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                            Loading comments...
+                        </div>
+                    )}
                     {comments.map((comment) => (
                         <div
                             key={comment.id}
@@ -303,6 +354,11 @@ const PostCard = ({
                             <strong>{comment.user?.name || 'User'}:</strong> {comment.content}
                         </div>
                     ))}
+                    {isSavingComment && (
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
+                            Saving comment...
+                        </div>
+                    )}
                 </div>
             )}
         </article>
