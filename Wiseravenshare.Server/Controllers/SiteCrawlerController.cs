@@ -8,6 +8,7 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Route("api/sitecrawler")]
 [Authorize]
+[FeatureCompartment("site-crawler")]
 public sealed class SiteCrawlerController : ControllerBase
 {
     private readonly ISiteCrawlerService _siteCrawlerService;

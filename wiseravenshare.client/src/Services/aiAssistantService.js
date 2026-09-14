@@ -25,7 +25,7 @@ client.interceptors.request.use((config) => {
 });
 
 export const aiAssistantService = {
-    /** Health check - verifies Ollama is online and ready. Retries with backoff. */
+    /** Health check - verifies active AI backend (user connector or platform default). */
     healthCheck: async (maxRetries = 5, initialDelayMs = 1000) => {
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
@@ -33,9 +33,11 @@ export const aiAssistantService = {
                 if (response.status === 200) {
                     return { 
                         online: true, 
-                        message: response.data.message || "Ollama is ready",
+                        message: response.data.message || "AI backend is ready",
                         models: response.data.models || [],
-                        modelCount: response.data.modelCount || 0
+                        modelCount: response.data.modelCount || 0,
+                        provider: response.data.provider || 'platform-default',
+                        usingUserConnector: Boolean(response.data.usingUserConnector)
                     };
                 }
             } catch (error) {
@@ -58,9 +60,11 @@ export const aiAssistantService = {
         }
         return { 
             online: false, 
-            message: "Ollama is offline. Please ensure the Ollama service/container is running.",
+            message: "AI backend is offline. Please verify your connector or platform AI service.",
             models: [],
-            modelCount: 0
+            modelCount: 0,
+            provider: 'platform-default',
+            usingUserConnector: false
         };
     },
 
@@ -72,6 +76,20 @@ export const aiAssistantService = {
         } catch {
             return [];
         }
+    },
+
+    getConnectorSettings: async () => {
+        try {
+            const response = await client.get('/aiassistant/connector');
+            return response?.data || null;
+        } catch {
+            return null;
+        }
+    },
+
+    updateConnectorSettings: async (settings) => {
+        const response = await client.put('/aiassistant/connector', settings || {});
+        return response?.data || null;
     },
 
     /**

@@ -1,7 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import aiAssistantService from '../Services/aiAssistantService';
 
-const OLLAMA_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ollama-offline-alerted';
+const AI_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ai-offline-alerted';
+const DEFAULT_CONNECTOR = {
+    enabled: false,
+    provider: 'openai',
+    baseUrl: '',
+    defaultModel: '',
+    apiKey: '',
+    clearApiKey: false,
+    hasApiKey: false,
+    apiKeyMasked: ''
+};
 
 const SUGGESTIONS = [
     'How do I cross-post to all platforms?',
@@ -24,46 +34,82 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const [selectedModel, setSelectedModel] = useState('');
     const [ollmaInitializing, setOllamaInitializing] = useState(true);
     const [ollmaError, setOllamaError] = useState(null);
+    const [healthProvider, setHealthProvider] = useState('platform-default');
+    const [usingUserConnector, setUsingUserConnector] = useState(false);
+    const [connectorSettings, setConnectorSettings] = useState(DEFAULT_CONNECTOR);
+    const [connectorSaving, setConnectorSaving] = useState(false);
+    const [connectorMessage, setConnectorMessage] = useState('');
     const scrollRef = useRef(null);
     const abortRef = useRef(null);
 
-    // Initialize Ollama health check on page load (once only)
+    const normalizeConnector = (value) => {
+        const source = value || {};
+        return {
+            ...DEFAULT_CONNECTOR,
+            enabled: Boolean(source.enabled),
+            provider: String(source.provider || 'openai').toLowerCase(),
+            baseUrl: String(source.baseUrl || ''),
+            defaultModel: String(source.defaultModel || ''),
+            apiKey: '',
+            clearApiKey: false,
+            hasApiKey: Boolean(source.hasApiKey),
+            apiKeyMasked: String(source.apiKeyMasked || '')
+        };
+    };
+
+    const refreshHealth = async ({ raiseAlert = true } = {}) => {
+        setOllamaInitializing(true);
+        setOllamaError(null);
+
+        const health = await aiAssistantService.healthCheck(5, 1000);
+
+        setHealthProvider(health.provider || 'platform-default');
+        setUsingUserConnector(Boolean(health.usingUserConnector));
+
+        if (health.online) {
+            setOllamaError(null);
+            setModels(health.models || []);
+            if (health.models && health.models.length > 0) {
+                setSelectedModel((previous) => {
+                    if (previous && health.models.includes(previous)) {
+                        return previous;
+                    }
+                    return health.models[0];
+                });
+            }
+        } else {
+            setOllamaError(health.message);
+            const alreadyAlerted = sessionStorage.getItem(AI_OFFLINE_ALERT_SESSION_KEY) === '1';
+            if (addTruthAlert && raiseAlert && !alreadyAlerted) {
+                sessionStorage.setItem(AI_OFFLINE_ALERT_SESSION_KEY, '1');
+                addTruthAlert('error', 'AI Backend Offline', health.message);
+            }
+        }
+
+        setOllamaInitializing(false);
+    };
+
+    // Initialize active AI backend and load BYO connector settings.
     useEffect(() => {
         let cancelled = false;
-        
-        const initOllama = async () => {
-            setOllamaInitializing(true);
-            setOllamaError(null);
-            
-            const health = await aiAssistantService.healthCheck(5, 1000);
-            
-            if (cancelled) return;
-            
-            if (health.online) {
-                setOllamaError(null);
-                setModels(health.models || []);
-                if (health.models && health.models.length > 0) {
-                    setSelectedModel(health.models[0]);
-                }
-            } else {
-                setOllamaError(health.message);
-                // Alert once per browser session to avoid duplicate offline noise.
-                const alreadyAlerted = sessionStorage.getItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY) === '1';
-                if (addTruthAlert && !alreadyAlerted) {
-                    sessionStorage.setItem(OLLAMA_OFFLINE_ALERT_SESSION_KEY, '1');
-                    addTruthAlert('error', 'Ollama Offline', health.message);
-                }
+
+        const initAssistant = async () => {
+            const connector = await aiAssistantService.getConnectorSettings();
+            if (!cancelled && connector) {
+                setConnectorSettings(normalizeConnector(connector));
             }
-            
-            setOllamaInitializing(false);
+
+            if (!cancelled) {
+                await refreshHealth({ raiseAlert: true });
+            }
         };
-        
-        initOllama();
+
+        initAssistant();
         
         return () => {
             cancelled = true;
         };
-    }, []); // Empty dependency array - run only on mount
+    }, []);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -157,9 +203,48 @@ const AiAssistantPage = ({ addTruthAlert }) => {
         }
     };
 
+    const updateConnectorField = (field, value) => {
+        setConnectorSettings((previous) => ({
+            ...previous,
+            [field]: value
+        }));
+    };
+
+    const saveConnectorSettings = async () => {
+        setConnectorSaving(true);
+        setConnectorMessage('');
+
+        try {
+            const payload = {
+                enabled: Boolean(connectorSettings.enabled),
+                provider: connectorSettings.provider || 'openai',
+                baseUrl: String(connectorSettings.baseUrl || '').trim(),
+                defaultModel: String(connectorSettings.defaultModel || '').trim(),
+                apiKey: String(connectorSettings.apiKey || '').trim() || null,
+                clearApiKey: Boolean(connectorSettings.clearApiKey)
+            };
+
+            const saved = await aiAssistantService.updateConnectorSettings(payload);
+            setConnectorSettings((previous) => ({
+                ...normalizeConnector(saved),
+                apiKey: '',
+                clearApiKey: false,
+                provider: previous.provider || normalizeConnector(saved).provider
+            }));
+
+            setConnectorMessage('Connector settings saved.');
+            await refreshHealth({ raiseAlert: false });
+        } catch (error) {
+            const message = error?.response?.data?.message || error?.message || 'Failed to save connector settings.';
+            setConnectorMessage(message);
+        } finally {
+            setConnectorSaving(false);
+        }
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '480px' }}>
-            {/* Ollama Initialization Status */}
+            {/* AI Backend Initialization Status */}
             {ollmaInitializing && (
                 <div style={{
                     background: 'rgba(59, 130, 246, 0.15)',
@@ -174,7 +259,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     gap: '10px'
                 }}>
                     <span style={{ animation: 'spin 1s linear infinite' }}>⟳</span>
-                    <span>Initializing Ollama... This may take a moment if it's starting up.</span>
+                    <span>Initializing AI backend... This may take a moment.</span>
                 </div>
             )}
             
@@ -188,12 +273,12 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     fontSize: '14px',
                     color: '#f87171'
                 }}>
-                    <strong>⚠️ Ollama Offline</strong>
+                    <strong>⚠️ AI Backend Offline</strong>
                     <div style={{ marginTop: '6px', fontSize: '13px', opacity: 0.9 }}>
                         {ollmaError}
                     </div>
                     <div style={{ marginTop: '6px', fontSize: '12px', opacity: 0.8 }}>
-                        Make sure Ollama is running: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '3px' }}>ollama serve</code>
+                        Configure your connector below or use the platform default AI provider.
                     </div>
                 </div>
             )}
@@ -203,6 +288,10 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     <h2 style={{ margin: 0, fontSize: '20px' }}>🦉 Raven Assistant</h2>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
                         Your in-app AI helper for platform questions and support.
+                        {' '}
+                        {usingUserConnector
+                            ? `Connected to your AI (${healthProvider}).`
+                            : `Using platform AI (${healthProvider}).`}
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -262,6 +351,144 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                 </div>
             </div>
 
+            <div style={{
+                marginBottom: '10px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '12px',
+                padding: '12px',
+                background: 'rgba(15,23,42,0.5)',
+                display: 'grid',
+                gap: '10px'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: '13px' }}>Bring Your Own AI Connector</strong>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                        <input
+                            type="checkbox"
+                            checked={connectorSettings.enabled}
+                            onChange={(event) => updateConnectorField('enabled', event.target.checked)}
+                        />
+                        Enable user AI connector
+                    </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                    <select
+                        value={connectorSettings.provider}
+                        onChange={(event) => updateConnectorField('provider', event.target.value)}
+                        style={{
+                            background: 'rgba(17,24,39,0.7)',
+                            color: 'var(--text-color)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px',
+                            fontSize: '12px'
+                        }}
+                        aria-label="AI provider"
+                    >
+                        <option value="gradient">DigitalOcean Gradient</option>
+                        <option value="openai">OpenAI-compatible</option>
+                        <option value="deepseek">DeepSeek-compatible</option>
+                        <option value="ollama">Ollama</option>
+                        <option value="llamacpp">llama.cpp</option>
+                    </select>
+
+                    <input
+                        type="text"
+                        value={connectorSettings.defaultModel}
+                        onChange={(event) => updateConnectorField('defaultModel', event.target.value)}
+                        placeholder="Default model (optional)"
+                        style={{
+                            background: 'rgba(17,24,39,0.7)',
+                            color: 'var(--text-color)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px',
+                            fontSize: '12px'
+                        }}
+                    />
+                </div>
+
+                <input
+                    type="text"
+                    value={connectorSettings.baseUrl}
+                    onChange={(event) => updateConnectorField('baseUrl', event.target.value)}
+                    placeholder="Base URL (e.g. https://api.openai.com or http://localhost:11434)"
+                    style={{
+                        background: 'rgba(17,24,39,0.7)',
+                        color: 'var(--text-color)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '8px',
+                        fontSize: '12px'
+                    }}
+                />
+
+                <div style={{ display: 'grid', gap: '8px' }}>
+                    <input
+                        type="password"
+                        value={connectorSettings.apiKey}
+                        onChange={(event) => updateConnectorField('apiKey', event.target.value)}
+                        placeholder={connectorSettings.hasApiKey ? `API key saved (${connectorSettings.apiKeyMasked || 'hidden'}) - enter new key to replace` : 'API key (required for OpenAI/DeepSeek)'}
+                        style={{
+                            background: 'rgba(17,24,39,0.7)',
+                            color: 'var(--text-color)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px',
+                            fontSize: '12px'
+                        }}
+                    />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                        <input
+                            type="checkbox"
+                            checked={connectorSettings.clearApiKey}
+                            onChange={(event) => updateConnectorField('clearApiKey', event.target.checked)}
+                        />
+                        Clear stored API key
+                    </label>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        onClick={saveConnectorSettings}
+                        disabled={connectorSaving}
+                        style={{
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            background: 'var(--highlight-color)',
+                            color: '#10151f',
+                            fontWeight: 700,
+                            cursor: connectorSaving ? 'not-allowed' : 'pointer',
+                            opacity: connectorSaving ? 0.6 : 1,
+                            fontSize: '12px'
+                        }}
+                    >
+                        {connectorSaving ? 'Saving...' : 'Save Connector'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => refreshHealth({ raiseAlert: false })}
+                        disabled={connectorSaving || ollmaInitializing}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            background: 'rgba(17,24,39,0.7)',
+                            color: 'var(--text-color)',
+                            cursor: (connectorSaving || ollmaInitializing) ? 'not-allowed' : 'pointer',
+                            opacity: (connectorSaving || ollmaInitializing) ? 0.6 : 1,
+                            fontSize: '12px'
+                        }}
+                    >
+                        Recheck Connection
+                    </button>
+                    {connectorMessage && <span style={{ fontSize: '12px', opacity: 0.9 }}>{connectorMessage}</span>}
+                </div>
+            </div>
+
             <div
                 ref={scrollRef}
                 style={{
@@ -309,7 +536,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                             key={s}
                             type="button"
                             onClick={() => send(s)}
-                            disabled={ollmaInitializing || ollmaError}
+                            disabled={ollmaInitializing || Boolean(ollmaError)}
                             style={{
                                 border: '1px solid var(--border-color)',
                                 background: 'rgba(17,24,39,0.7)',
@@ -317,8 +544,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                                 borderRadius: '999px',
                                 padding: '6px 12px',
                                 fontSize: '12px',
-                                cursor: (ollmaInitializing || ollmaError) ? 'not-allowed' : 'pointer',
-                                opacity: (ollmaInitializing || ollmaError) ? 0.5 : 1
+                                cursor: (ollmaInitializing || Boolean(ollmaError)) ? 'not-allowed' : 'pointer',
+                                opacity: (ollmaInitializing || Boolean(ollmaError)) ? 0.5 : 1
                             }}
                         >
                             {s}
@@ -332,7 +559,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={ollmaInitializing ? "Waiting for Ollama to initialize..." : ollmaError ? "Ollama is offline. Please start it." : "Ask the Raven Assistant…"}
+                    placeholder={ollmaInitializing ? "Waiting for AI backend to initialize..." : ollmaError ? "AI backend is offline. Check connector settings." : "Ask the Raven Assistant..."}
                     rows={2}
                     disabled={loading || ollmaInitializing || ollmaError}
                     style={{

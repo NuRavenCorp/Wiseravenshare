@@ -12,6 +12,7 @@ function ConnectionIndicator({
   status = 'disconnected', // 'disconnected', 'connecting', 'connected', 'error'
   device = null,
   connectionType = null,
+  instrumentCode = '',
   signal = false, // Animated signal trigger
   autoReconnecting = false,
   onDisconnect = null,
@@ -129,6 +130,11 @@ function ConnectionIndicator({
             <span className="connection-type-label">
               {getConnectionTypeLabel()}
             </span>
+            {instrumentCode && (
+              <span className="connection-type-label" style={{ marginLeft: '6px', fontWeight: 700 }}>
+                {instrumentCode}
+              </span>
+            )}
           </div>
         )}
 

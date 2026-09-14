@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload, FiTrash2, FiX } from 'react-icons/fi';
+import { resolveMediaUrl } from '../utils/mediaUtils';
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
 const PROTECTION_PLANS = [
@@ -52,6 +53,7 @@ import { ravensightAPI } from '../Services/RavensightAPI';
 
 const TRACK_PLAYER_HANDOFF_KEY = 'wr_track_player_handoff';
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const COMPACT_GUID_REGEX = /^[0-9a-f]{32}$/i;
 
 const inferUploadTypeFromFile = (file, fallback = 'photo') => {
     const mime = String(file?.type || '').toLowerCase();
@@ -70,6 +72,42 @@ const inferUploadTypeFromFile = (file, fallback = 'photo') => {
     }
 
     return fallback;
+};
+
+const normalizePlaybackUrl = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+        try {
+            const parsed = new URL(raw);
+            return `${parsed.pathname}${parsed.search}`;
+        } catch {
+            return raw;
+        }
+    }
+
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    return '';
+};
+
+const toBlobStreamUrl = (relativePath = '') => {
+    const normalized = String(relativePath || '')
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+    if (!normalized) return '';
+
+    const encoded = normalized
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
 };
 
 const normalizeTrack = (track) => {
@@ -97,11 +135,32 @@ const normalizeTrack = (track) => {
 
 const normalizeVideo = (video) => {
     if (!video || typeof video !== 'object') return null;
+
+    const fileName = String(video.fileName || video.FileName || video.title || 'video').trim();
+    const relativePath = String(video.relativePath || video.RelativePath || video.objectKey || video.ObjectKey || '').trim();
+    const sourceCandidates = [
+        toBlobStreamUrl(relativePath),
+        fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '',
+        normalizePlaybackUrl(video.videoUrl || ''),
+        normalizePlaybackUrl(video.mediaUrl || ''),
+        normalizePlaybackUrl(video.filePath || ''),
+        normalizePlaybackUrl(video.publicUrl || ''),
+        normalizePlaybackUrl(video.thumbnailUrl || ''),
+        normalizePlaybackUrl(video.posterUrl || '')
+    ].filter(Boolean).map((url) => resolveMediaUrl(url) || url);
+
+    const videoUrl = sourceCandidates[0] || '';
+    const thumbnailUrl = sourceCandidates[1] || sourceCandidates[0] || '';
+
     return {
         id: String(video.id || video.videoId || ''),
         title: String(video.title || 'Untitled video').trim(),
         description: String(video.description || '').trim(),
-        videoUrl: String(video.videoUrl || video.mediaUrl || video.filePath || '').trim(),
+        videoUrl,
+        mediaUrl: videoUrl,
+        thumbnailUrl,
+        relativePath,
+        fileName,
         createdAt: String(video.createdAt || video.uploadedAt || ''),
         type: 'video'
     };
@@ -109,41 +168,6 @@ const normalizeVideo = (video) => {
 
 const normalizePhoto = (photo) => {
     if (!photo || typeof photo !== 'object') return null;
-
-    const normalizePlaybackUrl = (value = '') => {
-        const raw = String(value || '').trim();
-        if (!raw) return '';
-
-        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
-            try {
-                const parsed = new URL(raw);
-                return `${parsed.pathname}${parsed.search}`;
-            } catch {
-                return raw;
-            }
-        }
-
-        if (raw.startsWith('/')) return raw;
-        if (raw.startsWith('api/')) return `/${raw}`;
-        if (/^https?:\/\//i.test(raw)) return raw;
-        return '';
-    };
-
-    const toBlobStreamUrl = (relativePath = '') => {
-        const normalized = String(relativePath || '')
-            .trim()
-            .replace(/\\/g, '/')
-            .replace(/^\/+/, '');
-        if (!normalized) return '';
-
-        const encoded = normalized
-            .split('/')
-            .filter(Boolean)
-            .map((segment) => encodeURIComponent(segment))
-            .join('/');
-
-        return encoded ? `/api/videostreaming/blob/${encoded}` : '';
-    };
 
     const relativePath = String(
         photo.relativePath
@@ -163,7 +187,7 @@ const normalizePhoto = (photo) => {
         normalizePlaybackUrl(photo.url || photo.Url || ''),
         normalizePlaybackUrl(photo.fileUrl || photo.FileUrl || ''),
         normalizePlaybackUrl(photo.publicUrl || photo.PublicUrl || '')
-    ].filter(Boolean);
+    ].filter(Boolean).map((url) => resolveMediaUrl(url) || url);
 
     const imageUrl = sourceCandidates[0] || '';
     const thumbnailUrl = sourceCandidates[1] || sourceCandidates[0] || '';
@@ -184,6 +208,69 @@ const normalizePhoto = (photo) => {
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
+const LIBRARY_LIMITS = {
+    music: 20,
+    photo: 25,
+    video: 10
+};
+
+const LOCAL_ARCHIVE_STORAGE_KEY = 'wiseLocalMediaArchive';
+const LOCAL_ARCHIVE_HIDDEN_KEY = 'wiseLocalMediaArchiveHiddenIds';
+
+const readJsonLocal = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const writeJsonLocal = (key, value) => {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Best effort local persistence.
+    }
+};
+
+const normalizeArchiveStore = (value) => {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        music: Array.isArray(source.music) ? source.music : [],
+        photo: Array.isArray(source.photo) ? source.photo : [],
+        video: Array.isArray(source.video) ? source.video : []
+    };
+};
+
+const getMediaDateValue = (item) => {
+    const candidates = [item?.uploadedAt, item?.createdAt, item?.updatedAt, item?.archivedAt];
+    for (const candidate of candidates) {
+        const parsed = new Date(candidate || '').getTime();
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+    return 0;
+};
+
+const makeArchiveEntry = (item, mediaType) => {
+    const type = String(mediaType || '').trim().toLowerCase();
+    const sourceUrl = String(item?.mediaUrl || item?.videoUrl || item?.imageUrl || item?.url || '').trim();
+    const title = String(item?.title || `${type} item`).trim() || `${type} item`;
+    return {
+        id: `archive-${type}-${item?.id || Date.now()}-${Date.now()}`,
+        mediaId: String(item?.id || '').trim(),
+        type,
+        title,
+        description: String(item?.description || '').trim(),
+        sourceUrl,
+        thumbnailUrl: String(item?.thumbnailUrl || item?.imageUrl || '').trim(),
+        folderPath: `/wiseravenshare/local/${type}`,
+        archivedAt: new Date().toISOString()
+    };
+};
+
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
@@ -199,7 +286,7 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [photoLightbox, setPhotoLightbox] = useState(null);
     const [playingVideoId, setPlayingVideoId] = useState(null);
-    const [removingPhotoId, setRemovingPhotoId] = useState('');
+    const [removingMediaId, setRemovingMediaId] = useState('');
     const audioRef = useRef(null);
     const isMountedRef = useRef(true);
     const uploadInputRef = useRef(null);
@@ -210,6 +297,16 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [uploadTitle, setUploadTitle] = useState('');
     const [uploadDescription, setUploadDescription] = useState('');
     const [uploading, setUploading] = useState(false);
+    const [localArchive, setLocalArchive] = useState(() => normalizeArchiveStore(readJsonLocal(LOCAL_ARCHIVE_STORAGE_KEY, {})));
+    const [hiddenArchivedIds, setHiddenArchivedIds] = useState(() => normalizeArchiveStore(readJsonLocal(LOCAL_ARCHIVE_HIDDEN_KEY, {})));
+
+    useEffect(() => {
+        writeJsonLocal(LOCAL_ARCHIVE_STORAGE_KEY, localArchive);
+    }, [localArchive]);
+
+    useEffect(() => {
+        writeJsonLocal(LOCAL_ARCHIVE_HIDDEN_KEY, hiddenArchivedIds);
+    }, [hiddenArchivedIds]);
 
     const playTrack = (track) => {
         if (!track) {
@@ -282,43 +379,201 @@ const MyLibraryPage = ({ onNavigate }) => {
         });
     };
 
-    const handleRemovePhoto = async (photo, event) => {
+    const handleRemoveMedia = async (item, event) => {
         event?.preventDefault?.();
         event?.stopPropagation?.();
 
-        const photoId = String(photo?.id || '').trim();
-        if (!photoId) {
-            addToast('Unable to remove this photo because the id is missing.', 'error');
-            return;
+        await removeMediaItem(item, { skipConfirm: false, suppressToast: false });
+    };
+
+    const removeMediaItem = async (item, { skipConfirm = false, suppressToast = false } = {}) => {
+        const mediaId = String(item?.id || '').trim();
+        const mediaType = String(item?.type || '').toLowerCase();
+        if (!mediaId) {
+            addToast('Unable to remove this media because the id is missing.', 'error');
+            return false;
         }
 
-        const photoTitle = String(photo?.title || 'this photo').trim() || 'this photo';
-        const confirmed = window.confirm(`Remove "${photoTitle}" from your library? This cannot be undone.`);
-        if (!confirmed) {
-            return;
+        const mediaTitle = String(item?.title || `this ${mediaType || 'media item'}`).trim() || `this ${mediaType || 'media item'}`;
+        if (!skipConfirm) {
+            const confirmed = window.confirm(`Remove "${mediaTitle}" from your library? This cannot be undone.`);
+            if (!confirmed) {
+                return false;
+            }
         }
 
-        setRemovingPhotoId(photoId);
+        setRemovingMediaId(mediaId);
         try {
-            try {
-                await apiService.deletePhotoLibraryItem(photoId);
-            } catch (error) {
-                const status = Number(error?.status || error?.response?.status || 0);
-                if ((status === 404 || status === 400) && GUID_REGEX.test(photoId)) {
-                    await apiService.deleteSavedMediaItem(photoId);
-                } else {
-                    throw error;
+            if (mediaType === 'photo') {
+                try {
+                    await apiService.deletePhotoLibraryItem(mediaId);
+                } catch (error) {
+                    const status = Number(error?.status || error?.response?.status || 0);
+                    if ((status === 404 || status === 400) && GUID_REGEX.test(mediaId)) {
+                        await apiService.deleteSavedMediaItem(mediaId);
+                    } else {
+                        throw error;
+                    }
                 }
+                setPhotos((previous) => previous.filter((entry) => entry.id !== mediaId));
+                setPhotoLightbox((previous) => (previous?.id === mediaId ? null : previous));
+                setHiddenArchivedIds((previous) => ({ ...previous, photo: previous.photo.filter((id) => id !== mediaId) }));
+                setLocalArchive((previous) => ({ ...previous, photo: previous.photo.filter((entry) => entry.mediaId !== mediaId) }));
+            } else if (mediaType === 'video') {
+                try {
+                    await apiService.deleteVideoLibraryItem(mediaId);
+                } catch (error) {
+                    const status = Number(error?.status || error?.response?.status || 0);
+                    if ((status === 404 || status === 400) && GUID_REGEX.test(mediaId)) {
+                        await apiService.deleteSavedMediaItem(mediaId);
+                    } else {
+                        throw error;
+                    }
+                }
+                setVideos((previous) => previous.filter((entry) => entry.id !== mediaId));
+                setPlayingVideoId((previous) => (previous === mediaId ? null : previous));
+                setHiddenArchivedIds((previous) => ({ ...previous, video: previous.video.filter((id) => id !== mediaId) }));
+                setLocalArchive((previous) => ({ ...previous, video: previous.video.filter((entry) => entry.mediaId !== mediaId) }));
+            } else if (mediaType === 'music') {
+                try {
+                    await apiService.deleteMusicLibraryItem(mediaId);
+                } catch (error) {
+                    const status = Number(error?.status || error?.response?.status || 0);
+                    const canFallback = status === 404 || status === 400 || status === 405;
+                    if (canFallback && (GUID_REGEX.test(mediaId) || COMPACT_GUID_REGEX.test(mediaId))) {
+                        await apiService.deleteSavedMediaItem(mediaId);
+                    } else {
+                        throw error;
+                    }
+                }
+                setMusicTracks((previous) => {
+                    const next = previous.filter((entry) => entry.id !== mediaId);
+                    if (currentTrack?.id === mediaId) {
+                        setCurrentTrack(next[0] || null);
+                        setIsPlaying(false);
+                    }
+                    return next;
+                });
+                setHiddenArchivedIds((previous) => ({ ...previous, music: previous.music.filter((id) => id !== mediaId) }));
+                setLocalArchive((previous) => ({ ...previous, music: previous.music.filter((entry) => entry.mediaId !== mediaId) }));
+            } else {
+                throw new Error('Unsupported media type for removal.');
             }
 
-            setPhotos((previous) => previous.filter((item) => item.id !== photoId));
-            setPhotoLightbox((previous) => (previous?.id === photoId ? null : previous));
-            addToast(`Removed ${photoTitle} from your library.`, 'success');
+            if (!suppressToast) {
+                addToast(`Removed ${mediaTitle} from your library.`, 'success');
+            }
+            return true;
         } catch (error) {
-            addToast(error?.message || 'Failed to remove photo.', 'error');
+            if (!suppressToast) {
+                addToast(error?.message || 'Failed to remove media.', 'error');
+            }
+            return false;
         } finally {
-            setRemovingPhotoId('');
+            setRemovingMediaId('');
         }
+    };
+
+    const archiveMediaItem = (item) => {
+        const mediaId = String(item?.id || '').trim();
+        const mediaType = String(item?.type || '').toLowerCase();
+        if (!mediaId || !['music', 'photo', 'video'].includes(mediaType)) {
+            addToast('Unable to archive this item.', 'error');
+            return false;
+        }
+
+        const archiveEntry = makeArchiveEntry(item, mediaType);
+        setLocalArchive((previous) => ({
+            ...previous,
+            [mediaType]: [archiveEntry, ...(previous[mediaType] || []).filter((entry) => entry.mediaId !== mediaId)].slice(0, 400)
+        }));
+        setHiddenArchivedIds((previous) => ({
+            ...previous,
+            [mediaType]: Array.from(new Set([...(previous[mediaType] || []), mediaId]))
+        }));
+
+        if (mediaType === 'music' && currentTrack?.id === mediaId) {
+            setCurrentTrack(null);
+            setIsPlaying(false);
+        }
+        if (mediaType === 'video' && playingVideoId === mediaId) {
+            setPlayingVideoId(null);
+        }
+        if (mediaType === 'photo' && photoLightbox?.id === mediaId) {
+            setPhotoLightbox(null);
+        }
+
+        addToast(`Moved to local archive folder /wiseravenshare/local/${mediaType}.`, 'success');
+        return true;
+    };
+
+    const restoreArchivedItem = (entry) => {
+        const mediaType = String(entry?.type || '').toLowerCase();
+        const mediaId = String(entry?.mediaId || '').trim();
+        if (!mediaType || !mediaId) {
+            return;
+        }
+
+        setHiddenArchivedIds((previous) => ({
+            ...previous,
+            [mediaType]: (previous[mediaType] || []).filter((id) => id !== mediaId)
+        }));
+        addToast(`${entry?.title || 'Item'} restored to active library.`, 'success');
+    };
+
+    const removeArchiveRecord = (entry) => {
+        const mediaType = String(entry?.type || '').toLowerCase();
+        const archiveId = String(entry?.id || '').trim();
+        if (!mediaType || !archiveId) {
+            return;
+        }
+
+        setLocalArchive((previous) => ({
+            ...previous,
+            [mediaType]: (previous[mediaType] || []).filter((item) => item.id !== archiveId)
+        }));
+        addToast('Archive record removed.', 'info');
+    };
+
+    const enforceCapacityBeforeUpload = async (incomingType) => {
+        const mediaType = String(incomingType || '').toLowerCase();
+        const visibleCounts = {
+            music: musicTracks.filter((item) => !hiddenArchivedIds.music.includes(String(item?.id || ''))).length,
+            photo: photos.filter((item) => !hiddenArchivedIds.photo.includes(String(item?.id || ''))).length,
+            video: videos.filter((item) => !hiddenArchivedIds.video.includes(String(item?.id || ''))).length
+        };
+        const currentCount = visibleCounts[mediaType] || 0;
+        const limit = LIBRARY_LIMITS[mediaType] || 0;
+        if (limit <= 0 || currentCount < limit) {
+            return true;
+        }
+
+        const items = mediaType === 'music'
+            ? musicTracks.filter((item) => !hiddenArchivedIds.music.includes(String(item?.id || '')))
+            : mediaType === 'photo'
+                ? photos.filter((item) => !hiddenArchivedIds.photo.includes(String(item?.id || '')))
+                : videos.filter((item) => !hiddenArchivedIds.video.includes(String(item?.id || '')));
+
+        const oldest = [...items].sort((left, right) => getMediaDateValue(left) - getMediaDateValue(right))[0];
+        if (!oldest) {
+            return false;
+        }
+
+        const action = String(window.prompt(
+            `${mediaType.toUpperCase()} library limit reached (${limit}). Type ARCHIVE to move oldest item to local storage folder, DELETE to remove oldest item, or CANCEL to stop upload.`,
+            'ARCHIVE'
+        ) || '').trim().toLowerCase();
+
+        if (action === 'archive') {
+            return archiveMediaItem(oldest);
+        }
+
+        if (action === 'delete') {
+            return await removeMediaItem(oldest, { skipConfirm: true, suppressToast: false });
+        }
+
+        addToast('Upload canceled. No files were changed.', 'info');
+        return false;
     };
 
     const loadLibrary = async () => {
@@ -386,6 +641,17 @@ const MyLibraryPage = ({ onNavigate }) => {
         const description = String(uploadDescription || '').trim();
         const resolvedUploadType = inferUploadTypeFromFile(uploadFile, uploadType);
         const type = resolvedUploadType === 'music' ? 'audio' : resolvedUploadType;
+        const canProceed = await enforceCapacityBeforeUpload(resolvedUploadType);
+        if (!canProceed) {
+            return;
+        }
+
+        const destinationFolderByType = {
+            music: '/wiseravenshare/music',
+            photo: '/wiseravenshare/photo',
+            video: '/wiseravenshare/video'
+        };
+        const destinationFolder = destinationFolderByType[resolvedUploadType] || '/wiseravenshare/media';
 
         setUploading(true);
         try {
@@ -395,13 +661,14 @@ const MyLibraryPage = ({ onNavigate }) => {
                     artist: '',
                     album: '',
                     genre: '',
-                    destinationFolder: '',
+                    destinationFolder,
                     fingerprint: ''
                 });
             } else {
                 await apiService.uploadMedia(uploadFile, type, {
                     title,
-                    description
+                    description,
+                    destinationFolder
                 });
             }
 
@@ -430,31 +697,34 @@ const MyLibraryPage = ({ onNavigate }) => {
 
     const filteredTracks = useMemo(() => {
         const query = musicSearch.trim().toLowerCase();
-        if (!query) return musicTracks;
-        return musicTracks.filter((track) =>
+        const visibleTracks = musicTracks.filter((track) => !hiddenArchivedIds.music.includes(String(track?.id || '')));
+        if (!query) return visibleTracks;
+        return visibleTracks.filter((track) =>
             String(track.title || '').toLowerCase().includes(query)
             || String(track.artist || '').toLowerCase().includes(query)
             || String(track.album || '').toLowerCase().includes(query)
         );
-    }, [musicTracks, musicSearch]);
+    }, [musicTracks, musicSearch, hiddenArchivedIds.music]);
 
     const filteredVideos = useMemo(() => {
         const query = videoSearch.trim().toLowerCase();
-        if (!query) return videos;
-        return videos.filter((video) =>
+        const visibleVideos = videos.filter((video) => !hiddenArchivedIds.video.includes(String(video?.id || '')));
+        if (!query) return visibleVideos;
+        return visibleVideos.filter((video) =>
             String(video.title || '').toLowerCase().includes(query)
             || String(video.description || '').toLowerCase().includes(query)
         );
-    }, [videos, videoSearch]);
+    }, [videos, videoSearch, hiddenArchivedIds.video]);
 
     const filteredPhotos = useMemo(() => {
         const query = photoSearch.trim().toLowerCase();
-        if (!query) return photos;
-        return photos.filter((photo) =>
+        const visiblePhotos = photos.filter((photo) => !hiddenArchivedIds.photo.includes(String(photo?.id || '')));
+        if (!query) return visiblePhotos;
+        return visiblePhotos.filter((photo) =>
             String(photo.title || '').toLowerCase().includes(query)
             || String(photo.description || '').toLowerCase().includes(query)
         );
-    }, [photos, photoSearch]);
+    }, [photos, photoSearch, hiddenArchivedIds.photo]);
 
     const allMediaItems = useMemo(() => 
         [...filteredTracks, ...filteredVideos, ...filteredPhotos], 
@@ -463,10 +733,17 @@ const MyLibraryPage = ({ onNavigate }) => {
 
     const totalItems = useMemo(() => ({
         all: allMediaItems.length,
-        music: musicTracks.length,
-        photos: photos.length,
-        videos: videos.length
-    }), [allMediaItems, musicTracks, photos, videos]);
+        music: filteredTracks.length,
+        photos: filteredPhotos.length,
+        videos: filteredVideos.length
+    }), [allMediaItems, filteredTracks.length, filteredPhotos.length, filteredVideos.length]);
+
+    const archiveCounts = useMemo(() => ({
+        music: localArchive.music.length,
+        photo: localArchive.photo.length,
+        video: localArchive.video.length,
+        all: localArchive.music.length + localArchive.photo.length + localArchive.video.length
+    }), [localArchive]);
 
     return (
         <section style={{ display: 'grid', gap: '14px' }}>
@@ -526,6 +803,9 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <div style={{ marginTop: '6px', color: 'var(--light-color)', fontSize: '13px' }}>
                     All your uploaded photos, music, videos, and more in one unified library.
                 </div>
+                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)' }}>
+                    Capacity limits: Music {LIBRARY_LIMITS.music}, Photos {LIBRARY_LIMITS.photo}, Videos {LIBRARY_LIMITS.video}. When full, you will be prompted to archive or delete.
+                </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
                     <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
                         Photos ({totalItems.photos})
@@ -535,6 +815,9 @@ const MyLibraryPage = ({ onNavigate }) => {
                     </span>
                     <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
                         Videos ({totalItems.videos})
+                    </span>
+                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                        Local Archive ({archiveCounts.all})
                     </span>
                 </div>
                 <form onSubmit={handleUpload} style={{ display: 'grid', gap: '10px', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
@@ -666,6 +949,22 @@ const MyLibraryPage = ({ onNavigate }) => {
                 </button>
                 <button
                     type="button"
+                    onClick={() => setActiveTab('archive')}
+                    style={{
+                        border: activeTab === 'archive' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                        background: activeTab === 'archive' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
+                        color: 'var(--text-color)',
+                        borderRadius: '999px',
+                        padding: '8px 14px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                    }}
+                >
+                    <FiFile style={{ marginRight: '6px', display: 'inline' }} />
+                    Archive ({archiveCounts.all})
+                </button>
+                <button
+                    type="button"
                     onClick={() => setActiveTab('protect')}
                     style={{
                         border: activeTab === 'protect' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
@@ -703,7 +1002,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                                             tabIndex={0}
                                             onClick={() => {
                                                 if (item.type === 'music') playTrack(item);
-                                                else if (item.type === 'photo') setPhotoLightbox(item.imageUrl || item.url);
+                                                else if (item.type === 'photo') openPhotoLightbox(item);
                                                 else if (item.type === 'video') setPlayingVideoId((id) => id === item.id ? null : item.id);
                                             }}
                                             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.click()}
@@ -741,14 +1040,14 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                     )}
                                                 </div>
                                                 <FiPlay style={{ color: 'var(--light-color)', flexShrink: 0 }} />
-                                                {item.type === 'photo' && (
+                                                {(item.type === 'photo' || item.type === 'video' || item.type === 'music') && (
                                                     <button
                                                         type="button"
-                                                        title="Remove photo"
+                                                        title={`Remove ${item.type}`}
                                                         aria-label={`Remove ${item.title}`}
-                                                        disabled={removingPhotoId === item.id}
-                                                        onClick={(event) => handleRemovePhoto(item, event)}
-                                                        style={{ marginLeft: '8px', border: '1px solid rgba(248,113,113,0.45)', background: removingPhotoId === item.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingPhotoId === item.id ? 'not-allowed' : 'pointer' }}
+                                                        disabled={removingMediaId === item.id}
+                                                        onClick={(event) => handleRemoveMedia(item, event)}
+                                                        style={{ marginLeft: '8px', border: '1px solid rgba(248,113,113,0.45)', background: removingMediaId === item.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingMediaId === item.id ? 'not-allowed' : 'pointer' }}
                                                     >
                                                         <FiTrash2 />
                                                     </button>
@@ -821,9 +1120,9 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                 type="button"
                                                 title="Remove photo"
                                                 aria-label={`Remove ${photo.title}`}
-                                                disabled={removingPhotoId === photo.id}
-                                                onClick={(event) => handleRemovePhoto(photo, event)}
-                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 2, border: '1px solid rgba(248,113,113,0.55)', background: removingPhotoId === photo.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingPhotoId === photo.id ? 'not-allowed' : 'pointer' }}
+                                                disabled={removingMediaId === photo.id}
+                                                onClick={(event) => handleRemoveMedia(photo, event)}
+                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 2, border: '1px solid rgba(248,113,113,0.55)', background: removingMediaId === photo.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingMediaId === photo.id ? 'not-allowed' : 'pointer' }}
                                             >
                                                 <FiTrash2 />
                                             </button>
@@ -877,10 +1176,8 @@ const MyLibraryPage = ({ onNavigate }) => {
                             ) : (
                                 <div style={{ display: 'grid', gap: '8px' }}>
                                     {filteredTracks.map((track) => (
-                                        <button
+                                        <div
                                             key={track.id}
-                                            type="button"
-                                            onClick={() => playTrack(track)}
                                             style={{
                                                 textAlign: 'left',
                                                 border: `1px solid ${currentTrack?.id === track.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
@@ -888,19 +1185,38 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                 background: currentTrack?.id === track.id ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.03)',
                                                 color: 'var(--text-color)',
                                                 padding: '10px',
-                                                cursor: 'pointer'
+                                                display: 'grid',
+                                                gap: '8px'
                                             }}
                                         >
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                                                <strong>{track.title || 'Untitled'}</strong>
-                                                <span style={{ fontSize: '18px', color: 'var(--highlight-color)', flexShrink: 0 }}>
-                                                    {currentTrack?.id === track.id && isPlaying ? '⏸' : '▶'}
-                                                </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => playTrack(track)}
+                                                style={{ background: 'transparent', border: 'none', color: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                                                    <strong>{track.title || 'Untitled'}</strong>
+                                                    <span style={{ fontSize: '18px', color: 'var(--highlight-color)', flexShrink: 0 }}>
+                                                        {currentTrack?.id === track.id && isPlaying ? '⏸' : '▶'}
+                                                    </span>
+                                                </div>
+                                                <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
+                                                    {track.artist || 'Unknown artist'}{track.album ? ` • ${track.album}` : ''}
+                                                </div>
+                                            </button>
+                                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                                <button
+                                                    type="button"
+                                                    title="Remove music"
+                                                    aria-label={`Remove ${track.title || 'track'}`}
+                                                    disabled={removingMediaId === track.id}
+                                                    onClick={(event) => handleRemoveMedia(track, event)}
+                                                    style={{ border: '1px solid rgba(248,113,113,0.45)', background: removingMediaId === track.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingMediaId === track.id ? 'not-allowed' : 'pointer' }}
+                                                >
+                                                    <FiTrash2 />
+                                                </button>
                                             </div>
-                                            <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                {track.artist || 'Unknown artist'}{track.album ? ` • ${track.album}` : ''}
-                                            </div>
-                                        </button>
+                                        </div>
                                     ))}
                                 </div>
                             )}
@@ -937,9 +1253,20 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                 border: `1px solid ${playingVideoId === video.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
                                                 borderRadius: '10px',
                                                 background: 'rgba(255,255,255,0.03)',
-                                                overflow: 'hidden'
+                                                overflow: 'hidden',
+                                                position: 'relative'
                                             }}
                                         >
+                                            <button
+                                                type="button"
+                                                title="Remove video"
+                                                aria-label={`Remove ${video.title || 'video'}`}
+                                                disabled={removingMediaId === video.id}
+                                                onClick={(event) => handleRemoveMedia(video, event)}
+                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 3, border: '1px solid rgba(248,113,113,0.55)', background: removingMediaId === video.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingMediaId === video.id ? 'not-allowed' : 'pointer' }}
+                                            >
+                                                <FiTrash2 />
+                                            </button>
                                             {/* Collapsed row — tap to expand player */}
                                             <button type="button"
                                                 onClick={() => setPlayingVideoId((id) => id === video.id ? null : video.id)}
@@ -1068,6 +1395,54 @@ const MyLibraryPage = ({ onNavigate }) => {
                                         </div>
                                     </div>
                                 </>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'archive' && (
+                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
+                            <div style={{ fontSize: '13px', color: 'var(--light-color)' }}>
+                                Local archive stores folder path + retrieval URL metadata for on-demand access.
+                            </div>
+                            {archiveCounts.all === 0 ? (
+                                <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
+                                    No archived media yet.
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gap: '8px' }}>
+                                    {[...localArchive.music, ...localArchive.photo, ...localArchive.video].map((entry) => (
+                                        <div key={entry.id} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '8px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                                                <div>
+                                                    <strong>{entry.title}</strong>
+                                                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{entry.type} · {entry.folderPath}</div>
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                                                    {new Date(entry.archivedAt).toLocaleString()}
+                                                </div>
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#93c5fd', overflowWrap: 'anywhere' }}>
+                                                URL: {entry.sourceUrl || 'Unavailable'}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => restoreArchivedItem(entry)}
+                                                    style={{ border: '1px solid var(--border-color)', background: 'rgba(56,189,248,0.16)', color: 'var(--text-color)', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer' }}
+                                                >
+                                                    Restore to active
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeArchiveRecord(entry)}
+                                                    style={{ border: '1px solid rgba(248,113,113,0.45)', background: 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer' }}
+                                                >
+                                                    Remove archive record
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
                     )}

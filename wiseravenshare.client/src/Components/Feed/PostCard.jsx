@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Compartment from '../Common/Compartment';
 import { truthEngine } from '../../Services/truthEngine';
+import { apiService } from '../../Services/api';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { classifyPostMedia } from './postMediaClassifier';
+import '@flaticon/flaticon-uicons/css/all/all.css';
 
 const PostCard = ({
     post,
@@ -15,11 +17,63 @@ const PostCard = ({
     isFollowing,
     onFollow,
     onBookmark,
-    bookmarkLabel = 'Bookmark'
+    bookmarkLabel = 'Bookmark',
+    onCommentCountChange
 }) => {
     const [showComments, setShowComments] = useState(false);
     const [commentText, setCommentText] = useState('');
-    const [comments, setComments] = useState(post.comments || []);
+    const [comments, setComments] = useState(Array.isArray(post.comments) ? post.comments : []);
+    const [isCommentsLoading, setIsCommentsLoading] = useState(false);
+    const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+
+    const commentsCount = useMemo(() => {
+        if (Number.isFinite(Number(post.commentsCount))) {
+            return Number(post.commentsCount);
+        }
+
+        if (Array.isArray(comments)) {
+            return comments.length;
+        }
+
+        return 0;
+    }, [comments, post.commentsCount]);
+
+    const likesCount = Number(post.likes ?? post.likesCount ?? 0);
+    const repostsCount = Number(post.reposts ?? post.repostsCount ?? 0);
+
+    useEffect(() => {
+        setComments(Array.isArray(post.comments) ? post.comments : []);
+    }, [post.id, post.comments]);
+
+    useEffect(() => {
+        if (!showComments || !post?.id) {
+            return;
+        }
+
+        let cancelled = false;
+        const loadComments = async () => {
+            setIsCommentsLoading(true);
+            try {
+                const response = await apiService.getComments(post.id);
+                const nextComments = Array.isArray(response?.data) ? response.data : [];
+                if (!cancelled) {
+                    setComments(nextComments);
+                    onCommentCountChange?.(post.id, nextComments.length);
+                }
+            } catch {
+                // Keep local comments as fallback.
+            } finally {
+                if (!cancelled) {
+                    setIsCommentsLoading(false);
+                }
+            }
+        };
+
+        void loadComments();
+        return () => {
+            cancelled = true;
+        };
+    }, [showComments, post?.id, onCommentCountChange]);
 
     const displayUser = useMemo(() => {
         const postUser = post.user || {};
@@ -69,20 +123,55 @@ const PostCard = ({
         post.facebookUrl && { href: post.facebookUrl, label: 'Facebook', color: '#1877f2' }
     ].filter(Boolean);
 
-    const addComment = () => {
-        if (!commentText.trim()) {
+    const addComment = async () => {
+        const nextContent = commentText.trim();
+        if (!nextContent || isSubmittingComment) {
             return;
         }
 
-        const comment = {
-            id: Date.now(),
-            user: currentUser,
-            content: commentText,
-            createdAt: new Date()
-        };
+        setIsSubmittingComment(true);
+        try {
+            const response = await apiService.addComment(post.id, nextContent);
+            const payload = response?.data;
+            const nextComment = payload && typeof payload === 'object'
+                ? payload
+                : {
+                    id: `local-comment-${Date.now()}`,
+                    user: currentUser,
+                    content: nextContent,
+                    createdAt: new Date().toISOString()
+                };
 
-        setComments((prev) => [...prev, comment]);
-        setCommentText('');
+            setComments((prev) => {
+                const merged = [nextComment, ...prev];
+                onCommentCountChange?.(post.id, merged.length);
+                return merged;
+            });
+            setCommentText('');
+        } finally {
+            setIsSubmittingComment(false);
+        }
+    };
+
+    const actionButtonStyle = {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '6px 10px',
+        borderRadius: '999px',
+        border: '1px solid var(--border-color)',
+        background: 'rgba(255,255,255,0.03)',
+        color: 'var(--text-color)',
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontWeight: 600
+    };
+
+    const iconStyle = {
+        fontSize: '16px',
+        lineHeight: 1,
+        width: '16px',
+        textAlign: 'center'
     };
 
     return (
@@ -226,14 +315,33 @@ const PostCard = ({
                 )}
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                <button onClick={() => onLike?.(post.id)}>Like ({post.likes ?? 0})</button>
-                <button onClick={() => onRepost?.(post.id)}>Repost ({post.reposts ?? 0})</button>
-                <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
-                <button onClick={() => onVerify?.(post)}>Verify</button>
-                <button onClick={() => onDispute?.(post)}>Dispute</button>
-                <button onClick={() => setShowComments((prev) => !prev)}>
-                    Comments ({comments.length})
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <button style={actionButtonStyle} onClick={() => onLike?.(post.id)} aria-label="Heart this post">
+                    <i className="fi fi-br-heart" aria-hidden="true" style={iconStyle} />
+                    Like ({likesCount})
+                </button>
+                <button style={actionButtonStyle} onClick={() => onRepost?.(post.id)} aria-label="Repost this post">
+                    <i className="fi fi-br-stamp" aria-hidden="true" style={iconStyle} />
+                    Repost ({repostsCount})
+                </button>
+                <button style={actionButtonStyle} onClick={() => onBookmark?.(post)} aria-label="Bookmark this post">
+                    <i className="fi fi-br-bookmark" aria-hidden="true" style={iconStyle} />
+                    {bookmarkLabel || 'Bookmark'}
+                </button>
+                <button style={actionButtonStyle} onClick={() => onVerify?.(post)} aria-label="Verify this post">
+                    <i className="fi fi-br-shield-check" aria-hidden="true" style={iconStyle} />
+                    Verify
+                </button>
+                <button style={actionButtonStyle} onClick={() => onDispute?.(post)} aria-label="Dispute this post">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <i className="fi fi-br-handshake" aria-hidden="true" style={iconStyle} />
+                        <i className="fi fi-br-scale" aria-hidden="true" style={iconStyle} />
+                    </span>
+                    Dispute
+                </button>
+                <button style={actionButtonStyle} onClick={() => setShowComments((prev) => !prev)} aria-label="Toggle comments">
+                    <i className="fi fi-br-comment-dots" aria-hidden="true" style={iconStyle} />
+                    Comments ({commentsCount})
                 </button>
             </div>
 
@@ -278,6 +386,12 @@ const PostCard = ({
                         <input
                             value={commentText}
                             onChange={(e) => setCommentText(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    void addComment();
+                                }
+                            }}
                             placeholder="Write a comment"
                             style={{
                                 flex: 1,
@@ -288,8 +402,15 @@ const PostCard = ({
                                 color: 'var(--text-color)'
                             }}
                         />
-                        <button onClick={addComment}>Send</button>
+                        <button onClick={() => void addComment()} disabled={isSubmittingComment || !commentText.trim()}>
+                            {isSubmittingComment ? 'Sending...' : 'Send'}
+                        </button>
                     </div>
+                    {isCommentsLoading && (
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                            Loading comments...
+                        </div>
+                    )}
                     {comments.map((comment) => (
                         <div
                             key={comment.id}

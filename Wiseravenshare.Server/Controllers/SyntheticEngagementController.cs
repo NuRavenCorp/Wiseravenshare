@@ -8,6 +8,7 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Route("api/admin/synthetic-engagement")]
 [Authorize]
+[FeatureCompartment("synthetic-engagement")]
 public sealed class SyntheticEngagementController : ControllerBase
 {
     private readonly SyntheticEngagementService _syntheticEngagementService;

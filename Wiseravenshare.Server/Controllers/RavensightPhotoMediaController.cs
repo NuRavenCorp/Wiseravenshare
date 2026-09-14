@@ -140,10 +140,20 @@ public sealed class RavensightPhotoMediaController : ControllerBase
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SavePhoto([FromForm] SaveRavensightPhotoDto dto, CancellationToken cancellationToken)
     {
-        if (dto.File is null || dto.File.Length == 0)
+        var file = dto.File;
+        if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "No photo file uploaded." });
+            file = Request.Form.Files.FirstOrDefault(f =>
+                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No photo file uploaded. Ensure the multipart field is named 'file'." });
+        }
+
+        dto.File ??= file;
 
         if (!TryResolveUserId(out var userId))
         {

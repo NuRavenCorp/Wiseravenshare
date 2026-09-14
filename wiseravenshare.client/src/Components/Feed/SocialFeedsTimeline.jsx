@@ -291,9 +291,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [postMessage, setPostMessage] = useState('');
     const [mediaUrlInput, setMediaUrlInput] = useState('');
     const [linkUrlInput, setLinkUrlInput] = useState('');
-    const [publishFacebook, setPublishFacebook] = useState(true);
+    const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
+    const [publishInstagram, setPublishInstagram] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
     const [displayTemplate, setDisplayTemplate] = useState('cards');
@@ -661,6 +662,12 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         e?.preventDefault();
         if (!postMessage.trim()) return;
 
+        const noneSelected = !publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram;
+        if (noneSelected) {
+            setPublishResults([{ platform: 'general', success: false, error: 'Select at least one platform before publishing.' }]);
+            return;
+        }
+
         setIsPublishing(true);
         setPublishResults(null);
 
@@ -682,13 +689,18 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
                 publishToTikTok: publishTikTok && isVideoUrl,
-                publishToYouTube: publishYouTube && isVideoUrl
+                publishToYouTube: publishYouTube && isVideoUrl,
+                publishToInstagram: publishInstagram
             });
 
             setPublishResults(response?.results || []);
             setPostMessage('');
             setMediaUrlInput('');
             setLinkUrlInput('');
+            setPublishFacebook(false);
+            setPublishTikTok(false);
+            setPublishYouTube(false);
+            setPublishInstagram(false);
         } catch (err) {
             setPublishResults([{ platform: 'general', success: false, error: err?.message || 'Publishing request failed.' }]);
         } finally {
@@ -1149,80 +1161,81 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 >
                     <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
-                        🔗 Configure Social Media Handles / Page IDs
+                        🔗 Configure Social Media Handles & Page IDs
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Just enter your public handle or page name. No API keys are required from users here.
+                        Enter your public username, page name, or numeric ID for each platform. Your feeds will sync automatically once saved.
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>📘 Facebook Page ID or Handle</span>
+                            <span style={{ fontWeight: 700, color: '#93c5fd' }}>📘 Facebook</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Page username or numeric Page ID (e.g. <em>MyBrandPage</em> or <em>109283749283</em>). Found in Page Settings → Page Info.</span>
                             <input
                                 ref={(node) => { handleInputRefs.current.facebook = node; }}
                                 type="text"
                                 value={handles.facebook}
                                 onChange={(e) => setHandles({ ...handles, facebook: e.target.value })}
-                                placeholder="e.g. MyBrandPage or 109283749283"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="MyBrandPage or 109283749283"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #93c5fd44', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>🎵 TikTok Username</span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 700, color: '#67e8f9' }}>🎵 TikTok</span>
                                 <button
                                     type="button"
-                                    onClick={async () => {
-                                        launchConnectPlatform('tiktok');
-                                    }}
+                                    onClick={async () => { launchConnectPlatform('tiktok'); }}
                                     style={{
                                         border: 'none',
                                         background: 'rgba(103, 232, 249, 0.2)',
                                         color: '#67e8f9',
                                         borderRadius: '4px',
-                                        padding: '2px 6px',
+                                        padding: '2px 8px',
                                         fontSize: '10px',
                                         cursor: 'pointer',
                                         fontWeight: 700
                                     }}
                                 >
-                                    🔑 Authorize OAuth v2
+                                    🔑 OAuth Login
                                 </button>
-                            </span>
+                            </div>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your TikTok @username (without the @). Use OAuth Login for API publishing access.</span>
                             <input
                                 ref={(node) => { handleInputRefs.current.tiktok = node; }}
                                 type="text"
                                 value={handles.tiktok}
                                 onChange={(e) => setHandles({ ...handles, tiktok: e.target.value })}
-                                placeholder="e.g. creatorname"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="creatorusername"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #67e8f944', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>📸 Instagram Username</span>
+                            <span style={{ fontWeight: 700, color: '#f9a8d4' }}>📸 Instagram</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Instagram @username (without the @). Must be a Business or Creator account for publishing.</span>
                             <input
                                 ref={(node) => { handleInputRefs.current.instagram = node; }}
                                 type="text"
                                 value={handles.instagram}
                                 onChange={(e) => setHandles({ ...handles, instagram: e.target.value })}
-                                placeholder="e.g. mybrand"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="mybrandusername"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #f9a8d444', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>▶️ YouTube Channel Handle</span>
+                            <span style={{ fontWeight: 700, color: '#f87171' }}>▶️ YouTube</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your channel handle (e.g. <em>@MyChannel</em>) or Channel ID (e.g. <em>UCxxxxxxx</em>). Found in YouTube Studio → Channel → Advanced settings.</span>
                             <input
                                 ref={(node) => { handleInputRefs.current.youtube = node; }}
                                 type="text"
                                 value={handles.youtube}
                                 onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
-                                placeholder="e.g. MyChannel"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="@MyChannel or UCxxxxxxxx"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #f8717144', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
-
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -1243,7 +1256,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </form>
             )}
 
-            {/* Interactive Multi-Platform Post Creator */}
             <form
                 onSubmit={handlePublishPost}
                 style={{
@@ -1254,15 +1266,56 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     marginBottom: '18px'
                 }}
             >
-                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    ✍️ Post to Social Media Feed ({activeMeta.label})
+                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ✍️ Publish to Social Platforms
                 </div>
+
+                {/* Platform selector pills — pick one or many */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                    {[
+                        { key: 'facebook', label: 'Facebook', icon: '📘', color: '#93c5fd', value: publishFacebook, set: setPublishFacebook },
+                        { key: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4', value: publishInstagram, set: setPublishInstagram },
+                        { key: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9', value: publishTikTok, set: setPublishTikTok, note: 'video required' },
+                        { key: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171', value: publishYouTube, set: setPublishYouTube, note: 'video required' }
+                    ].map(({ key, label, icon, color, value, set, note }) => (
+                        <button
+                            key={key}
+                            type="button"
+                            onClick={() => set(!value)}
+                            style={{
+                                border: `2px solid ${value ? color : 'var(--border-color)'}`,
+                                background: value ? `${color}22` : 'rgba(15,23,42,0.4)',
+                                color: value ? color : 'var(--light-color)',
+                                borderRadius: '10px',
+                                padding: '8px 14px',
+                                fontSize: '12px',
+                                fontWeight: value ? 700 : 400,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                gap: '2px',
+                                minWidth: '96px'
+                            }}
+                        >
+                            <span style={{ fontSize: '18px' }}>{icon}</span>
+                            <span>{label}</span>
+                            {note && <span style={{ fontSize: '10px', opacity: 0.75 }}>{note}</span>}
+                        </button>
+                    ))}
+                </div>
+
+                {(!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram) && (
+                    <div style={{ fontSize: '12px', color: '#fca5a5', marginBottom: '10px' }}>
+                        ⚠️ Select at least one platform above before publishing.
+                    </div>
+                )}
 
                 <textarea
                     rows={3}
                     value={postMessage}
                     onChange={(e) => setPostMessage(e.target.value)}
-                    placeholder={`Write an update or post to publish to ${activeMeta.label} or cross-post across platforms...`}
+                    placeholder="Write a post or update to publish…"
                     style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1275,53 +1328,47 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '10px' }}>
-                    <input
-                        type="url"
-                        value={mediaUrlInput}
-                        onChange={(e) => setMediaUrlInput(e.target.value)}
-                        placeholder="Video / Photo URL (optional for TikTok/YouTube)"
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                    />
-                    <input
-                        type="url"
-                        value={linkUrlInput}
-                        onChange={(e) => setLinkUrlInput(e.target.value)}
-                        placeholder="Link URL (optional for Facebook)"
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                    />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--light-color)' }}>Video / Photo URL <span style={{ opacity: 0.7 }}>(required for TikTok & YouTube)</span></span>
+                        <input
+                            type="url"
+                            value={mediaUrlInput}
+                            onChange={(e) => setMediaUrlInput(e.target.value)}
+                            placeholder="https://… (.mp4, .jpg, etc.)"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--light-color)' }}>Link URL <span style={{ opacity: 0.7 }}>(optional, for Facebook / Instagram)</span></span>
+                        <input
+                            type="url"
+                            value={linkUrlInput}
+                            onChange={(e) => setLinkUrlInput(e.target.value)}
+                            placeholder="https://…"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        />
+                    </label>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishFacebook} onChange={(e) => setPublishFacebook(e.target.checked)} />
-                            📘 Facebook
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishTikTok} onChange={(e) => setPublishTikTok(e.target.checked)} />
-                            🎵 TikTok
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishYouTube} onChange={(e) => setPublishYouTube(e.target.checked)} />
-                            ▶️ YouTube
-                        </label>
-                    </div>
-
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
                         type="submit"
-                        disabled={isPublishing || !postMessage.trim()}
+                        disabled={isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)}
                         style={{
                             border: 'none',
-                            background: isPublishing ? 'var(--border-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                            background: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram))
+                                ? 'var(--border-color)'
+                                : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                             color: '#fff',
                             borderRadius: '8px',
-                            padding: '10px 20px',
+                            padding: '10px 24px',
                             fontWeight: 700,
-                            cursor: isPublishing ? 'wait' : 'pointer'
+                            cursor: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)) ? 'not-allowed' : 'pointer',
+                            fontSize: '13px'
                         }}
                     >
-                        {isPublishing ? 'Publishing...' : '🚀 Publish Post'}
+                        {isPublishing ? 'Publishing…' : '🚀 Publish Post'}
                     </button>
                 </div>
 

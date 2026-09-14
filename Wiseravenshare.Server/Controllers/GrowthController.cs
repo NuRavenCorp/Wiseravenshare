@@ -61,6 +61,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("funnel")]
+    [FeatureCompartment("growth-admin")]
     public IActionResult GetFunnelSummary([FromQuery] int days = 30)
     {
         if (!IsAdminRequest())
@@ -151,6 +152,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("moderation/reports")]
+    [FeatureCompartment("growth-admin")]
     public IActionResult GetModerationReports(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -168,6 +170,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("moderation/reports/{reportId}/resolve")]
+    [FeatureCompartment("growth-admin")]
     public IActionResult ResolveModerationReport(string reportId, [FromBody] ModerationResolveRequest request)
     {
         if (!IsAdminRequest())
@@ -212,6 +215,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("revenue/initialize")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult InitializeRevenueAgent()
     {
         if (!IsAdminRequest())
@@ -230,6 +234,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("revenue/agent")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult GetRevenueAgent()
     {
         if (!IsAdminRequest())
@@ -248,6 +253,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("revenue/summary")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult GetRevenueSummary()
     {
         if (!IsAdminRequest())
@@ -265,6 +271,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("revenue/actions")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult GetRevenueActions([FromQuery] int? weekNumber = null, [FromQuery] string? status = null)
     {
         if (!IsAdminRequest())
@@ -282,6 +289,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("revenue/actions/{actionId}/status")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult UpdateRevenueActionStatus(string actionId, [FromBody] RevenueActionStatusRequest request)
     {
         if (!IsAdminRequest())
@@ -320,6 +328,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("revenue/evidence")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult AddRevenueEvidence([FromBody] RevenueEvidenceCreateRequest request)
     {
         if (!IsAdminRequest())
@@ -362,6 +371,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("revenue/evidence/{evidenceId}/verify")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult VerifyRevenueEvidence(string evidenceId, [FromBody] RevenueEvidenceVerifyRequest request)
     {
         if (!IsAdminRequest())
@@ -398,6 +408,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("revenue/evidence")]
+    [FeatureCompartment("growth-revenue")]
     public IActionResult GetRevenueEvidence([FromQuery] int? weekNumber = null, [FromQuery] bool? verified = null)
     {
         if (!IsAdminRequest())
@@ -415,6 +426,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("policy")]
+    [FeatureCompartment("growth-admin")]
     public IActionResult GetAdminPolicyHistory()
     {
         if (!IsAdminRequest())
@@ -427,6 +439,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpPost("policy")]
+    [FeatureCompartment("growth-admin")]
     public IActionResult RecordAdminPolicyShift([FromBody] AdminPolicyShiftRequest request)
     {
         if (!IsAdminRequest())
@@ -449,6 +462,7 @@ public sealed class GrowthController : ControllerBase
     }
 
     [HttpGet("admin/users/accounting")]
+    [FeatureCompartment("growth-admin")]
     public async Task<IActionResult> GetAdminUserAccounting()
     {
         if (!IsAdminRequest())

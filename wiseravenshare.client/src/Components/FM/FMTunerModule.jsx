@@ -345,6 +345,17 @@ const FMTunerModule = ({ onFrequencyChange }) => {
           <h3>FM Tuner</h3>
           <p>Live radio discovery and streaming inside your Music Studio.</p>
         </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="fm-btn"
+            onClick={handleStop}
+            disabled={!isPlaying}
+            title="Turn off radio audio"
+          >
+            Turn Radio Off
+          </button>
+        </div>
       </header>
 
       <div className="fm-quick-tune" role="group" aria-label="Quick frequency tune">
