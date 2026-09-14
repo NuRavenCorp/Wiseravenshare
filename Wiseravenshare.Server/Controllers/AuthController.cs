@@ -10,6 +10,7 @@ using System.Threading;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using Google.Apis.Auth;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
@@ -39,6 +40,7 @@ public class AuthController : ControllerBase
     private readonly IUserRepository _userRepository;
     private readonly GrowthService _growthService;
     private readonly TeamAccessService _teamAccessService;
+    private readonly IBlobStorageService _blobStorageService;
     private readonly IEmailService _emailService;
     private readonly ILogger<AuthController> _logger;
     private readonly RefreshTokenStore _refreshTokenStore;
@@ -49,6 +51,7 @@ public class AuthController : ControllerBase
         IUserRepository userRepository,
         GrowthService growthService,
         TeamAccessService teamAccessService,
+        IBlobStorageService blobStorageService,
         IEmailService emailService,
         ILogger<AuthController> logger,
         RefreshTokenStore refreshTokenStore)
@@ -58,6 +61,7 @@ public class AuthController : ControllerBase
         _userRepository = userRepository;
         _growthService = growthService;
         _teamAccessService = teamAccessService;
+        _blobStorageService = blobStorageService;
         _emailService = emailService;
         _logger = logger;
         _refreshTokenStore = refreshTokenStore;
@@ -1019,11 +1023,40 @@ public class AuthController : ControllerBase
 
     [HttpGet("team-access/podcast-session-snapshot")]
     [Authorize]
-    public IActionResult GetPodcastSessionSnapshot([FromQuery] string? roomId = null)
+    public async Task<IActionResult> GetPodcastSessionSnapshot([FromQuery] string? roomId = null, CancellationToken cancellationToken = default)
     {
         if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
         {
             return Forbid();
+        }
+
+        var normalizedRoomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim();
+
+        var databaseRecord = await GetPodcastSessionSnapshotFromDatabaseAsync(normalizedRoomId, cancellationToken);
+        if (databaseRecord is not null)
+        {
+            JsonElement dbPayload;
+            try
+            {
+                dbPayload = JsonSerializer.Deserialize<JsonElement>(databaseRecord.SnapshotJson);
+            }
+            catch
+            {
+                dbPayload = JsonDocument.Parse("{}").RootElement;
+            }
+
+            return Ok(new
+            {
+                roomId = databaseRecord.RoomId,
+                hasSnapshot = true,
+                snapshot = dbPayload,
+                savedByEmail = databaseRecord.SavedByEmail,
+                savedAtUtc = databaseRecord.SavedAtUtc,
+                version = databaseRecord.Version,
+                blobUrl = databaseRecord.BlobPublicUrl,
+                persistence = "database",
+                syncedAtUtc = DateTime.UtcNow
+            });
         }
 
         var snapshot = _teamAccessService.GetPodcastSessionSnapshot(roomId);
@@ -1031,7 +1064,7 @@ public class AuthController : ControllerBase
         {
             return Ok(new
             {
-                roomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim(),
+                roomId = normalizedRoomId,
                 hasSnapshot = false,
                 syncedAtUtc = DateTime.UtcNow
             });
@@ -1055,13 +1088,14 @@ public class AuthController : ControllerBase
             savedByEmail = snapshot.SavedByEmail,
             savedAtUtc = snapshot.SavedAtUtc,
             version = snapshot.Version,
+            persistence = "fallback",
             syncedAtUtc = DateTime.UtcNow
         });
     }
 
     [HttpPost("team-access/podcast-session-snapshot")]
     [Authorize]
-    public IActionResult SavePodcastSessionSnapshot([FromBody] PodcastSessionSnapshotRequest? request)
+    public async Task<IActionResult> SavePodcastSessionSnapshot([FromBody] PodcastSessionSnapshotRequest? request, CancellationToken cancellationToken = default)
     {
         if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
         {
@@ -1079,13 +1113,23 @@ public class AuthController : ControllerBase
         }
 
         var saved = _teamAccessService.UpsertPodcastSessionSnapshot(actorEmail, roomId, snapshotJson, request?.Version);
+
+        var dbSaved = await UpsertPodcastSessionSnapshotInDatabaseAsync(
+            roomId,
+            actorEmail,
+            snapshotJson,
+            saved.Version,
+            cancellationToken);
+
         return Ok(new
         {
             success = true,
             roomId = saved.RoomId,
             savedByEmail = saved.SavedByEmail,
             savedAtUtc = saved.SavedAtUtc,
-            version = saved.Version,
+            version = dbSaved?.Version ?? saved.Version,
+            persistence = dbSaved is null ? "fallback" : "database",
+            blobUrl = dbSaved?.BlobPublicUrl,
             syncedAtUtc = DateTime.UtcNow
         });
     }
@@ -2347,6 +2391,162 @@ public class AuthController : ControllerBase
         return $"{remoteIp}|{normalizedIdentifier}";
     }
 
+    private async Task EnsurePodcastSessionSnapshotSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.podcast_session_snapshots (
+    room_id TEXT PRIMARY KEY,
+    snapshot_json JSONB NOT NULL,
+    version TEXT NOT NULL,
+    saved_by_email TEXT NOT NULL,
+    saved_at_utc TIMESTAMPTZ NOT NULL,
+    blob_object_key TEXT NULL,
+    blob_public_url TEXT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<PodcastSessionSnapshotStorageRecord?> UpsertPodcastSessionSnapshotInDatabaseAsync(
+        string roomId,
+        string actorEmail,
+        string snapshotJson,
+        string version,
+        CancellationToken cancellationToken)
+    {
+        var connectionString = NormalizeDatabaseConnectionString(_configuration["DATABASE_URL"]
+            ?? _configuration.GetConnectionString("DefaultConnection")
+            ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return null;
+        }
+
+        string? blobObjectKey = null;
+        string? blobPublicUrl = null;
+
+        if (_blobStorageService.IsConfigured)
+        {
+            try
+            {
+                var safeRoomSegment = new string((roomId ?? "main").Where(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_').ToArray());
+                if (string.IsNullOrWhiteSpace(safeRoomSegment))
+                {
+                    safeRoomSegment = "main";
+                }
+
+                blobObjectKey = $"wiseravenshare/podcast/session-snapshots/{safeRoomSegment}/latest.json";
+                await using var payloadStream = new MemoryStream(Encoding.UTF8.GetBytes(snapshotJson));
+                var upload = await _blobStorageService.UploadAsync(blobObjectKey, payloadStream, "application/json", cancellationToken);
+                blobPublicUrl = upload.PublicUrl;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed uploading podcast session snapshot blob for room {RoomId}.", roomId);
+                blobObjectKey = null;
+                blobPublicUrl = null;
+            }
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await EnsurePodcastSessionSnapshotSchemaAsync(connection, cancellationToken);
+
+        const string sql = @"
+INSERT INTO app_data.podcast_session_snapshots (
+    room_id, snapshot_json, version, saved_by_email, saved_at_utc, blob_object_key, blob_public_url, updated_at_utc
+) VALUES (
+    @room_id, CAST(@snapshot_json AS jsonb), @version, @saved_by_email, @saved_at_utc, @blob_object_key, @blob_public_url, @updated_at_utc
+)
+ON CONFLICT (room_id) DO UPDATE
+SET snapshot_json = EXCLUDED.snapshot_json,
+    version = EXCLUDED.version,
+    saved_by_email = EXCLUDED.saved_by_email,
+    saved_at_utc = EXCLUDED.saved_at_utc,
+    blob_object_key = EXCLUDED.blob_object_key,
+    blob_public_url = EXCLUDED.blob_public_url,
+    updated_at_utc = EXCLUDED.updated_at_utc;
+";
+
+        var savedAtUtc = DateTime.UtcNow;
+        await using (var command = new NpgsqlCommand(sql, connection))
+        {
+            command.Parameters.AddWithValue("room_id", roomId);
+            command.Parameters.AddWithValue("snapshot_json", snapshotJson);
+            command.Parameters.AddWithValue("version", version);
+            command.Parameters.AddWithValue("saved_by_email", actorEmail);
+            command.Parameters.AddWithValue("saved_at_utc", savedAtUtc);
+            command.Parameters.AddWithValue("blob_object_key", (object?)blobObjectKey ?? DBNull.Value);
+            command.Parameters.AddWithValue("blob_public_url", (object?)blobPublicUrl ?? DBNull.Value);
+            command.Parameters.AddWithValue("updated_at_utc", savedAtUtc);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return new PodcastSessionSnapshotStorageRecord
+        {
+            RoomId = roomId,
+            SnapshotJson = snapshotJson,
+            Version = version,
+            SavedByEmail = actorEmail,
+            SavedAtUtc = savedAtUtc,
+            BlobObjectKey = blobObjectKey,
+            BlobPublicUrl = blobPublicUrl
+        };
+    }
+
+    private async Task<PodcastSessionSnapshotStorageRecord?> GetPodcastSessionSnapshotFromDatabaseAsync(string roomId, CancellationToken cancellationToken)
+    {
+        var connectionString = NormalizeDatabaseConnectionString(_configuration["DATABASE_URL"]
+            ?? _configuration.GetConnectionString("DefaultConnection")
+            ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await EnsurePodcastSessionSnapshotSchemaAsync(connection, cancellationToken);
+
+            const string sql = @"
+SELECT room_id, snapshot_json::text, version, saved_by_email, saved_at_utc, blob_object_key, blob_public_url
+FROM app_data.podcast_session_snapshots
+WHERE room_id = @room_id
+LIMIT 1;";
+
+            await using var command = new NpgsqlCommand(sql, connection);
+            command.Parameters.AddWithValue("room_id", roomId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return new PodcastSessionSnapshotStorageRecord
+            {
+                RoomId = reader.IsDBNull(0) ? roomId : reader.GetString(0),
+                SnapshotJson = reader.IsDBNull(1) ? "{}" : reader.GetString(1),
+                Version = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                SavedByEmail = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                SavedAtUtc = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetDateTime(4),
+                BlobObjectKey = reader.IsDBNull(5) ? null : reader.GetString(5),
+                BlobPublicUrl = reader.IsDBNull(6) ? null : reader.GetString(6)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed reading podcast session snapshot from database for room {RoomId}.", roomId);
+            return null;
+        }
+    }
+
     private static bool IsLockedOut(string key, out TimeSpan retryAfter)
     {
         retryAfter = TimeSpan.Zero;
@@ -2403,6 +2603,73 @@ public class AuthController : ControllerBase
     private static void ClearFailedLogins(string key)
     {
         LoginAttemptsByKey.TryRemove(key, out _);
+    }
+
+    private static string NormalizeDatabaseConnectionString(string connectionString)
+    {
+        var value = connectionString?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (!value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            && !value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        if (value.EndsWith("?sslmode", StringComparison.OrdinalIgnoreCase))
+        {
+            return value + "=require";
+        }
+
+        value = value.Replace("?sslmode&", "?sslmode=require&", StringComparison.OrdinalIgnoreCase);
+        value = value.Replace("&sslmode&", "&sslmode=require&", StringComparison.OrdinalIgnoreCase);
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return value;
+        }
+
+        var userName = string.Empty;
+        var password = string.Empty;
+        if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+            userName = Uri.UnescapeDataString(parts[0]);
+            if (parts.Length > 1)
+            {
+                password = Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.IsDefaultPort ? 5432 : uri.Port,
+            Username = userName,
+            Password = password,
+            Database = uri.AbsolutePath.Trim('/'),
+            SslMode = SslMode.Require,
+            Pooling = true
+        };
+
+        var query = uri.Query?.TrimStart('?') ?? string.Empty;
+        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = segment.Split('=', 2);
+            var keyPart = Uri.UnescapeDataString(kv[0]);
+            var valuePart = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+            if (keyPart.Equals("sslmode", StringComparison.OrdinalIgnoreCase)
+                && Enum.TryParse<SslMode>(valuePart, true, out var mode))
+            {
+                builder.SslMode = mode;
+            }
+        }
+
+        return builder.ConnectionString;
     }
 
     private void EnsureConfiguredUsersSeeded()
@@ -2637,6 +2904,17 @@ public class AuthController : ControllerBase
             canSwitchMonitors = false,
             canManageGuests = false
         };
+    }
+
+    private sealed class PodcastSessionSnapshotStorageRecord
+    {
+        public string RoomId { get; init; } = "main";
+        public string SnapshotJson { get; init; } = "{}";
+        public string Version { get; init; } = string.Empty;
+        public string SavedByEmail { get; init; } = string.Empty;
+        public DateTime SavedAtUtc { get; init; }
+        public string? BlobObjectKey { get; init; }
+        public string? BlobPublicUrl { get; init; }
     }
 }
 
