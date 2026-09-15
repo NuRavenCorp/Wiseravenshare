@@ -337,6 +337,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
     const canApproveWorkflow = isCreator || isDesignee;
     const canEditScriptPipeline = permissions.canEditScript || isCreator || isDesignee;
+    const canEditLiveScript = canEditScriptPipeline || workflowStage === 'Team';
     const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
     const activeRemoteGuests = teamMembersList.filter((member) => (
         String(member?.role || '').toLowerCase() === 'guest' && member?.coupled !== false
@@ -3119,8 +3120,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     <span style={{ color: permissions.canGoLive ? '#4ade80' : 'var(--light-color)' }}>
                                         {permissions.canGoLive ? '✓ Can present live' : '✗ Cannot go live'}
                                     </span>
-                                    <span style={{ color: permissions.canEditScript ? '#4ade80' : 'var(--light-color)' }}>
-                                        {permissions.canEditScript ? '✓ Can edit script' : '✗ Script locked'}
+                                    <span style={{ color: canEditLiveScript ? '#4ade80' : 'var(--light-color)' }}>
+                                        {canEditLiveScript ? '✓ Can edit script' : '✗ Script locked'}
                                     </span>
                                     <span style={{ color: permissions.canApproveSegments ? '#4ade80' : 'var(--light-color)' }}>
                                         {permissions.canApproveSegments ? '✓ Can approve segments' : '✗ Cannot approve'}
@@ -3273,7 +3274,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         broadcastTandemState({ scriptText: event.target.value, runOrderApproved: false });
                                     }}
                                     rows={8}
-                                    disabled={!permissions.canEditScript}
+                                    disabled={!canEditLiveScript}
                                     style={{
                                         padding: '12px',
                                         borderRadius: '10px',
@@ -3281,7 +3282,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         background: 'rgba(255,255,255,0.04)',
                                         color: 'var(--text-color)',
                                         resize: 'vertical',
-                                        opacity: permissions.canEditScript ? 1 : 0.6
+                                        opacity: canEditLiveScript ? 1 : 0.6
                                     }}
                                 />
                                 <div style={{ fontSize: '12px', color: '#93c5fd' }}>
