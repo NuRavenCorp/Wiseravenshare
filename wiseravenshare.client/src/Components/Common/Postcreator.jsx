@@ -56,7 +56,7 @@ const safeAvatarInitials = (value, name) => {
 
 const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatformPublish = false }) => {
     const [content, setContent] = useState('');
-    const [mediaFile, setMediaFile] = useState(null);
+    const [mediaFiles, setMediaFiles] = useState([]);
     const [mediaType, setMediaType] = useState(null);
     const [publishToYouTube, setPublishToYouTube] = useState(false);
     const [publishToTikTok, setPublishToTikTok] = useState(false);
@@ -78,7 +78,8 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
     const autoSavedFilesRef = useRef(new WeakSet());
     const addTruthAlertRef = useRef(addTruthAlert);
     const mediaInputRef = useRef(null);
-    const canPublishVideo = mediaType === 'video' || Boolean(mediaFile?.type?.startsWith('video/'));
+    const hasVideoSelected = mediaFiles.some((file) => Boolean(file?.type?.startsWith('video/')));
+    const canPublishVideo = mediaType === 'video' || mediaType === 'montage' || hasVideoSelected;
 
     const user = currentUser || { name: 'Alex Raven', avatar: 'AR', handle: '@alexraven' };
 
@@ -86,48 +87,58 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         addTruthAlertRef.current = addTruthAlert;
     }, [addTruthAlert]);
 
-    // Auto-save media to computer when a file is selected.
+    // Auto-save media files to computer when they are selected.
     useEffect(() => {
-        if (!mediaFile) return;
-        if (autoSavedFilesRef.current.has(mediaFile)) return;
-        autoSavedFilesRef.current.add(mediaFile);
+        if (!Array.isArray(mediaFiles) || mediaFiles.length === 0) return;
 
-        (async () => {
-            try {
-                const resolvedType = mediaType || (mediaFile.type?.startsWith('video/')
-                    ? 'video'
-                    : mediaFile.type?.startsWith('image/')
-                        ? 'photo'
-                        : mediaFile.type?.startsWith('audio/')
-                            ? 'audio'
-                            : 'photo');
+        mediaFiles.forEach((mediaFile) => {
+            if (!mediaFile || autoSavedFilesRef.current.has(mediaFile)) return;
+            autoSavedFilesRef.current.add(mediaFile);
 
-                const result = await saveFileToRavensightFolder(
-                    mediaFile,
-                    mediaFile.name || `ravensight_${Date.now()}`,
-                    resolvedType,
-                    localSaveRoot
-                );
+            (async () => {
+                try {
+                    const resolvedType = mediaFile.type?.startsWith('video/')
+                        ? 'video'
+                        : mediaFile.type?.startsWith('image/')
+                            ? 'photo'
+                            : mediaFile.type?.startsWith('audio/')
+                                ? 'audio'
+                                : (mediaType === 'montage' ? 'photo' : (mediaType || 'photo'));
 
-                if (result.ok) {
-                    if (result.mode === 'directory') {
-                        const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
-                        addTruthAlertRef.current?.('success', `Auto-saved to ${rootLabel}/Ravensight`, null);
-                    } else {
-                        addTruthAlertRef.current?.('success', 'Auto-saved to computer', null);
+                    const result = await saveFileToRavensightFolder(
+                        mediaFile,
+                        mediaFile.name || `ravensight_${Date.now()}`,
+                        resolvedType,
+                        localSaveRoot
+                    );
+
+                    if (result.ok) {
+                        if (result.mode === 'directory') {
+                            const rootLabel = result.startIn === 'videos' ? 'Videos' : 'Pictures';
+                            addTruthAlertRef.current?.('success', `Auto-saved to ${rootLabel}/Ravensight`, null);
+                        } else {
+                            addTruthAlertRef.current?.('success', 'Auto-saved to computer', null);
+                        }
                     }
+                } catch {
+                    // Silent fail on auto-save to keep creation flow uninterrupted.
                 }
-            } catch {
-                // Silent fail on auto-save to keep creation flow uninterrupted.
-            }
-        })();
-    }, [mediaFile, mediaType, localSaveRoot]);
+            })();
+        });
+    }, [mediaFiles, mediaType, localSaveRoot]);
 
     const handleFileUpload = (type) => {
         const input = mediaInputRef.current || document.createElement('input');
         input.type = 'file';
         input.value = '';
-        input.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
+        input.multiple = type === 'montage';
+        input.accept = type === 'photo'
+            ? 'image/*'
+            : type === 'video'
+                ? 'video/*'
+                : type === 'audio'
+                    ? 'audio/*'
+                    : 'image/*,video/*';
         mediaInputRef.current = input;
 
         setPublishToYouTube(false);
@@ -138,21 +149,51 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
         setFacebookPermissionGranted(false);
 
         input.onchange = (e) => {
-            const selected = e.target.files?.[0];
-            if (!selected) {
+            const files = Array.from(e.target.files || []);
+            if (!files.length) {
                 input.value = '';
                 return;
             }
 
-            setMediaFile(selected);
+            const selected = type === 'montage'
+                ? files.filter((file) => file.type?.startsWith('image/') || file.type?.startsWith('video/'))
+                : [files[0]];
 
-            // Trust the browser-reported MIME first so upload toggles are accurate.
-            if (selected.type?.startsWith('video/')) {
+            if (!selected.length) {
+                addTruthAlert('warning', 'Montage supports image and video files only.', null);
+                input.value = '';
+                return;
+            }
+
+            setMediaFiles(selected);
+
+            const hasVideo = selected.some((file) => file.type?.startsWith('video/'));
+            const hasImage = selected.some((file) => file.type?.startsWith('image/'));
+            const hasAudio = selected.some((file) => file.type?.startsWith('audio/'));
+
+            if (type === 'montage') {
+                setMediaType('montage');
+                setDestinationFolder(hasVideo ? resolveRavensightDestination('video') : resolveRavensightDestination('photo'));
+            } else if (hasVideo) {
                 setMediaType('video');
                 setDestinationFolder(resolveRavensightDestination('video'));
+            } else if (hasImage) {
+                setMediaType('photo');
+                setDestinationFolder(resolveRavensightDestination('photo'));
+            } else if (hasAudio) {
+                setMediaType('audio');
+                setDestinationFolder(resolveRavensightDestination('audio'));
+            } else {
+                setMediaType(type);
+                setDestinationFolder(resolveRavensightDestination(type === 'montage' ? 'video' : type));
+            }
+
+            if (hasVideo) {
                 try {
                     const pickedDestination = window.prompt(
-                        'Choose destination folder for this video upload:',
+                        type === 'montage'
+                            ? 'Choose destination folder for this montage (video items store in video library):'
+                            : 'Choose destination folder for this video upload:',
                         resolveRavensightDestination('video')
                     );
 
@@ -162,15 +203,6 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 } catch {
                     // Ignore prompt failures in restricted runtimes.
                 }
-            } else if (selected.type?.startsWith('image/')) {
-                setMediaType('photo');
-                setDestinationFolder(resolveRavensightDestination('photo'));
-            } else if (selected.type?.startsWith('audio/')) {
-                setMediaType('audio');
-                setDestinationFolder(resolveRavensightDestination('audio'));
-            } else {
-                setMediaType(type);
-                setDestinationFolder(resolveRavensightDestination(type));
             }
 
             input.value = '';
@@ -296,16 +328,18 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
 
     const handleSubmit = async () => {
         const trimmedContent = content.trim();
-        const mediaLabel = mediaType === 'photo'
+        const mediaLabel = mediaType === 'montage'
+            ? 'Montage upload'
+            : mediaType === 'photo'
             ? 'Photo upload'
             : mediaType === 'video'
                 ? 'Video upload'
                 : mediaType === 'audio'
                     ? 'Audio upload'
                     : 'Media upload';
-        const contentForPayload = trimmedContent || (mediaFile ? mediaLabel : trimmedContent);
+        const contentForPayload = trimmedContent || (mediaFiles.length > 0 ? mediaLabel : trimmedContent);
 
-        if (!trimmedContent && !mediaFile) {
+        if (!trimmedContent && mediaFiles.length === 0) {
             addTruthAlert('warning', 'Add text or upload media before publishing.', null);
             return;
         }
@@ -358,69 +392,100 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             addTruthAlert('correction', `Truth correction applied to your post.`, correction);
         }
 
-        let uploadedMediaUrl = mediaFile ? URL.createObjectURL(mediaFile) : null;
+        let uploadedMediaUrl = null;
+        const uploadedMediaUrls = [];
         let uploadedYoutubeUrl = null;
         let uploadedTikTokUrl = null;
         let uploadedFacebookUrl = null;
 
-        if (mediaFile) {
+        if (mediaFiles.length > 0) {
             try {
-                const uploadResponse = await apiService.uploadMedia(mediaFile, mediaType, {
-                    title: trimmedContent.slice(0, 60) || mediaFile.name,
-                    description: trimmedContent,
-                    destinationFolder,
-                    publishToYouTube,
-                    publishToTikTok,
-                    publishToFacebook,
-                    youTubeChannelOrEmail,
-                    tikTokUsername,
-                    facebookPageOrProfile,
-                    youTubePermissionGranted,
-                    tikTokPermissionGranted,
-                    facebookPermissionGranted
-                });
+                for (const selectedFile of mediaFiles) {
+                    const inferredType = selectedFile.type?.startsWith('video/')
+                        ? 'video'
+                        : selectedFile.type?.startsWith('image/')
+                            ? 'photo'
+                            : selectedFile.type?.startsWith('audio/')
+                                ? 'audio'
+                                : (mediaType === 'montage' ? 'photo' : (mediaType || 'photo'));
+                    const uploadDestination = inferredType === 'video'
+                        ? destinationFolder
+                        : resolveRavensightDestination(inferredType);
 
-                const normalizedMedia = normalizeUploadedMedia(uploadResponse);
+                    const uploadResponse = await apiService.uploadMedia(selectedFile, inferredType, {
+                        title: trimmedContent.slice(0, 60) || selectedFile.name,
+                        description: trimmedContent,
+                        destinationFolder: uploadDestination,
+                        publishToYouTube: inferredType === 'video' ? publishToYouTube : false,
+                        publishToTikTok: inferredType === 'video' ? publishToTikTok : false,
+                        publishToFacebook: inferredType === 'video' ? publishToFacebook : false,
+                        youTubeChannelOrEmail,
+                        tikTokUsername,
+                        facebookPageOrProfile,
+                        youTubePermissionGranted,
+                        tikTokPermissionGranted,
+                        facebookPermissionGranted
+                    });
 
-                if (normalizedMedia.mediaUrl) {
-                    uploadedMediaUrl = normalizedMedia.mediaUrl;
+                    const normalizedMedia = normalizeUploadedMedia(uploadResponse);
+
+                    if (normalizedMedia.mediaUrl) {
+                        uploadedMediaUrls.push(normalizedMedia.mediaUrl);
+                    }
+
+                    if (!uploadedYoutubeUrl && normalizedMedia.youtubeUrl) {
+                        uploadedYoutubeUrl = normalizedMedia.youtubeUrl;
+                    }
+
+                    if (!uploadedTikTokUrl && normalizedMedia.tiktokUrl) {
+                        uploadedTikTokUrl = normalizedMedia.tiktokUrl;
+                    }
+
+                    if (!uploadedFacebookUrl && normalizedMedia.facebookUrl) {
+                        uploadedFacebookUrl = normalizedMedia.facebookUrl;
+                    }
                 }
 
-                if (normalizedMedia.youtubeUrl) {
-                    uploadedYoutubeUrl = normalizedMedia.youtubeUrl;
-                }
-
-                if (normalizedMedia.tiktokUrl) {
-                    uploadedTikTokUrl = normalizedMedia.tiktokUrl;
-                }
-
-                if (normalizedMedia.facebookUrl) {
-                    uploadedFacebookUrl = normalizedMedia.facebookUrl;
-                }
+                uploadedMediaUrl = uploadedMediaUrls[0] || null;
             } catch (error) {
                 const status = error?.response?.status;
                 const serverMessage = error?.response?.data?.message || error?.response?.data;
                 const normalizedServerMessage = sanitizeServerMessage(serverMessage, '');
 
-                let uploadMessage = 'Media upload endpoint unreachable, using local preview instead.';
+                let uploadMessage = 'Media upload endpoint unreachable. Your post was not published so media is not lost.';
 
                 if (status === 401 || status === 403) {
-                    uploadMessage = 'Media upload requires an active login. Using local preview instead.';
+                    uploadMessage = 'Media upload requires an active login. Please sign in and retry.';
                 } else if (status === 400 && normalizedServerMessage) {
-                    uploadMessage = `${normalizedServerMessage} Using local preview instead.`;
+                    uploadMessage = normalizedServerMessage;
                 } else if (normalizedServerMessage) {
-                    uploadMessage = `${normalizedServerMessage} Using local preview instead.`;
+                    uploadMessage = normalizedServerMessage;
                 }
 
                 addTruthAlert('warning', uploadMessage, null);
+                clearInterval(interval);
+                setUploadProgress(0);
+                setIsUploading(false);
+                return;
             }
         }
 
+        const hasVideoInSelection = mediaFiles.some((file) => file?.type?.startsWith('video/'));
+        const hasImageInSelection = mediaFiles.some((file) => file?.type?.startsWith('image/'));
+        const hasAudioInSelection = mediaFiles.some((file) => file?.type?.startsWith('audio/'));
+        const postType = hasVideoInSelection
+            ? 'Video'
+            : hasImageInSelection
+                ? 'Image'
+                : hasAudioInSelection
+                    ? 'Audio'
+                    : 'Text';
+
         const payload = {
             content: contentForPayload,
-            type: mediaType === 'video' ? 'Video' : mediaType === 'photo' ? 'Image' : mediaType === 'audio' ? 'Audio' : 'Text',
+            type: postType,
             mediaUrl: uploadedMediaUrl || null,
-            mediaUrls: uploadedMediaUrl ? JSON.stringify([uploadedMediaUrl]) : null,
+            mediaUrls: uploadedMediaUrls.length > 0 ? JSON.stringify(uploadedMediaUrls) : null,
             youtubeUrl: uploadedYoutubeUrl,
             tiktokUrl: uploadedTikTokUrl,
             facebookUrl: uploadedFacebookUrl,
@@ -442,7 +507,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     type: createResponse?.data?.type || createResponse?.type || payload.type,
                     mediaType: createResponse?.data?.mediaType || createResponse?.mediaType || mediaType,
                     mediaUrl: createResponse?.data?.mediaUrl || createResponse?.mediaUrl || uploadedMediaUrl,
-                    mediaUrls: createResponse?.data?.mediaUrls || createResponse?.mediaUrls || (uploadedMediaUrl ? [uploadedMediaUrl] : []),
+                    mediaUrls: createResponse?.data?.mediaUrls || createResponse?.mediaUrls || uploadedMediaUrls,
                     youtubeUrl: createResponse?.data?.youtubeUrl || createResponse?.youtubeUrl || uploadedYoutubeUrl,
                     tiktokUrl: createResponse?.data?.tiktokUrl || createResponse?.tiktokUrl || uploadedTikTokUrl,
                     facebookUrl: createResponse?.data?.facebookUrl || createResponse?.facebookUrl || uploadedFacebookUrl,
@@ -487,7 +552,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     content,
                     type: payload.type,
                     mediaUrl: uploadedMediaUrl || null,
-                    mediaUrls: uploadedMediaUrl ? [uploadedMediaUrl] : [],
+                    mediaUrls: uploadedMediaUrls,
                     youtubeUrl: uploadedYoutubeUrl,
                     tiktokUrl: uploadedTikTokUrl,
                     facebookUrl: uploadedFacebookUrl,
@@ -511,7 +576,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
             }
 
             setContent('');
-            setMediaFile(null);
+            setMediaFiles([]);
             setMediaType(null);
             setPublishToYouTube(false);
             setPublishToTikTok(false);
@@ -606,7 +671,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     hidden
                     onChange={() => {}}
                 />
-                {['photo', 'video', 'audio'].map(type => (
+                {['photo', 'video', 'audio', 'montage'].map(type => (
                     <button
                         key={type}
                         onClick={() => handleFileUpload(type)}
@@ -625,7 +690,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                             color: 'var(--text-color)'
                         }}
                     >
-                        <i className={`fas fa-${type === 'photo' ? 'image' : type === 'video' ? 'video' : 'music'}`} style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+                        <i className={`fas fa-${type === 'photo' ? 'image' : type === 'video' ? 'video' : type === 'audio' ? 'music' : 'layer-group'}`} style={{ fontSize: '24px', marginBottom: '8px' }}></i>
                         <span style={{ fontSize: '0.8rem' }}>{type.charAt(0).toUpperCase() + type.slice(1)}</span>
                     </button>
                 ))}
@@ -863,7 +928,7 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                 </select>
             </div>
 
-            {mediaFile && (
+            {mediaFiles.length > 0 && (
                 <div style={{
                     marginTop: '15px',
                     padding: '10px',
@@ -873,10 +938,12 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                     justifyContent: 'space-between',
                     alignItems: 'center'
                 }}>
-                    <span>{mediaFile.name}</span>
+                    <span>
+                        {mediaFiles.length === 1 ? mediaFiles[0].name : `${mediaFiles.length} files selected for montage`}
+                    </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <button onClick={() => {
-                            setMediaFile(null);
+                            setMediaFiles([]);
                             setMediaType(null);
                             setPublishToYouTube(false);
                             setPublishToTikTok(false);
