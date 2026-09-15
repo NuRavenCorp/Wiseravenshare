@@ -334,8 +334,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const creatorKey = normalizeLoginIdentifier(teamCreatorId);
     const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
     const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
-    const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
-    const canEditScriptPipeline = ['Owner', 'Producer', 'Host', 'Editor'].includes(controlRole);
+    const canApproveWorkflow = isCreator || isDesignee;
+    const canEditScriptPipeline = permissions.canEditScript || isCreator || isDesignee;
     const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
 
     const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
@@ -518,15 +518,19 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const applyPolicyState = (state) => {
-        const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
+        const serverRoleLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
+        const resolvedLabel = (isCreator && serverRoleLabel === 'Guest') ? 'Owner' : serverRoleLabel;
         const allowedRoles = Array.isArray(state?.allowedRoles)
             ? state.allowedRoles
                 .map((role) => apiRoleToRoleLabel[String(role || '').trim().toLowerCase()])
                 .filter(Boolean)
             : [];
+        const mergedAllowedRoles = resolvedLabel === 'Owner' && !allowedRoles.includes('Owner')
+            ? ['Owner', ...allowedRoles]
+            : allowedRoles;
 
         setControlRole(resolvedLabel);
-        setAllowedRoleLabels(allowedRoles.length > 0 ? allowedRoles : ['Guest']);
+        setAllowedRoleLabels(mergedAllowedRoles.length > 0 ? mergedAllowedRoles : [resolvedLabel]);
         setPermissions(normalizePermissions(state?.permissions));
         setSyncSource(state?.isFallback ? 'fallback' : 'server');
         setSyncError('');
@@ -536,12 +540,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
         try {
             const state = await authService.getPodcastControlState();
             // The signed-in user is the team leader (Owner) unless the server says otherwise.
-            const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Owner';
-            const allowedRoles = Array.isArray(state?.allowedRoles) && state.allowedRoles.length > 0
+            const serverRoleLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Owner';
+            const resolvedLabel = (isCreator && serverRoleLabel === 'Guest') ? 'Owner' : serverRoleLabel;
+            let allowedRoles = Array.isArray(state?.allowedRoles) && state.allowedRoles.length > 0
                 ? state.allowedRoles
                     .map((role) => apiRoleToRoleLabel[String(role || '').trim().toLowerCase()])
                     .filter(Boolean)
                 : controlRoles;
+            if (resolvedLabel === 'Owner' && !allowedRoles.includes('Owner')) {
+                allowedRoles = ['Owner', ...allowedRoles];
+            }
 
             setAllowedRoleLabels(allowedRoles);
             setPermissions(rolePermissions[resolvedLabel] || rolePermissions.Owner);
@@ -1916,6 +1924,15 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setGuestNameInput('');
         setNewPageTitle('');
 
+        try {
+            localStorage.removeItem('wisePodcastScriptDraft');
+            localStorage.removeItem(PODCAST_AUTOSAVE_STORAGE_KEY);
+            localStorage.removeItem('wiseSharedPodcastScript');
+            localStorage.removeItem(SHARED_SCRIPT_STORAGE_KEY);
+        } catch {
+            // Best effort cleanup only.
+        }
+
         broadcastTandemState({
             title: '',
             storyAngle: '',
@@ -2002,7 +2019,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const hasScriptPipeline = scriptPipelineSegments.some((segment) => Boolean(String(scriptPipeline[segment.key] || '').trim()));
     const hasScript = Boolean(String(scriptText || '').trim()) || hasScriptPipeline;
     const hasTeamReady = teamMembersList.some((member) => member?.coupled !== false);
-    const hasRecording = Boolean(recordedVideoUrl);
+    const hasRecording = Boolean(recordedVideoUrl || savedRecordingMediaUrl || hasSavedRecording);
+    const playbackMediaUrl = String(recordedVideoUrl || savedRecordingMediaUrl || '').trim();
 
     const flowSteps = [
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
@@ -2029,6 +2047,12 @@ const PodcastStudioPage = ({ onNavigate }) => {
         if (!hasCoreBrief) {
             setStatus('Complete episode title and story angle to lock your recording brief.');
             setWorkflowStage('Plan');
+            return;
+        }
+
+        if (!hasTeamReady) {
+            setWorkflowStage('Team');
+            setStatus('Pair at least one teammate or guest before moving forward in the flow.');
             return;
         }
 
@@ -2062,6 +2086,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
     const nextFlowActionLabel = (() => {
         if (!hasCoreBrief) return 'Complete episode brief';
+        if (!hasTeamReady) return 'Sync your team';
         if (!hasScript) return 'Write your script';
         if (!runOrderApproved) return 'Approve run order';
         if (!isRecording && !hasRecording) return 'Start recording';
@@ -2794,7 +2819,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 )}
 
                 {/* Recorded Session Preview & Library Export */}
-                {(workflowStage === 'Review' || workflowStage === 'Ship') && recordedVideoUrl && (
+                {(workflowStage === 'Review' || workflowStage === 'Ship') && playbackMediaUrl && (
                     <div style={{
                         background: 'var(--card-bg)',
                         border: '1px solid var(--highlight-color)',
@@ -2807,7 +2832,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '14px' }}>
                             <div>
                                 <video
-                                    src={recordedVideoUrl}
+                                    src={playbackMediaUrl}
                                     controls
                                     style={{ width: '100%', borderRadius: '12px', background: '#000' }}
                                 />
@@ -2865,7 +2890,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         {isPublishingEpisodePost ? 'Publishing...' : '📰 Publish to Feed'}
                                     </button>
                                     <a
-                                        href={recordedVideoUrl}
+                                        href={playbackMediaUrl}
                                         download={`podcast_recording_${Date.now()}.webm`}
                                         style={{
                                             border: '1px solid var(--border-color)',
@@ -3165,11 +3190,30 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <button
                                     type="button"
                                     onClick={() => {
+                                        const snapshot = buildSessionSnapshot();
+                                        const version = Date.now().toString();
                                         try {
                                             localStorage.setItem('wisePodcastScriptDraft', scriptText);
-                                        } catch {}
+                                            localStorage.setItem(PODCAST_AUTOSAVE_STORAGE_KEY, JSON.stringify({ version, snapshot }));
+                                            autosaveVersionRef.current = version;
+                                            setLastAutosavedAt(new Date().toLocaleTimeString());
+                                        } catch {
+                                            // Ignore local save errors.
+                                        }
+
+                                        void authService.savePodcastSessionSnapshot({
+                                            roomId: 'main',
+                                            version,
+                                            snapshot
+                                        }).then((response) => {
+                                            const committedVersion = String(response?.version || version).trim();
+                                            autosaveVersionRef.current = committedVersion;
+                                        }).catch(() => {
+                                            // Cloud save best effort only.
+                                        });
+
                                         broadcastTandemState({ scriptText });
-                                        setStatus('Script draft saved successfully to local studio storage.');
+                                        setStatus('Script draft saved to studio storage and cloud autosave.');
                                     }}
                                     style={{
                                         border: '1px solid var(--border-color)',
