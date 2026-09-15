@@ -38,6 +38,7 @@ const createEmptyScriptPipeline = () => ({
 
 const SHARED_SCRIPT_STORAGE_KEY = 'wiseSharedPodcastScriptPayload';
 const PODCAST_AUTOSAVE_STORAGE_KEY = 'wisePodcastSessionAutosave';
+const MAX_REMOTE_GUEST_MONITORS = 3;
 
 const studioModes = ['Phone', 'Tablet', 'Desktop', 'Camera', 'Remote guest'];
 const controlRoles = ['Owner', 'Producer', 'Host', 'Editor', 'Script Lead', 'Guest'];
@@ -337,6 +338,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const canApproveWorkflow = isCreator || isDesignee;
     const canEditScriptPipeline = permissions.canEditScript || isCreator || isDesignee;
     const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
+    const activeRemoteGuests = teamMembersList.filter((member) => (
+        String(member?.role || '').toLowerCase() === 'guest' && member?.coupled !== false
+    ));
+    const splitGuestMonitors = Array.from({ length: MAX_REMOTE_GUEST_MONITORS }, (_, index) => activeRemoteGuests[index] || null);
 
     const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
 
@@ -1611,6 +1616,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         const candidateName = resolvedName || 'Remote User';
         const displayName = candidateName.charAt(0).toUpperCase() + candidateName.slice(1);
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier || displayName);
+        const existingGuest = teamMembersList.find((member) => (
+            resolveMemberKey(member) === normalizedIdentifier
+        ));
+
+        if (syncRole === 'Guest' && !existingGuest && activeRemoteGuests.length >= MAX_REMOTE_GUEST_MONITORS) {
+            setSyncMessage(`Remote guest split monitor is full (${MAX_REMOTE_GUEST_MONITORS}/${MAX_REMOTE_GUEST_MONITORS}).`);
+            setStatus('Remote guest split monitor is full. Remove one guest to add another.');
+            return;
+        }
+
         const login = resolveLoginStatus(identifier);
 
         const updatedList = upsertTeamMember({
@@ -1637,6 +1653,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleGuestInvite = () => {
         const gName = guestNameInput.trim();
         if (!gName) return;
+
+        const normalizedIdentifier = normalizeLoginIdentifier(gName);
+        const existingGuest = teamMembersList.find((member) => (
+            resolveMemberKey(member) === normalizedIdentifier
+        ));
+
+        if (!existingGuest && activeRemoteGuests.length >= MAX_REMOTE_GUEST_MONITORS) {
+            setStatus('Remote guest split monitor is full. Remove one guest to add another.');
+            return;
+        }
+
         const login = resolveLoginStatus(gName);
         const updatedList = upsertTeamMember({
             name: gName,
@@ -2043,56 +2070,118 @@ const PodcastStudioPage = ({ onNavigate }) => {
         { id: 'Ship', hint: 'Publish and handoff' }
     ];
 
-    const runNextStudioAction = async () => {
+    const nextRequiredFlow = (() => {
         if (!hasCoreBrief) {
-            setStatus('Complete episode title and story angle to lock your recording brief.');
-            setWorkflowStage('Plan');
-            return;
+            return {
+                stage: 'Plan',
+                actionLabel: 'Complete episode brief',
+                message: 'Complete episode title and story angle to lock your recording brief.'
+            };
         }
 
         if (!hasTeamReady) {
-            setWorkflowStage('Team');
-            setStatus('Pair at least one teammate or guest before moving forward in the flow.');
-            return;
+            return {
+                stage: 'Team',
+                actionLabel: 'Sync your team',
+                message: 'Pair at least one teammate or guest before moving forward in the flow.'
+            };
         }
 
         if (!hasScript) {
-            setWorkflowStage('Script');
-            setStatus('Fill Script Pipeline segments or add your own script content before continuing. No prewritten script is inserted.');
-            return;
+            return {
+                stage: 'Script',
+                actionLabel: 'Write your script',
+                message: 'Fill Script Pipeline segments or add your own script content before continuing. No prewritten script is inserted.'
+            };
         }
 
         if (!runOrderApproved) {
-            setWorkflowStage('Script');
+            return {
+                stage: 'Script',
+                actionLabel: 'Approve run order',
+                message: 'Approve run order before going live.'
+            };
+        }
+
+        if (!isRecording && !hasRecording) {
+            return {
+                stage: 'Record',
+                actionLabel: 'Start recording',
+                message: 'Start recording when your team and script are ready.'
+            };
+        }
+
+        if (hasRecording && !hasSavedRecording) {
+            return {
+                stage: 'Review',
+                actionLabel: 'Save recording',
+                message: 'Save your recording to Ravensight Library before shipping.'
+            };
+        }
+
+        return {
+            stage: 'Ship',
+            actionLabel: 'Flow complete',
+            message: 'Podcast flow complete. Recording is saved and ready for Ravensight publishing.'
+        };
+    })();
+
+    const handleWorkflowStageSelect = (stageId) => {
+        if (stageId === nextRequiredFlow.stage || stageId === workflowStage) {
+            setWorkflowStage(stageId);
+            return;
+        }
+
+        const stageOrder = ['Plan', 'Script', 'Team', 'Record', 'Review', 'Ship'];
+        const requestedIndex = stageOrder.indexOf(stageId);
+        const requiredIndex = stageOrder.indexOf(nextRequiredFlow.stage);
+
+        if (requestedIndex > requiredIndex) {
+            setWorkflowStage(nextRequiredFlow.stage);
+            setStatus(`Next required stage: ${nextRequiredFlow.stage}. ${nextRequiredFlow.message}`);
+            return;
+        }
+
+        setWorkflowStage(stageId);
+    };
+
+    const runNextStudioAction = async () => {
+        setWorkflowStage(nextRequiredFlow.stage);
+
+        if (nextRequiredFlow.stage === 'Plan') {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Team') {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Script' && !hasScript) {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Script' && !runOrderApproved) {
             handleApproveRunOrder();
             return;
         }
 
-        if (!isRecording && !hasRecording) {
-            setWorkflowStage('Record');
+        if (nextRequiredFlow.stage === 'Record') {
             handleStartRecordingFromFlow();
             return;
         }
 
-        if (hasRecording && !hasSavedRecording) {
-            setWorkflowStage('Review');
+        if (nextRequiredFlow.stage === 'Review') {
             await saveRecordingToLibrary();
             return;
         }
 
-        setWorkflowStage('Ship');
-        setStatus('Podcast flow complete. Recording is saved and ready for Ravensight publishing.');
+        setStatus(nextRequiredFlow.message);
     };
 
-    const nextFlowActionLabel = (() => {
-        if (!hasCoreBrief) return 'Complete episode brief';
-        if (!hasTeamReady) return 'Sync your team';
-        if (!hasScript) return 'Write your script';
-        if (!runOrderApproved) return 'Approve run order';
-        if (!isRecording && !hasRecording) return 'Start recording';
-        if (hasRecording && !hasSavedRecording) return 'Save recording';
-        return 'Flow complete';
-    })();
+    const nextFlowActionLabel = nextRequiredFlow.actionLabel;
 
     const audienceSummary = useMemo(() => ({
         segments: (formatDefinitions[format]?.segments || scriptBlocks).length,
@@ -2323,7 +2412,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <button
                                     key={stage.id}
                                     type="button"
-                                    onClick={() => setWorkflowStage(stage.id)}
+                                    onClick={() => handleWorkflowStageSelect(stage.id)}
                                     style={{
                                         border: workflowStage === stage.id ? '1px solid #34d399' : '1px solid var(--border-color)',
                                         background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
@@ -2349,6 +2438,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                             <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '4px' }}>
                                 Follow the flow that reliably ships: brief, script, approval, recording, then library save.
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#99f6e4', marginTop: '4px' }}>
+                                Next required stage: {nextRequiredFlow.stage}
                             </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
@@ -2689,7 +2781,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             )}
                         </div>
 
-                        {/* Guest Cam A Stream */}
+                        {/* Remote Guest Split Monitor (up to 3) */}
                         <div style={{
                             border: '1px solid var(--border-color)',
                             borderRadius: '14px',
@@ -2697,17 +2789,54 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             padding: '14px',
                             position: 'relative'
                         }}>
-                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>Guest Cam A (Remote)</div>
-                            <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
-                                <div style={{ fontSize: '32px' }}>👤</div>
-                                <div style={{ fontWeight: 700, marginTop: '6px' }}>
-                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'No guest paired'}
-                                </div>
-                                <div style={{ fontSize: '12px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
-                                    {guestCamOn ? 'Connected · Audio Active' : 'Camera Muted'}
-                                </div>
+                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>
+                                Remote Guest Split Monitor (Up To 3)
                             </div>
-                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '6px' }}>
+
+                            <div style={{
+                                marginTop: '12px',
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                                gap: '8px'
+                            }}>
+                                {splitGuestMonitors.map((guest, index) => (
+                                    <div
+                                        key={`split-guest-${index}`}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '10px',
+                                            background: 'rgba(15, 23, 42, 0.55)',
+                                            minHeight: '132px',
+                                            display: 'grid',
+                                            placeItems: 'center',
+                                            textAlign: 'center',
+                                            padding: '10px'
+                                        }}
+                                    >
+                                        {guest ? (
+                                            <>
+                                                <div style={{ fontSize: '22px' }}>👤</div>
+                                                <div style={{ fontWeight: 700, marginTop: '4px' }}>{guest.name}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--light-color)', marginTop: '2px' }}>
+                                                    {guest.locale || 'Remote'}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
+                                                    {guestCamOn ? 'Camera On' : 'Camera Off'}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div style={{ fontSize: '20px', opacity: 0.7 }}>➕</div>
+                                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                                    Open slot {index + 1}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
                                 <button
                                     type="button"
                                     onClick={() => setGuestCamOn(!guestCamOn)}
@@ -2739,20 +2868,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     {!guestMuted ? '🎙️ Mic Active' : '🔇 Muted'}
                                 </button>
                             </div>
-                        </div>
-
-                        {/* Guest Cam B Stream */}
-                        <div style={{
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '14px',
-                            background: 'linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))',
-                            padding: '14px'
-                        }}>
-                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>Guest Cam B (Backup)</div>
-                            <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
-                                <div style={{ fontSize: '32px' }}>📱</div>
-                                <div style={{ fontWeight: 700, marginTop: '6px' }}>Mobile Backup Feed</div>
-                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>Standby · WebRTC</div>
+                            <div style={{ marginTop: '8px', textAlign: 'center', fontSize: '11px', color: '#bae6fd' }}>
+                                Active remote guests: {activeRemoteGuests.length}/{MAX_REMOTE_GUEST_MONITORS}
                             </div>
                         </div>
 
