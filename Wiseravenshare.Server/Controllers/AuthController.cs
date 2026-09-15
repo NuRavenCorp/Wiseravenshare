@@ -1134,6 +1134,124 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpGet("team-access/podcast-team-selection")]
+    [Authorize]
+    public IActionResult GetPodcastTeamSelection([FromQuery] string? roomId = null)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var normalizedRoomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim();
+        var selection = _teamAccessService.GetPodcastTeamSelection(normalizedRoomId);
+
+        if (selection is null)
+        {
+            return Ok(new
+            {
+                roomId = normalizedRoomId,
+                hasSelection = false,
+                requestedMaxParticipants = 5,
+                deviceCapacity = 5,
+                effectiveMaxParticipants = 5,
+                participants = Array.Empty<object>(),
+                syncedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        return Ok(new
+        {
+            roomId = selection.RoomId,
+            hasSelection = true,
+            requestedMaxParticipants = selection.RequestedMaxParticipants,
+            deviceCapacity = selection.DeviceCapacity,
+            effectiveMaxParticipants = selection.EffectiveMaxParticipants,
+            participants = selection.Participants.Select(member => new
+            {
+                identifier = member.Identifier,
+                displayName = member.DisplayName,
+                role = member.Role,
+                device = member.Device,
+                isConnected = member.IsConnected,
+                addedAtUtc = member.AddedAtUtc
+            }),
+            savedByEmail = selection.SavedByEmail,
+            savedAtUtc = selection.SavedAtUtc,
+            version = selection.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost("team-access/podcast-team-selection")]
+    [Authorize]
+    public IActionResult SavePodcastTeamSelection([FromBody] PodcastTeamSelectionRequest? request)
+    {
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsAuthenticationAllowed(actorEmail))
+        {
+            return Forbid();
+        }
+
+        var roomId = string.IsNullOrWhiteSpace(request?.RoomId) ? "main" : request!.RoomId.Trim();
+        var requestedMaxParticipants = Math.Clamp(request?.RequestedMaxParticipants ?? 5, 1, 5);
+        var deviceCapacity = Math.Clamp(request?.DeviceCapacity ?? 5, 1, 20);
+        var effectiveMaxParticipants = Math.Min(requestedMaxParticipants, deviceCapacity);
+
+        var participants = (request?.Participants ?? new List<PodcastTeamMemberRequest>())
+            .Select(member => new TeamPodcastTeamMemberRecord
+            {
+                Identifier = (member.Identifier ?? string.Empty).Trim(),
+                DisplayName = (member.DisplayName ?? string.Empty).Trim(),
+                Role = string.IsNullOrWhiteSpace(member.Role) ? "guest" : member.Role.Trim(),
+                Device = string.IsNullOrWhiteSpace(member.Device) ? "Unknown" : member.Device.Trim(),
+                IsConnected = member.IsConnected,
+                AddedAtUtc = member.AddedAtUtc ?? DateTime.UtcNow
+            })
+            .Where(member => !string.IsNullOrWhiteSpace(member.Identifier) || !string.IsNullOrWhiteSpace(member.DisplayName))
+            .ToList();
+
+        if (participants.Count > effectiveMaxParticipants)
+        {
+            return BadRequest(new
+            {
+                message = $"Selected participants ({participants.Count}) exceed your current team capacity ({effectiveMaxParticipants}).",
+                requestedMaxParticipants,
+                deviceCapacity,
+                effectiveMaxParticipants
+            });
+        }
+
+        var saved = _teamAccessService.UpsertPodcastTeamSelection(
+            actorEmail,
+            roomId,
+            requestedMaxParticipants,
+            deviceCapacity,
+            participants,
+            request?.Version);
+
+        return Ok(new
+        {
+            success = true,
+            roomId = saved.RoomId,
+            requestedMaxParticipants = saved.RequestedMaxParticipants,
+            deviceCapacity = saved.DeviceCapacity,
+            effectiveMaxParticipants = saved.EffectiveMaxParticipants,
+            participants = saved.Participants.Select(member => new
+            {
+                identifier = member.Identifier,
+                displayName = member.DisplayName,
+                role = member.Role,
+                device = member.Device,
+                isConnected = member.IsConnected,
+                addedAtUtc = member.AddedAtUtc
+            }),
+            savedByEmail = saved.SavedByEmail,
+            savedAtUtc = saved.SavedAtUtc,
+            version = saved.Version,
+            syncedAtUtc = DateTime.UtcNow
+        });
+    }
+
     [HttpPost("team-access/accept")]
     [AllowAnonymous]
     public async Task<IActionResult> AcceptTeamInvite([FromBody] TeamInviteAcceptRequest request)
@@ -3022,4 +3140,23 @@ public sealed class PodcastSessionSnapshotRequest
     public string RoomId { get; set; } = "main";
     public JsonElement Snapshot { get; set; }
     public string Version { get; set; } = string.Empty;
+}
+
+public sealed class PodcastTeamSelectionRequest
+{
+    public string RoomId { get; set; } = "main";
+    public int RequestedMaxParticipants { get; set; } = 5;
+    public int DeviceCapacity { get; set; } = 5;
+    public List<PodcastTeamMemberRequest> Participants { get; set; } = new();
+    public string Version { get; set; } = string.Empty;
+}
+
+public sealed class PodcastTeamMemberRequest
+{
+    public string Identifier { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Role { get; set; } = "guest";
+    public string Device { get; set; } = "Unknown";
+    public bool IsConnected { get; set; } = true;
+    public DateTime? AddedAtUtc { get; set; }
 }

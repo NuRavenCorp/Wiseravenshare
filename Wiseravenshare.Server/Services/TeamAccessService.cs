@@ -317,6 +317,110 @@ public sealed class TeamAccessService
         }
     }
 
+    public TeamPodcastTeamSelectionRecord UpsertPodcastTeamSelection(
+        string actorEmail,
+        string roomId,
+        int requestedMaxParticipants,
+        int deviceCapacity,
+        IReadOnlyList<TeamPodcastTeamMemberRecord>? participants,
+        string? version = null)
+    {
+        EnsureLoaded();
+
+        var normalizedActorEmail = NormalizeEmail(actorEmail);
+        var normalizedRoomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim();
+        var safeRequestedMax = Math.Clamp(requestedMaxParticipants, 1, 5);
+        var safeDeviceCapacity = Math.Clamp(deviceCapacity, 1, 20);
+        var safeEffectiveMax = Math.Min(safeRequestedMax, safeDeviceCapacity);
+        var safeVersion = string.IsNullOrWhiteSpace(version)
+            ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()
+            : version.Trim();
+        var now = DateTime.UtcNow;
+
+        var dedupedParticipants = new List<TeamPodcastTeamMemberRecord>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in participants ?? Array.Empty<TeamPodcastTeamMemberRecord>())
+        {
+            var normalizedIdentifier = (item.Identifier ?? string.Empty).Trim();
+            var normalizedDisplayName = (item.DisplayName ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(normalizedIdentifier) && string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                continue;
+            }
+
+            var dedupeKey = string.IsNullOrWhiteSpace(normalizedIdentifier)
+                ? normalizedDisplayName.ToLowerInvariant()
+                : normalizedIdentifier.ToLowerInvariant();
+
+            if (!seen.Add(dedupeKey))
+            {
+                continue;
+            }
+
+            dedupedParticipants.Add(new TeamPodcastTeamMemberRecord
+            {
+                Identifier = normalizedIdentifier,
+                DisplayName = normalizedDisplayName,
+                Role = string.IsNullOrWhiteSpace(item.Role) ? "guest" : item.Role.Trim(),
+                Device = string.IsNullOrWhiteSpace(item.Device) ? "Unknown" : item.Device.Trim(),
+                IsConnected = item.IsConnected,
+                AddedAtUtc = item.AddedAtUtc == default ? now : item.AddedAtUtc
+            });
+        }
+
+        if (dedupedParticipants.Count > safeEffectiveMax)
+        {
+            dedupedParticipants = dedupedParticipants.Take(safeEffectiveMax).ToList();
+        }
+
+        lock (_lock)
+        {
+            _state.PodcastTeamSelection = new TeamPodcastTeamSelectionRecord
+            {
+                RoomId = normalizedRoomId,
+                RequestedMaxParticipants = safeRequestedMax,
+                DeviceCapacity = safeDeviceCapacity,
+                EffectiveMaxParticipants = safeEffectiveMax,
+                Participants = dedupedParticipants,
+                SavedByEmail = normalizedActorEmail,
+                SavedAtUtc = now,
+                Version = safeVersion
+            };
+
+            PersistUnsafe();
+            return _state.PodcastTeamSelection;
+        }
+    }
+
+    public TeamPodcastTeamSelectionRecord? GetPodcastTeamSelection(string? roomId = null)
+    {
+        EnsureLoaded();
+
+        var normalizedRoomId = string.IsNullOrWhiteSpace(roomId) ? "main" : roomId.Trim();
+        lock (_lock)
+        {
+            var selection = _state.PodcastTeamSelection;
+            if (selection is null)
+            {
+                return null;
+            }
+
+            if (!string.Equals(selection.RoomId, normalizedRoomId, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (selection.Participants is null || selection.Participants.Count == 0)
+            {
+                return null;
+            }
+
+            return selection;
+        }
+    }
+
     public TeamInviteRecord? RevokePendingInvite(string inviteId, string actorEmail, string reason)
     {
         EnsureLoaded();
@@ -473,6 +577,7 @@ public sealed class TeamAccessState
     public List<TeamMemberRecord> Members { get; set; } = new();
     public TeamSharedPodcastScriptRecord SharedPodcastScript { get; set; } = new();
     public TeamPodcastSessionSnapshotRecord PodcastSessionSnapshot { get; set; } = new();
+    public TeamPodcastTeamSelectionRecord PodcastTeamSelection { get; set; } = new();
 }
 
 public sealed class TeamSharedPodcastScriptRecord
@@ -501,6 +606,28 @@ public sealed class TeamPodcastSessionSnapshotRecord
     public string SavedByEmail { get; set; } = string.Empty;
     public DateTime SavedAtUtc { get; set; } = DateTime.UtcNow;
     public string Version { get; set; } = string.Empty;
+}
+
+public sealed class TeamPodcastTeamSelectionRecord
+{
+    public string RoomId { get; set; } = "main";
+    public int RequestedMaxParticipants { get; set; } = 5;
+    public int DeviceCapacity { get; set; } = 5;
+    public int EffectiveMaxParticipants { get; set; } = 5;
+    public List<TeamPodcastTeamMemberRecord> Participants { get; set; } = new();
+    public string SavedByEmail { get; set; } = string.Empty;
+    public DateTime SavedAtUtc { get; set; } = DateTime.UtcNow;
+    public string Version { get; set; } = string.Empty;
+}
+
+public sealed class TeamPodcastTeamMemberRecord
+{
+    public string Identifier { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Role { get; set; } = "guest";
+    public string Device { get; set; } = "Unknown";
+    public bool IsConnected { get; set; } = true;
+    public DateTime AddedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class TeamInviteRecord

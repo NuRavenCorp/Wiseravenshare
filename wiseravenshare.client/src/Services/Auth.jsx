@@ -336,6 +336,29 @@ class AuthService {
         }
     }
 
+    async getPodcastTeamSelection(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-team-selection', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async savePodcastTeamSelection(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-team-selection', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
     async issueAdminPassToken() {
         try {
             const response = await this.postAuth('/admin-pass', {}, { withAuth: true });
