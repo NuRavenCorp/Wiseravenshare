@@ -249,7 +249,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
-    const [workflowStage, setWorkflowStage] = useState('Plan');
+    const [workflowStage, setWorkflowStage] = useState('Team');
     const [teamCreatorId, setTeamCreatorId] = useState('');
     const [teamCreatorLabel, setTeamCreatorLabel] = useState('');
     const [designeeKeys, setDesigneeKeys] = useState([]);
@@ -2050,9 +2050,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const playbackMediaUrl = String(recordedVideoUrl || savedRecordingMediaUrl || '').trim();
 
     const flowSteps = [
+        { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
         { id: 'format', label: 'Format and urgency selected', done: Boolean(format && urgency), hint: 'Pick show structure and dispatch priority' },
-        { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
         { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Fill Script Pipeline segments or write your own script' },
         { id: 'approval', label: 'Run order approved', done: runOrderApproved, hint: 'Lock segment order before recording' },
         { id: 'publish', label: 'Recording saved to library', done: hasSavedRecording, hint: 'Record, review, then save to Ravensight Library' }
@@ -2071,19 +2071,19 @@ const PodcastStudioPage = ({ onNavigate }) => {
     ];
 
     const nextRequiredFlow = (() => {
-        if (!hasCoreBrief) {
-            return {
-                stage: 'Plan',
-                actionLabel: 'Complete episode brief',
-                message: 'Complete episode title and story angle to lock your recording brief.'
-            };
-        }
-
         if (!hasTeamReady) {
             return {
                 stage: 'Team',
                 actionLabel: 'Sync your team',
                 message: 'Pair at least one teammate or guest before moving forward in the flow.'
+            };
+        }
+
+        if (!hasCoreBrief) {
+            return {
+                stage: 'Plan',
+                actionLabel: 'Complete episode brief',
+                message: 'Complete episode title and story angle to lock your recording brief.'
             };
         }
 
@@ -2655,6 +2655,56 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             {syncMessage}
                         </div>
                     )}
+
+                    <div style={{
+                        marginTop: '14px',
+                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                        borderRadius: '12px',
+                        padding: '12px',
+                        background: 'rgba(15, 23, 42, 0.55)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#7dd3fc' }}>
+                            Remote Guest Split Monitor (Startup Preview)
+                        </div>
+                        <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+                            {splitGuestMonitors.map((guest, index) => (
+                                <div
+                                    key={`startup-split-${index}`}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '10px',
+                                        background: 'rgba(2, 6, 23, 0.7)',
+                                        minHeight: '102px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        textAlign: 'center',
+                                        padding: '8px'
+                                    }}
+                                >
+                                    {guest ? (
+                                        <>
+                                            <div style={{ fontSize: '18px' }}>👤</div>
+                                            <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '4px' }}>{guest.name}</div>
+                                            <div style={{ fontSize: '10px', color: '#93c5fd', marginTop: '2px' }}>
+                                                Slot {index + 1} active
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div style={{ fontSize: '16px', opacity: 0.7 }}>➕</div>
+                                            <div style={{ fontSize: '11px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                                Open slot {index + 1}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#bae6fd' }}>
+                            Add guests from Team setup. Up to {MAX_REMOTE_GUEST_MONITORS} remote guest monitors are shown.
+                        </div>
+                    </div>
+
                     <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
                         <button type="button" onClick={handleSyncConnection} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(2, 132, 199, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
                             Sync Connection
