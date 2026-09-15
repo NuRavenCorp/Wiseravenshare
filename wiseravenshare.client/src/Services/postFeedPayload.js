@@ -102,6 +102,43 @@ const resolvePrimaryMediaUrl = (post) => {
     return null;
 };
 
+const resolveAllMediaUrls = (post) => {
+    const values = [];
+    const pushIfValid = (candidate) => {
+        const resolved = sanitizeMediaUrl(candidate);
+        if (resolved && !values.includes(resolved)) {
+            values.push(resolved);
+        }
+    };
+
+    pushIfValid(post?.mediaUrl || post?.url || post?.imageUrl || post?.photoUrl || post?.thumbnailUrl);
+
+    const mediaUrls = post?.mediaUrls;
+    if (Array.isArray(mediaUrls)) {
+        mediaUrls.forEach((candidate) => pushIfValid(candidate));
+    } else if (typeof mediaUrls === 'string') {
+        const trimmed = mediaUrls.trim();
+        if (trimmed) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach((candidate) => pushIfValid(candidate));
+                } else {
+                    pushIfValid(trimmed);
+                }
+            } catch {
+                trimmed
+                    .split(',')
+                    .map((value) => value.trim())
+                    .filter(Boolean)
+                    .forEach((candidate) => pushIfValid(candidate));
+            }
+        }
+    }
+
+    return values;
+};
+
 const resolveMediaFileNameFromUrl = (value) => {
     const source = cleanWhitespaceText(value);
     if (!source) {
@@ -190,7 +227,8 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
     const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
-    const resolvedMediaUrl = resolvePrimaryMediaUrl(post);
+    const normalizedMediaUrls = resolveAllMediaUrls(post);
+    const resolvedMediaUrl = normalizedMediaUrls[0] || resolvePrimaryMediaUrl(post);
     const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
     const mediaFileHint = resolveMediaFileNameFromUrl(resolvedMediaUrl);
     const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
@@ -209,6 +247,7 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
         userId: resolvedUserId,
         mediaType: inferredMediaType,
         mediaUrl: resolvedMediaUrl,
+        mediaUrls: normalizedMediaUrls,
         likes: Number(post?.likes ?? post?.likesCount ?? 0),
         reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
         comments: Array.isArray(post?.comments) ? post.comments : [],

@@ -113,6 +113,45 @@ const PostCard = ({
         post.facebookUrl && { href: post.facebookUrl, label: 'Facebook', color: '#1877f2' }
     ].filter(Boolean);
 
+    const mediaItems = useMemo(() => {
+        const items = [];
+        const pushIfValid = (candidate) => {
+            const resolved = resolveMediaUrl(String(candidate || '').trim());
+            if (!resolved) {
+                return;
+            }
+            if (!items.includes(resolved)) {
+                items.push(resolved);
+            }
+        };
+
+        pushIfValid(post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '');
+
+        if (Array.isArray(post.mediaUrls)) {
+            post.mediaUrls.forEach((candidate) => pushIfValid(candidate));
+        } else if (typeof post.mediaUrls === 'string') {
+            const trimmed = post.mediaUrls.trim();
+            if (trimmed) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) {
+                        parsed.forEach((candidate) => pushIfValid(candidate));
+                    } else {
+                        pushIfValid(trimmed);
+                    }
+                } catch {
+                    trimmed
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean)
+                        .forEach((candidate) => pushIfValid(candidate));
+                }
+            }
+        }
+
+        return items;
+    }, [post.mediaUrl, post.url, post.videoUrl, post.imageUrl, post.mediaUrls]);
+
     const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
 
     const handleToggleComments = async () => {
@@ -208,49 +247,72 @@ const PostCard = ({
                 )}
             </div>
 
-            {/* Media block renders first so photos are never buried under text */}
-            {(() => {
-                const rawMediaUrl = post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '';
-                const resolvedMedia = resolveMediaUrl(rawMediaUrl);
-                if (!resolvedMedia) return null;
-                const { isVideoPost, isImagePost, isAudioPost } = classifyPostMedia(post, resolvedMedia);
-
-                return (
-                    <div style={{ marginTop: '12px', borderRadius: '12px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', zIndex: 1 }}>
-                        {isVideoPost ? (
-                            <video
-                                src={resolvedMedia}
-                                controls
-                                playsInline
-                                preload="metadata"
-                                style={{ width: '100%', maxHeight: '420px', display: 'block', borderRadius: '12px', background: '#000' }}
-                            />
-                        ) : isImagePost ? (
-                            <img
-                                src={resolvedMedia}
-                                alt="Story media"
-                                style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
-                            />
-                        ) : isAudioPost ? (
-                            <div style={{ padding: '14px', background: 'rgba(255,255,255,0.04)' }}>
-                                <audio
+            {/* Media block renders first so montage items are visible before text */}
+            {mediaItems.length > 0 && (
+                <div
+                    style={{
+                        marginTop: '12px',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: 'rgba(0,0,0,0.4)',
+                        position: 'relative',
+                        zIndex: 1,
+                        padding: mediaItems.length > 1 ? '6px' : 0,
+                        display: 'grid',
+                        gridTemplateColumns: mediaItems.length > 1 ? 'repeat(auto-fit, minmax(220px, 1fr))' : '1fr',
+                        gap: mediaItems.length > 1 ? '6px' : 0
+                    }}
+                >
+                    {mediaItems.map((resolvedMedia, index) => {
+                        const mediaClass = classifyPostMedia({ type: 'Text', mediaType: '' }, resolvedMedia);
+                        if (mediaClass.isVideoPost) {
+                            return (
+                                <video
+                                    key={`${post.id || 'post'}-media-${index}`}
                                     src={resolvedMedia}
                                     controls
+                                    playsInline
                                     preload="metadata"
-                                    style={{ width: '100%' }}
+                                    style={{ width: '100%', maxHeight: '420px', display: 'block', borderRadius: '12px', background: '#000' }}
                                 />
-                            </div>
-                        ) : (
-                            <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            );
+                        }
+
+                        if (mediaClass.isImagePost) {
+                            return (
+                                <img
+                                    key={`${post.id || 'post'}-media-${index}`}
+                                    src={resolvedMedia}
+                                    alt={`Story media ${index + 1}`}
+                                    style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
+                                />
+                            );
+                        }
+
+                        if (mediaClass.isAudioPost) {
+                            return (
+                                <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '14px', background: 'rgba(255,255,255,0.04)', borderRadius: '12px' }}>
+                                    <audio
+                                        src={resolvedMedia}
+                                        controls
+                                        preload="metadata"
+                                        style={{ width: '100%' }}
+                                    />
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <span style={{ fontSize: '13px', color: 'var(--light-color)' }}>📄 Attached Story File</span>
                                 <a href={resolvedMedia} target="_blank" rel="noreferrer" style={{ color: 'var(--highlight-color)', fontWeight: 'bold', fontSize: '13px' }}>
                                     View / Download File
                                 </a>
                             </div>
-                        )}
-                    </div>
-                );
-            })()}
+                        );
+                    })}
+                </div>
+            )}
 
             <p
                 style={{
