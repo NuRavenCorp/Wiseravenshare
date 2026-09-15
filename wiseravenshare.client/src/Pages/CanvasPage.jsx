@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Compartment from '../Components/Common/Compartment';
 import { useAuth } from '../Contexts/AuthContext';
+import { apiService } from '../Services/api';
 import { readStoredFeedPosts, writeStoredFeedPosts, normalizeFeedPost } from '../Services/postFeedPayload';
 
 const COLORS = [
@@ -31,6 +32,7 @@ const CanvasPage = ({ onNavigate }) => {
     const [textInput, setTextInput] = useState('WiseRaven Creator');
     const [selectedSticker, setSelectedSticker] = useState('🦅 WiseRaven');
     const [statusMsg, setStatusMsg] = useState('');
+    const [isPublishing, setIsPublishing] = useState(false);
 
     const isDrawingRef = useRef(false);
     const startPosRef = useRef({ x: 0, y: 0 });
@@ -304,33 +306,94 @@ const CanvasPage = ({ onNavigate }) => {
         setTimeout(() => setStatusMsg(''), 2500);
     };
 
-    const postToFeed = () => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const dataUrl = canvas.toDataURL('image/png');
-
-        const newPost = normalizeFeedPost({
-            id: `post-canvas-${Date.now()}`,
-            userId: currentUser.id,
-            user: currentUser,
-            content: textInput ? `🎨 Canvas Design: "${textInput}"` : '🎨 Shared artwork created in Canvas Studio',
-            mediaUrl: dataUrl,
-            mediaType: 'photo',
-            likes: 0,
-            reposts: 0,
-            comments: [],
-            createdAt: new Date().toISOString()
-        }, currentUser);
-
-        const currentPosts = readStoredFeedPosts();
-        writeStoredFeedPosts([newPost, ...currentPosts]);
-
-        setStatusMsg('Design published to WiseRaven feed!');
-        setTimeout(() => {
-            if (typeof onNavigate === 'function') {
-                onNavigate('feed');
+    const canvasToPngFile = (canvas, fileName) => new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error('Unable to export canvas image.'));
+                return;
             }
-        }, 1200);
+
+            resolve(new File([blob], fileName, { type: 'image/png' }));
+        }, 'image/png');
+    });
+
+    const postToFeed = async () => {
+        const canvas = canvasRef.current;
+        if (!canvas || isPublishing) return;
+
+        const caption = textInput ? `🎨 Canvas Design: "${textInput}"` : '🎨 Shared artwork created in Canvas Studio';
+        const fallbackDataUrl = canvas.toDataURL('image/png');
+        setIsPublishing(true);
+        setStatusMsg('Publishing artwork...');
+
+        try {
+            const pngFile = await canvasToPngFile(canvas, `canvas_artwork_${Date.now()}.png`);
+            const uploadResponse = await apiService.uploadMedia(pngFile, 'photo', {
+                title: textInput?.trim() || 'Canvas artwork',
+                description: caption,
+                caption
+            });
+
+            const payload = uploadResponse?.data || uploadResponse || {};
+            const uploadedMediaUrl = payload?.mediaUrl || payload?.file?.mediaUrl || payload?.file?.MediaUrl || null;
+
+            const createResponse = await apiService.createPost({
+                content: caption,
+                type: 'Image',
+                mediaUrl: uploadedMediaUrl,
+                mediaType: 'photo',
+                isSensitive: false
+            });
+
+            const createdPost = normalizeFeedPost(createResponse?.data || createResponse || {
+                id: `post-canvas-${Date.now()}`,
+                userId: currentUser.id,
+                user: currentUser,
+                content: caption,
+                mediaUrl: uploadedMediaUrl,
+                mediaType: 'photo',
+                likes: 0,
+                reposts: 0,
+                comments: [],
+                createdAt: new Date().toISOString()
+            }, currentUser);
+
+            const currentPosts = readStoredFeedPosts();
+            writeStoredFeedPosts([createdPost, ...currentPosts]);
+
+            setStatusMsg('Design published to WiseRaven feed!');
+            setTimeout(() => {
+                if (typeof onNavigate === 'function') {
+                    onNavigate('feed');
+                }
+            }, 1200);
+        } catch {
+            // Keep local fallback so artwork remains visible even when backend upload/post is unavailable.
+            const fallbackPost = normalizeFeedPost({
+                id: `post-canvas-${Date.now()}`,
+                userId: currentUser.id,
+                user: currentUser,
+                content: caption,
+                mediaUrl: fallbackDataUrl,
+                mediaType: 'photo',
+                likes: 0,
+                reposts: 0,
+                comments: [],
+                createdAt: new Date().toISOString()
+            }, currentUser);
+
+            const currentPosts = readStoredFeedPosts();
+            writeStoredFeedPosts([fallbackPost, ...currentPosts]);
+
+            setStatusMsg('Published locally. The network is unavailable, so this artwork is saved on this device.');
+            setTimeout(() => {
+                if (typeof onNavigate === 'function') {
+                    onNavigate('feed');
+                }
+            }, 1200);
+        } finally {
+            setIsPublishing(false);
+        }
     };
 
     return (
@@ -622,6 +685,7 @@ const CanvasPage = ({ onNavigate }) => {
                         <button
                             type="button"
                             onClick={postToFeed}
+                            disabled={isPublishing}
                             style={{
                                 border: 'none',
                                 background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
@@ -629,11 +693,12 @@ const CanvasPage = ({ onNavigate }) => {
                                 borderRadius: '10px',
                                 padding: '10px 20px',
                                 fontWeight: 700,
-                                cursor: 'pointer',
+                                cursor: isPublishing ? 'not-allowed' : 'pointer',
+                                opacity: isPublishing ? 0.7 : 1,
                                 fontSize: '13px'
                             }}
                         >
-                            📰 Publish Artwork to Feed
+                            {isPublishing ? 'Publishing...' : '📰 Publish Artwork to Feed'}
                         </button>
                     </div>
                 </div>

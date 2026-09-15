@@ -628,7 +628,13 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                     : 'National feed is active.'}
             </div>
 
-            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
+            <PostCreator
+                onPostCreate={handlePostCreate}
+                addTruthAlert={addTruthAlert}
+                currentUser={currentUser}
+                onNavigate={onNavigate}
+                hideMultiPlatformPublish={true}
+            />
             <div style={{ marginTop: '20px' }}>
                 {rankedFeedPosts.map(post => (
                     <PostCard

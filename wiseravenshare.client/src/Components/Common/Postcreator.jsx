@@ -54,7 +54,7 @@ const safeAvatarInitials = (value, name) => {
     return null; // use <img> instead
 };
 
-const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatformPublish = false }) => {
+const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, onNavigate, hideMultiPlatformPublish = false }) => {
     const [content, setContent] = useState('');
     const [mediaFiles, setMediaFiles] = useState([]);
     const [mediaType, setMediaType] = useState(null);
@@ -694,6 +694,28 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, hideMultiPlatfo
                         <span style={{ fontSize: '0.8rem' }}>{type.charAt(0).toUpperCase() + type.slice(1)}</span>
                     </button>
                 ))}
+                <button
+                    type="button"
+                    onClick={() => onNavigate?.('canvas')}
+                    style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '70px',
+                        height: '70px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s ease',
+                        border: '1px solid var(--border-color)',
+                        color: 'var(--text-color)'
+                    }}
+                    title="Open Canvas Studio to create murals and artwork"
+                >
+                    <i className="fas fa-palette" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+                    <span style={{ fontSize: '0.8rem' }}>Canvas</span>
+                </button>
             </div>
 
             {!hideMultiPlatformPublish && (
