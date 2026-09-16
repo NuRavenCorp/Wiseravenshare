@@ -14,6 +14,7 @@ Storage__Blob__Endpoint=https://nyc3.digitaloceanspaces.com
 Storage__Blob__Region=nyc3
 Storage__Blob__AccessKey=YOUR_SPACES_ACCESS_KEY
 Storage__Blob__SecretKey=YOUR_SPACES_SECRET_KEY
+Storage__Blob__CdnPublicBaseUrl=https://cdn.wise-ravens.com
 Storage__Blob__PublicBaseUrl=https://bucket-wrs-01010.nyc3.digitaloceanspaces.com
 
 Social__Facebook__Provider=zernio

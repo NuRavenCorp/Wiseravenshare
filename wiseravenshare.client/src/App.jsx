@@ -129,8 +129,8 @@ const App = () => {
         return email.length > 0 && adminEmails.has(email);
     }, [adminEmails, user?.email]);
     const canAccessPlatformAggregator = useMemo(() => {
-        return isAdminUser || hasPrivilegedAggregatorRole(user);
-    }, [isAdminUser, user]);
+        return Boolean(user);
+    }, [user]);
 
     useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';

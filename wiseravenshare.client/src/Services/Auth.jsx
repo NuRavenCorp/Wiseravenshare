@@ -394,11 +394,33 @@ class AuthService {
             err.status = 401;
             throw err;
         } catch (error) {
-            if (error?.response?.status === 401 || error?.response?.status === 403 || error?.status === 401 || error?.status === 403) {
+            const status = Number(error?.response?.status || error?.status || 0);
+            if (status === 401 || status === 403) {
                 this.clearToken();
                 this.clearRefreshToken();
                 this.clearUser();
+                throw this.handleError(error);
             }
+
+            const cachedUser = this.getUser();
+            const payload = this.decodeTokenPayload() || {};
+            const fallbackUser = {
+                ...(cachedUser || {}),
+                id: cachedUser?.id || payload.sub || payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || '',
+                email: cachedUser?.email || payload.email || payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || '',
+                username: cachedUser?.username || payload.unique_name || payload.name || payload.preferred_username || '',
+                name: cachedUser?.name || cachedUser?.displayName || payload.name || payload.unique_name || payload.preferred_username || '',
+                displayName: cachedUser?.displayName || cachedUser?.name || payload.name || payload.unique_name || payload.preferred_username || '',
+                avatar: cachedUser?.avatar || cachedUser?.avatarUrl || payload.avatar || payload.picture || '',
+                avatarUrl: cachedUser?.avatarUrl || cachedUser?.avatar || payload.avatar || payload.picture || ''
+            };
+
+            const normalizedFallbackUser = this.normalizeUser(fallbackUser);
+            if (normalizedFallbackUser && (normalizedFallbackUser.id || normalizedFallbackUser.email || normalizedFallbackUser.username)) {
+                this.setUser(normalizedFallbackUser);
+                return normalizedFallbackUser;
+            }
+
             throw this.handleError(error);
         }
     }

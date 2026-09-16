@@ -241,6 +241,9 @@ const FMRadioPage = () => {
   const [captionMediaType, setCaptionMediaType] = useState('');
   const [captionMediaFile, setCaptionMediaFile] = useState(null);
   const [captionPlaying,   setCaptionPlaying]   = useState(false);
+  const [captionTrackDuration, setCaptionTrackDuration] = useState(0);
+  const [captionClipStart, setCaptionClipStart] = useState(0);
+  const [captionClipEnd, setCaptionClipEnd] = useState(0);
 
   // Radio Creator
   const [creatorStationForm, setCreatorStationForm] = useState({
@@ -307,6 +310,7 @@ const FMRadioPage = () => {
   const modCanvasRef    = useRef(null);   // modern viz canvas
   const captionAudioRef = useRef(null);
   const captionMediaRef = useRef(null);
+  const captionStopAtRef = useRef(null);
   const containerRef    = useRef(null);
   const vizRafRef       = useRef(null);
   const tickRef         = useRef(null);   // time-update interval
@@ -1248,6 +1252,95 @@ const FMRadioPage = () => {
     setCaptionMediaType(file.type.startsWith('video/') ? 'video' : 'image');
     e.target.value = '';
   };
+
+  useEffect(() => {
+    if (!captionTrack) {
+      setCaptionTrackDuration(0);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(0);
+      return;
+    }
+
+    const candidates = resolveTrackSourceCandidates(captionTrack);
+    if (!candidates.length) {
+      setCaptionTrackDuration(0);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(0);
+      return;
+    }
+
+    let canceled = false;
+    const probeAudio = new Audio();
+    let sourceIndex = 0;
+
+    const cleanupProbe = () => {
+      probeAudio.onloadedmetadata = null;
+      probeAudio.onerror = null;
+      probeAudio.src = '';
+    };
+
+    const tryLoad = () => {
+      if (canceled || sourceIndex >= candidates.length) {
+        setCaptionTrackDuration(0);
+        setCaptionClipStart(0);
+        setCaptionClipEnd(0);
+        cleanupProbe();
+        return;
+      }
+
+      probeAudio.src = candidates[sourceIndex];
+      probeAudio.load();
+    };
+
+    probeAudio.preload = 'metadata';
+    probeAudio.onloadedmetadata = () => {
+      if (canceled) {
+        cleanupProbe();
+        return;
+      }
+
+      const trackDuration = Number(probeAudio.duration);
+      if (!Number.isFinite(trackDuration) || trackDuration <= 0) {
+        sourceIndex += 1;
+        tryLoad();
+        return;
+      }
+
+      setCaptionTrackDuration(trackDuration);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(trackDuration);
+      cleanupProbe();
+    };
+
+    probeAudio.onerror = () => {
+      sourceIndex += 1;
+      tryLoad();
+    };
+
+    tryLoad();
+
+    return () => {
+      canceled = true;
+      cleanupProbe();
+    };
+  }, [captionTrack]);
+
+  const handleCaptionClipStartChange = (nextStart) => {
+    const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+    const clampedStart = Math.max(0, Math.min(Number(nextStart) || 0, safeDuration));
+    const clampedEnd = Math.max(clampedStart, captionClipEnd || 0);
+    setCaptionClipStart(clampedStart);
+    setCaptionClipEnd(Math.min(clampedEnd, safeDuration));
+  };
+
+  const handleCaptionClipEndChange = (nextEnd) => {
+    const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+    const clampedEnd = Math.max(0, Math.min(Number(nextEnd) || 0, safeDuration));
+    const clampedStart = Math.min(captionClipStart || 0, clampedEnd);
+    setCaptionClipStart(Math.max(0, clampedStart));
+    setCaptionClipEnd(clampedEnd);
+  };
+
   const captionPlay = () => {
     if (!captionTrack || !captionAudioRef.current || !captionMediaUrl) return;
 
@@ -1258,7 +1351,23 @@ const FMRadioPage = () => {
     let sourceIndex = 0;
     const tryPlay = () => {
       audio.src = candidates[sourceIndex];
-      audio.currentTime = 0;
+      const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+      const startAt = Math.max(0, Math.min(captionClipStart || 0, safeDuration || Number.MAX_SAFE_INTEGER));
+      const stopAt = Math.max(startAt, Math.min(captionClipEnd || safeDuration || 0, safeDuration || Number.MAX_SAFE_INTEGER));
+      captionStopAtRef.current = stopAt > 0 ? stopAt : null;
+      audio.currentTime = startAt;
+
+      audio.ontimeupdate = () => {
+        const clipStopAt = Number(captionStopAtRef.current);
+        if (!Number.isFinite(clipStopAt) || clipStopAt <= 0) {
+          return;
+        }
+
+        if (audio.currentTime >= clipStopAt) {
+          captionStop();
+        }
+      };
+
       audio.play().then(() => {
         setCaptionPlaying(true);
         if (captionMediaType === 'video') {
@@ -1281,8 +1390,10 @@ const FMRadioPage = () => {
   const captionStop = () => {
     captionAudioRef.current?.pause();
     if (captionAudioRef.current) {
+      captionAudioRef.current.ontimeupdate = null;
       captionAudioRef.current.currentTime = 0;
     }
+    captionStopAtRef.current = null;
     captionMediaRef.current?.pause();
     if (captionMediaRef.current) {
       captionMediaRef.current.currentTime = 0;
@@ -1820,6 +1931,33 @@ const FMRadioPage = () => {
                 <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
               </label>
               {captionTrack && <div className="wr-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              {captionTrack && captionTrackDuration > 0 && (
+                <div style={{ marginTop: 10, marginBottom: 10, display: 'grid', gap: 8 }}>
+                  <div className="wr-section-label">3. Select track portion</div>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>Start: {fmt(captionClipStart)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(captionClipStart, captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipStartChange(event.target.value)}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>End: {fmt(captionClipEnd)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(Math.max(captionClipEnd, captionClipStart), captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipEndChange(event.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="wr-caption-preview-wrap">
                 {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
                 {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}
@@ -2031,6 +2169,33 @@ const FMRadioPage = () => {
                 <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
               </label>
               {captionTrack && <div className="mod-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              {captionTrack && captionTrackDuration > 0 && (
+                <div style={{ marginTop: 10, marginBottom: 10, display: 'grid', gap: 8 }}>
+                  <div className="mod-section-label">3. Select track portion</div>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>Start: {fmt(captionClipStart)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(captionClipStart, captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipStartChange(event.target.value)}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>End: {fmt(captionClipEnd)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(Math.max(captionClipEnd, captionClipStart), captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipEndChange(event.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="mod-caption-preview-wrap">
                 {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
                 {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}

@@ -25,7 +25,7 @@ const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').t
 
 const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
 
-const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'wiseravenshare.com'];
+const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'cdn.wise-ravens.com', 'wiseravenshare.com'];
 
 const isFirstPartyHost = (host = '') => {
     const normalized = String(host || '').trim().toLowerCase();

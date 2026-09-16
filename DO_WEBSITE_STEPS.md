@@ -36,6 +36,7 @@ Run the app in containers while connecting to managed DigitalOcean services.
 - Fill S3_ACCESS_KEY and S3_SECRET_KEY.
 - Set S3_ENDPOINT like https://sfo3.digitaloceanspaces.com
 - Set BLOB_BUCKET_NAME to your Space name.
+- Optional but recommended: configure a CDN hostname and set Storage__Blob__CdnPublicBaseUrl (for example https://cdn.wise-ravens.com).
 
 4) Stripe values
 - Stripe Dashboard -> Developers -> API keys and Webhooks.

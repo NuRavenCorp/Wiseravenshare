@@ -74,6 +74,9 @@ services:
       - key: Storage__Blob__SecretKey
         value: ${DO_SPACES_SECRET_KEY}
         type: SECRET
+      - key: Storage__Blob__CdnPublicBaseUrl
+        value: ${DO_CDN_PUBLIC_BASE_URL}
+        type: SECRET
       - key: Storage__Blob__PublicBaseUrl
         value: ${DO_SPACES_PUBLIC_BASE_URL}
         type: SECRET

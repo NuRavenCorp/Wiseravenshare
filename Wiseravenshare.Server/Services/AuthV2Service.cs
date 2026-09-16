@@ -224,6 +224,7 @@ public sealed class AuthV2Service : IAuthV2Service
         {
             Id = user.Id,
             Email = user.Email,
+            EmailVerified = user.EmailVerified,
             Username = user.Handle,
             Name = user.Name,
             DisplayName = user.Name,

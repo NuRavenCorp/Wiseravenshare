@@ -45,6 +45,7 @@ const DEFAULT_NAV_ORDER = [
   'music-rights-studio',
   'podcast-rights-studio',
   'team-launchpad',
+  'collaboration',
   'truthseeker',
   'ai-assistant',
   'ainews',

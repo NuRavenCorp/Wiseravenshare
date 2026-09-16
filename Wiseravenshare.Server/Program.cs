@@ -1479,7 +1479,7 @@ CREATE INDEX IF NOT EXISTS idx_regional_trend_country_cat
     await pCmd.ExecuteNonQueryAsync(cancellationToken);
 }
 
-// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -1489,6 +1489,7 @@ var fallbackClientOrigins = new[]
 {
     "https://wise-ravens.com",
     "https://www.wise-ravens.com",
+    "https://cdn.wise-ravens.com",
     "https://wiseravenshare.com",
     "https://www.wiseravenshare.com"
 };
@@ -2039,7 +2040,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -2147,7 +2148,7 @@ if (frontendDistExists)
     });
 }
 
-// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/health/db", async () =>
 {
@@ -2273,6 +2274,15 @@ ORDER BY ""MigrationId"";";
             .Where(expected => !actualTables.Contains(expected))
             .ToArray();
 
+        // Local helper to read simple boolean flags from environment variables.
+        static bool ParseBoolEnv(string key)
+        {
+            var v = Environment.GetEnvironmentVariable(key);
+            return !string.IsNullOrWhiteSpace(v)
+                && (v.Equals("1", StringComparison.OrdinalIgnoreCase)
+                    || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+        }
+
         return Results.Ok(new
         {
             status = "ok",
@@ -2299,6 +2309,14 @@ ORDER BY ""MigrationId"";";
                 hasUserRetentionTable = hasUserTable,
                 hasVideoRetentionTable = hasVideoTable,
                 hasVideoCommentsRetentionTable = hasVideoCommentsTable,
+
+                // Social media integration feature flags
+                supportsTikTok = ParseBoolEnv("INTEGRATION_TIKTOK_ENABLED"),
+                supportsFacebook = ParseBoolEnv("INTEGRATION_FACEBOOK_ENABLED"),
+                supportsReddit = ParseBoolEnv("INTEGRATION_REDDIT_ENABLED"),
+                supportsYouTube = ParseBoolEnv("INTEGRATION_YOUTUBE_ENABLED"),
+                supportsInstagram = ParseBoolEnv("INTEGRATION_INSTAGRAM_ENABLED"),
+
                 hasBucketRegistryTable = hasBucketObjectsTable,
                 expectedBucketName = configuredBucketName,
                 expectedProjectFolder = NormalizeFolderPath(configuredProjectFolder),
