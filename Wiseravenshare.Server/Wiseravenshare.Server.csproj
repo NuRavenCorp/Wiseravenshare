@@ -55,6 +55,7 @@
   <ItemGroup>
     <None Remove="Wiseravenshare.Server.deps.json;Wiseravenshare.Server.runtimeconfig.json;Wiseravenshare.Server.staticwebassets.endpoints.json" />
     <Content Remove="Wiseravenshare.Server.deps.json;Wiseravenshare.Server.runtimeconfig.json;Wiseravenshare.Server.staticwebassets.endpoints.json" />
+    <Compile Remove="Controllers\AssistantController.cs" />
   </ItemGroup>
 
   <ItemGroup>
