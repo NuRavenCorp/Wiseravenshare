@@ -32,6 +32,11 @@ const normalizeSocialFeeds = (socialFeeds) => {
     };
 };
 
+const isPlaceholderDisplayName = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local user' || text === 'local-user' || text === 'localuser' || text === 'user' || text === 'you';
+};
+
 const normalizeUser = (user) => {
     if (!user || typeof user !== 'object') {
         return user;
@@ -39,8 +44,11 @@ const normalizeUser = (user) => {
 
     const avatar = user.avatar || user.avatarUrl || user.photoURL || '';
     const avatarUrl = user.avatarUrl || user.avatar || user.photoURL || '';
-    const name = user.name || user.displayName || user.username || '';
-    const displayName = user.displayName || user.name || user.username || '';
+    const username = String(user.username || '').trim();
+    const nameCandidate = user.name || user.displayName || username || '';
+    const displayNameCandidate = user.displayName || user.name || username || '';
+    const name = isPlaceholderDisplayName(nameCandidate) ? (username || '') : nameCandidate;
+    const displayName = isPlaceholderDisplayName(displayNameCandidate) ? (username || name || '') : displayNameCandidate;
 
     return {
         ...user,
