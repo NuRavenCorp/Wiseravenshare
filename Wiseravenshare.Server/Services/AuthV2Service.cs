@@ -86,7 +86,9 @@ public sealed class AuthV2Service : IAuthV2Service
     {
         EnsureSeeded();
 
-        var login = (request.UsernameOrEmail ?? request.Email ?? string.Empty).Trim();
+        var login = (!string.IsNullOrWhiteSpace(request.UsernameOrEmail)
+            ? request.UsernameOrEmail
+            : request.Email ?? string.Empty).Trim();
         var password = request.Password ?? string.Empty;
         if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(password))
         {
