@@ -110,16 +110,26 @@ export const AuthProvider = ({ children }) => {
 
     const checkAuth = async () => {
         try {
-            const token = authService.getToken();
-            if (token) {
-                const userData = normalizeUser(await authService.verifyToken(token));
-                setUser(userData);
-                localStorage.setItem('user_data', JSON.stringify(userData));
-                localStorage.setItem('wiseSocialFeeds', JSON.stringify(userData?.socialFeeds || {}));
-                window.dispatchEvent(new Event('wiseraven:social-updated'));
-            } else {
-                clearAuthState();
+            let token = authService.getToken();
+            if (!token) {
+                try {
+                    const refreshed = await authService.refreshSession();
+                    token = refreshed?.token || authService.getToken();
+                } catch {
+                    token = '';
+                }
             }
+
+            if (!token) {
+                clearAuthState();
+                return;
+            }
+
+            const userData = normalizeUser(await authService.verifyToken(token));
+            setUser(userData);
+            localStorage.setItem('user_data', JSON.stringify(userData));
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(userData?.socialFeeds || {}));
+            window.dispatchEvent(new Event('wiseraven:social-updated'));
         } catch (err) {
             console.error('Auth check failed:', err);
             const status = err?.status || err?.response?.status || 0;
