@@ -103,8 +103,12 @@ const buildFallbackImage = (article = {}) => {
     return FALLBACK_CATEGORY_IMAGES[categoryKey || 'general'];
 };
 
-export const resolveArticleImage = (article = {}) => {
+export const extractArticleImage = (article = {}) => {
     const candidates = collectImageCandidates(article);
-    const resolved = candidates.find((value) => isHttpUrl(value));
+    return candidates.find((value) => isHttpUrl(value)) ?? null;
+};
+
+export const resolveArticleImage = (article = {}) => {
+    const resolved = extractArticleImage(article);
     return resolved ? normalizeImageUrl(resolved) : buildFallbackImage(article);
 };
