@@ -623,14 +623,24 @@ public sealed class UserStore
 
     private static string BuildHandle(string name, string email)
     {
-        var source = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name;
-        var alphanumeric = new string(source.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
-        if (string.IsNullOrWhiteSpace(alphanumeric))
+        foreach (var source in new[] { name, email.Split('@')[0], "member" })
         {
-            alphanumeric = email.Split('@')[0];
+            var alphanumeric = new string((source ?? string.Empty).Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+            if (string.IsNullOrWhiteSpace(alphanumeric))
+            {
+                continue;
+            }
+
+            var normalized = alphanumeric.ToLowerInvariant();
+            if (LooksLikeOpaqueIdentifier(normalized))
+            {
+                continue;
+            }
+
+            return normalized;
         }
 
-        return alphanumeric.ToLowerInvariant();
+        return "member";
     }
 
     private SocialFeedSettings NormalizeSocialFeeds(SocialFeedSettings feeds)
@@ -894,6 +904,21 @@ public sealed class UserStore
         }
 
         return value.All(char.IsDigit);
+    }
+
+    private static bool LooksLikeOpaqueIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (IsNumericIdentifier(value))
+        {
+            return true;
+        }
+
+        return value.Length >= 12 && value.All(c => char.IsDigit(c) || (c >= 'a' && c <= 'f'));
     }
 
     private string GetUsersFilePath()

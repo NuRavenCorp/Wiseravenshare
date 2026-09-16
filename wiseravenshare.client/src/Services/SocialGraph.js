@@ -43,6 +43,20 @@ const isPlaceholderIdentity = (value) => {
     return text === '' || text === 'user' || text === '@user' || text === 'unknown' || text === 'local user';
 };
 
+const hasMeaningfulIdentity = (user) => {
+    if (!user) {
+        return false;
+    }
+
+    const name = String(user?.name || user?.displayName || '').trim();
+    const handle = String(user?.handle || user?.username || '').trim().replace(/^@+/, '');
+    const email = String(user?.email || '').trim();
+
+    return (!isPlaceholderIdentity(name) && name.length > 0)
+        || (!isPlaceholderIdentity(handle) && handle.length > 0)
+        || email.includes('@');
+};
+
 const fallbackHandleFromUser = (user) => {
     const explicit = String(user?.handle || user?.username || '').trim().replace(/^@+/, '');
     if (explicit && !isPlaceholderIdentity(explicit)) {
@@ -233,6 +247,7 @@ const getRecentPostsForUser = (posts = [], userId, days = 14) => {
 export const socialGraphService = {
     registerUserProfile(user) {
         if (!user?.id) return;
+        if (!hasMeaningfulIdentity(user)) return;
 
         const canonicalId = getCanonicalUserId(user);
         if (!canonicalId) {
@@ -253,6 +268,7 @@ export const socialGraphService = {
 
     syncProfileAcrossStorage(user) {
         if (!user?.id) return;
+        if (!hasMeaningfulIdentity(user)) return;
 
         const canonicalId = getCanonicalUserId(user);
         if (!canonicalId) {

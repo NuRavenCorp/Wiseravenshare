@@ -77,6 +77,39 @@ public class UserAvatarPersistenceTests
     }
 
     [Fact]
+    public void CreateUser_AvoidsOpaqueHexLikeHandles()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "wrs-userstore-handle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DATABASE_URL"] = "postgresql://invalid.example.com:5432/wiseravenshare",
+                    ["Persistence:RequireDatabase"] = "true"
+                })
+                .Build();
+
+            var store = new UserStore(new TestWebHostEnvironment { ContentRootPath = tempRoot, EnvironmentName = Environments.Production }, config);
+
+            var user = store.CreateUser("13b999db297d46ec", "realperson@example.com", "P@ssword123", string.Empty, string.Empty, string.Empty, string.Empty);
+
+            Assert.Equal("realperson", user.Handle);
+            Assert.DoesNotMatch(@"^[a-f0-9]{12,}$", user.Handle);
+            Assert.DoesNotContain("13b999db297d46ec", user.Handle, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task AuthV2Service_LoginAsync_AllowsCreatedUser_ToAuthenticateByEmail()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "wrs-authv2-login-" + Guid.NewGuid().ToString("N"));
