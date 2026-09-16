@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
@@ -349,6 +350,35 @@ namespace Wiseravenshare.Server.Controllers
                 ?? User.FindFirstValue("email")
                 ?? string.Empty).Trim();
 
+            var username = (User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue(ClaimTypes.Upn)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.UniqueName)
+                ?? User.FindFirstValue("preferred_username")
+                ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                try
+                {
+                    var byUsername = await _userRepository.GetByUsernameAsync(username);
+                    if (byUsername is not null)
+                    {
+                        if (!byUsername.IsActive)
+                        {
+                            byUsername.IsActive = true;
+                            await _userRepository.UpdateAsync(byUsername);
+                        }
+
+                        _logger.LogInformation("Recovered domain user mapping by username {Username}: token user {TokenUserId} -> domain user {DomainUserId}", username, claimUserId, byUsername.Id);
+                        return byUsername.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "User lookup by username failed for {Username}; continuing identity resolution.", username);
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(email))
             {
                 _logger.LogWarning("Unable to resolve missing domain user {UserId} because token email claim is missing.", claimUserId);
@@ -376,8 +406,8 @@ namespace Wiseravenshare.Server.Controllers
                 return claimUserId;
             }
 
-            var displayName = (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
-            var usernameSeed = displayName.Length > 0 ? displayName : email.Split('@')[0];
+            var displayName = username.Length > 0 ? username : (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
+            var usernameSeed = username.Length > 0 ? username : (displayName.Length > 0 ? displayName : email.Split('@')[0]);
             var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(sanitizedUsername))
             {
