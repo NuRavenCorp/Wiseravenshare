@@ -133,6 +133,13 @@ public class AppDbContext : DbContext
     public DbSet<PersonalizationTagMapping>  PersonalizationTagMappings   => Set<PersonalizationTagMapping>();
     public DbSet<RegionalTrendSnapshot>      RegionalTrendSnapshots       => Set<RegionalTrendSnapshot>();
 
+    // AI Assistant
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantConversation> AssistantConversations => Set<WiseRavenShare.Server.Entities.Assistant.AssistantConversation>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>      AssistantMessages      => Set<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>     AssistantFeedbacks     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>    AssistantKnowledge     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample> AssistantLearningSamples => Set<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
