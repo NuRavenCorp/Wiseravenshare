@@ -2127,7 +2127,13 @@ using (var scope = app.Services.CreateScope())
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseHttpsRedirection();
+}
+
+app.UseForwardedHeaders();
+app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
 }
 
 // Security headers for all responses
@@ -2146,6 +2152,18 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "font-src 'self' data: https:; " +
+        "connect-src 'self' https: wss:; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "upgrade-insecure-requests";
     context.Response.Headers["X-XSS-Protection"] = "0"; // CSP is the modern replacement
     if (!app.Environment.IsDevelopment())
     {
@@ -2176,7 +2194,6 @@ app.Use(async (context, next) =>
     }
 });
 
-app.UseForwardedHeaders();
 app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();

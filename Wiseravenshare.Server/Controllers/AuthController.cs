@@ -97,7 +97,7 @@ public class AuthController : ControllerBase
 
         if (_userStore.EmailExists(request.Email))
         {
-            return Conflict(new { message = "An account with that email already exists." });
+            return BadRequest(new { message = "Unable to register with the provided details." });
         }
 
         AppUserRecord user;
@@ -116,7 +116,7 @@ public class AuthController : ControllerBase
         {
             if (string.Equals(ex.Message, "An account with that email already exists.", StringComparison.Ordinal))
             {
-                return Conflict(new { message = "An account with that email already exists." });
+                return BadRequest(new { message = "Unable to register with the provided details." });
             }
 
             _logger.LogWarning(ex, "Signup blocked because durable persistence is unavailable for {Email}.", request.Email);
@@ -1484,7 +1484,7 @@ public class AuthController : ControllerBase
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey()));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
         var expiresMinutes = int.TryParse(_configuration["Authentication:Jwt:ExpiresMinutes"], out var minutes)
-            ? Math.Max(minutes, 5)
+            ? Math.Clamp(minutes, 5, 1440)
             : 60;
 
         var token = new JwtSecurityToken(
