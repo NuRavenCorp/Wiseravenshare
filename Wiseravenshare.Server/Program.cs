@@ -1586,8 +1586,55 @@ builder.Services.AddOutputCache(options =>
 });
 
 builder.Services.AddSignalR();
+
+// Assistant AI Service Configuration
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.AssistantOptions>(
+    builder.Configuration.GetSection("Assistant"));
+builder.Services.Configure<WiseRavenShare.Server.Infrastructure.External.OpenAiOptions>(
+    builder.Configuration.GetSection("OpenAI"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(
+    builder.Configuration.GetSection("Whisper"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.TtsOptions>(
+    builder.Configuration.GetSection("Tts"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WebGroundingOptions>(
+    builder.Configuration.GetSection("WebGrounding"));
+
+builder.Services.AddHttpClient<WiseRavenShare.Server.Infrastructure.External.OpenAiClient>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ISpeechToTextService,
+    WiseRavenShare.Server.Application.Services.Assistant.SpeechToTextService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ITextToSpeechService,
+    WiseRavenShare.Server.Application.Services.Assistant.TextToSpeechService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.IWebGroundingService,
+    WiseRavenShare.Server.Application.Services.Assistant.WebGroundingService>();
+
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.ILlmGateway,
+    WiseRavenShare.Server.Infrastructure.External.LlmGatewayAdapter>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IEmbeddingService,
+    WiseRavenShare.Server.Application.Services.Assistant.EmbeddingService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IPgVectorStore,
+    WiseRavenShare.Server.Infrastructure.Vector.PgVectorStore>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IRagRetriever,
+    WiseRavenShare.Server.Application.Services.Assistant.RagRetriever>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantOrchestrator,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantOrchestrator>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IChatterLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.ChatterLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IFeedbackLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.FeedbackLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantSafetyService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantSafetyService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantPersonaService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantPersonaService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.PromptBuilder>();
+
+// Craft Intelligence Services
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Craft.ICraftCoachingService,
+    WiseRavenShare.Server.Application.Services.Craft.CraftCoachingService>();
+
+builder.Services.AddHostedService<WiseRavenShare.Server.HostedServices.ChatterLearningBackgroundService>();
+
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
-builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
+builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
@@ -1610,6 +1657,17 @@ builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureS
 builder.Services.AddScoped<IMediaRepository, MediaRepository>();
 builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
 builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
+// Assistant repositories
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantConversationRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantConversationRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantMessageRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantMessageRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantFeedbackRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantFeedbackRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantKnowledgeRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantKnowledgeRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantLearningSampleRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantLearningSampleRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -2355,5 +2413,8 @@ ORDER BY ""MigrationId"";";
         return Results.Problem($"Database connectivity check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
+
+// Seed Craft Intelligence domains on startup
+await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();

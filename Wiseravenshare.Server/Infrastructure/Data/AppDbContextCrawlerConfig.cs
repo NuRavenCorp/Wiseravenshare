@@ -32,6 +32,7 @@ public static class AppDbContextCrawlerConfig
         {
             entity.HasIndex(link => new { link.CrawlJobId, link.SourceUrl });
             entity.HasIndex(link => new { link.CrawlJobId, link.TargetUrl });
+            entity.Ignore(link => link.SourcePage);
         });
 
         modelBuilder.Entity<CrawlMetric>(entity =>
