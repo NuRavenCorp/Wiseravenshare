@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Compartment from '../Common/Compartment';
-import { resolveArticleImage } from '../../utils/newsImageUtils';
+import { extractArticleImage, resolveArticleImage } from '../../utils/newsImageUtils';
 
 const aiFallbackNews = [
     {
@@ -317,6 +317,13 @@ const toArticleFromPost = (post, index) => ({
 const mapRssItemToArticle = (feed, item, index) => {
     const textPreview = String(item?.description || item?.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const summary = textPreview.slice(0, 220) || 'Latest headline from free-tier public news feed.';
+    const imageUrl = extractArticleImage({
+        ...item,
+        title: item?.title,
+        summary: item?.description || item?.content || summary,
+        content: item?.content || item?.description || summary,
+        category: inferCategoryFromText(`${item?.title || ''} ${summary}`)
+    });
 
     return {
         id: `${feed.id}-${item?.guid || item?.link || index}`,
@@ -328,6 +335,7 @@ const mapRssItemToArticle = (feed, item, index) => {
         content: `${summary}\n\nSource feed: ${feed.source}. Open the original source link for full reporting details and updates.`,
         publishedAt: item?.pubDate || item?.isoDate || new Date().toISOString(),
         confidence: 84,
+        imageUrl,
         externalUrl: sanitizeExternalUrl(item?.link)
     };
 };
