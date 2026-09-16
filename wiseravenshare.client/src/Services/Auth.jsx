@@ -461,7 +461,7 @@ class AuthService {
     }
 
     async legacyLogin(email, password) {
-        const normalizedLogin = String(email || '').trim();
+        const normalizedLogin = this.normalizeLoginIdentifier(email);
         const response = this.normalizeAuthResponse(await this.postAuthV2('/login', {
             email: normalizedLogin,
             usernameOrEmail: normalizedLogin,
@@ -478,6 +478,19 @@ class AuthService {
         this.setAdminPassToken(response.adminPassToken);
         this.setUser(response.user);
         return response;
+    }
+
+    normalizeLoginIdentifier(value) {
+        const text = String(value || '').trim();
+        if (!text) {
+            return '';
+        }
+
+        if (text.startsWith('@')) {
+            return text.slice(1).trim();
+        }
+
+        return text;
     }
 
     async legacyRegister(userData) {

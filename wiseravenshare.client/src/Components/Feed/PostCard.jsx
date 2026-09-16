@@ -41,6 +41,29 @@ const PostCard = ({
         };
     }, [post.user, post.userId, currentUser]);
 
+    const displayHandle = useMemo(() => {
+        const raw = String(
+            displayUser?.handle
+            || displayUser?.username
+            || displayUser?.name
+            || ''
+        ).trim();
+
+        if (raw) {
+            return raw.startsWith('@') ? raw : `@${raw.replace(/^@+/, '')}`;
+        }
+
+        const email = String(displayUser?.email || '').trim();
+        if (email.includes('@')) {
+            const prefix = email.split('@')[0].trim();
+            if (prefix) {
+                return `@${prefix}`;
+            }
+        }
+
+        return '@user';
+    }, [displayUser]);
+
     const truthBadge = useMemo(() => {
         const content = String(post.content || '').trim();
 
@@ -224,7 +247,7 @@ const PostCard = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <strong>{displayUser?.name || 'Unknown'}</strong>
-                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayUser?.handle || ''}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayHandle}</div>
                 </div>
                 {onFollow && post.userId && post.userId !== currentUser?.id && (
                     <button

@@ -498,6 +498,45 @@ const setStoredNotifications = (items) => {
     safeWriteJson('wiseNotifications', Array.isArray(items) ? items : []);
 };
 
+const readNumericField = (source, ...keys) => {
+    for (const key of keys) {
+        if (source?.[key] !== undefined && source?.[key] !== null) {
+            const value = Number(source[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+    }
+
+    return undefined;
+};
+
+const readBooleanField = (source, ...keys) => {
+    for (const key of keys) {
+        if (source?.[key] !== undefined && source?.[key] !== null) {
+            return Boolean(source[key]);
+        }
+    }
+
+    return undefined;
+};
+
+const normalizeInteractionState = (payload) => {
+    const source = payload && typeof payload === 'object' ? payload : {};
+
+    return {
+        ...source,
+        postId: source.postId ?? source.PostId,
+        likesCount: readNumericField(source, 'likesCount', 'LikesCount', 'likes', 'Likes'),
+        repostsCount: readNumericField(source, 'repostsCount', 'RepostsCount', 'reposts', 'Reposts'),
+        commentsCount: readNumericField(source, 'commentsCount', 'CommentsCount', 'comments', 'Comments'),
+        bookmarksCount: readNumericField(source, 'bookmarksCount', 'BookmarksCount', 'bookmarks', 'Bookmarks'),
+        isLiked: readBooleanField(source, 'isLiked', 'IsLiked'),
+        isReposted: readBooleanField(source, 'isReposted', 'IsReposted'),
+        isBookmarked: readBooleanField(source, 'isBookmarked', 'IsBookmarked')
+    };
+};
+
 const getStoredPosts = () => {
     const data = safeReadJson('wiseLocalPosts', []);
     return Array.isArray(data) ? data : [];
@@ -758,7 +797,7 @@ export const apiService = {
     likePost: async (postId) => {
         try {
             const response = await api.post(`/posts/${postId}/like`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update like. Please try again.');
         }
@@ -766,7 +805,7 @@ export const apiService = {
     unlikePost: async (postId) => {
         try {
             const response = await api.delete(`/posts/${postId}/like`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update like. Please try again.');
         }
@@ -774,7 +813,7 @@ export const apiService = {
     repostPost: async (postId) => {
         try {
             const response = await api.post(`/posts/${postId}/repost`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update repost. Please try again.');
         }
@@ -782,7 +821,7 @@ export const apiService = {
     unrepostPost: async (postId) => {
         try {
             const response = await api.delete(`/posts/${postId}/repost`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update repost. Please try again.');
         }

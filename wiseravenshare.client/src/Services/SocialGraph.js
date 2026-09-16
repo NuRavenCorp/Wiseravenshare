@@ -38,15 +38,63 @@ const toTimestamp = (value) => {
     return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
+const isPlaceholderIdentity = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === '' || text === 'user' || text === '@user' || text === 'unknown' || text === 'local user';
+};
+
+const fallbackHandleFromUser = (user) => {
+    const explicit = String(user?.handle || user?.username || '').trim().replace(/^@+/, '');
+    if (explicit && !isPlaceholderIdentity(explicit)) {
+        return explicit.toLowerCase();
+    }
+
+    const email = String(user?.email || '').trim();
+    if (email.includes('@')) {
+        const local = email.split('@')[0].trim().replace(/[^a-zA-Z0-9_]+/g, '');
+        if (local) {
+            return local.toLowerCase();
+        }
+    }
+
+    const id = String(user?.id || '').trim().replace(/[^a-zA-Z0-9_]+/g, '').toLowerCase();
+    if (id) {
+        return id.slice(0, 16);
+    }
+
+    return 'member';
+};
+
+const fallbackNameFromUser = (user, handle) => {
+    const explicit = String(user?.name || user?.displayName || '').trim();
+    if (explicit && !isPlaceholderIdentity(explicit)) {
+        return explicit;
+    }
+
+    const normalizedHandle = String(handle || '').replace(/^@+/, '').trim();
+    if (!normalizedHandle) {
+        return 'Community Member';
+    }
+
+    return normalizedHandle;
+};
+
 const profileFromUser = (user) => {
+    const handle = fallbackHandleFromUser(user);
+    const name = fallbackNameFromUser(user, handle);
     let avatarVal = user.avatar || user.avatarUrl || ((user.name || user.displayName)?.[0] || 'U').toUpperCase();
     if (typeof avatarVal === 'string' && avatarVal.length > 80000 && avatarVal.startsWith('data:image/')) {
         avatarVal = avatarVal.slice(0, 60000);
     }
+
+    if (!avatarVal || String(avatarVal).trim().length === 0) {
+        avatarVal = (name[0] || 'U').toUpperCase();
+    }
+
     return {
         id: user.id,
-        name: user.name || user.displayName || 'User',
-        handle: user.handle || user.username || 'user',
+        name,
+        handle,
         avatar: avatarVal
     };
 };
