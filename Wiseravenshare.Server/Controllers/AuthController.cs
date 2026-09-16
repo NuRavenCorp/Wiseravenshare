@@ -1610,8 +1610,7 @@ public class AuthController : ControllerBase
 
     private IReadOnlyCollection<string> GetConfiguredAdminEmails()
     {
-        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
-        return AuthAccessPolicy.GetConfiguredAdminEmails(configuredAdminEmails, Enumerable.Empty<string>());
+        return AuthAccessPolicy.ResolveConfiguredAdminEmails(_configuration);
     }
 
     private bool IsConfiguredAdminUser(string? email)
