@@ -70,12 +70,22 @@ export const usePosts = (initialFilters = {}) => {
             const updated = await apiService.likePost(postId);
             setPosts(prev => prev.map(post =>
                 post.id === postId
-                    ? {
-                        ...post,
-                        likes: Number(updated?.likesCount ?? post.likes ?? 0),
-                        likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
-                        isLiked: Boolean(updated?.isLiked)
-                    }
+                    ? (() => {
+                        const baseCount = Number(post.likesCount ?? post.likes ?? 0);
+                        const resolvedIsLiked = typeof updated?.isLiked === 'boolean'
+                            ? updated.isLiked
+                            : !Boolean(post?.isLiked);
+                        const resolvedLikesCount = Number.isFinite(Number(updated?.likesCount))
+                            ? Number(updated.likesCount)
+                            : Math.max(0, baseCount + (resolvedIsLiked ? 1 : -1));
+
+                        return {
+                            ...post,
+                            likes: resolvedLikesCount,
+                            likesCount: resolvedLikesCount,
+                            isLiked: resolvedIsLiked
+                        };
+                    })()
                     : post
             ));
         } catch (err) {
@@ -88,12 +98,22 @@ export const usePosts = (initialFilters = {}) => {
             const updated = await apiService.repostPost(postId);
             setPosts(prev => prev.map(post =>
                 post.id === postId
-                    ? {
-                        ...post,
-                        reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
-                        repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
-                        isReposted: Boolean(updated?.isReposted)
-                    }
+                    ? (() => {
+                        const baseCount = Number(post.repostsCount ?? post.reposts ?? 0);
+                        const resolvedIsReposted = typeof updated?.isReposted === 'boolean'
+                            ? updated.isReposted
+                            : true;
+                        const resolvedRepostsCount = Number.isFinite(Number(updated?.repostsCount))
+                            ? Number(updated.repostsCount)
+                            : Math.max(0, baseCount + (resolvedIsReposted ? 1 : -1));
+
+                        return {
+                            ...post,
+                            reposts: resolvedRepostsCount,
+                            repostsCount: resolvedRepostsCount,
+                            isReposted: resolvedIsReposted
+                        };
+                    })()
                     : post
             ));
             addToast('Reposted successfully!', 'success');

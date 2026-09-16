@@ -205,7 +205,18 @@ public sealed class UserStore
     public UserRecord? FindByLoginIdentifier(string identifier)
     {
         var loginIdentifier = identifier.Trim();
-        if (loginIdentifier.Contains('@'))
+        if (loginIdentifier.StartsWith('@'))
+        {
+            var handle = loginIdentifier[1..].Trim();
+            if (!string.IsNullOrWhiteSpace(handle))
+            {
+                return _usersByEmail.Values.FirstOrDefault(u =>
+                    string.Equals(u.Handle, handle, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(u.Name, handle, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        if (loginIdentifier.Contains('@') && loginIdentifier.Count(c => c == '@') == 1)
         {
             _usersByEmail.TryGetValue(loginIdentifier, out var userByEmail);
             return userByEmail;
