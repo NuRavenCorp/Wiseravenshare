@@ -1,0 +1,66 @@
+version: '3.9'
+
+name: wiseravenshare-crawler
+
+services:
+  crawler-api:
+    build:
+      context: ../..
+      dockerfile: Wiseravenshare.Server/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://wiseravenshare.com/api}
+        VITE_RAVENSIGHT_API_URL: ${VITE_RAVENSIGHT_API_URL:-https://wiseravenshare.com/api/ravensight}
+    image: wiseravenshare/crawler-api:latest
+    restart: unless-stopped
+    env_file:
+      - .env.crawler
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-https://wiseravenshare.com}
+      Database__ExpectedName: ${DATABASE_EXPECTED_NAME:-defaultdb}
+      Persistence__RequireDatabase: ${PERSISTENCE_REQUIRE_DATABASE:-true}
+    ports:
+      - "127.0.0.1:${CRAWLER_API_PORT:-18080}:10000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:10000/health"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  crawler-scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    image: wiseravenshare/crawler-scheduler:latest
+    restart: unless-stopped
+    env_file:
+      - .env.crawler
+    environment:
+      API_BASE_URL: http://crawler-api:10000
+      CRAWL_INTERVAL_SECONDS: ${CRAWL_INTERVAL_SECONDS:-1800}
+      CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-5000}
+      CRAWL_MAX_DEPTH: ${CRAWL_MAX_DEPTH:-10}
+      CRAWL_REQUESTS_PER_SECOND: ${CRAWL_REQUESTS_PER_SECOND:-5}
+      CRAWL_SCOPE: ${CRAWL_SCOPE:-FullSite}
+      CRAWL_RENDER_JAVASCRIPT: ${CRAWL_RENDER_JAVASCRIPT:-true}
+      CRAWL_RESPECT_ROBOTS_TXT: ${CRAWL_RESPECT_ROBOTS_TXT:-true}
+      CRAWL_FOLLOW_EXTERNAL_LINKS: ${CRAWL_FOLLOW_EXTERNAL_LINKS:-false}
+      CRAWL_CAPTURE_SCREENSHOTS: ${CRAWL_CAPTURE_SCREENSHOTS:-false}
+      CRAWL_SKIP_IF_RUNNING: ${CRAWL_SKIP_IF_RUNNING:-true}
+      CRAWL_START_URL: ${CRAWL_START_URL:-https://wiseravenshare.com}
+      CRAWL_JOB_NAME_PREFIX: ${CRAWL_JOB_NAME_PREFIX:-Scheduled Full Site Crawl}
+    depends_on:
+      crawler-api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

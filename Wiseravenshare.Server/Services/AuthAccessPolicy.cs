@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+
 namespace Wiseravenshare.Server.Services;
 
 public static class AuthAccessPolicy
@@ -39,5 +41,29 @@ public static class AuthAccessPolicy
         }
 
         return values;
+    }
+
+    public static IReadOnlyCollection<string> ResolveConfiguredAdminEmails(IConfiguration configuration)
+    {
+        if (configuration is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var adminSection = configuration.GetSection("Admin:Emails");
+        var adminArray = adminSection.Get<string[]>() ?? [];
+        var adminScalarValues = (adminSection.Value ?? string.Empty)
+            .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var configuredAuthUsers = configuration.GetSection("Authentication:Users").GetChildren()
+            .Select(section => section["Email"] ?? section.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+
+        return GetConfiguredAdminEmails(adminArray.Concat(adminScalarValues), configuredAuthUsers);
+    }
+
+    public static bool IsConfiguredAdminEmail(IConfiguration configuration, string? email)
+    {
+        return IsAdminLoginAllowed(email, ResolveConfiguredAdminEmails(configuration));
     }
 }

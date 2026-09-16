@@ -127,21 +127,6 @@ public sealed class SyntheticEngagementController : ControllerBase
             ?? User.FindFirstValue("email")
             ?? string.Empty;
 
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            return false;
-        }
-
-        var configuredAdminEmails = _configuration.GetSection("Admin:Emails").Get<string[]>() ?? [];
-        if (configuredAdminEmails.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        var configuredAuthUsers = _configuration.GetSection("Authentication:Users").GetChildren()
-            .Select(section => section["Email"]?.Trim())
-            .Where(value => !string.IsNullOrWhiteSpace(value));
-
-        return configuredAuthUsers.Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
+        return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
     }
 }
