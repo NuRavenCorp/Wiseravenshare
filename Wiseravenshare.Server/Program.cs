@@ -19,6 +19,7 @@ using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.Services.FM;
 using Wiseravenshare.Server.Services.Personalization;
+using Wiseravenshare.Server.Services.Crawler;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -1533,6 +1534,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
+builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Crawler"));
+builder.Services.Configure<PerformanceAnalyzerOptions>(builder.Configuration.GetSection("Crawler:Performance"));
 
 if (useRedisCache && !string.IsNullOrWhiteSpace(cacheConnection))
 {
@@ -1634,6 +1637,28 @@ builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
 builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
 builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
 builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
+builder.Services.AddScoped<ICrawlerOrchestrator, CrawlerOrchestrator>();
+builder.Services.AddScoped<IPageFetcher, PageFetcher>();
+builder.Services.AddScoped<IHtmlParser, HtmlParser>();
+builder.Services.AddScoped<IHealthScoreCalculator, HealthScoreCalculator>();
+builder.Services.AddScoped<IReportGenerator, ReportGenerator>();
+builder.Services.AddScoped<IJavaScriptRenderer, PlaywrightJavaScriptRenderer>();
+builder.Services.AddScoped<IPageAnalyzer, SeoAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, PerformanceAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, AccessibilityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, SecurityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, ContentAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, LinkAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, MobileAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, StructuredDataAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, BestPracticesAnalyzer>();
+builder.Services.AddHttpClient("SiteCrawlerClient")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        AllowAutoRedirect = false,
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    });
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();

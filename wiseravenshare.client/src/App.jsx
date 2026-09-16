@@ -22,6 +22,7 @@ import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
+import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
@@ -76,6 +77,12 @@ const hasPrivilegedAggregatorRole = (user) => {
     return roleCandidates.includes('privileged') || roleCandidates.includes('priveledged');
 };
 
+const getProfileSlug = (userRecord) => {
+    const rawUsername = String(userRecord?.username || userRecord?.handle || userRecord?.id || 'profile').trim();
+    const cleaned = rawUsername.replace(/^@+/, '').trim();
+    return encodeURIComponent(cleaned || 'profile');
+};
+
 const resolveInitialPublicPage = () => {
     if (typeof window === 'undefined') {
         return 'public-home';
@@ -98,6 +105,10 @@ const resolveInitialPublicPage = () => {
 
     if (normalizedPath === '/login' || normalizedPath === '/social/access' || normalizedPath === '/oauth') {
         return 'login';
+    }
+
+    if (normalizedPath === '/profile' || normalizedPath.startsWith('/profile/')) {
+        return 'profile';
     }
 
     return 'public-home';
@@ -124,6 +135,7 @@ const App = () => {
     const { addToast } = useNotification();
     const { submitCrawledContent, submitCrawledBatch } = usePersonalization();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const profileSlug = useMemo(() => getProfileSlug(user), [user]);
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.has(email);
@@ -131,6 +143,19 @@ const App = () => {
     const canAccessPlatformAggregator = useMemo(() => {
         return Boolean(user);
     }, [user]);
+
+    useEffect(() => {
+        if (currentPage !== 'profile') {
+            return;
+        }
+
+        const path = window.location.pathname || '/';
+        const nextPath = `/profile/${profileSlug}`;
+        const isProfilePagePath = /^\/profile(?:\/.*)?$/.test(path);
+        if (!isProfilePagePath || path !== nextPath) {
+            window.history.replaceState({}, '', nextPath);
+        }
+    }, [currentPage, profileSlug]);
 
     useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';
@@ -508,6 +533,10 @@ const App = () => {
                 return isAdminUser
                     ? <TeamAccessAdminPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'site-crawler-audit':
+                return isAdminUser
+                    ? <SiteCrawlerDashboardPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'facebook-feed':
             case 'tiktok-feed':
             case 'instagram-feed':
@@ -725,6 +754,7 @@ const App = () => {
             { id: 'growth', label: 'Growth' },
             { id: 'revenue', label: 'Revenue' },
             { id: 'team-access-admin', label: 'Team Access' },
+            { id: 'site-crawler-audit', label: 'Site Crawler Audit' },
             { id: 'music-rights-studio', label: 'Music Rights' }
         );
     }
