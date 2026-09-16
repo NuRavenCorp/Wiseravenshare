@@ -80,6 +80,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var like = new PostLike { PostId = postId, UserId = userId };
             await _context.PostLikes.AddAsync(like);
+            await _context.SaveChangesAsync();
             await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
@@ -92,6 +93,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (like != null)
             {
                 _context.PostLikes.Remove(like);
+                await _context.SaveChangesAsync();
                 await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
@@ -104,6 +106,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var repost = new PostRepost { PostId = postId, UserId = userId };
             await _context.PostReposts.AddAsync(repost);
+            await _context.SaveChangesAsync();
             await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
@@ -116,6 +119,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (repost != null)
             {
                 _context.PostReposts.Remove(repost);
+                await _context.SaveChangesAsync();
                 await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
@@ -128,6 +132,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             var bookmark = new PostBookmark { PostId = postId, UserId = userId };
             await _context.PostBookmarks.AddAsync(bookmark);
+            await _context.SaveChangesAsync();
             await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
         }
@@ -140,6 +145,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             if (bookmark != null)
             {
                 _context.PostBookmarks.Remove(bookmark);
+                await _context.SaveChangesAsync();
                 await RefreshPostCountersAsync(postId);
                 await _context.SaveChangesAsync();
             }
@@ -170,6 +176,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             };
 
             await _context.Set<Comment>().AddAsync(comment);
+            await _context.SaveChangesAsync();
             await RefreshPostCountersAsync(postId);
             await _context.SaveChangesAsync();
 

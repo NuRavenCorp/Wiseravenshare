@@ -18,13 +18,19 @@ const getConnection = (feeds, ...keys) => {
     return {};
 };
 
-const normalizeConnection = (connection) => ({
-    enabled: Boolean(connection?.enabled),
-    username: String(connection?.username || '').trim(),
-    profileUrl: String(connection?.profileUrl || '').trim(),
-    feedUrl: String(connection?.feedUrl || '').trim(),
-    designation: String(connection?.designation || '').trim()
-});
+const normalizeConnection = (connection) => {
+    const username = String(connection?.username || '').trim();
+    const profileUrl = String(connection?.profileUrl || '').trim();
+    const feedUrl = String(connection?.feedUrl || '').trim();
+
+    return {
+        enabled: Boolean(connection?.enabled || username || profileUrl || feedUrl),
+        username,
+        profileUrl,
+        feedUrl,
+        designation: String(connection?.designation || '').trim()
+    };
+};
 
 const normalizeSocialFeeds = (socialFeeds) => {
     const feeds = socialFeeds || {};
@@ -37,6 +43,47 @@ const normalizeSocialFeeds = (socialFeeds) => {
 };
 
 const getProfileDraftKey = (userId) => `wiseProfileEditDraft:${userId}`;
+const getCumulativeMetricsKey = (userId) => `wiseProfileCumulativeMetrics:${userId}`;
+
+const readCumulativeMetrics = (userId) => {
+    if (!userId) {
+        return null;
+    }
+
+    try {
+        const raw = localStorage.getItem(getCumulativeMetricsKey(userId));
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        return {
+            posts: Number(parsed.posts) || 0,
+            followers: Number(parsed.followers) || 0,
+            following: Number(parsed.following) || 0,
+            mentions: Number(parsed.mentions) || 0,
+            likes: Number(parsed.likes) || 0
+        };
+    } catch {
+        return null;
+    }
+};
+
+const writeCumulativeMetrics = (userId, metrics) => {
+    if (!userId || !metrics) {
+        return;
+    }
+
+    try {
+        localStorage.setItem(getCumulativeMetricsKey(userId), JSON.stringify(metrics));
+    } catch {
+        // Best-effort cache for cumulative profile counters.
+    }
+};
 
 const parseAdminEmails = () => {
     const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
@@ -120,6 +167,13 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     const [photoLightbox, setPhotoLightbox] = useState(null);
     const [profileVideoIdx, setProfileVideoIdx] = useState(0);
     const [profileVideoAutoPlay, setProfileVideoAutoPlay] = useState(true);
+    const [cumulativeMetrics, setCumulativeMetrics] = useState({
+        posts: 0,
+        followers: 0,
+        following: 0,
+        mentions: 0,
+        likes: 0
+    });
     const [followerProfiles, setFollowerProfiles] = useState([]);
     const [followingProfiles, setFollowingProfiles] = useState([]);
     const [associationView, setAssociationView] = useState('followers');
@@ -178,6 +232,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         if (!user?.id) {
             setFocusedProfile(null);
             return;
+        }
+
+        const cachedMetrics = readCumulativeMetrics(user.id);
+        if (cachedMetrics) {
+            setCumulativeMetrics(cachedMetrics);
         }
 
         try {
@@ -476,6 +535,33 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         };
     }, [posts, stats.followers, stats.following, user?.handle, user?.id, user?.username]);
 
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        setCumulativeMetrics((previous) => {
+            const next = {
+                posts: Math.max(Number(previous?.posts) || 0, Number(derivedStats.posts) || 0),
+                followers: Math.max(Number(previous?.followers) || 0, Number(derivedStats.followers) || 0),
+                following: Math.max(Number(previous?.following) || 0, Number(derivedStats.following) || 0),
+                mentions: Math.max(Number(previous?.mentions) || 0, Number(derivedStats.mentions) || 0),
+                likes: Math.max(Number(previous?.likes) || 0, Number(derivedStats.likes) || 0)
+            };
+
+            writeCumulativeMetrics(user.id, next);
+            return next;
+        });
+    }, [derivedStats, user?.id]);
+
+    const displayedStats = useMemo(() => ({
+        posts: Math.max(Number(cumulativeMetrics.posts) || 0, Number(derivedStats.posts) || 0),
+        followers: Math.max(Number(cumulativeMetrics.followers) || 0, Number(derivedStats.followers) || 0),
+        following: Math.max(Number(cumulativeMetrics.following) || 0, Number(derivedStats.following) || 0),
+        mentions: Math.max(Number(cumulativeMetrics.mentions) || 0, Number(derivedStats.mentions) || 0),
+        likes: Math.max(Number(cumulativeMetrics.likes) || 0, Number(derivedStats.likes) || 0)
+    }), [cumulativeMetrics, derivedStats]);
+
     const repliesPosts = posts.filter((p) => {
         const comments = Array.isArray(p.comments) ? p.comments : [];
         return comments.some((c) => c?.user?.id === user?.id || c?.userId === user?.id);
@@ -494,11 +580,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     });
 
     const tabCounts = {
-        posts: derivedStats.posts,
+        posts: displayedStats.posts,
         replies: repliesPosts.length,
         media: mediaPosts.length,
         likes: likedPosts.length,
-        mentions: derivedStats.mentions
+        mentions: displayedStats.mentions
     };
 
     const tabs = [
@@ -1252,11 +1338,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                     borderTop: '1px solid var(--border-color)'
                 }}>
                     {[
-                        { label: 'Posts', value: derivedStats.posts, interactive: false },
-                        { label: 'Followers', value: derivedStats.followers, interactive: true, view: 'followers' },
-                        { label: 'Following', value: derivedStats.following, interactive: true, view: 'following' },
-                        { label: 'Mentions', value: derivedStats.mentions, interactive: false },
-                        { label: 'Likes', value: derivedStats.likes, interactive: false }
+                        { label: 'Posts', value: displayedStats.posts, interactive: false },
+                        { label: 'Followers', value: displayedStats.followers, interactive: true, view: 'followers' },
+                        { label: 'Following', value: displayedStats.following, interactive: true, view: 'following' },
+                        { label: 'Mentions', value: displayedStats.mentions, interactive: false },
+                        { label: 'Likes', value: displayedStats.likes, interactive: false }
                     ].map((metric) => {
                         const metricCard = (
                             <>

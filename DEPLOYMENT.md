@@ -2,7 +2,9 @@
 
 This checklist covers local validation and production deployment on DigitalOcean, with IONOS DNS pointing to the same app.
 
-Note: current authoritative nameservers for `wise-ravens.com` are DigitalOcean (`ns1.digitalocean.com`, `ns2.digitalocean.com`, `ns3.digitalocean.com`). Manage active DNS records in the DigitalOcean DNS zone.
+Note: use split authority during this phase.
+- `wise-ravens.com`: move DNS authority to Cloudflare for CDN/performance testing.
+- `wiseravenshare.com`: keep DNS authority on DigitalOcean nameservers.
 
 ## 1) Local Container Validation
 
@@ -91,6 +93,66 @@ Important:
 - DNS propagation can take up to 24 hours, but usually completes much sooner.
 
 If delegation has already moved to DigitalOcean nameservers, apply equivalent records in the DigitalOcean DNS zone instead of IONOS.
+
+## 3.1) Cloudflare Cutover + CDN for Media (wise-ravens.com only)
+
+Use this path when moving only `wise-ravens.com` DNS authority to Cloudflare and benchmarking CDN performance for objects/video.
+
+Do not move `wiseravenshare.com` nameservers in this phase.
+
+### DNS and Proxy Layout
+
+- Add `wise-ravens.com` to Cloudflare and update registrar nameservers to the Cloudflare pair.
+- Recreate required DNS records in Cloudflare:
+  - `@` -> existing app endpoint target (same target currently used in production)
+  - `www` -> `CNAME` to `@` (or to canonical host)
+  - `cdn` -> `CNAME` to your Spaces CDN endpoint or bucket endpoint
+- Start with Cloudflare proxy enabled (orange cloud) for `@` and `www`.
+- For `cdn`, use proxied mode when testing Cloudflare edge caching behavior.
+
+### App Configuration
+
+- Keep origin endpoint unchanged:
+  - `Storage__Blob__Endpoint=https://<region>.digitaloceanspaces.com`
+- Set CDN public URL for object delivery:
+  - `Storage__Blob__CdnPublicBaseUrl=https://cdn.wise-ravens.com`
+- Keep the existing fallback in place:
+  - `Storage__Blob__PublicBaseUrl=https://<bucket>.<region>.digitaloceanspaces.com`
+
+If your bucket is now on Cloudflare R2, use these values instead:
+
+- `Storage__Blob__BucketName=<your-r2-bucket-name>`
+- `Storage__Blob__Endpoint=https://<account-id>.r2.cloudflarestorage.com`
+- `Storage__Blob__Region=auto`
+- `Storage__Blob__CdnPublicBaseUrl=https://cdn.wise-ravens.com`
+- `Storage__Blob__PublicBaseUrl=https://cdn.wise-ravens.com` (optional compatibility fallback)
+
+### Cloudflare Caching Rules (baseline)
+
+- Cache static/media paths aggressively (for example `/ravensight/*`, `/media/*`, file extensions like mp4/webm/mp3/jpg/png/webp).
+- Respect origin cache headers where possible.
+- Enable Brotli and HTTP/3.
+- Keep HTML routes dynamic (`/`, app routes) and avoid long edge cache there.
+
+### Video/Object Performance Validation
+
+Run the benchmark script to compare origin vs CDN:
+
+```powershell
+./scripts/benchmark-cdn.ps1 \
+  -OriginBaseUrl "https://bucket-wrs-01010.nyc3.digitaloceanspaces.com" \
+  -CdnBaseUrl "https://cdn.wise-ravens.com" \
+  -ObjectPath "wiseravenshare/ravensight/video/sample.mp4" \
+  -Iterations 20
+```
+
+Expected outcome:
+- CDN should show lower median `starttransfer` and `total` times after first request warm-up.
+- `cf-cache-status` should move from `MISS` toward `HIT` on repeated requests.
+
+Rollback plan:
+- Set `Storage__Blob__CdnPublicBaseUrl` back to origin-style URL.
+- Temporarily disable Cloudflare proxy for `cdn` (DNS-only) to compare direct origin behavior.
 
 ## 4) Optional IONOS VPS Path (Secondary)
 

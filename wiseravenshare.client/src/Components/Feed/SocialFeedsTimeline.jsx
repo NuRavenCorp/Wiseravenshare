@@ -251,13 +251,19 @@ const normalizeFeedConnections = (feeds = {}) => {
         return {};
     };
 
-    const normalizeConn = (conn = {}) => ({
-        enabled: Boolean(conn?.enabled),
-        username: String(conn?.username || '').trim(),
-        profileUrl: String(conn?.profileUrl || '').trim(),
-        feedUrl: String(conn?.feedUrl || '').trim(),
-        designation: String(conn?.designation || '').trim()
-    });
+    const normalizeConn = (conn = {}) => {
+        const username = String(conn?.username || '').trim();
+        const profileUrl = String(conn?.profileUrl || '').trim();
+        const feedUrl = String(conn?.feedUrl || '').trim();
+
+        return {
+            enabled: Boolean(conn?.enabled || username || profileUrl || feedUrl),
+            username,
+            profileUrl,
+            feedUrl,
+            designation: String(conn?.designation || '').trim()
+        };
+    };
 
     return {
         facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
@@ -291,7 +297,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [postMessage, setPostMessage] = useState('');
     const [mediaUrlInput, setMediaUrlInput] = useState('');
     const [linkUrlInput, setLinkUrlInput] = useState('');
-    const [publishFacebook, setPublishFacebook] = useState(true);
+    const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
@@ -692,15 +698,44 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 || /^data:image\//i.test(mediaUrl)
             );
 
-            // Guard: YouTube/TikTok require a video URL.
+            // Guard: YouTube/TikTok require a public video URL.
             if ((publishYouTube || publishTikTok) && !mediaUrl) {
+                const platformName = publishYouTube && publishTikTok
+                    ? 'YouTube/TikTok'
+                    : publishYouTube
+                        ? 'YouTube'
+                        : 'TikTok';
                 setPublishResults([{
                     platform: publishYouTube ? 'youtube' : 'tiktok',
                     success: false,
-                    error: `${publishYouTube ? 'YouTube' : 'TikTok'} requires a public video URL. Paste one in the Video/Photo URL field.`
+                    error: `${platformName} requires a public video URL. Paste one in the Video/Photo URL field.`
                 }]);
                 setIsPublishing(false);
                 return;
+            }
+
+            if (publishYouTube && mediaUrl) {
+                if (!isHttpUrl(mediaUrl)) {
+                    setPublishResults([{
+                        platform: 'youtube',
+                        success: false,
+                        error: 'YouTube requires a public http(s) video URL.'
+                    }]);
+                    setIsPublishing(false);
+                    return;
+                }
+
+                const isDirectVideoFile = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl);
+                const isMp4Container = /\.mp4(\?|$)/i.test(mediaUrl);
+                if (isDirectVideoFile && !isMp4Container) {
+                    setPublishResults([{
+                        platform: 'youtube',
+                        success: false,
+                        error: 'YouTube baseline: use .mp4 container (H.264/AVC + AAC-LC, 24/30/60 fps) before publishing.'
+                    }]);
+                    setIsPublishing(false);
+                    return;
+                }
             }
 
             const response = await socialService.publishContent({
@@ -1320,6 +1355,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                 </div>
+
+                {publishYouTube && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.15)', fontSize: '12px', lineHeight: 1.45, color: '#fecaca' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>YouTube upload baselines</div>
+                        <div>Use <strong>.mp4</strong> container with <strong>H.264/AVC video</strong> and <strong>AAC-LC audio</strong> at <strong>24/30/60 fps</strong>.</div>
+                        <div style={{ marginTop: '4px' }}>Shorts are auto-detected at 9:16 and under 60s; add <strong>#Shorts</strong> in title/description for reliable placement.</div>
+                        <div style={{ marginTop: '4px' }}>Before publish, finalize title, tags, and description in this composer for cleaner channel metadata.</div>
+                    </div>
+                )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>

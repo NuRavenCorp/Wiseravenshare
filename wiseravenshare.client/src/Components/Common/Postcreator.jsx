@@ -58,9 +58,9 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, onNavigate, hid
     const [content, setContent] = useState('');
     const [mediaFiles, setMediaFiles] = useState([]);
     const [mediaType, setMediaType] = useState(null);
-    const [publishToYouTube, setPublishToYouTube] = useState(false);
-    const [publishToTikTok, setPublishToTikTok] = useState(false);
-    const [publishToFacebook, setPublishToFacebook] = useState(false);
+    const [publishToYouTube, setPublishToYouTube] = useState(true);
+    const [publishToTikTok, setPublishToTikTok] = useState(true);
+    const [publishToFacebook, setPublishToFacebook] = useState(true);
     const [youTubeChannelOrEmail, setYouTubeChannelOrEmail] = useState('');
     const [tikTokUsername, setTikTokUsername] = useState('');
     const [facebookPageOrProfile, setFacebookPageOrProfile] = useState('');
@@ -141,9 +141,9 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, onNavigate, hid
                     : 'image/*,video/*';
         mediaInputRef.current = input;
 
-        setPublishToYouTube(false);
-        setPublishToTikTok(false);
-        setPublishToFacebook(false);
+        setPublishToYouTube(true);
+        setPublishToTikTok(true);
+        setPublishToFacebook(true);
         setYouTubePermissionGranted(false);
         setTikTokPermissionGranted(false);
         setFacebookPermissionGranted(false);

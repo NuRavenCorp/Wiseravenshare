@@ -55,7 +55,10 @@ public sealed class BucketMusicLibraryStore : IMusicLibraryStore
         _bucketName = configuration["Storage:Blob:BucketName"]?.Trim() ?? "bucket-wrs-01010";
         _region = configuration["Storage:Blob:Region"]?.Trim() ?? "nyc3";
         _endpoint = configuration["Storage:Blob:Endpoint"]?.Trim() ?? "https://nyc3.digitaloceanspaces.com";
-        _cdnBaseUrl = configuration["Storage:Blob:PublicBaseUrl"]?.Trim() ?? string.Empty;
+        _cdnBaseUrl = configuration["Storage:Blob:CdnPublicBaseUrl"]?.Trim()
+            ?? configuration["Storage__Blob__CdnPublicBaseUrl"]?.Trim()
+            ?? configuration["Storage:Blob:PublicBaseUrl"]?.Trim()
+            ?? string.Empty;
         _blobStorageService = blobStorageService;
         _musicService = musicService;
     }

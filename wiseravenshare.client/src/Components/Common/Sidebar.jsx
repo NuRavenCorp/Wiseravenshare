@@ -39,7 +39,7 @@ const normalizeConnection = (connection, platform) => {
                         : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
-        enabled: Boolean(connection?.enabled),
+        enabled: Boolean(connection?.enabled || username || profileUrl || feedUrl),
         username,
         resolvedUrl: feedUrl || profileUrl || fallbackUrl
     };
@@ -121,6 +121,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
         { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
+        { id: 'collaboration', icon: 'fas fa-users', label: 'Collaborate' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },

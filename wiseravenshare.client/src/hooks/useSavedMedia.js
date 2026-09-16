@@ -40,6 +40,13 @@ export const useSavedMedia = () => {
   }, []);
 
   const saveMedia = useCallback(async (mediaData) => {
+    const mediaUrl = String(mediaData?.mediaUrl || '').trim().toLowerCase();
+    if (mediaUrl.startsWith('blob:') || mediaUrl.startsWith('file:')) {
+      const err = new Error('Temporary local media URLs cannot be saved. Please upload the file first.');
+      setError(err.message);
+      throw err;
+    }
+
     return apiCall('POST', '/save', mediaData);
   }, [apiCall]);
 
