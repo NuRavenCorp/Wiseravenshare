@@ -23,6 +23,8 @@ import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
 import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
+import CrawlerMetricsInsightsPage from './Pages/CrawlerMetricsInsightsPage';
+import AssistantPage from './Pages/AssistantPage';
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
@@ -537,6 +539,14 @@ const App = () => {
                 return isAdminUser
                     ? <SiteCrawlerDashboardPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'crawler-metrics':
+                return isAdminUser
+                    ? <CrawlerMetricsInsightsPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'assistant':
+                return isAdminUser
+                    ? <AssistantPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'facebook-feed':
             case 'tiktok-feed':
             case 'instagram-feed':
@@ -755,6 +765,7 @@ const App = () => {
             { id: 'revenue', label: 'Revenue' },
             { id: 'team-access-admin', label: 'Team Access' },
             { id: 'site-crawler-audit', label: 'Site Crawler Audit' },
+            { id: 'crawler-metrics', label: 'Crawler Metrics' },
             { id: 'music-rights-studio', label: 'Music Rights' }
         );
     }

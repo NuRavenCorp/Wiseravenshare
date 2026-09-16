@@ -95,6 +95,18 @@ export const siteAuditCrawlerService = {
     return response.json();
   },
 
+  async getMetrics(jobId) {
+    const response = await fetch(`${API_BASE}/jobs/${jobId}/metrics`, {
+      headers: await authHeaders()
+    });
+
+    if (!response.ok) {
+      await parseError(response);
+    }
+
+    return response.json();
+  },
+
   async cancelJob(jobId) {
     const response = await fetch(`${API_BASE}/jobs/${jobId}/cancel`, {
       method: 'POST',

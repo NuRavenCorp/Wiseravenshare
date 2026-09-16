@@ -135,7 +135,9 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             0,
             { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
             { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' },
-            { id: 'site-crawler-audit', icon: 'fas fa-spider', label: 'Site Crawler' }
+            { id: 'site-crawler-audit', icon: 'fas fa-spider', label: 'Site Crawler' },
+            { id: 'crawler-metrics', icon: 'fas fa-chart-pie', label: 'Crawler Metrics' },
+            { id: 'assistant', icon: 'fas fa-robot', label: 'AI Assistant' }
         );
     }
 
