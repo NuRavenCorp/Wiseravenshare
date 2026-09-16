@@ -7,6 +7,7 @@ using Wiseravenshare.Server.Entities.FM;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
 using Wiseravenshare.Server.Entities.CrossPlatform;
+using Wiseravenshare.Server.Entities.Crawler;
 using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
 namespace Wiseravenshare.Server.Infrastructure.Data;
@@ -58,6 +59,12 @@ public class AppDbContext : DbContext
     public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();
     public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
     public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
+    public DbSet<CrawlJob> CrawlJobs => Set<CrawlJob>();
+    public DbSet<CrawledPage> CrawledPages => Set<CrawledPage>();
+    public DbSet<CrawlIssue> CrawlIssues => Set<CrawlIssue>();
+    public DbSet<CrawlLink> CrawlLinks => Set<CrawlLink>();
+    public DbSet<CrawlMetric> CrawlMetrics => Set<CrawlMetric>();
+    public DbSet<CrawlReportRecord> CrawlReports => Set<CrawlReportRecord>();
 
     // FM Tuner
     public DbSet<FMStation> FMStations => Set<FMStation>();
@@ -114,6 +121,7 @@ public class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.ConfigureCurrency();
+        modelBuilder.ConfigureCrawler();
 
         modelBuilder.HasDefaultSchema("app_data");
 
