@@ -172,6 +172,11 @@ const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) =>
     return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
 };
 
+const isPlaceholderDisplayName = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local user' || text === 'local-user' || text === 'localuser' || text === 'user' || text === 'you';
+};
+
 export const normalizePostsPayload = (payload) => {
     if (Array.isArray(payload)) {
         return payload;
@@ -205,12 +210,16 @@ export const normalizePostsPayload = (payload) => {
 const normalizeUser = (post, fallbackUser = null) => {
     const rawUser = post?.user || fallbackUser || {};
     const resolvedUserId = post?.userId || rawUser?.id || fallbackUser?.id || null;
+    const fallbackName = String(fallbackUser?.name || fallbackUser?.displayName || fallbackUser?.username || '').trim();
+    const rawName = rawUser?.displayName || rawUser?.name || rawUser?.username || '';
+    const resolvedName = isPlaceholderDisplayName(rawName) ? (fallbackName || rawUser?.username || '') : rawName;
+    const resolvedHandle = rawUser?.handle || (rawUser?.username ? `@${rawUser.username}` : fallbackUser?.handle || '@user');
 
     return {
         ...(rawUser || {}),
         id: resolvedUserId,
-        name: rawUser?.displayName || rawUser?.name || rawUser?.username || fallbackUser?.name || 'User',
-        handle: rawUser?.handle || (rawUser?.username ? `@${rawUser.username}` : fallbackUser?.handle || '@user'),
+        name: resolvedName || fallbackName || 'User',
+        handle: resolvedHandle,
         avatar: sanitizeImageValue(rawUser?.avatar || rawUser?.avatarUrl || fallbackUser?.avatar, 'U')
     };
 };

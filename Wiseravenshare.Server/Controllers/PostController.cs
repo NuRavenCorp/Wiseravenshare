@@ -193,10 +193,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> RepostPost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.RepostPostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.RepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
         }
 
         /// <summary>
@@ -207,10 +219,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnrepostPost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.UnrepostPostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnrepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unreposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
         }
 
         /// <summary>
