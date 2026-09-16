@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Collections.Concurrent;
 using Microsoft.IdentityModel.Tokens;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services.Interfaces;
@@ -10,6 +11,11 @@ namespace Wiseravenshare.Server.Services;
 
 public sealed class AuthV2Service : IAuthV2Service
 {
+    private static readonly ConcurrentDictionary<string, LoginAttemptRecord> LoginAttemptsByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
+    private const int MaxFailedLoginAttempts = 5;
+
     private readonly IConfiguration _configuration;
     private readonly UserStore _userStore;
     private readonly RefreshTokenStore _refreshTokenStore;
@@ -54,7 +60,7 @@ public sealed class AuthV2Service : IAuthV2Service
 
         if (_userStore.EmailExists(email))
         {
-            throw new InvalidOperationException("An account with that email already exists.");
+            throw new InvalidOperationException("Unable to register with the provided details.");
         }
 
         UserRecord user;
@@ -71,9 +77,10 @@ public sealed class AuthV2Service : IAuthV2Service
         }
         catch (InvalidOperationException ex)
         {
-            if (string.Equals(ex.Message, "An account with that email already exists.", StringComparison.Ordinal))
+            if (string.Equals(ex.Message, "An account with that email already exists.", StringComparison.Ordinal)
+                || string.Equals(ex.Message, "Unable to register with the provided details.", StringComparison.Ordinal))
             {
-                throw;
+                throw new InvalidOperationException("Unable to register with the provided details.");
             }
 
             throw new InvalidOperationException("Signup is temporarily unavailable while account storage reconnects. Please try again shortly.");
@@ -90,16 +97,25 @@ public sealed class AuthV2Service : IAuthV2Service
             ? request.UsernameOrEmail
             : request.Email ?? string.Empty).Trim();
         var password = request.Password ?? string.Empty;
+        var attemptKey = BuildAttemptKey(login);
         if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(password))
         {
             throw new ArgumentException("Email and password are required.");
         }
 
+        if (IsLockedOut(attemptKey, out _))
+        {
+            throw new UnauthorizedAccessException("Too many failed login attempts. Please try again later.");
+        }
+
         var user = _userStore.FindByLoginIdentifier(login);
         if (user is null || !UserStore.VerifyPassword(password, user.PasswordHash))
         {
+            RecordFailedLogin(attemptKey);
             throw new UnauthorizedAccessException("Invalid email or password.");
         }
+
+        ClearFailedLogins(attemptKey);
 
         if (!_userStore.TryGetById(user.Id, out var refreshed) || refreshed is null)
         {
@@ -303,10 +319,84 @@ public sealed class AuthV2Service : IAuthV2Service
     {
         if (int.TryParse(_configuration["Authentication:Jwt:ExpiresMinutes"], out var minutes) && minutes > 0)
         {
-            return minutes;
+            // Bound token lifetime to prevent accidental overflow/misconfiguration.
+            return Math.Clamp(minutes, 5, 1440);
         }
 
         return 60;
+    }
+
+    private string BuildAttemptKey(string identifier)
+    {
+        var normalizedIdentifier = (identifier ?? string.Empty).Trim().ToLowerInvariant();
+        return normalizedIdentifier;
+    }
+
+    private static bool IsLockedOut(string attemptKey, out TimeSpan retryAfter)
+    {
+        retryAfter = TimeSpan.Zero;
+        if (!LoginAttemptsByKey.TryGetValue(attemptKey, out var record))
+        {
+            return false;
+        }
+
+        var utcNow = DateTime.UtcNow;
+        if (record.LockedOutUntilUtc is not null && record.LockedOutUntilUtc > utcNow)
+        {
+            retryAfter = record.LockedOutUntilUtc.Value - utcNow;
+            return true;
+        }
+
+        if (utcNow - record.FirstAttemptUtc > LoginAttemptWindow)
+        {
+            LoginAttemptsByKey.TryRemove(attemptKey, out _);
+            return false;
+        }
+
+        return false;
+    }
+
+    private static void RecordFailedLogin(string attemptKey)
+    {
+        LoginAttemptsByKey.AddOrUpdate(
+            attemptKey,
+            _ => new LoginAttemptRecord
+            {
+                FirstAttemptUtc = DateTime.UtcNow,
+                FailedCount = 1,
+                LockedOutUntilUtc = null
+            },
+            (_, existing) =>
+            {
+                var utcNow = DateTime.UtcNow;
+                if (utcNow - existing.FirstAttemptUtc > LoginAttemptWindow)
+                {
+                    existing.FirstAttemptUtc = utcNow;
+                    existing.FailedCount = 1;
+                    existing.LockedOutUntilUtc = null;
+                    return existing;
+                }
+
+                existing.FailedCount++;
+                if (existing.FailedCount >= MaxFailedLoginAttempts)
+                {
+                    existing.LockedOutUntilUtc = utcNow.Add(LoginLockoutDuration);
+                }
+
+                return existing;
+            });
+    }
+
+    private static void ClearFailedLogins(string attemptKey)
+    {
+        LoginAttemptsByKey.TryRemove(attemptKey, out _);
+    }
+
+    private sealed class LoginAttemptRecord
+    {
+        public DateTime FirstAttemptUtc { get; set; }
+        public int FailedCount { get; set; }
+        public DateTime? LockedOutUntilUtc { get; set; }
     }
 
     private bool IsSelfRegistrationAllowed()

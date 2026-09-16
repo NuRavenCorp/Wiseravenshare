@@ -67,7 +67,6 @@ public class CraftIntelligenceController : ControllerBase
     /// Get all available craft domains.
     /// </summary>
     [HttpGet("domains")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetDomains(
         [FromServices] Wiseravenshare.Server.Infrastructure.Data.AppDbContext context,
         CancellationToken cancellationToken)
@@ -103,7 +102,6 @@ public class CraftIntelligenceController : ControllerBase
     /// Get principles for a specific craft domain.
     /// </summary>
     [HttpGet("domains/{domainKey}/principles")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetDomainPrinciples(
         string domainKey,
         [FromServices] Wiseravenshare.Server.Infrastructure.Data.AppDbContext context,

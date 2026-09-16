@@ -58,7 +58,12 @@ public sealed class AuthV2Controller : ControllerBase
         {
             if (ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
             {
-                return Conflict(new { message = ex.Message });
+                return BadRequest(new { message = "Unable to register with the provided details." });
+            }
+
+            if (ex.Message.Contains("unable to register", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "Unable to register with the provided details." });
             }
 
             return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
