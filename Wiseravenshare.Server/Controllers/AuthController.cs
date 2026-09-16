@@ -34,6 +34,8 @@ public class AuthController : ControllerBase
     private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan OAuthStateLifetime = TimeSpan.FromMinutes(10);
     private const int MaxFailedLoginAttempts = 5;
+    private const string RefreshCookieName = "wr_refresh_token";
+    private const int RefreshCookieDays = 365;
 
     private readonly IConfiguration _configuration;
     private readonly UserStore _userStore;
@@ -143,6 +145,7 @@ public class AuthController : ControllerBase
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+        SetRefreshCookie(refreshToken);
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
@@ -229,6 +232,7 @@ public class AuthController : ControllerBase
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+        SetRefreshCookie(refreshToken);
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
@@ -237,32 +241,36 @@ public class AuthController : ControllerBase
 
     [HttpPost("refresh-token")]
     [AllowAnonymous]
-    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest? request)
     {
-        if (string.IsNullOrWhiteSpace(request.RefreshToken))
+        var incomingRefreshToken = string.IsNullOrWhiteSpace(request?.RefreshToken)
+            ? (Request.Cookies[RefreshCookieName] ?? string.Empty)
+            : request.RefreshToken;
+
+        if (string.IsNullOrWhiteSpace(incomingRefreshToken))
         {
             return BadRequest(new { message = "Refresh token is required." });
         }
 
-        var storedRecord = _refreshTokenStore.Find(request.RefreshToken);
+        var storedRecord = _refreshTokenStore.Find(incomingRefreshToken);
         if (storedRecord is null || storedRecord.ExpiresAtUtc < DateTime.UtcNow)
         {
-            _refreshTokenStore.Remove(request.RefreshToken);
+            _refreshTokenStore.Remove(incomingRefreshToken);
             return Unauthorized(new { message = "Refresh token is invalid or expired." });
         }
         if (!_userStore.TryGetById(storedRecord.UserId, out var user) || user is null)
         {
-            _refreshTokenStore.Remove(request.RefreshToken);
+            _refreshTokenStore.Remove(incomingRefreshToken);
             return Unauthorized(new { message = "User not found." });
         }
 
         if (!IsAuthenticationAllowed(user.Email))
         {
-            _refreshTokenStore.Remove(request.RefreshToken);
+            _refreshTokenStore.Remove(incomingRefreshToken);
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
         }
 
-        _refreshTokenStore.Remove(request.RefreshToken);
+        _refreshTokenStore.Remove(incomingRefreshToken);
 
         var domainUserId = await EnsureDomainUserAsync(user);
         var accessScope = ResolveAccessScope(user.Email);
@@ -270,6 +278,7 @@ public class AuthController : ControllerBase
         var newToken = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var newRefreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+        SetRefreshCookie(newRefreshToken);
 
         return Ok(new { token = newToken, refreshToken = newRefreshToken, adminPassToken });
     }
@@ -352,6 +361,8 @@ public class AuthController : ControllerBase
         {
             _refreshTokenStore.RemoveAllForUser(userId);
         }
+
+        DeleteRefreshCookie();
 
         return Ok(new { success = true, message = "Logged out successfully" });
     }
@@ -626,6 +637,7 @@ public class AuthController : ControllerBase
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
+        SetRefreshCookie(refreshToken);
         var successUrl = BuildOAuthSuccessRedirect(stateRecord.ReturnUrl, normalizedProvider, token, refreshToken, adminPassToken);
         return Redirect(successUrl);
     }
@@ -1307,6 +1319,7 @@ public class AuthController : ControllerBase
         var teamRole = ResolveTeamRole(user.Email);
         var token = GenerateToken(domainUserId.ToString("N"), user.Email, user.Name, accessScope, teamRole);
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
+        SetRefreshCookie(refreshToken);
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
@@ -1494,6 +1507,31 @@ public class AuthController : ControllerBase
         _refreshTokenStore.Save(token, userId, expiresAtUtc);
 
         return token;
+    }
+
+    private void SetRefreshCookie(string refreshToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return;
+        }
+
+        Response.Cookies.Append(RefreshCookieName, refreshToken, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = Request.IsHttps,
+            SameSite = SameSiteMode.Lax,
+            Expires = DateTimeOffset.UtcNow.AddDays(RefreshCookieDays),
+            Path = "/api/auth"
+        });
+    }
+
+    private void DeleteRefreshCookie()
+    {
+        Response.Cookies.Delete(RefreshCookieName, new CookieOptions
+        {
+            Path = "/api/auth"
+        });
     }
 
     private string GetJwtKey()

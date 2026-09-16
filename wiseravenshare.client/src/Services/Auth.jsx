@@ -67,7 +67,8 @@ class AuthService {
 
         const response = await api.post(`/auth${path}`, payload, {
             timeout: timeoutMs,
-            headers
+            headers,
+            withCredentials: true
         });
 
         return response?.data ?? {};
@@ -82,7 +83,8 @@ class AuthService {
 
         const response = await api.post(`${AUTH_V2_PREFIX}${path}`, payload, {
             timeout: timeoutMs,
-            headers
+            headers,
+            withCredentials: true
         });
 
         return response?.data ?? {};
@@ -382,6 +384,27 @@ class AuthService {
         }
     }
 
+    async refreshSession() {
+        const refreshToken = this.getRefreshToken();
+        const payload = refreshToken ? { refreshToken } : {};
+
+        const response = this.normalizeAuthResponse(await this.postAuthV2('/refresh-token', payload));
+        if (!response.token) {
+            const err = new Error('Session refresh did not return an access token.');
+            err.status = 401;
+            throw err;
+        }
+
+        this.setToken(response.token);
+        this.setRefreshToken(response.refreshToken || refreshToken || '');
+        this.setAdminPassToken(response.adminPassToken || this.getAdminPassToken() || '');
+        if (response.user) {
+            this.setUser(response.user);
+        }
+
+        return response;
+    }
+
     async verifyToken(token) {
         try {
             const response = this.normalizeAuthResponse(await this.postAuthV2('/verify', { token }, { withAuth: true }));
@@ -396,10 +419,26 @@ class AuthService {
         } catch (error) {
             const status = Number(error?.response?.status || error?.status || 0);
             if (status === 401 || status === 403) {
-                this.clearToken();
-                this.clearRefreshToken();
-                this.clearUser();
-                throw this.handleError(error);
+                try {
+                    await this.refreshSession();
+                    const refreshedToken = this.getToken();
+                    if (!refreshedToken) {
+                        throw error;
+                    }
+
+                    const retryResponse = this.normalizeAuthResponse(await this.postAuthV2('/verify', { token: refreshedToken }, { withAuth: true }));
+                    if (retryResponse.valid && retryResponse.user) {
+                        this.setUser(retryResponse.user);
+                        return retryResponse.user;
+                    }
+
+                    throw error;
+                } catch {
+                    this.clearToken();
+                    this.clearRefreshToken();
+                    this.clearUser();
+                    throw this.handleError(error);
+                }
             }
 
             const cachedUser = this.getUser();

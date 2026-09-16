@@ -10,6 +10,8 @@ namespace Wiseravenshare.Server.Controllers;
 [Route("auth-v2")]
 public sealed class AuthV2Controller : ControllerBase
 {
+    private const string RefreshCookieName = "wr_refresh_token";
+    private const int RefreshCookieDays = 365;
     private readonly IAuthV2Service _authService;
     private readonly ILogger<AuthV2Controller> _logger;
 
@@ -45,6 +47,7 @@ public sealed class AuthV2Controller : ControllerBase
         try
         {
             var result = await _authService.RegisterAsync(request);
+            SetRefreshCookie(result.RefreshToken);
             return Ok(new { token = result.Token, refreshToken = result.RefreshToken, user = result.User });
         }
         catch (ArgumentException ex)
@@ -74,6 +77,7 @@ public sealed class AuthV2Controller : ControllerBase
         try
         {
             var result = await _authService.LoginAsync(request);
+            SetRefreshCookie(result.RefreshToken);
             return Ok(new { token = result.Token, refreshToken = result.RefreshToken, user = result.User });
         }
         catch (ArgumentException ex)
@@ -93,11 +97,15 @@ public sealed class AuthV2Controller : ControllerBase
 
     [HttpPost("refresh-token")]
     [AllowAnonymous]
-    public async Task<IActionResult> RefreshToken([FromBody] AuthV2RefreshRequest request)
+    public async Task<IActionResult> RefreshToken([FromBody] AuthV2RefreshRequest? request)
     {
         try
         {
-            var result = await _authService.RefreshAsync(request.RefreshToken);
+            var incomingRefreshToken = string.IsNullOrWhiteSpace(request?.RefreshToken)
+                ? (Request.Cookies[RefreshCookieName] ?? string.Empty)
+                : request.RefreshToken;
+            var result = await _authService.RefreshAsync(incomingRefreshToken);
+            SetRefreshCookie(result.RefreshToken);
             return Ok(new { token = result.Token, refreshToken = result.RefreshToken, user = result.User });
         }
         catch (UnauthorizedAccessException ex)
@@ -146,7 +154,34 @@ public sealed class AuthV2Controller : ControllerBase
             await _authService.LogoutAsync(userId);
         }
 
+        DeleteRefreshCookie();
+
         return Ok(new { success = true, message = "Logged out successfully" });
+    }
+
+    private void SetRefreshCookie(string refreshToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return;
+        }
+
+        Response.Cookies.Append(RefreshCookieName, refreshToken, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = Request.IsHttps,
+            SameSite = SameSiteMode.Lax,
+            Expires = DateTimeOffset.UtcNow.AddDays(RefreshCookieDays),
+            Path = "/api/auth-v2"
+        });
+    }
+
+    private void DeleteRefreshCookie()
+    {
+        Response.Cookies.Delete(RefreshCookieName, new CookieOptions
+        {
+            Path = "/api/auth-v2"
+        });
     }
 }
 
