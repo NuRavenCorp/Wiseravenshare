@@ -57,6 +57,34 @@ const isPlaceholderIdentity = (value) => {
     return text === '' || text === 'user' || text === '@user' || text === 'unknown' || text === 'local user';
 };
 
+const looksLikeOpaqueIdentity = (value) => {
+    const text = String(value || '').trim().replace(/^@+/, '');
+    return /^[a-f0-9]{12,}$/i.test(text) || /^user[0-9a-f]{8,}$/i.test(text);
+};
+
+const isRenderableSuggestedProfile = (profile) => {
+    if (!profile?.id) {
+        return false;
+    }
+
+    if (seedUsers.some((seed) => seed.id === profile.id)) {
+        return true;
+    }
+
+    const name = String(profile?.name || '').trim();
+    const handle = String(profile?.handle || profile?.username || '').trim().replace(/^@+/, '');
+
+    if (isPlaceholderIdentity(name) || isPlaceholderIdentity(handle)) {
+        return false;
+    }
+
+    if (looksLikeOpaqueIdentity(profile.id) && (!name || looksLikeOpaqueIdentity(name)) && (!handle || looksLikeOpaqueIdentity(handle))) {
+        return false;
+    }
+
+    return Boolean(name || handle);
+};
+
 const normalizeSuggestedProfile = (profile) => {
     const seedById = seedUsers.find((seed) => seed.id === profile?.id);
 
@@ -576,7 +604,7 @@ const RightSidebar = ({ onNavigate }) => {
 
             const posts = readPosts();
             posts.forEach((post) => {
-                if (!post?.userId) return;
+                if (!post?.userId || !isRenderableSuggestedProfile(post.user)) return;
                 socialGraphService.registerUserProfile({
                     id: post.userId,
                     name: post.user?.name,
@@ -597,7 +625,7 @@ const RightSidebar = ({ onNavigate }) => {
 
             const candidates = socialGraphService
                 .getProfiles([...candidateIds])
-                .filter((candidate) => candidate?.id && candidate.id !== user.id && !following.includes(candidate.id))
+                .filter((candidate) => isRenderableSuggestedProfile(candidate) && candidate.id !== user.id && !following.includes(candidate.id))
                 .map((candidate) => {
                     const normalizedCandidate = normalizeSuggestedProfile(candidate);
                     const counts = socialGraphService.getCounts(candidate.id);
