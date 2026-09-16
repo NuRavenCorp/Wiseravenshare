@@ -177,6 +177,15 @@ const isPlaceholderDisplayName = (value) => {
     return text === 'local user' || text === 'local-user' || text === 'localuser' || text === 'user' || text === 'you';
 };
 
+const isPlaceholderUsername = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local-user'
+        || text === 'localuser'
+        || text === 'user'
+        || text === 'you'
+        || /^user[0-9a-f]{8,}$/i.test(text);
+};
+
 export const normalizePostsPayload = (payload) => {
     if (Array.isArray(payload)) {
         return payload;
@@ -211,14 +220,38 @@ const normalizeUser = (post, fallbackUser = null) => {
     const rawUser = post?.user || fallbackUser || {};
     const resolvedUserId = post?.userId || rawUser?.id || fallbackUser?.id || null;
     const fallbackName = String(fallbackUser?.name || fallbackUser?.displayName || fallbackUser?.username || '').trim();
+    const fallbackUsername = String(fallbackUser?.username || '').trim();
+    const fallbackHandle = String(fallbackUser?.handle || (fallbackUsername ? `@${fallbackUsername}` : '') || '').trim();
     const rawName = rawUser?.displayName || rawUser?.name || rawUser?.username || '';
-    const resolvedName = isPlaceholderDisplayName(rawName) ? (fallbackName || rawUser?.username || '') : rawName;
-    const resolvedHandle = rawUser?.handle || (rawUser?.username ? `@${rawUser.username}` : fallbackUser?.handle || '@user');
+    const rawUsername = String(rawUser?.username || '').trim();
+    const rawHandle = String(rawUser?.handle || '').trim();
+    const resolvedName = isPlaceholderDisplayName(rawName)
+        ? (fallbackName || fallbackUsername || rawUsername || '')
+        : rawName;
+    const resolvedUsername = isPlaceholderUsername(rawUsername)
+        ? (fallbackUsername || rawUsername)
+        : rawUsername;
+    const resolvedHandle = (() => {
+        if (rawHandle && !isPlaceholderUsername(rawUsername) && !isPlaceholderDisplayName(rawName)) {
+            return rawHandle.startsWith('@') ? rawHandle : `@${rawHandle}`;
+        }
+
+        if (fallbackHandle) {
+            return fallbackHandle.startsWith('@') ? fallbackHandle : `@${fallbackHandle}`;
+        }
+
+        if (resolvedUsername) {
+            return `@${resolvedUsername}`;
+        }
+
+        return '@user';
+    })();
 
     return {
         ...(rawUser || {}),
         id: resolvedUserId,
-        name: resolvedName || fallbackName || 'User',
+        username: resolvedUsername || fallbackUsername || rawUsername,
+        name: resolvedName || fallbackName || fallbackUsername || 'User',
         handle: resolvedHandle,
         avatar: sanitizeImageValue(rawUser?.avatar || rawUser?.avatarUrl || fallbackUser?.avatar, 'U')
     };
@@ -257,8 +290,17 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
         mediaType: inferredMediaType,
         mediaUrl: resolvedMediaUrl,
         mediaUrls: normalizedMediaUrls,
-        likes: Number(post?.likes ?? post?.likesCount ?? 0),
-        reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
+        likesCount: Number(post?.likesCount ?? post?.likes ?? 0),
+        likes: Number(post?.likesCount ?? post?.likes ?? 0),
+        repostsCount: Number(post?.repostsCount ?? post?.reposts ?? 0),
+        reposts: Number(post?.repostsCount ?? post?.reposts ?? 0),
+        commentsCount: Number(post?.commentsCount ?? post?.comments?.length ?? 0),
+        bookmarksCount: Number(post?.bookmarksCount ?? post?.bookmarks ?? 0),
+        sharesCount: Number(post?.sharesCount ?? 0),
+        viewsCount: Number(post?.viewsCount ?? 0),
+        isLiked: Boolean(post?.isLiked),
+        isReposted: Boolean(post?.isReposted),
+        isBookmarked: Boolean(post?.isBookmarked),
         comments: Array.isArray(post?.comments) ? post.comments : [],
         content,
         caption,
