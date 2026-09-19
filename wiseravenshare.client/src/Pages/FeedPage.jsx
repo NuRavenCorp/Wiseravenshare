@@ -5,7 +5,7 @@ import VideoFeedMini from '../Components/Feed/VideoFeedMini.jsx';
 import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
-import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
+import { rankCommunityFirstPosts } from '../Services/EngagementAlgorithms';
 import { truthEngine } from '../Services/truthEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
@@ -528,8 +528,35 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         }
     };
 
+    const quickActions = [
+        {
+            id: 'amateur-journalist',
+            label: 'Amateur Journalist',
+            description: 'Local dispatches first',
+            accent: 'rgba(59, 130, 246, 0.16)',
+            icon: '✍️'
+        },
+        {
+            id: 'my-library',
+            label: 'My Library',
+            description: 'Saved media vault',
+            accent: 'rgba(168, 85, 247, 0.16)',
+            icon: '📚'
+        },
+        {
+            id: 'radio-creator',
+            label: 'Radio Creator',
+            description: 'Broadcast studio',
+            accent: 'rgba(34, 197, 94, 0.16)',
+            icon: '📻'
+        }
+    ];
+
     const rankedFeedPosts = useMemo(() => {
-        const ranked = rankPostsByPredictedEngagement(posts, { horizonHours: 18 });
+        const ranked = rankCommunityFirstPosts(posts, {
+            horizonHours: 18,
+            userLocation: localRegion
+        });
 
         if (feedScope !== 'local' || !localRegion) {
             return ranked;
@@ -538,12 +565,14 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         return [...ranked].sort((left, right) => {
             const leftLocal = isLocalPost(left);
             const rightLocal = isLocalPost(right);
+            const leftPriority = (leftLocal ? 1 : 0) + (left.isCommunityFirst ? 1 : 0);
+            const rightPriority = (rightLocal ? 1 : 0) + (right.isCommunityFirst ? 1 : 0);
 
-            if (leftLocal === rightLocal) {
-                return 0;
+            if (leftPriority !== rightPriority) {
+                return rightPriority - leftPriority;
             }
 
-            return leftLocal ? -1 : 1;
+            return (right.communityFirstScore || 0) - (left.communityFirstScore || 0);
         });
     }, [posts, feedScope, localRegion]);
 
@@ -646,6 +675,34 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         ? `Local feed prioritized for ${localRegion}.`
                         : 'Local feed is active, but no signup location is available yet.')
                     : 'National feed is active.'}
+            </div>
+
+            <div style={{ marginBottom: '18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                {quickActions.map((action) => (
+                    <button
+                        key={action.id}
+                        type="button"
+                        onClick={() => onNavigate?.(action.id)}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '14px',
+                            background: action.accent,
+                            color: 'var(--text-color)',
+                            textAlign: 'left',
+                            padding: '14px 16px',
+                            cursor: 'pointer',
+                            boxShadow: '0 8px 18px rgba(15, 23, 42, 0.18)'
+                        }}
+                    >
+                        <div style={{ fontSize: '20px', marginBottom: '8px' }}>{action.icon}</div>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>{action.label}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{action.description}</div>
+                    </button>
+                ))}
+            </div>
+
+            <div style={{ marginBottom: '16px', border: '1px solid rgba(34, 197, 94, 0.35)', borderRadius: '12px', background: 'rgba(34, 197, 94, 0.08)', padding: '12px 14px', color: 'var(--text-color)' }}>
+                <strong style={{ color: '#86efac' }}>Phase 1:</strong> Community-first ranking is now boosting local and amateur journalist dispatches ahead of generic viral noise.
             </div>
 
             <PostCreator

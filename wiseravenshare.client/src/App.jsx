@@ -577,7 +577,56 @@ const App = () => {
                 return <MusicPlayerPage onNavigate={setCurrentPage} />;
             case 'fm-tuner':
             case 'radio-creator':
-                return <FMRadioPage onNavigate={setCurrentPage} />;
+                return isAdminUser
+                    ? <FMRadioPage onNavigate={setCurrentPage} />
+                    : (
+                        <div style={{ padding: '24px', border: '1px solid var(--border-color)', borderRadius: '16px', background: 'rgba(15, 23, 42, 0.72)' }}>
+                            <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)', marginBottom: '8px' }}>
+                                Admin-only studio
+                            </div>
+                            <h2 style={{ margin: '0 0 12px' }}>Radio Creator</h2>
+                            <p style={{ margin: '0 0 14px', color: 'var(--light-color)', lineHeight: 1.7 }}>
+                                This is the premium broadcasting layer for Wiseravenshare: local station creation, audience scheduling, brand identity, community call-ins, and AI-assisted production workflows.
+                            </p>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                                {[
+                                    'Station launch planning and frequency curation',
+                                    'Audience call-in and shout-out tooling',
+                                    'AI-assisted production and moderation assistance',
+                                    'Broadcast monetization and sponsor packages'
+                                ].map((item) => (
+                                    <div key={item} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '12px 14px', background: 'rgba(255,255,255,0.02)' }}>
+                                        {item}
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px' }}>
+                                {['Starter', 'Creator', 'Signal Pro'].map((tier, index) => (
+                                    <div key={tier} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 12px', minWidth: '140px', background: index === 2 ? 'rgba(168, 85, 247, 0.12)' : 'rgba(15, 23, 42, 0.7)' }}>
+                                        <div style={{ fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--light-color)' }}>{tier}</div>
+                                        <div style={{ marginTop: '6px', fontWeight: 700 }}>
+                                            {index === 0 ? '$29/mo' : index === 1 ? '$79/mo' : '$149/mo'}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage('team-launchpad')}
+                                style={{
+                                    border: 'none',
+                                    borderRadius: '999px',
+                                    background: 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                                    color: '#fff',
+                                    padding: '10px 16px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Request access
+                            </button>
+                        </div>
+                    );
             case 'my-library':
                 return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':

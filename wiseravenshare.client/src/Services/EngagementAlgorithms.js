@@ -150,6 +150,41 @@ export const rankPostsByPredictedEngagement = (posts = [], options = {}) => {
         .sort((a, b) => b.predictedEngagementScore - a.predictedEngagementScore);
 };
 
+export const rankCommunityFirstPosts = (posts = [], options = {}) => {
+    const normalizeLocation = (value = '') => String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+
+    const userLocation = normalizeLocation(options.userLocation || '');
+
+    return [...posts]
+        .map((post) => {
+            const prediction = predictPostEngagement(post, options);
+            const contentText = String(post?.content || '');
+            const locationText = String(post?.locationName || post?.location || '');
+            const authorLabel = String(post?.user?.name || post?.user?.handle || post?.author || '');
+            const locationSeed = normalizeLocation(locationText);
+
+            const dispatchBoost = Boolean(post?.truthDispatch || post?.truthDeclarationAccepted) ? 35 : 0;
+            const journalistBoost = /amateur|journalist|citizen|field report|dispatch|local report|community/i.test(`${contentText} ${authorLabel}`) ? 22 : 0;
+            const geoBoost = userLocation && locationSeed && (
+                locationSeed.includes(userLocation) || userLocation.includes(locationSeed)
+            ) ? 28 : 0;
+            const communityBoost = dispatchBoost + journalistBoost + geoBoost;
+            const communityFirstScore = prediction.predictedEngagementScore + communityBoost;
+
+            return {
+                ...post,
+                ...prediction,
+                communityBoost,
+                communityFirstScore,
+                isCommunityFirst: communityBoost > 0
+            };
+        })
+        .sort((a, b) => b.communityFirstScore - a.communityFirstScore);
+};
+
 export const computeTrendingTopics = (posts = [], limit = 6) => {
     if (!Array.isArray(posts) || posts.length === 0) {
         return FALLBACK_TRENDS.slice(0, limit);

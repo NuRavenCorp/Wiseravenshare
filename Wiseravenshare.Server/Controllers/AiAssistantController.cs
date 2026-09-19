@@ -182,12 +182,64 @@ public class AiAssistantController : ControllerBase
         Response.ContentType = "text/event-stream";
 
         var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, ct);
-        await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
-        {
-            await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
-        }
+        var emittedAny = false;
 
-        await Response.WriteAsync("data: [DONE]\n\n", ct);
+        try
+        {
+            await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                emittedAny = true;
+                await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+
+            if (!emittedAny)
+            {
+                var fallback = await _chatService.ChatAsync(enrichedRequest);
+                if (!string.IsNullOrWhiteSpace(fallback.Reply))
+                {
+                    emittedAny = true;
+                    await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(fallback.Reply)}\n\n", ct);
+                    await Response.Body.FlushAsync(ct);
+                }
+                else if (!string.IsNullOrWhiteSpace(fallback.Error))
+                {
+                    emittedAny = true;
+                    await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(fallback.Error)}\n\n", ct);
+                    await Response.Body.FlushAsync(ct);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // client disconnected or request aborted
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI stream request failed.");
+            if (!Response.HasStarted)
+            {
+                Response.StatusCode = StatusCodes.Status500InternalServerError;
+            }
+            else
+            {
+                await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize("The AI assistant is unavailable right now.")}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                await Response.WriteAsync("data: [DONE]\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+        }
     }
 
     // ---- Background AI jobs (queue + poll) — for bursty creator features ----

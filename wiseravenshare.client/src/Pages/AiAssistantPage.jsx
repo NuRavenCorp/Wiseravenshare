@@ -109,11 +109,20 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                 useCrawlerContext
             );
             if (!acc.trim()) {
+                const fallback = await aiAssistantService.chat(
+                    message,
+                    history,
+                    selectedModel || null,
+                    useCrawlerContext
+                );
+
                 setMessages((prev) => {
                     const next = [...prev];
                     next[next.length - 1] = {
                         role: 'assistant',
-                        content: 'Sorry, the assistant returned an empty reply. Please try again.'
+                        content: fallback?.success && fallback?.reply
+                            ? String(fallback.reply).trim()
+                            : (fallback?.error || 'Sorry, the assistant returned an empty reply. Please try again.')
                     };
                     return next;
                 });

@@ -13,7 +13,8 @@ services:
     image: wiseravenshare/crawler-api:latest
     restart: unless-stopped
     env_file:
-      - .env.crawler
+      - path: .env.crawler
+        required: false
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:10000
@@ -41,7 +42,8 @@ services:
     image: wiseravenshare/crawler-scheduler:latest
     restart: unless-stopped
     env_file:
-      - .env.crawler
+      - path: .env.crawler
+        required: false
     environment:
       API_BASE_URL: http://crawler-api:10000
       CRAWL_INTERVAL_SECONDS: ${CRAWL_INTERVAL_SECONDS:-1800}
@@ -54,8 +56,10 @@ services:
       CRAWL_FOLLOW_EXTERNAL_LINKS: ${CRAWL_FOLLOW_EXTERNAL_LINKS:-false}
       CRAWL_CAPTURE_SCREENSHOTS: ${CRAWL_CAPTURE_SCREENSHOTS:-false}
       CRAWL_SKIP_IF_RUNNING: ${CRAWL_SKIP_IF_RUNNING:-true}
-      CRAWL_START_URL: ${CRAWL_START_URL:-https://wiseravenshare.com}
+      CRAWL_START_URLS: ${CRAWL_START_URLS:-https://wiseravenshare.com,https://voterallianceus.com,https://wiseravenstream.com}
       CRAWL_JOB_NAME_PREFIX: ${CRAWL_JOB_NAME_PREFIX:-Scheduled Full Site Crawl}
+      CRAWL_JOB_POLL_SECONDS: ${CRAWL_JOB_POLL_SECONDS:-30}
+      CRAWL_JOB_TIMEOUT_SECONDS: ${CRAWL_JOB_TIMEOUT_SECONDS:-0}
     depends_on:
       crawler-api:
         condition: service_healthy

@@ -257,3 +257,112 @@ Add the following CNAME records at your DNS provider (e.g., Cloudflare, Namechea
 |---|---|---|---|
 | **CNAME** | `@` | `wiseravenshare-XXXXX.ondigitalocean.app` | Auto / 300 |
 | **CNAME** | `www` | `wiseravenshare-XXXXX.ondigitalocean.app` | Auto / 300 |
+
+---
+
+## 5. NuRavenCorpLLM Cross-Site Intelligence Pipeline
+
+NuRavenCorpLLM should run as a dedicated containerized intelligence service that receives behavioral and content signals from:
+
+- `wiseravenshare.com`
+- `voterallianceus.com`
+- `wiseravenstream.com`
+
+### 5.1 What NuRavenCorpLLM Ingests
+
+Each site sends structured events to NuRavenCorpLLM:
+
+1. **User search intent** (query text, filters, result clicks, follow-up actions)
+2. **Post interaction signals** (views, likes, comments, shares, dwell time)
+3. **Journey context** (entry page, navigation path, feature usage sequence)
+4. **Publisher activity** (post creation/edit/delete and moderation outcomes)
+5. **Crawler/web-grounding evidence** (cross-site crawl outputs for internet clarity)
+
+### 5.2 Required Privacy & Safety Guardrails
+
+Before data leaves any product boundary:
+
+1. Strip direct PII (email, phone, full name) unless explicit legal basis exists.
+2. Use stable pseudonymous user IDs for cross-site behavior analytics.
+3. Enforce consent and retention policies per site jurisdiction settings.
+4. Mark every event with `sourceSite` and `consentState`.
+5. Block tenant leakage: no data from one product can be returned to another without an explicit policy rule.
+
+### 5.3 Container Topology (DigitalOcean)
+
+```text
+[wiseravenshare-api] ----\
+[voter-alliance-api] -----+----> [nuravencorpllm-ingestor-api] ---> [nuravencorpllm-db + vector index]
+[wiseravenstream-api] ----/                 |
+                                            +--> [web-grounding/crawler workers]
+                                            +--> [model inference service]
+```
+
+- Website APIs stay in their own repos and domains.
+- NuRavenCorpLLM is the central learning plane.
+- Crawler workers feed grounded internet context back to NuRavenCorpLLM.
+
+### 5.4 Runtime Environment Contract
+
+Configure each website API container with outbound collector settings:
+
+```env
+LLM_COLLECTOR__ENABLED=true
+LLM_COLLECTOR__BASE_URL=https://nuravencorpllm-api.<your-domain>
+LLM_COLLECTOR__API_KEY=<secret>
+LLM_COLLECTOR__SOURCE_SITE=wiseravenshare.com
+LLM_COLLECTOR__BATCH_SIZE=100
+LLM_COLLECTOR__FLUSH_INTERVAL_SECONDS=15
+```
+
+Configure NuRavenCorpLLM service with inbound trust and web-grounding:
+
+```env
+COLLECTOR__REQUIRE_SIGNED_EVENTS=true
+COLLECTOR__ALLOWED_SOURCES=wiseravenshare.com,voterallianceus.com,wiseravenstream.com
+COLLECTOR__MAX_EVENT_BYTES=262144
+RAG__WEB_GROUNDING_ENABLED=true
+RAG__CRAWL_SEED_URLS=https://wiseravenshare.com,https://voterallianceus.com,https://wiseravenstream.com
+```
+
+### 5.5 Deployment Pattern
+
+1. Deploy each site API normally from its repo (`Wiseravenshare`, `Voter-Alliance`, `wiseravenstream`).
+2. Deploy `NuRavenCorpLLM.Server` as a separate API container in the same DigitalOcean region/VPC.
+3. Store collector keys as App Platform secrets in each site.
+4. Enable cross-site crawler schedule for web clarity (`CRAWL_START_URLS`).
+5. Validate ingestion lag, event acceptance rate, and tenant-isolation checks before promoting.
+
+### 5.6 Minimum API Surface for NuRavenCorpLLM
+
+Implement and expose these endpoints in NuRavenCorpLLM:
+
+- `POST /api/intel/events/batch` (user/search/post behavior ingestion)
+- `POST /api/intel/crawl/report` (crawler findings ingestion)
+- `POST /api/intel/feedback` (human corrections and moderation outcomes)
+- `GET /api/intel/health` (collector and pipeline health)
+
+### 5.7 Administrator Language Intelligence Output
+
+NuRavenCorpLLM must monitor activity across all connected sites and convert metrics into plain human language for the administrator's selected locale.
+
+1. Monitor all major activity dimensions: searches, posting patterns, engagement shifts, moderation actions, referral paths, and cross-site behavior changes.
+2. Compute normalized metrics and trend deltas (hourly/daily/weekly) so activity can be compared consistently across all three domains.
+3. Generate narrative summaries that explain **what changed**, **why it likely changed**, and **recommended next actions**.
+4. Translate narrative output to the admin language preference (`en`, `es`, `fr`, etc.) while preserving numeric accuracy.
+
+Recommended runtime settings:
+
+```env
+ADMIN_INTEL__ENABLE_ACTIVITY_MONITORING=true
+ADMIN_INTEL__ENABLE_NARRATIVE_TRANSLATION=true
+ADMIN_INTEL__DEFAULT_LANGUAGE=en
+ADMIN_INTEL__SUPPORTED_LANGUAGES=en,es,fr,pt
+ADMIN_INTEL__SUMMARY_WINDOW_HOURS=24
+ADMIN_INTEL__METRIC_EXPLANATION_LEVEL=detailed
+```
+
+Recommended endpoints:
+
+- `GET /api/intel/admin/summary?language=en&windowHours=24`
+- `GET /api/intel/admin/metrics?from=<iso>&to=<iso>`
