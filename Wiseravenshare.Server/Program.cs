@@ -1530,7 +1530,13 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
     options.KnownProxies.Clear();
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Emit camelCase JSON for all API responses so JS clients read counts directly.
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
