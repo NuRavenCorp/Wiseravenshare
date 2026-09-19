@@ -196,9 +196,17 @@ const resolveTrackSourceCandidates = (track) => {
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const FMRadioPage = () => {
+const FMRadioPage = ({ canAccessCreator = false, initialTab = 'radio' }) => {
+  const resolveInitialTab = () => {
+    const normalized = String(initialTab || 'radio').trim().toLowerCase();
+    if (normalized === 'creator' && !canAccessCreator) {
+      return 'radio';
+    }
+    return ['radio', 'cassette', 'creator', 'caption'].includes(normalized) ? normalized : 'radio';
+  };
+
   // Tabs
-  const [tab, setTab] = useState('radio');
+  const [tab, setTab] = useState(resolveInitialTab);
 
   // FM tuner display
   const [tunedFreq,    setTunedFreq]    = useState(98.5);
@@ -407,6 +415,20 @@ const FMRadioPage = () => {
   }, [creatorRegionIso]);
 
   useEffect(() => {
+    const normalized = String(initialTab || 'radio').trim().toLowerCase();
+    const nextTab = normalized === 'creator' && !canAccessCreator
+      ? 'radio'
+      : (['radio', 'cassette', 'creator', 'caption'].includes(normalized) ? normalized : 'radio');
+    setTab((current) => (current === nextTab ? current : nextTab));
+  }, [initialTab, canAccessCreator]);
+
+  useEffect(() => {
+    if (!canAccessCreator && tab === 'creator') {
+      setTab('radio');
+    }
+  }, [canAccessCreator, tab]);
+
+  useEffect(() => {
     try {
       const handoff = localStorage.getItem(INSTRUMENT_HANDOFF_KEY);
       if (!handoff) return;
@@ -414,8 +436,13 @@ const FMRadioPage = () => {
       const parsed = JSON.parse(handoff);
       if (!parsed || typeof parsed !== 'object') return;
 
-      setTab('creator');
-      setCreatorStatus(`Instrument handoff active: ${parsed.sourceName || 'Unknown Source'}`);
+      if (canAccessCreator) {
+        setTab('creator');
+        setCreatorStatus(`Instrument handoff active: ${parsed.sourceName || 'Unknown Source'}`);
+      } else {
+        setTab('cassette');
+        setCreatorStatus('Instrument handoff loaded into Cassette mode. Radio Creator access requires an administrator.');
+      }
       setCreatorUseInstrumentInput(true);
       setCreatorTrackForm((prev) => ({
         ...prev,
@@ -425,7 +452,7 @@ const FMRadioPage = () => {
     } catch {
       // Ignore malformed handoff payloads.
     }
-  }, []);
+  }, [canAccessCreator]);
 
   useEffect(() => () => {
     if (creatorRecordedUrl) {
@@ -1743,7 +1770,9 @@ const FMRadioPage = () => {
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
         <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 TRACK PLAYER</button>
-        <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
+        {canAccessCreator && (
+          <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
+        )}
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
@@ -1904,7 +1933,7 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(false)}
+      {canAccessCreator && tab === 'creator' && renderCreatorStudio(false)}
       {tab === 'caption' && (
         <div className="wr-caption-wrap">
           <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
@@ -1981,7 +2010,9 @@ const FMRadioPage = () => {
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
           <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Track Player</button>
-          <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
+          {canAccessCreator && (
+            <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
+          )}
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>
       </div>
@@ -2210,7 +2241,7 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(true)}
+      {canAccessCreator && tab === 'creator' && renderCreatorStudio(true)}
 
       {showGlobalTransport && (
         <div className="mod-mini-transport" role="region" aria-label="Track player quick controls">

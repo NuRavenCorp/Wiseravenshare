@@ -121,7 +121,8 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
         { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
-        { id: 'radio-creator', icon: 'fas fa-broadcast-tower', label: 'Radio Creator' },
+        { id: 'fm-tuner', icon: 'fas fa-broadcast-tower', label: 'FM Radio' },
+        { id: 'music-player', icon: 'fas fa-compact-disc', label: 'Cassette Music' },
         { id: 'collaboration', icon: 'fas fa-users', label: 'Collaborate' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
@@ -138,6 +139,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' },
             { id: 'site-crawler-audit', icon: 'fas fa-spider', label: 'Site Crawler' },
             { id: 'crawler-metrics', icon: 'fas fa-chart-pie', label: 'Crawler Metrics' },
+            { id: 'radio-creator', icon: 'fas fa-microphone-alt', label: 'Radio Creator' },
             { id: 'assistant', icon: 'fas fa-robot', label: 'AI Assistant' }
         );
     }
