@@ -73,7 +73,8 @@ public enum TransactionType
 {
     Mining, ContentCreation, Verification, BadgeReward, Staking, Tip,
     Purchase, Transfer, Burn, Fee, Governance, BadgeUpgrade,
-    SkillValidation, Referral, CommunityBonus, CreativityWork
+    SkillValidation, Referral, CommunityBonus, CreativityWork,
+    EngagementReward  // Earned when your content receives likes, reposts, or comments
 }
 
 public enum TransactionStatus
