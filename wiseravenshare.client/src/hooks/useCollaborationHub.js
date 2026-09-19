@@ -145,6 +145,8 @@ export const useCollaborationHub = () => {
         invoke('UpdatePresence', status, activity), [invoke]);
     const bridgeToExternalPlatform = useCallback((platform, targetUserId, data) =>
         invoke('BridgeToExternalPlatform', platform, targetUserId, data), [invoke]);
+    const sendRoomInvite = useCallback((roomId, channel, recipient, recipientName = '') =>
+        invoke('SendRoomInvite', roomId, channel, recipient, recipientName), [invoke]);
     const getMyRooms = useCallback((take = 25) =>
         invoke('GetMyRooms', take), [invoke]);
     const joinPodcastBridge = useCallback((roomKey = 'main') =>
@@ -180,6 +182,7 @@ export const useCollaborationHub = () => {
         sendFileChunk,
         updatePresence,
         bridgeToExternalPlatform,
+        sendRoomInvite,
         getMyRooms,
         joinPodcastBridge,
         leavePodcastBridge,
