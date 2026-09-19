@@ -30,9 +30,10 @@ export default function WiseCoinPage() {
       ]);
       setBalance(bal);
       setValuation(val);
+      // getRolloutStatus is a public endpoint — gracefully handle 401 when not logged in
       setRolloutStatus(status);
-      setTransactions(txs);
-      setBadges(bdgs);
+      setTransactions(Array.isArray(txs) ? txs : []);
+      setBadges(Array.isArray(bdgs) ? bdgs : []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -75,23 +76,33 @@ export default function WiseCoinPage() {
         <div className="wisecoin-stats">
           <div className="stat-card">
             <div className="stat-label">Your Balance</div>
-            <div className="stat-value">{balance.balance.toFixed(2)}</div>
+            <div className="stat-value">{Number(balance.balance ?? 0).toFixed(2)}</div>
             <div className="stat-sublabel">WSC</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Effective Balance</div>
-            <div className="stat-value">{balance.effectiveBalance.toFixed(2)}</div>
-            <div className="stat-sublabel">includes staking</div>
+            <div className="stat-value">{Number(balance.effectiveBalance ?? 0).toFixed(2)}</div>
+            <div className="stat-sublabel">incl. staked</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">USD Value</div>
-            <div className="stat-value">${balance.currentValueUSD}</div>
+            <div className="stat-value">${Number(balance.currentValueUSD ?? 0).toFixed(2)}</div>
             <div className="stat-sublabel">at current rate</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Total Earned</div>
-            <div className="stat-value positive">{balance.badgeMultiplier.toFixed(2)}x</div>
-            <div className="stat-sublabel">badge multiplier</div>
+            <div className="stat-label">Earning Boost</div>
+            <div className="stat-value positive">{Number(balance.totalMultiplier ?? balance.badgeMultiplier ?? 1).toFixed(2)}×</div>
+            <div className="stat-sublabel">total multiplier</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Badges Earned</div>
+            <div className="stat-value">{badges.length}</div>
+            <div className="stat-sublabel">lifetime</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">All Time Earned</div>
+            <div className="stat-value positive">{Number(balance.workHoursContributed ?? 0).toFixed(1)}</div>
+            <div className="stat-sublabel">work hours</div>
           </div>
         </div>
       )}

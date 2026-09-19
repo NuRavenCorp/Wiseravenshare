@@ -485,7 +485,7 @@ public class PostService : IPostService
         await _postRepository.LikePostAsync(postId, userId);
         _logger.LogInformation("User {UserId} liked post {PostId}", userId, postId);
 
-        // Send notification to post author (fire-and-forget)
+        // Award WSC to the post author for receiving a like (fire-and-forget).
         if (post.UserId != userId)
         {
             var liker = await _userRepository.GetByIdAsync(userId);
@@ -496,6 +496,23 @@ public class PostService : IPostService
                 likerName,
                 post.Content ?? "your post"
             );
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _wiseCoinService.EarnWSCAsync(
+                        post.UserId,
+                        0.25m,
+                        TransactionType.EngagementReward,
+                        $"Like reward: post received a like",
+                        applyMultipliers: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WSC like reward failed for post author {UserId}", post.UserId);
+                }
+            });
         }
 
         // Update engagement in content crawler (fire-and-forget)
@@ -540,7 +557,7 @@ public class PostService : IPostService
         await _postRepository.RepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
 
-        // Send notification to post author (fire-and-forget)
+        // Award WSC to the post author for receiving a repost (fire-and-forget).
         if (post.UserId != userId)
         {
             var sharedBy = await _userRepository.GetByIdAsync(userId);
@@ -551,6 +568,23 @@ public class PostService : IPostService
                 sharedByName,
                 post.Content ?? "your post"
             );
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _wiseCoinService.EarnWSCAsync(
+                        post.UserId,
+                        0.50m,
+                        TransactionType.EngagementReward,
+                        $"Repost reward: post was reposted",
+                        applyMultipliers: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WSC repost reward failed for post author {UserId}", post.UserId);
+                }
+            });
         }
 
         // Update engagement in content crawler (fire-and-forget)
