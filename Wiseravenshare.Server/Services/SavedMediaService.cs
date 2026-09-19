@@ -108,6 +108,9 @@ namespace Wiseravenshare.Server.Services
             if (request.ScheduledPublishAt.HasValue)
                 media.ScheduledPublishAt = request.ScheduledPublishAt.Value;
 
+            if (request.MediaMetadata != null)
+                media.MediaMetadata = request.MediaMetadata;
+
             media.UpdatedAt = DateTime.UtcNow;
 
             _savedMediaRepository.Update(media);

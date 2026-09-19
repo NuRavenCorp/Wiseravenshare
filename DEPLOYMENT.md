@@ -335,3 +335,20 @@ Then verify API reports healthy schema:
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://wise-ravens.com/health/db | Select-Object -ExpandProperty Content
 ```
+
+## 12) Cross-site collection container
+
+Use the crawler droplet stack when you want one containerized server to collect public site information from:
+
+- `https://wiseravenshare.com`
+- `https://voterallianceus.com`
+- `https://wiseravenstream.com`
+
+Run the stack from `deploy/droplet/docker-compose.crawler.yml`. The scheduler accepts `CRAWL_START_URLS` and will trigger a crawl job for each site through the local API container.
+
+Example:
+
+```bash
+CRAWL_START_URLS=https://wiseravenshare.com,https://voterallianceus.com,https://wiseravenstream.com \
+docker compose -f deploy/droplet/docker-compose.crawler.yml up -d
+```
