@@ -31,7 +31,7 @@ export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
     const { user } = useAuth();
     const {
         isConnected, isConnecting, onEvent, invoke,
-        joinRoom, leaveRoom, sendMessage, startFileTransfer, sendFileChunk, bridgeToExternalPlatform
+        joinRoom, leaveRoom, sendMessage, startFileTransfer, sendFileChunk, bridgeToExternalPlatform, sendRoomInvite
     } = useCollaborationHub();
 
     const [room, setRoom] = useState(null);
@@ -46,6 +46,11 @@ export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
     const [copySuccess, setCopySuccess] = useState(false);
     const [fileTransfers, setFileTransfers] = useState({});
     const [bridgeStatus, setBridgeStatus] = useState('');
+    const [inviteChannel, setInviteChannel] = useState('email');
+    const [inviteRecipient, setInviteRecipient] = useState('');
+    const [inviteRecipientName, setInviteRecipientName] = useState('');
+    const [inviteStatus, setInviteStatus] = useState('');
+    const [inviteBusy, setInviteBusy] = useState(false);
 
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -246,6 +251,31 @@ export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
         setTimeout(() => setBridgeStatus(''), 3500);
     };
 
+    const handleSendAccessInvite = async () => {
+        const recipient = String(inviteRecipient || '').trim();
+        if (!recipient || inviteBusy) return;
+
+        setInviteBusy(true);
+        setInviteStatus('');
+
+        try {
+            await sendRoomInvite(
+                roomId,
+                inviteChannel,
+                recipient,
+                String(inviteRecipientName || '').trim()
+            );
+            setInviteStatus(`Invite sent via ${inviteChannel === 'sms' ? 'text' : 'email'}.`);
+            setInviteRecipient('');
+            setInviteRecipientName('');
+        } catch (error) {
+            setInviteStatus(error?.message || `Could not send ${inviteChannel} invite right now.`);
+        } finally {
+            setInviteBusy(false);
+            setTimeout(() => setInviteStatus(''), 4000);
+        }
+    };
+
     if (!isConnected) {
         return (
             <div style={{ ...panel, padding: '40px', textAlign: 'center' }}>
@@ -343,9 +373,91 @@ export const CollaborationRoom = ({ roomId, roomMetadata, onLeave }) => {
                         </button>
                     ))}
                 </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
+                    <select
+                        value={inviteChannel}
+                        onChange={(event) => setInviteChannel(event.target.value === 'sms' ? 'sms' : 'email')}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-color)',
+                            borderRadius: '8px',
+                            padding: '6px 8px',
+                            fontSize: '11px'
+                        }}
+                    >
+                        <option value="email">Email</option>
+                        <option value="sms">Text (SMS)</option>
+                    </select>
+                    <input
+                        type="text"
+                        value={inviteRecipient}
+                        onChange={(event) => setInviteRecipient(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault();
+                                handleSendAccessInvite();
+                            }
+                        }}
+                        placeholder={inviteChannel === 'sms' ? 'Phone number' : 'Email address'}
+                        style={{
+                            flex: 1,
+                            minWidth: '180px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-color)',
+                            borderRadius: '8px',
+                            padding: '6px 8px',
+                            fontSize: '11px'
+                        }}
+                    />
+                    <input
+                        type="text"
+                        value={inviteRecipientName}
+                        onChange={(event) => setInviteRecipientName(event.target.value)}
+                        placeholder="Name (optional)"
+                        style={{
+                            minWidth: '130px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-color)',
+                            borderRadius: '8px',
+                            padding: '6px 8px',
+                            fontSize: '11px'
+                        }}
+                    />
+                    <button
+                        type="button"
+                        onClick={handleSendAccessInvite}
+                        disabled={!inviteRecipient.trim() || inviteBusy}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'rgba(34, 197, 94, 0.18)',
+                            color: 'var(--text-color)',
+                            borderRadius: '999px',
+                            fontSize: '11px',
+                            padding: '5px 12px',
+                            cursor: (!inviteRecipient.trim() || inviteBusy) ? 'default' : 'pointer',
+                            opacity: (!inviteRecipient.trim() || inviteBusy) ? 0.6 : 1
+                        }}
+                    >
+                        {inviteBusy ? 'Sending...' : 'Send access invite'}
+                    </button>
+                </div>
                 {bridgeStatus && (
                     <div style={{ width: '100%', fontSize: '11px', color: '#4ade80' }}>
                         {bridgeStatus}
+                    </div>
+                )}
+                {inviteStatus && (
+                    <div style={{
+                        width: '100%',
+                        fontSize: '11px',
+                        color: inviteStatus.toLowerCase().includes('could not') || inviteStatus.toLowerCase().includes('failed')
+                            ? 'var(--danger-color, #ef4444)'
+                            : '#4ade80'
+                    }}>
+                        {inviteStatus}
                     </div>
                 )}
             </div>

@@ -9,6 +9,7 @@ public interface IEmailService
     Task SendWelcomeEmailAsync(string email, string displayName);
     Task SendPasswordResetEmailAsync(string email, string displayName, string resetToken);
     Task<bool> SendTeamInviteEmailAsync(TeamInviteEmailMessage message, CancellationToken cancellationToken = default);
+    Task<bool> SendCollaborationInviteEmailAsync(CollaborationInviteEmailMessage message, CancellationToken cancellationToken = default);
 }
 
 public sealed class TeamInviteEmailMessage
@@ -19,6 +20,16 @@ public sealed class TeamInviteEmailMessage
     public string TeamRole { get; set; } = "member";
     public bool Prearranged { get; set; }
     public DateTime ExpiresAtUtc { get; set; }
+    public string InviteLink { get; set; } = string.Empty;
+}
+
+public sealed class CollaborationInviteEmailMessage
+{
+    public string ToEmail { get; set; } = string.Empty;
+    public string ToName { get; set; } = string.Empty;
+    public string InviterEmail { get; set; } = string.Empty;
+    public string RoomName { get; set; } = string.Empty;
+    public string RoomId { get; set; } = string.Empty;
     public string InviteLink { get; set; } = string.Empty;
 }
 
@@ -35,6 +46,11 @@ public class NoopEmailService : IEmailService
     }
 
     public Task<bool> SendTeamInviteEmailAsync(TeamInviteEmailMessage message, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(false);
+    }
+
+    public Task<bool> SendCollaborationInviteEmailAsync(CollaborationInviteEmailMessage message, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(false);
     }
@@ -159,6 +175,102 @@ public sealed class SmtpEmailService : IEmailService
         }
     }
 
+    public async Task<bool> SendCollaborationInviteEmailAsync(CollaborationInviteEmailMessage message, CancellationToken cancellationToken = default)
+    {
+        if (message is null)
+        {
+            _logger.LogWarning("Skipped collaboration invite email dispatch because payload was null.");
+            return false;
+        }
+
+        var toEmail = message.ToEmail.Trim();
+        if (string.IsNullOrWhiteSpace(toEmail))
+        {
+            _logger.LogWarning("Skipped collaboration invite email dispatch because destination address was missing.");
+            return false;
+        }
+
+        if (!IsValidEmail(toEmail))
+        {
+            _logger.LogWarning("Skipped collaboration invite email dispatch because destination address '{Email}' is invalid.", toEmail);
+            return false;
+        }
+
+        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            _logger.LogWarning("Skipped collaboration invite email dispatch because SMTP host is not configured.");
+            return false;
+        }
+
+        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        if (string.IsNullOrWhiteSpace(fromAddress))
+        {
+            _logger.LogWarning("Skipped collaboration invite email dispatch because sender address is not configured.");
+            return false;
+        }
+
+        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        if (string.IsNullOrWhiteSpace(fromName))
+        {
+            fromName = "Wise Ravens Collaboration";
+        }
+
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+
+        var safeRoomName = string.IsNullOrWhiteSpace(message.RoomName) ? "Cross-Platform Collaboration Room" : message.RoomName.Trim();
+        var subject = $"Collaboration invite: {safeRoomName}";
+        var body = BuildCollaborationInviteBody(message, safeRoomName);
+
+        try
+        {
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(fromAddress, fromName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = false
+            };
+            mail.To.Add(new MailAddress(toEmail, string.IsNullOrWhiteSpace(message.ToName) ? toEmail : message.ToName));
+
+            using var client = new SmtpClient(smtpHost, smtpPort)
+            {
+                EnableSsl = enableSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = false,
+                Timeout = smtpTimeout
+            };
+
+            if (!string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+            {
+                client.Credentials = new NetworkCredential(username, password);
+            }
+
+            await client.SendMailAsync(mail, cancellationToken);
+            _logger.LogInformation("Successfully sent collaboration invite email to {Email}.", toEmail);
+            return true;
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogError(ex, "Invalid email format for {Email}.", toEmail);
+            return false;
+        }
+        catch (SmtpException ex)
+        {
+            _logger.LogError(ex, "SMTP error sending collaboration invite email to {Email}.", toEmail);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send collaboration invite email to {Email}.", toEmail);
+            return false;
+        }
+    }
+
     private static bool IsValidEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email))
@@ -229,6 +341,30 @@ Activate your access with this secure link:
 If you did not expect this invite, you can ignore this email.
 
 Wise Ravens Team Access
+""";
+    }
+
+    private static string BuildCollaborationInviteBody(CollaborationInviteEmailMessage message, string safeRoomName)
+    {
+        var safeName = string.IsNullOrWhiteSpace(message.ToName) ? "there" : message.ToName.Trim();
+        var safeInviter = string.IsNullOrWhiteSpace(message.InviterEmail) ? "a Wise Ravens collaborator" : message.InviterEmail.Trim();
+        var safeRoomId = string.IsNullOrWhiteSpace(message.RoomId) ? "N/A" : message.RoomId.Trim();
+        var inviteLink = string.IsNullOrWhiteSpace(message.InviteLink) ? "(link unavailable)" : message.InviteLink.Trim();
+
+        return $"""
+Hello {safeName},
+
+{safeInviter} invited you to join a Wise Ravens collaboration room.
+
+Room: {safeRoomName}
+Room ID: {safeRoomId}
+
+Join here:
+{inviteLink}
+
+If you did not expect this invite, you can ignore this email.
+
+Wise Ravens Collaboration
 """;
     }
 }
