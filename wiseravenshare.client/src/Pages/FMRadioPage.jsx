@@ -185,13 +185,15 @@ const resolveTrackSourceCandidates = (track) => {
     : '';
   const fileObjectUrl = track.file ? URL.createObjectURL(track.file) : '';
 
+  // FALLBACK_AUDIO_CANDIDATES are only appropriate for the FM tuner (live radio streams).
+  // Library tracks must only resolve from their own URLs; falling back to a radio stream
+  // would silently play the wrong content and confuse the user.
   return [...new Set([
     normalizedDirect,
     blobStream,
     fileNameStream,
     proxy,
-    fileObjectUrl,
-    ...FALLBACK_AUDIO_CANDIDATES
+    fileObjectUrl
   ].filter(Boolean))];
 };
 
