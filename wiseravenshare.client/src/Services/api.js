@@ -1471,7 +1471,16 @@ export const apiService = {
     // Music Rights Registration
     registerOriginalTrack: (payload) => api.post('/music-rights/register', payload),
     printMusicRightsCertificate: (payload) =>
-        api.post('/music-rights/certificate/print', payload, { responseType: 'text' })
+        api.post('/music-rights/certificate/print', payload, { responseType: 'text' }),
+
+    // Copyright Registration (U.S. Copyright Office)
+    copyrightRegistrationApi: {
+        getForms: () => api.get('/copyright-registration/forms'),
+        getFormByCode: (formCode) => api.get(`/copyright-registration/forms/${encodeURIComponent(formCode)}`),
+        recommendForms: (payload) => api.post('/copyright-registration/recommend', payload),
+        calculateCost: (payload) => api.post('/copyright-registration/calculate-cost', payload),
+        getGuide: () => api.get('/copyright-registration/guide', { responseType: 'text' })
+    }
 };
 
 export default api;
