@@ -332,6 +332,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [showPricingModal, setShowPricingModal] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState(null);
     const [billingCycle, setBillingCycle] = useState('monthly');
+    const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+    const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(true);
 
     // Recording State
     const [isRecording, setIsRecording] = useState(false);
@@ -1119,6 +1121,33 @@ const PodcastStudioPage = ({ onNavigate }) => {
         } catch {
             // Ignore local storage restore failures.
         }
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadSubscriptionStatus = async () => {
+            try {
+                const status = await subscriptionService.getSubscriptionStatus();
+                if (!cancelled) {
+                    setSubscriptionStatus(status);
+                }
+            } catch {
+                if (!cancelled) {
+                    setSubscriptionStatus(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setSubscriptionStatusLoading(false);
+                }
+            }
+        };
+
+        loadSubscriptionStatus();
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     useEffect(() => {
@@ -2230,6 +2259,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
     })();
 
     const handleWorkflowStageSelect = (stageId) => {
+        if (isGuidedStudioLocked) {
+            promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.');
+            return;
+        }
+
         if (stageId === nextRequiredFlow.stage || stageId === workflowStage) {
             setWorkflowStage(stageId);
             return;
@@ -2249,6 +2283,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const runNextStudioAction = async () => {
+        if (isGuidedStudioLocked) {
+            promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.');
+            return;
+        }
+
         setWorkflowStage(nextRequiredFlow.stage);
 
         if (nextRequiredFlow.stage === 'Plan') {
@@ -2285,6 +2324,14 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const nextFlowActionLabel = nextRequiredFlow.actionLabel;
+    const isGuidedStudioUnlocked = Boolean(subscriptionStatus?.hasActiveSubscription);
+    const isGuidedStudioLocked = subscriptionStatusLoading || !isGuidedStudioUnlocked;
+
+    const promptGuidedStudioUpgrade = (reason = 'Unlock Guided Studio Flow to continue. Stripe checkout opens with the plan list.') => {
+        setSelectedPlan('podcast_pro');
+        setShowPricingModal(true);
+        setStatus(reason);
+    };
 
     const audienceSummary = useMemo(() => ({
         segments: (formatDefinitions[format]?.segments || scriptBlocks).length,
@@ -2707,21 +2754,62 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#99f6e4', fontWeight: 700 }}>
                             Guided Studio Flow
                         </div>
+                        {isGuidedStudioLocked && (
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '10px',
+                                flexWrap: 'wrap',
+                                background: 'rgba(129,140,248,0.10)',
+                                border: '1px solid rgba(129,140,248,0.28)',
+                                borderRadius: '12px',
+                                padding: '12px 14px'
+                            }}>
+                                <div>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
+                                        {subscriptionStatusLoading ? 'Checking billing access...' : 'Guided Studio Flow is locked'}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
+                                        {subscriptionStatusLoading
+                                            ? 'Verifying Stripe subscription status before enabling the flow.'
+                                            : 'Open the pricing list to attach Stripe checkout and unlock Plan, Script, Record, Review, and Ship.'}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => promptGuidedStudioUpgrade(subscriptionStatusLoading ? 'Checking Stripe access...' : 'Guided Studio Flow is locked until a paid plan is active.')}
+                                    style={{
+                                        border: '1px solid rgba(129,140,248,0.45)',
+                                        background: 'rgba(129,140,248,0.18)',
+                                        color: '#c4b5fd',
+                                        borderRadius: '10px',
+                                        padding: '9px 14px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    View pricing &amp; unlock
+                                </button>
+                            </div>
+                        )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {workflowStages.map((stage) => (
                                 <button
                                     key={stage.id}
                                     type="button"
-                                    onClick={() => handleWorkflowStageSelect(stage.id)}
+                                    onClick={() => (isGuidedStudioLocked ? promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.') : handleWorkflowStageSelect(stage.id))}
                                     style={{
                                         border: workflowStage === stage.id ? '1px solid #34d399' : '1px solid var(--border-color)',
-                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
+                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : isGuidedStudioLocked ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.03)',
                                         color: 'var(--text-color)',
                                         borderRadius: '999px',
                                         padding: '7px 12px',
-                                        cursor: 'pointer',
+                                        cursor: isGuidedStudioLocked ? 'pointer' : 'pointer',
                                         fontSize: '12px',
-                                        fontWeight: workflowStage === stage.id ? 700 : 500
+                                        fontWeight: workflowStage === stage.id ? 700 : 500,
+                                        opacity: isGuidedStudioLocked && workflowStage !== stage.id ? 0.8 : 1
                                     }}
                                     title={stage.hint}
                                 >
@@ -2748,6 +2836,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 Flow progress
                             </div>
                             <div style={{ fontSize: '24px', fontWeight: 800 }}>{flowProgressPercent}%</div>
+                            {isGuidedStudioLocked && (
+                                <div style={{ fontSize: '11px', color: '#c4b5fd', marginTop: '4px' }}>
+                                    Paid plan required
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -2800,7 +2893,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </button>
                             <button
                                 type="button"
-                                onClick={runNextStudioAction}
+                                onClick={() => (isGuidedStudioLocked ? promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.') : runNextStudioAction())}
                                 disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
                                 style={{
                                     border: 'none',
@@ -3418,7 +3511,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         type="text"
                                         value={videoTitle}
                                         onChange={(e) => setVideoTitle(e.target.value)}
-                                        placeholder={title || 'My Podcast Recording'}
+                                        placeholder="Enter a recording title"
                                         style={{
                                             padding: '10px 12px',
                                             borderRadius: '8px',
