@@ -7,9 +7,50 @@ export const resolveMediaUrl = (url) => {
         return trimmed;
     }
 
+    const tryResolveSpacesBlobProxy = (absoluteUrl) => {
+        try {
+            const parsed = new URL(absoluteUrl);
+            const host = String(parsed.hostname || '').toLowerCase();
+            if (!host.includes('digitaloceanspaces.com')) {
+                return '';
+            }
+
+            const pathSegments = String(parsed.pathname || '')
+                .split('/')
+                .filter(Boolean)
+                .map((segment) => decodeURIComponent(segment));
+            if (pathSegments.length === 0) {
+                return '';
+            }
+
+            // Virtual-host style: <bucket>.<region>.digitaloceanspaces.com/<object-key>
+            // Path style: <region>.digitaloceanspaces.com/<bucket>/<object-key>
+            const hostParts = host.split('.');
+            const isVirtualHosted = hostParts.length >= 4;
+            const objectSegments = isVirtualHosted ? pathSegments : pathSegments.slice(1);
+            if (objectSegments.length === 0) {
+                return '';
+            }
+
+            const encodedObjectKey = objectSegments
+                .map((segment) => encodeURIComponent(String(segment || '').trim()))
+                .filter(Boolean)
+                .join('/');
+
+            return encodedObjectKey ? `/api/videostreaming/blob/${encodedObjectKey}` : '';
+        } catch {
+            return '';
+        }
+    };
+
     // Older records may contain internal localhost stream URLs that are unreachable
     // from public deployments. Rewrite them to same-origin relative paths.
     if (/^https?:\/\//i.test(trimmed)) {
+        const blobProxyUrl = tryResolveSpacesBlobProxy(trimmed);
+        if (blobProxyUrl) {
+            return blobProxyUrl;
+        }
+
         try {
             const parsed = new URL(trimmed);
             const isLocalHost = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname);

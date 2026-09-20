@@ -642,6 +642,86 @@
         "plan": "creator_pro",
         "reason": "Request failed (404)"
       }
+    },
+    {
+      "Id": "32af6b92a9d54c7e9b3ae307a8c320b2",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:08:48.3279633Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "8c2bdedb8beb41bba5eadfe92ffbc056",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:12:38.9753131Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "9e857d5147b346f7868b8d6503782485",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:14:21.932667Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "80c4dc1d1ff3445b920ec77d3a96b146",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:14:48.9378156Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "85271ead37ae48a38b63beb84753ff7d",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:15:34.7559952Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "a7b86ff86eb1481e928faca404dd8fa6",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:16:28.7190057Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "6cc99680b6ef4971bbe7e51b494f04bd",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:17:25.0197238Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "c64152fae64645b29ccd49f3cd1a09ed",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:17:30.8118803Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "66ad9d3b30e942c3a93f94b0031dbb8c",
+      "UserId": "e14008578930428fba0b46b2b81799ec",
+      "Email": "definitely-not-here@ghost999.xyz",
+      "EventName": "signup_completed",
+      "CreatedAtUtc": "2026-09-16T20:22:16.591294Z",
+      "Metadata": {}
+    },
+    {
+      "Id": "46fa9ec139844d0a9363dfb4ce6f2f4f",
+      "UserId": "3b53fa97bc0e4348ae5943f615a14c35",
+      "Email": "admin@wise-ravens.com",
+      "EventName": "login_success",
+      "CreatedAtUtc": "2026-09-16T20:22:16.7370933Z",
+      "Metadata": {}
     }
   ],
   "Invites": [],

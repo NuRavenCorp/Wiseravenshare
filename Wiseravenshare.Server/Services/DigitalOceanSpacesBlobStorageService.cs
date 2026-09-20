@@ -31,6 +31,7 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
     private readonly string? _secretKey;
     private readonly string? _endpoint;
     private readonly string? _region;
+    private readonly string? _cdnPublicBaseUrl;
     private readonly string? _publicBaseUrl;
     private readonly bool _enabled;
 
@@ -45,6 +46,7 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         _secretKey = configuration["Storage:Blob:SecretKey"]?.Trim() ?? configuration["Storage__Blob__SecretKey"]?.Trim();
         _endpoint = configuration["Storage:Blob:Endpoint"]?.Trim() ?? configuration["Storage__Blob__Endpoint"]?.Trim();
         _region = configuration["Storage:Blob:Region"]?.Trim() ?? configuration["Storage__Blob__Region"]?.Trim();
+        _cdnPublicBaseUrl = configuration["Storage:Blob:CdnPublicBaseUrl"]?.Trim() ?? configuration["Storage__Blob__CdnPublicBaseUrl"]?.Trim();
         _publicBaseUrl = configuration["Storage:Blob:PublicBaseUrl"]?.Trim() ?? configuration["Storage__Blob__PublicBaseUrl"]?.Trim();
     }
 
@@ -57,9 +59,13 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
             return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(_publicBaseUrl))
+        var preferredPublicBaseUrl = !string.IsNullOrWhiteSpace(_cdnPublicBaseUrl)
+            ? _cdnPublicBaseUrl
+            : _publicBaseUrl;
+
+        if (!string.IsNullOrWhiteSpace(preferredPublicBaseUrl))
         {
-            return CombineUrl(_publicBaseUrl, objectKey);
+            return CombineUrl(preferredPublicBaseUrl, objectKey);
         }
 
         if (string.IsNullOrWhiteSpace(_endpoint) || string.IsNullOrWhiteSpace(_bucketName))
@@ -138,9 +144,14 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
             BucketName = _bucketName,
             Key = normalizedObjectKey,
             ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
-            InputStream = content,
-            CannedACL = S3CannedACL.Private
+            InputStream = content
         };
+
+        // Cloudflare R2 buckets do not support S3 ACL headers; omit ACL when targeting R2 endpoints.
+        if (!IsCloudflareR2Endpoint(_endpoint))
+        {
+            request.CannedACL = S3CannedACL.Private;
+        }
 
         await client.PutObjectAsync(request, cancellationToken);
 
@@ -272,5 +283,20 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         }
 
         return baseUrl.TrimEnd('/') + "/" + relativePath.TrimStart('/');
+    }
+
+    private static bool IsCloudflareR2Endpoint(string? endpoint)
+    {
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            return endpoint.Contains("cloudflarestorage.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return uri.Host.Contains("cloudflarestorage.com", StringComparison.OrdinalIgnoreCase);
     }
 }

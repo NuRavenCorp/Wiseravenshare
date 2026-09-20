@@ -1026,7 +1026,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                                                         onError={(event) => {
                                                             event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="120"%3E%3Crect fill="%23202b3d" width="120" height="120"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
                                                         }}
-                                                        style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'cover' }}
+                                                        style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'contain', background: 'rgba(15,23,42,0.75)' }}
                                                     />
                                                 )}
                                                 {item.type === 'music' && <FiMusic style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
@@ -1126,14 +1126,16 @@ const MyLibraryPage = ({ onNavigate }) => {
                                             >
                                                 <FiTrash2 />
                                             </button>
-                                            <img
-                                                src={photo.thumbnailUrl || photo.imageUrl || photo.url}
-                                                alt={photo.title}
-                                                onError={(event) => {
-                                                    event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%23202b3d" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="16"%3ENo Preview%3C/text%3E%3C/svg%3E';
-                                                }}
-                                                style={{ width: '100%', height: '150px', objectFit: 'cover', display: 'block' }}
-                                            />
+                                            <div style={{ width: '100%', height: '150px', background: 'rgba(15,23,42,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <img
+                                                    src={photo.thumbnailUrl || photo.imageUrl || photo.url}
+                                                    alt={photo.title}
+                                                    onError={(event) => {
+                                                        event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%23202b3d" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="16"%3ENo Preview%3C/text%3E%3C/svg%3E';
+                                                    }}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                                                />
+                                            </div>
                                             <div style={{ padding: '8px', fontSize: '12px' }}>
                                                 <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                     {photo.title}

@@ -18,13 +18,19 @@ const getConnection = (feeds, ...keys) => {
     return {};
 };
 
-const normalizeConnection = (connection) => ({
-    enabled: Boolean(connection?.enabled),
-    username: String(connection?.username || '').trim(),
-    profileUrl: String(connection?.profileUrl || '').trim(),
-    feedUrl: String(connection?.feedUrl || '').trim(),
-    designation: String(connection?.designation || '').trim()
-});
+const normalizeConnection = (connection) => {
+    const username = String(connection?.username || '').trim();
+    const profileUrl = String(connection?.profileUrl || '').trim();
+    const feedUrl = String(connection?.feedUrl || '').trim();
+
+    return {
+        enabled: Boolean(connection?.enabled || username || profileUrl || feedUrl),
+        username,
+        profileUrl,
+        feedUrl,
+        designation: String(connection?.designation || '').trim()
+    };
+};
 
 const normalizeSocialFeeds = (socialFeeds) => {
     const feeds = socialFeeds || {};
@@ -32,11 +38,55 @@ const normalizeSocialFeeds = (socialFeeds) => {
         tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
         instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'))
+        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
 };
 
 const getProfileDraftKey = (userId) => `wiseProfileEditDraft:${userId}`;
+const getCumulativeMetricsKey = (userId) => `wiseProfileCumulativeMetrics:${userId}`;
+
+const readCumulativeMetrics = (userId) => {
+    if (!userId) {
+        return null;
+    }
+
+    try {
+        const raw = localStorage.getItem(getCumulativeMetricsKey(userId));
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        return {
+            posts: Number(parsed.posts) || 0,
+            followers: Number(parsed.followers) || 0,
+            following: Number(parsed.following) || 0,
+            mentions: Number(parsed.mentions) || 0,
+            likes: Number(parsed.likes) || 0
+        };
+    } catch {
+        return null;
+    }
+};
+
+const writeCumulativeMetrics = (userId, metrics) => {
+    if (!userId || !metrics) {
+        return;
+    }
+
+    try {
+        localStorage.setItem(getCumulativeMetricsKey(userId), JSON.stringify(metrics));
+    } catch {
+        // Best-effort cache for cumulative profile counters.
+    }
+};
 
 const parseAdminEmails = () => {
     const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
@@ -97,7 +147,10 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         tikTok: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         facebook: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         instagram: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
+        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        twitter: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        linkedIn: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        bluesky: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
     };
     const [posts, setPosts] = useState([]);
     const [likedPosts, setLikedPosts] = useState([]);
@@ -120,6 +173,13 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     const [photoLightbox, setPhotoLightbox] = useState(null);
     const [profileVideoIdx, setProfileVideoIdx] = useState(0);
     const [profileVideoAutoPlay, setProfileVideoAutoPlay] = useState(true);
+    const [cumulativeMetrics, setCumulativeMetrics] = useState({
+        posts: 0,
+        followers: 0,
+        following: 0,
+        mentions: 0,
+        likes: 0
+    });
     const [followerProfiles, setFollowerProfiles] = useState([]);
     const [followingProfiles, setFollowingProfiles] = useState([]);
     const [associationView, setAssociationView] = useState('followers');
@@ -178,6 +238,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         if (!user?.id) {
             setFocusedProfile(null);
             return;
+        }
+
+        const cachedMetrics = readCumulativeMetrics(user.id);
+        if (cachedMetrics) {
+            setCumulativeMetrics(cachedMetrics);
         }
 
         try {
@@ -476,6 +541,33 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         };
     }, [posts, stats.followers, stats.following, user?.handle, user?.id, user?.username]);
 
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        setCumulativeMetrics((previous) => {
+            const next = {
+                posts: Math.max(Number(previous?.posts) || 0, Number(derivedStats.posts) || 0),
+                followers: Math.max(Number(previous?.followers) || 0, Number(derivedStats.followers) || 0),
+                following: Math.max(Number(previous?.following) || 0, Number(derivedStats.following) || 0),
+                mentions: Math.max(Number(previous?.mentions) || 0, Number(derivedStats.mentions) || 0),
+                likes: Math.max(Number(previous?.likes) || 0, Number(derivedStats.likes) || 0)
+            };
+
+            writeCumulativeMetrics(user.id, next);
+            return next;
+        });
+    }, [derivedStats, user?.id]);
+
+    const displayedStats = useMemo(() => ({
+        posts: Math.max(Number(cumulativeMetrics.posts) || 0, Number(derivedStats.posts) || 0),
+        followers: Math.max(Number(cumulativeMetrics.followers) || 0, Number(derivedStats.followers) || 0),
+        following: Math.max(Number(cumulativeMetrics.following) || 0, Number(derivedStats.following) || 0),
+        mentions: Math.max(Number(cumulativeMetrics.mentions) || 0, Number(derivedStats.mentions) || 0),
+        likes: Math.max(Number(cumulativeMetrics.likes) || 0, Number(derivedStats.likes) || 0)
+    }), [cumulativeMetrics, derivedStats]);
+
     const repliesPosts = posts.filter((p) => {
         const comments = Array.isArray(p.comments) ? p.comments : [];
         return comments.some((c) => c?.user?.id === user?.id || c?.userId === user?.id);
@@ -494,12 +586,23 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     });
 
     const tabCounts = {
-        posts: derivedStats.posts,
+        posts: displayedStats.posts,
         replies: repliesPosts.length,
         media: mediaPosts.length,
         likes: likedPosts.length,
-        mentions: derivedStats.mentions
+        mentions: displayedStats.mentions
     };
+
+    const oldPosts = useMemo(() => {
+        const items = Array.isArray(posts) ? [...posts] : [];
+        items.sort((a, b) => {
+            const aTime = new Date(a?.createdAt || a?.timestamp || 0).getTime();
+            const bTime = new Date(b?.createdAt || b?.timestamp || 0).getTime();
+            return bTime - aTime;
+        });
+
+        return items.slice(3);
+    }, [posts]);
 
     const tabs = [
         { id: 'posts', label: `Posts (${tabCounts.posts})`, icon: 'fas fa-file-alt' },
@@ -1252,11 +1355,11 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                     borderTop: '1px solid var(--border-color)'
                 }}>
                     {[
-                        { label: 'Posts', value: derivedStats.posts, interactive: false },
-                        { label: 'Followers', value: derivedStats.followers, interactive: true, view: 'followers' },
-                        { label: 'Following', value: derivedStats.following, interactive: true, view: 'following' },
-                        { label: 'Mentions', value: derivedStats.mentions, interactive: false },
-                        { label: 'Likes', value: derivedStats.likes, interactive: false }
+                        { label: 'Posts', value: displayedStats.posts, interactive: false },
+                        { label: 'Followers', value: displayedStats.followers, interactive: true, view: 'followers' },
+                        { label: 'Following', value: displayedStats.following, interactive: true, view: 'following' },
+                        { label: 'Mentions', value: displayedStats.mentions, interactive: false },
+                        { label: 'Likes', value: displayedStats.likes, interactive: false }
                     ].map((metric) => {
                         const metricCard = (
                             <>
@@ -1445,157 +1548,214 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                 </div>
             )}
 
-            {/* Tabs */}
             <div style={{
-                display: 'flex',
-                gap: '10px',
-                marginBottom: '20px',
-                borderBottom: '1px solid var(--border-color)',
-                paddingBottom: '10px'
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '20px',
+                alignItems: 'start'
             }}>
-                {tabs.map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        style={{
-                            padding: '10px 20px',
-                            borderRadius: '20px',
-                            border: 'none',
-                            background: activeTab === tab.id ? 'var(--highlight-color)' : 'transparent',
-                            color: 'var(--text-color)',
-                            cursor: 'pointer',
-                            transition: 'all 0.3s'
-                        }}
-                    >
-                        <i className={tab.icon} style={{ marginRight: '8px' }}></i>
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+                <div>
+                    {/* Tabs */}
+                    <div style={{
+                        display: 'flex',
+                        gap: '10px',
+                        marginBottom: '20px',
+                        borderBottom: '1px solid var(--border-color)',
+                        paddingBottom: '10px',
+                        flexWrap: 'wrap'
+                    }}>
+                        {tabs.map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                style={{
+                                    padding: '10px 20px',
+                                    borderRadius: '20px',
+                                    border: 'none',
+                                    background: activeTab === tab.id ? 'var(--highlight-color)' : 'transparent',
+                                    color: 'var(--text-color)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s'
+                                }}
+                            >
+                                <i className={tab.icon} style={{ marginRight: '8px' }}></i>
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
 
-            {/* Tab Content */}
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <div className="loading-spinner" style={{ margin: '0 auto' }}></div>
-                </div>
-            ) : (() => {
-                const tabData = {
-                    posts,
-                    replies: repliesPosts,
-                    media: mediaPosts,
-                    likes: likedPosts
-                };
-                const visible = tabData[activeTab] || [];
+                    {/* Tab Content */}
+                    {loading ? (
+                        <div style={{ textAlign: 'center', padding: '50px' }}>
+                            <div className="loading-spinner" style={{ margin: '0 auto' }}></div>
+                        </div>
+                    ) : (() => {
+                        const tabData = {
+                            posts,
+                            replies: repliesPosts,
+                            media: mediaPosts,
+                            likes: likedPosts
+                        };
+                        const visible = tabData[activeTab] || [];
 
-                // Dedicated photo gallery + video player for the Media tab.
-                if (activeTab === 'media') {
-                    const currentVideo = videoProfilePosts[profileVideoIdx];
-                    const currentVideoUrl = currentVideo?.mediaUrl || currentVideo?.videoUrl || '';
-                    return (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-                            {/* Photo Gallery */}
-                            <section>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>📷 Photos ({photoProfilePosts.length})</h3>
-                                </div>
-                                {photoProfilePosts.length === 0 ? (
-                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No photos yet.</div>
-                                ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px' }}>
-                                        {photoProfilePosts.map((post) => (
-                                            <button key={post.id} type="button"
-                                                onClick={() => setPhotoLightbox(post.mediaUrl)}
-                                                style={{ padding: 0, border: 'none', borderRadius: '10px', overflow: 'hidden', aspectRatio: '1', cursor: 'zoom-in', background: 'rgba(255,255,255,0.06)' }}>
-                                                <img src={post.mediaUrl} alt={post.content?.slice(0, 40) || 'Photo'}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        // Dedicated photo gallery + video player for the Media tab.
+                        if (activeTab === 'media') {
+                            const currentVideo = videoProfilePosts[profileVideoIdx];
+                            const currentVideoUrl = currentVideo?.mediaUrl || currentVideo?.videoUrl || '';
+                            return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                                    {/* Photo Gallery */}
+                                    <section>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>📷 Photos ({photoProfilePosts.length})</h3>
+                                        </div>
+                                        {photoProfilePosts.length === 0 ? (
+                                            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No photos yet.</div>
+                                        ) : (
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px' }}>
+                                                {photoProfilePosts.map((post) => (
+                                                    <button key={post.id} type="button"
+                                                        onClick={() => setPhotoLightbox(post.mediaUrl)}
+                                                        style={{ padding: 0, border: 'none', borderRadius: '10px', overflow: 'hidden', aspectRatio: '1', cursor: 'zoom-in', background: 'rgba(255,255,255,0.06)' }}>
+                                                        <img src={post.mediaUrl} alt={post.content?.slice(0, 40) || 'Photo'}
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                            onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </section>
+
+                                    {/* Video Player */}
+                                    <section>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>🎬 Videos ({videoProfilePosts.length})</h3>
+                                            <button type="button"
+                                                onClick={() => setProfileVideoAutoPlay((v) => !v)}
+                                                style={{ fontSize: '12px', padding: '4px 12px', borderRadius: '999px', border: '1px solid var(--border-color)', background: profileVideoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
+                                                {profileVideoAutoPlay ? '▶▶ Auto-play on' : '⏸ Auto-play off'}
                                             </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </section>
-
-                            {/* Video Player */}
-                            <section>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>🎬 Videos ({videoProfilePosts.length})</h3>
-                                    <button type="button"
-                                        onClick={() => setProfileVideoAutoPlay((v) => !v)}
-                                        style={{ fontSize: '12px', padding: '4px 12px', borderRadius: '999px', border: '1px solid var(--border-color)', background: profileVideoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
-                                        {profileVideoAutoPlay ? '▶▶ Auto-play on' : '⏸ Auto-play off'}
-                                    </button>
-                                </div>
-                                {videoProfilePosts.length === 0 ? (
-                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No videos yet.</div>
-                                ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '14px' }}>
-                                        {/* Active player */}
-                                        <div style={{ borderRadius: '14px', overflow: 'hidden', background: '#000', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            {currentVideoUrl ? (
-                                                <video key={currentVideoUrl} src={currentVideoUrl} controls autoPlay={profileVideoAutoPlay}
-                                                    style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
-                                                    onEnded={() => {
-                                                        if (profileVideoAutoPlay && profileVideoIdx < videoProfilePosts.length - 1) {
-                                                            setProfileVideoIdx((i) => i + 1);
-                                                        }
-                                                    }} />
-                                            ) : (
-                                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>Select a video</span>
-                                            )}
                                         </div>
-                                        {/* Playlist */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '420px', overflowY: 'auto' }}>
-                                            {videoProfilePosts.map((post, idx) => (
-                                                <button key={post.id} type="button"
-                                                    onClick={() => setProfileVideoIdx(idx)}
-                                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '10px', border: `1px solid ${profileVideoIdx === idx ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: profileVideoIdx === idx ? 'rgba(255,255,255,0.08)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', textAlign: 'left' }}>
-                                                    <span style={{ fontSize: '16px', flexShrink: 0 }}>{profileVideoIdx === idx ? '▶' : '○'}</span>
-                                                    <span style={{ fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                                                        {post.content?.slice(0, 36) || `Video ${idx + 1}`}
-                                                    </span>
-                                                </button>
-                                            ))}
+                                        {videoProfilePosts.length === 0 ? (
+                                            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No videos yet.</div>
+                                        ) : (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '14px' }}>
+                                                {/* Active player */}
+                                                <div style={{ borderRadius: '14px', overflow: 'hidden', background: '#000', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    {currentVideoUrl ? (
+                                                        <video key={currentVideoUrl} src={currentVideoUrl} controls autoPlay={profileVideoAutoPlay}
+                                                            style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
+                                                            onEnded={() => {
+                                                                if (profileVideoAutoPlay && profileVideoIdx < videoProfilePosts.length - 1) {
+                                                                    setProfileVideoIdx((i) => i + 1);
+                                                                }
+                                                            }} />
+                                                    ) : (
+                                                        <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>Select a video</span>
+                                                    )}
+                                                </div>
+                                                {/* Playlist */}
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '420px', overflowY: 'auto' }}>
+                                                    {videoProfilePosts.map((post, idx) => (
+                                                        <button key={post.id} type="button"
+                                                            onClick={() => setProfileVideoIdx(idx)}
+                                                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '10px', border: `1px solid ${profileVideoIdx === idx ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: profileVideoIdx === idx ? 'rgba(255,255,255,0.08)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', textAlign: 'left' }}>
+                                                            <span style={{ fontSize: '16px', flexShrink: 0 }}>{profileVideoIdx === idx ? '▶' : '○'}</span>
+                                                            <span style={{ fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                                {post.content?.slice(0, 36) || `Video ${idx + 1}`}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </section>
+
+                                    {/* Lightbox */}
+                                    {photoLightbox && (
+                                        <div onClick={() => setPhotoLightbox(null)}
+                                            style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+                                            <img src={photoLightbox} alt="Full view"
+                                                style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+
+                        if (visible.length === 0) {
+                            const emptyMessages = {
+                                posts: { icon: 'fas fa-file-alt', text: 'No posts yet. Share your first post!' },
+                                replies: { icon: 'fas fa-reply', text: 'No replies yet.' },
+                                media: { icon: 'fas fa-image', text: 'No media posts yet.' },
+                                likes: { icon: 'fas fa-heart', text: 'No liked posts yet.' }
+                            };
+                            const msg = emptyMessages[activeTab] || emptyMessages.posts;
+                            return (
+                                <div style={{ textAlign: 'center', padding: '50px', color: 'var(--highlight-color)' }}>
+                                    <i className={msg.icon} style={{ fontSize: '50px', marginBottom: '15px' }}></i>
+                                    <p>{msg.text}</p>
+                                </div>
+                            );
+                        }
+
+                        return visible.map((post) => (
+                            <PostCard
+                                key={post.id}
+                                post={post}
+                                currentUser={user}
+                            />
+                        ));
+                    })()}
+                </div>
+
+                <aside style={{
+                    background: 'var(--card-bg)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    padding: '14px',
+                    position: 'relative'
+                }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Old Posts</div>
+                    <div style={{ fontSize: '12px', color: 'var(--highlight-color)', marginBottom: '10px' }}>
+                        Archived from your earlier timeline
+                    </div>
+
+                    {oldPosts.length === 0 ? (
+                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)' }}>
+                            Old posts will appear here as your timeline grows.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '70vh', overflowY: 'auto' }}>
+                            {oldPosts.map((post, index) => {
+                                const createdAt = post?.createdAt || post?.timestamp;
+                                const createdText = createdAt
+                                    ? new Date(createdAt).toLocaleDateString()
+                                    : 'Unknown date';
+
+                                return (
+                                    <div
+                                        key={`old-post-${post?.id || index}`}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.03)',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '10px',
+                                            padding: '10px'
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '6px' }}>
+                                            {createdText}
+                                        </div>
+                                        <div style={{ fontSize: '13px', lineHeight: 1.4 }}>
+                                            {String(post?.content || '').trim().slice(0, 120) || 'No post text available.'}
                                         </div>
                                     </div>
-                                )}
-                            </section>
-
-                            {/* Lightbox */}
-                            {photoLightbox && (
-                                <div onClick={() => setPhotoLightbox(null)}
-                                    style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
-                                    <img src={photoLightbox} alt="Full view"
-                                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
-                                </div>
-                            )}
+                                );
+                            })}
                         </div>
-                    );
-                }
-
-                if (visible.length === 0) {
-                    const emptyMessages = {
-                        posts: { icon: 'fas fa-file-alt', text: 'No posts yet. Share your first post!' },
-                        replies: { icon: 'fas fa-reply', text: 'No replies yet.' },
-                        media: { icon: 'fas fa-image', text: 'No media posts yet.' },
-                        likes: { icon: 'fas fa-heart', text: 'No liked posts yet.' }
-                    };
-                    const msg = emptyMessages[activeTab] || emptyMessages.posts;
-                    return (
-                        <div style={{ textAlign: 'center', padding: '50px', color: 'var(--highlight-color)' }}>
-                            <i className={msg.icon} style={{ fontSize: '50px', marginBottom: '15px' }}></i>
-                            <p>{msg.text}</p>
-                        </div>
-                    );
-                }
-
-                return visible.map((post) => (
-                    <PostCard
-                        key={post.id}
-                        post={post}
-                        currentUser={user}
-                    />
-                ));
-            })()}
+                    )}
+                </aside>
+            </div>
         </div>
     );
 };

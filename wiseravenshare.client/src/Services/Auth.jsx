@@ -5,6 +5,57 @@ const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 30000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 const AUTH_V2_PREFIX = '/auth-v2';
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
+const normalizeConnection = (connection) => ({
+    enabled: Boolean(connection?.enabled),
+    username: String(connection?.username || '').trim(),
+    profileUrl: String(connection?.profileUrl || '').trim(),
+    feedUrl: String(connection?.feedUrl || '').trim(),
+    designation: String(connection?.designation || '').trim()
+});
+
+const hasMeaningfulFeeds = (socialFeeds) => {
+    if (!socialFeeds || typeof socialFeeds !== 'object') return false;
+    return Object.values(socialFeeds).some(conn =>
+        conn && typeof conn === 'object' &&
+        (Boolean(conn.username) || Boolean(conn.enabled) || Boolean(conn.profileUrl) || Boolean(conn.feedUrl))
+    );
+};
+
+const normalizeSocialFeeds = (socialFeeds) => {
+    const feeds = socialFeeds || {};
+    return {
+        tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
+        facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
+        instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
+    };
+};
+
+const normalizeUser = (user) => {
+    if (!user || typeof user !== 'object') {
+        return user;
+    }
+
+    return {
+        ...user,
+        socialFeeds: normalizeSocialFeeds(user.socialFeeds)
+    };
+};
+
 class AuthService {
     constructor() {
         const token = this.getToken();
@@ -47,7 +98,7 @@ class AuthService {
         const token = source.token || source.accessToken || source.AccessToken || source.jwt || '';
         const refreshToken = source.refreshToken || source.RefreshToken || '';
         const adminPassToken = source.adminPassToken || source.AdminPassToken || '';
-        const user = source.user || source.User || null;
+        const user = normalizeUser(source.user || source.User || null);
 
         return {
             ...source,
@@ -67,7 +118,24 @@ class AuthService {
 
         const response = await api.post(`/auth${path}`, payload, {
             timeout: timeoutMs,
-            headers
+            headers,
+            withCredentials: true
+        });
+
+        return response?.data ?? {};
+    }
+
+    async postAuthV2(path, payload = {}, options = {}) {
+        const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_AUTH_REQUEST_TIMEOUT_MS;
+        const token = this.getToken();
+        const headers = {
+            ...(options.withAuth && token ? { Authorization: `Bearer ${token}` } : {})
+        };
+
+        const response = await api.post(`${AUTH_V2_PREFIX}${path}`, payload, {
+            timeout: timeoutMs,
+            headers,
+            withCredentials: true
         });
 
         return response?.data ?? {};
@@ -290,6 +358,75 @@ class AuthService {
         }
     }
 
+    async getSharedPodcastScript(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-shared-script', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async sharePodcastScript(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-shared-script', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async getPodcastSessionSnapshot(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-session-snapshot', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async savePodcastSessionSnapshot(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-session-snapshot', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async getPodcastTeamSelection(roomId = 'main') {
+        try {
+            const token = this.getToken();
+            const response = await api.get('/auth/team-access/podcast-team-selection', {
+                timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS,
+                params: { roomId },
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+
+            return response?.data ?? {};
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
+    async savePodcastTeamSelection(payload) {
+        try {
+            return await this.postAuth('/team-access/podcast-team-selection', payload, { withAuth: true });
+        } catch (error) {
+            throw this.handleError(error);
+        }
+    }
+
     async issueAdminPassToken() {
         try {
             const response = await this.postAuth('/admin-pass', {}, { withAuth: true });
@@ -313,6 +450,27 @@ class AuthService {
         }
     }
 
+    async refreshSession() {
+        const refreshToken = this.getRefreshToken();
+        const payload = refreshToken ? { refreshToken } : {};
+
+        const response = this.normalizeAuthResponse(await this.postAuthV2('/refresh-token', payload));
+        if (!response.token) {
+            const err = new Error('Session refresh did not return an access token.');
+            err.status = 401;
+            throw err;
+        }
+
+        this.setToken(response.token);
+        this.setRefreshToken(response.refreshToken || refreshToken || '');
+        this.setAdminPassToken(response.adminPassToken || this.getAdminPassToken() || '');
+        if (response.user) {
+            this.setUser(response.user);
+        }
+
+        return response;
+    }
+
     async verifyToken(token) {
         try {
             const response = this.normalizeAuthResponse(await this.postAuthV2('/verify', { token }, { withAuth: true }));
@@ -325,11 +483,49 @@ class AuthService {
             err.status = 401;
             throw err;
         } catch (error) {
-            if (error?.response?.status === 401 || error?.response?.status === 403 || error?.status === 401 || error?.status === 403) {
-                this.clearToken();
-                this.clearRefreshToken();
-                this.clearUser();
+            const status = Number(error?.response?.status || error?.status || 0);
+            if (status === 401 || status === 403) {
+                try {
+                    await this.refreshSession();
+                    const refreshedToken = this.getToken();
+                    if (!refreshedToken) {
+                        throw error;
+                    }
+
+                    const retryResponse = this.normalizeAuthResponse(await this.postAuthV2('/verify', { token: refreshedToken }, { withAuth: true }));
+                    if (retryResponse.valid && retryResponse.user) {
+                        this.setUser(retryResponse.user);
+                        return retryResponse.user;
+                    }
+
+                    throw error;
+                } catch {
+                    this.clearToken();
+                    this.clearRefreshToken();
+                    this.clearUser();
+                    throw this.handleError(error);
+                }
             }
+
+            const cachedUser = this.getUser();
+            const payload = this.decodeTokenPayload() || {};
+            const fallbackUser = {
+                ...(cachedUser || {}),
+                id: cachedUser?.id || payload.sub || payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || '',
+                email: cachedUser?.email || payload.email || payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || '',
+                username: cachedUser?.username || payload.unique_name || payload.name || payload.preferred_username || '',
+                name: cachedUser?.name || cachedUser?.displayName || payload.name || payload.unique_name || payload.preferred_username || '',
+                displayName: cachedUser?.displayName || cachedUser?.name || payload.name || payload.unique_name || payload.preferred_username || '',
+                avatar: cachedUser?.avatar || cachedUser?.avatarUrl || payload.avatar || payload.picture || '',
+                avatarUrl: cachedUser?.avatarUrl || cachedUser?.avatar || payload.avatar || payload.picture || ''
+            };
+
+            const normalizedFallbackUser = this.normalizeUser(fallbackUser);
+            if (normalizedFallbackUser && (normalizedFallbackUser.id || normalizedFallbackUser.email || normalizedFallbackUser.username)) {
+                this.setUser(normalizedFallbackUser);
+                return normalizedFallbackUser;
+            }
+
             throw this.handleError(error);
         }
     }
@@ -337,8 +533,9 @@ class AuthService {
     async updateProfile(userId, updates) {
         try {
             const response = await api.put(`/users/${userId}`, updates);
-            this.setUser(response.data);
-            return response.data;
+            const normalized = normalizeUser(response.data);
+            this.setUser(normalized);
+            return normalized;
         } catch (error) {
             throw this.handleError(error);
         }
@@ -370,7 +567,7 @@ class AuthService {
     }
 
     async legacyLogin(email, password) {
-        const normalizedLogin = String(email || '').trim();
+        const normalizedLogin = this.normalizeLoginIdentifier(email);
         const response = this.normalizeAuthResponse(await this.postAuthV2('/login', {
             email: normalizedLogin,
             usernameOrEmail: normalizedLogin,
@@ -387,6 +584,19 @@ class AuthService {
         this.setAdminPassToken(response.adminPassToken);
         this.setUser(response.user);
         return response;
+    }
+
+    normalizeLoginIdentifier(value) {
+        const text = String(value || '').trim();
+        if (!text) {
+            return '';
+        }
+
+        if (text.startsWith('@')) {
+            return text.slice(1).trim();
+        }
+
+        return text;
     }
 
     async legacyRegister(userData) {
@@ -480,7 +690,14 @@ class AuthService {
             return;
         }
 
-        localStorage.setItem('user_data', JSON.stringify(user));
+        // When the server omits socialFeeds (e.g. verify/refresh endpoints), preserve
+        // whatever was previously cached so we don't wipe saved connections on reload.
+        const existing = this.getUser();
+        const userToStore = (!hasMeaningfulFeeds(user.socialFeeds) && hasMeaningfulFeeds(existing?.socialFeeds))
+            ? { ...user, socialFeeds: existing.socialFeeds }
+            : user;
+
+        localStorage.setItem('user_data', JSON.stringify(normalizeUser(userToStore)));
     }
 
     getUser() {

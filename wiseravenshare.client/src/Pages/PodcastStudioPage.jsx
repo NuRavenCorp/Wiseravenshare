@@ -7,6 +7,8 @@ import { apiService } from '../Services/api';
 import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
+import { useCollaborationHub } from '../hooks/useCollaborationHub';
+import { subscriptionService } from '../Services/subscriptionService';
 
 const initialTeamMembers = [];
 
@@ -20,6 +22,24 @@ const scriptBlocks = [
     'Three key takeaways and proof points',
     'Call-to-action and audience prompt'
 ];
+
+const scriptPipelineSegments = [
+    { key: 'segment1', label: 'Segment 1', helper: 'Opening hook and audience framing' },
+    { key: 'segment2', label: 'Segment 2', helper: 'Guest introduction with context and tone' },
+    { key: 'segment3', label: 'Segment 3', helper: 'Three key takeaways and proof points' },
+    { key: 'segment4', label: 'Segment 4', helper: 'Call-to-action and audience prompt' }
+];
+
+const createEmptyScriptPipeline = () => ({
+    segment1: '',
+    segment2: '',
+    segment3: '',
+    segment4: ''
+});
+
+const SHARED_SCRIPT_STORAGE_KEY = 'wiseSharedPodcastScriptPayload';
+const PODCAST_AUTOSAVE_STORAGE_KEY = 'wisePodcastSessionAutosave';
+const MAX_REMOTE_GUEST_MONITORS = 3;
 
 const studioModes = ['Phone', 'Tablet', 'Desktop', 'Camera', 'Remote guest'];
 const controlRoles = ['Owner', 'Producer', 'Host', 'Editor', 'Script Lead', 'Guest'];
@@ -151,6 +171,73 @@ const apiRoleToRoleLabel = {
     'script-lead': 'Script Lead'
 };
 
+// Podcast Studio Pricing Plans
+const PODCAST_PRICING_PLANS = {
+    growthSuite: {
+        id: 'growth-suite',
+        name: 'Growth Suite',
+        tagline: 'Unlock trending analytics & audience insights',
+        features: [
+            'Growth analytics & trending content dashboard',
+            'Audience sentiment tracking across platforms',
+            '30-day performance history',
+            'Topic recommendations based on trends',
+            'Monthly download reports'
+        ],
+        prices: {
+            monthly: 4900, // $49/month
+            annual: 49000  // $490/year (saves $98/year)
+        },
+        trial: {
+            days: 14,
+            message: 'Try Growth Suite for 14 days free — no credit card required'
+        }
+    },
+    studio_plus: {
+        id: 'studio-plus',
+        name: 'Studio Plus',
+        tagline: 'Bring reviewers, editors, and team operators into one lane',
+        features: [
+            'Team review workflows (unlimited reviewers)',
+            'Assignment & approval chains',
+            'Permission-based editing roles',
+            'Team member analytics & activity logs',
+            'Multi-role simultaneous editing',
+            'Team workspace with shared assets'
+        ],
+        prices: {
+            monthly: 9900, // $99/month
+            annual: 99000  // $990/year (saves $198/year)
+        },
+        trial: {
+            days: 7,
+            message: 'Try Studio Plus for 7 days free — invite your team'
+        }
+    },
+    podcast_pro: {
+        id: 'podcast-pro',
+        name: 'Podcast Pro Bundle',
+        tagline: 'Growth Suite + Studio Plus + priority support',
+        features: [
+            'Everything in Growth Suite',
+            'Everything in Studio Plus',
+            '24/7 priority email support',
+            'Monthly strategy calls with our team',
+            'Custom episode templates',
+            'Advanced analytics export'
+        ],
+        prices: {
+            monthly: 14900, // $149/month (save $35 vs individual)
+            annual: 149000  // $1,490/year (saves $470/year)
+        },
+        trial: {
+            days: 30,
+            message: 'Try Podcast Pro for 30 days free — full feature access'
+        },
+        featured: true
+    }
+};
+
 const normalizeLoginIdentifier = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
 
 const inferIdentifierType = (identifier) => {
@@ -224,12 +311,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [status, setStatus] = useState('Ready to record');
     const [selectedMode, setSelectedMode] = useState('Desktop');
     const [scriptText, setScriptText] = useState('');
+    const [scriptPipeline, setScriptPipeline] = useState(createEmptyScriptPipeline);
     const [controlRole, setControlRole] = useState('Owner');
     const [storyAngle, setStoryAngle] = useState('');
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
-    const [workflowStage, setWorkflowStage] = useState('Plan');
+    const [workflowStage, setWorkflowStage] = useState('Team');
     const [teamCreatorId, setTeamCreatorId] = useState('');
     const [teamCreatorLabel, setTeamCreatorLabel] = useState('');
     const [designeeKeys, setDesigneeKeys] = useState([]);
@@ -239,6 +327,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
     const [permissions, setPermissions] = useState(rolePermissions.Owner);
+
+    // Pricing & Subscription State
+    const [showPricingModal, setShowPricingModal] = useState(false);
+    const [selectedPlan, setSelectedPlan] = useState(null);
+    const [billingCycle, setBillingCycle] = useState('monthly');
+    const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+    const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(true);
 
     // Recording State
     const [isRecording, setIsRecording] = useState(false);
@@ -272,6 +367,14 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [guestNameInput, setGuestNameInput] = useState('');
     const [newPageType, setNewPageType] = useState('Script');
     const [newPageTitle, setNewPageTitle] = useState('');
+    const [lastAutosavedAt, setLastAutosavedAt] = useState('');
+    const [podcastBridgeState, setPodcastBridgeState] = useState({
+        connected: false,
+        roomKey: 'main',
+        activeFootage: null,
+        latestCommand: null,
+        commandResponses: []
+    });
 
     // Refs
     const videoRef = useRef(null);
@@ -281,6 +384,133 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const broadcastChannelRef = useRef(null);
+    const sharedScriptVersionRef = useRef('');
+    const autosaveVersionRef = useRef('');
+    const autosaveRestoreAppliedRef = useRef(false);
+    const podcastBridgeVideoRef = useRef(null);
+    const {
+        joinPodcastBridge,
+        leavePodcastBridge,
+        issuePodcastCommand,
+        onEvent
+    } = useCollaborationHub();
+
+    const actorKeys = useMemo(() => {
+        const keys = [
+            normalizeLoginIdentifier(user?.id),
+            normalizeLoginIdentifier(user?.email),
+            normalizeLoginIdentifier(user?.handle),
+            normalizeLoginIdentifier(user?.username),
+            normalizeLoginIdentifier(user?.displayName),
+            normalizeLoginIdentifier(user?.name)
+        ].filter(Boolean);
+        return Array.from(new Set(keys));
+    }, [user]);
+
+    const creatorKey = normalizeLoginIdentifier(teamCreatorId);
+    const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
+    const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
+    const canApproveWorkflow = isCreator || isDesignee;
+    const canEditScriptPipeline = permissions.canEditScript || isCreator || isDesignee;
+    const canEditLiveScript = canEditScriptPipeline || workflowStage === 'Team';
+    const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
+    const activeRemoteGuests = teamMembersList.filter((member) => (
+        String(member?.role || '').toLowerCase() === 'guest' && member?.coupled !== false
+    ));
+    const splitGuestMonitors = Array.from({ length: MAX_REMOTE_GUEST_MONITORS }, (_, index) => activeRemoteGuests[index] || null);
+
+    const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
+
+    const buildSessionSnapshot = () => ({
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    });
+
+    const applySessionSnapshot = (snapshot) => {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'title')) setTitle(String(snapshot.title || ''));
+        if (snapshot.format && formatDefinitions[snapshot.format]) setFormat(snapshot.format);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'scriptText')) setScriptText(String(snapshot.scriptText || ''));
+
+        if (snapshot.scriptPipeline && typeof snapshot.scriptPipeline === 'object') {
+            setScriptPipeline({
+                segment1: String(snapshot.scriptPipeline.segment1 || ''),
+                segment2: String(snapshot.scriptPipeline.segment2 || ''),
+                segment3: String(snapshot.scriptPipeline.segment3 || ''),
+                segment4: String(snapshot.scriptPipeline.segment4 || '')
+            });
+        }
+
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'storyAngle')) setStoryAngle(String(snapshot.storyAngle || ''));
+        if (snapshot.urgency) setUrgency(String(snapshot.urgency));
+        if (snapshot.selectedMode) setSelectedMode(String(snapshot.selectedMode));
+        if (typeof snapshot.runOrderApproved === 'boolean') setRunOrderApproved(snapshot.runOrderApproved);
+        if (Array.isArray(snapshot.teamMembersList)) setTeamMembersList(snapshot.teamMembersList);
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorId')) setTeamCreatorId(String(snapshot.teamCreatorId || ''));
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'teamCreatorLabel')) setTeamCreatorLabel(String(snapshot.teamCreatorLabel || ''));
+        if (Array.isArray(snapshot.designeeKeys)) setDesigneeKeys(snapshot.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+        if (Array.isArray(snapshot.workspacePages) && snapshot.workspacePages.length > 0) setWorkspacePages(snapshot.workspacePages);
+        if (snapshot.activeWorkspacePageId) setActiveWorkspacePageId(String(snapshot.activeWorkspacePageId));
+        if (snapshot.workflowStage) setWorkflowStage(String(snapshot.workflowStage));
+        if (typeof snapshot.isCameraOn === 'boolean') setIsCameraOn(snapshot.isCameraOn);
+        if (typeof snapshot.isMuted === 'boolean') setIsMuted(snapshot.isMuted);
+        if (typeof snapshot.guestCamOn === 'boolean') setGuestCamOn(snapshot.guestCamOn);
+        if (typeof snapshot.guestMuted === 'boolean') setGuestMuted(snapshot.guestMuted);
+        if (typeof snapshot.guestConnected === 'boolean') setGuestConnected(snapshot.guestConnected);
+    };
+
+    useEffect(() => {
+        if (teamCreatorId || !user?.id) {
+            return;
+        }
+
+        const creatorId = String(user.id);
+        const creatorName = String(user?.name || user?.displayName || user?.username || user?.email || 'Team Creator');
+        setTeamCreatorId(creatorId);
+        setTeamCreatorLabel(creatorName);
+    }, [teamCreatorId, user]);
+
+    useEffect(() => {
+        if (!activeWorkspacePageId && workspacePages[0]?.id) {
+            setActiveWorkspacePageId(workspacePages[0].id);
+        }
+
+        if (activeWorkspacePageId && !workspacePages.some((page) => page.id === activeWorkspacePageId)) {
+            setActiveWorkspacePageId(workspacePages[0]?.id || '');
+        }
+    }, [activeWorkspacePageId, workspacePages]);
+
+    useEffect(() => {
+        if (activeWorkspacePage?.type !== 'Script') {
+            return;
+        }
+
+        const pageContent = String(activeWorkspacePage?.content || '');
+        if (pageContent !== scriptText) {
+            setScriptText(pageContent);
+        }
+    }, [activeWorkspacePage, scriptText]);
 
     const actorKeys = useMemo(() => {
         const keys = [
@@ -420,15 +650,19 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const applyPolicyState = (state) => {
-        const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
+        const serverRoleLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Guest';
+        const resolvedLabel = (isCreator && serverRoleLabel === 'Guest') ? 'Owner' : serverRoleLabel;
         const allowedRoles = Array.isArray(state?.allowedRoles)
             ? state.allowedRoles
                 .map((role) => apiRoleToRoleLabel[String(role || '').trim().toLowerCase()])
                 .filter(Boolean)
             : [];
+        const mergedAllowedRoles = resolvedLabel === 'Owner' && !allowedRoles.includes('Owner')
+            ? ['Owner', ...allowedRoles]
+            : allowedRoles;
 
         setControlRole(resolvedLabel);
-        setAllowedRoleLabels(allowedRoles.length > 0 ? allowedRoles : ['Guest']);
+        setAllowedRoleLabels(mergedAllowedRoles.length > 0 ? mergedAllowedRoles : [resolvedLabel]);
         setPermissions(normalizePermissions(state?.permissions));
         setSyncSource(state?.isFallback ? 'fallback' : 'server');
         setSyncError('');
@@ -438,12 +672,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
         try {
             const state = await authService.getPodcastControlState();
             // The signed-in user is the team leader (Owner) unless the server says otherwise.
-            const resolvedLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Owner';
-            const allowedRoles = Array.isArray(state?.allowedRoles) && state.allowedRoles.length > 0
+            const serverRoleLabel = apiRoleToRoleLabel[String(state?.effectiveRole || '').trim().toLowerCase()] || 'Owner';
+            const resolvedLabel = (isCreator && serverRoleLabel === 'Guest') ? 'Owner' : serverRoleLabel;
+            let allowedRoles = Array.isArray(state?.allowedRoles) && state.allowedRoles.length > 0
                 ? state.allowedRoles
                     .map((role) => apiRoleToRoleLabel[String(role || '').trim().toLowerCase()])
                     .filter(Boolean)
                 : controlRoles;
+            if (resolvedLabel === 'Owner' && !allowedRoles.includes('Owner')) {
+                allowedRoles = ['Owner', ...allowedRoles];
+            }
 
             setAllowedRoleLabels(allowedRoles);
             setPermissions(rolePermissions[resolvedLabel] || rolePermissions.Owner);
@@ -485,6 +723,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             title: overrides.title ?? title,
             format: overrides.format ?? format,
             scriptText: overrides.scriptText ?? scriptText,
+            scriptPipeline: overrides.scriptPipeline ?? scriptPipeline,
             storyAngle: overrides.storyAngle ?? storyAngle,
             urgency: overrides.urgency ?? urgency,
             selectedMode: overrides.selectedMode ?? selectedMode,
@@ -497,6 +736,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
             workspacePages: overrides.workspacePages ?? workspacePages,
             activeWorkspacePageId: overrides.activeWorkspacePageId ?? activeWorkspacePageId,
             workflowStage: overrides.workflowStage ?? workflowStage,
+            isCameraOn: overrides.isCameraOn ?? isCameraOn,
+            isMuted: overrides.isMuted ?? isMuted,
+            guestCamOn: overrides.guestCamOn ?? guestCamOn,
+            guestMuted: overrides.guestMuted ?? guestMuted,
+            guestConnected: overrides.guestConnected ?? guestConnected,
+            forceStopCamera: Boolean(overrides.forceStopCamera),
+            forceStopFeed: Boolean(overrides.forceStopFeed),
             senderRole: controlRole,
             timestamp: new Date().toISOString()
         };
@@ -518,6 +764,176 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setTandemSyncedAt(new Date().toLocaleTimeString());
     };
 
+    const applyFeedShutdown = (statusMessage) => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch {
+                // Ignore stop errors while forcing feed shutdown.
+            }
+        }
+
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+        }
+
+        if (streamRef.current) {
+            try {
+                streamRef.current.getTracks().forEach((track) => track.stop());
+            } catch {
+                // Ignore track shutdown errors.
+            }
+            streamRef.current = null;
+        }
+
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+
+        if (guestVideoRef.current) {
+            guestVideoRef.current.srcObject = null;
+        }
+
+        setIsRecording(false);
+        setIsPaused(false);
+        setIsCameraOn(false);
+        setIsMuted(true);
+        setGuestCamOn(false);
+        setGuestMuted(true);
+        setGuestConnected(false);
+        setStatus(statusMessage);
+    };
+
+    const handleForceShutdownFeed = () => {
+        if (!canForceShutdownFeed) {
+            setStatus('Only upper-level designated studio members can shut down camera and footage feeds.');
+            return;
+        }
+
+        void issueControlCommand('cut', 'Upper-level shutdown requested.');
+        applyFeedShutdown('Studio camera and footage feeds shut down by upper-level control.');
+        broadcastTandemState({
+            isCameraOn: false,
+            isMuted: true,
+            guestCamOn: false,
+            guestMuted: true,
+            guestConnected: false,
+            forceStopCamera: true,
+            forceStopFeed: true
+        });
+    };
+
+    const handleStartTrial = async (planKey) => {
+        try {
+            const planPriceIdMap = {
+                'growth_suite': process.env.REACT_APP_STRIPE_GROWTH_SUITE_PRICE_ID || 'price_growth_suite',
+                'studio_plus': process.env.REACT_APP_STRIPE_STUDIO_PLUS_PRICE_ID || 'price_studio_plus',
+                'podcast_pro': process.env.REACT_APP_STRIPE_PODCAST_PRO_PRICE_ID || 'price_podcast_pro'
+            };
+
+            const priceId = planPriceIdMap[planKey];
+            const successUrl = `${window.location.origin}/podcast-studio?checkout=success`;
+            const cancelUrl = `${window.location.origin}/podcast-studio?checkout=cancel`;
+
+            const result = await subscriptionService.createCheckoutSession({
+                priceId,
+                successUrl,
+                cancelUrl,
+                plan: planKey,
+                billingCycle: billingCycle
+            });
+
+            if (result?.url) {
+                window.location.href = result.url;
+            }
+        } catch (error) {
+            console.error('Checkout error:', error);
+            setStatus(`Unable to start checkout: ${error?.message || 'Unknown error'}`);
+        }
+    };
+
+    const issueControlCommand = async (command, note = '') => {
+        try {
+            await issuePodcastCommand('main', command, note, '');
+            setStatus(`Command sent to videographer: ${String(command || '').toUpperCase()}`);
+        } catch (error) {
+            setStatus(error?.message || 'Unable to send command to videographer right now.');
+        }
+    };
+
+    useEffect(() => {
+        if (!teamCreatorId || !teamCreatorLabel) {
+            return;
+        }
+
+        broadcastTandemState({ teamCreatorId, teamCreatorLabel });
+    }, [teamCreatorId, teamCreatorLabel]);
+
+    useEffect(() => {
+        joinPodcastBridge('main')
+            .then(() => {
+                setPodcastBridgeState((prev) => ({ ...prev, connected: true }));
+            })
+            .catch(() => {
+                setPodcastBridgeState((prev) => ({ ...prev, connected: false }));
+            });
+
+        const disposeSnapshot = onEvent('PodcastBridgeSnapshot', (payload) => {
+            const commandLog = Array.isArray(payload?.commandLog) ? payload.commandLog : [];
+            const latestCommand = commandLog.length > 0 ? commandLog[commandLog.length - 1] : null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                connected: true,
+                roomKey: String(payload?.roomKey || 'main'),
+                activeFootage: payload?.activeFootage || null,
+                latestCommand,
+                commandResponses: latestCommand?.responses || []
+            }));
+        });
+
+        const disposeFootage = onEvent('PodcastFootageSelected', (payload) => {
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                connected: true,
+                roomKey: String(payload?.roomKey || 'main'),
+                activeFootage: payload?.footage || null
+            }));
+            if (payload?.footage?.title) {
+                setStatus(`Podcast bridge switched to footage: ${payload.footage.title}`);
+            }
+        });
+
+        const disposeCommand = onEvent('PodcastCommandIssued', (payload) => {
+            const command = payload?.command || null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                latestCommand: command,
+                commandResponses: command?.responses || []
+            }));
+
+            if (String(command?.command || '').toLowerCase() === 'cut') {
+                applyFeedShutdown('CUT command received. Local camera and feed were stopped.');
+            }
+        });
+
+        const disposeResponse = onEvent('PodcastCommandResponse', (payload) => {
+            const command = payload?.command || null;
+            setPodcastBridgeState((prev) => ({
+                ...prev,
+                latestCommand: command,
+                commandResponses: command?.responses || []
+            }));
+        });
+
+        return () => {
+            disposeSnapshot?.();
+            disposeFootage?.();
+            disposeCommand?.();
+            disposeResponse?.();
+            leavePodcastBridge('main').catch(() => null);
+        };
+    }, [joinPodcastBridge, leavePodcastBridge, onEvent]);
+
     useEffect(() => {
         if (!teamCreatorId || !teamCreatorLabel) {
             return;
@@ -538,10 +954,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 if (data?.type === 'PODCAST_TANDEM_SYNC') {
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -551,6 +980,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                     if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                     if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 }
             };
@@ -564,10 +997,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     const data = JSON.parse(e.newValue);
                     if (data.title) setTitle(data.title);
                     if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                    if (data.scriptText) setScriptText(data.scriptText);
+                    if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                    if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                        setScriptPipeline({
+                            segment1: String(data.scriptPipeline.segment1 || ''),
+                            segment2: String(data.scriptPipeline.segment2 || ''),
+                            segment3: String(data.scriptPipeline.segment3 || ''),
+                            segment4: String(data.scriptPipeline.segment4 || '')
+                        });
+                    }
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
                     if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                    if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                    if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                    if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                    if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                     if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                     if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -577,6 +1023,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                     if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                     if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                    if (data.forceStopCamera || data.forceStopFeed) {
+                        applyFeedShutdown('Studio camera and footage feeds closed by upper-level control.');
+                    }
+                    if (data.shared) setStatus('Shared script received for dissemination.');
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 } catch {
                     // Ignore parse error
@@ -590,10 +1040,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 const data = JSON.parse(savedState);
                 if (data.title) setTitle(data.title);
                 if (data.format && formatDefinitions[data.format]) setFormat(data.format);
-                if (data.scriptText) setScriptText(data.scriptText);
+                if (Object.prototype.hasOwnProperty.call(data, 'scriptText')) setScriptText(String(data.scriptText || ''));
+                if (data.scriptPipeline && typeof data.scriptPipeline === 'object') {
+                    setScriptPipeline({
+                        segment1: String(data.scriptPipeline.segment1 || ''),
+                        segment2: String(data.scriptPipeline.segment2 || ''),
+                        segment3: String(data.scriptPipeline.segment3 || ''),
+                        segment4: String(data.scriptPipeline.segment4 || '')
+                    });
+                }
                 if (data.storyAngle) setStoryAngle(data.storyAngle);
                 if (data.urgency) setUrgency(data.urgency);
                 if (data.selectedMode) setSelectedMode(data.selectedMode);
+                if (typeof data.isCameraOn === 'boolean') setIsCameraOn(data.isCameraOn);
+                if (typeof data.isMuted === 'boolean') setIsMuted(data.isMuted);
+                if (typeof data.guestCamOn === 'boolean') setGuestCamOn(data.guestCamOn);
+                if (typeof data.guestMuted === 'boolean') setGuestMuted(data.guestMuted);
+                if (typeof data.guestConnected === 'boolean') setGuestConnected(data.guestConnected);
                 if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
                 if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                 if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
@@ -603,6 +1066,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
                 if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
                 if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+                if (data.forceStopCamera || data.forceStopFeed) {
+                    applyFeedShutdown('Studio camera and footage feeds restored in shutdown state by upper-level control.');
+                }
+                if (data.shared) setStatus('Shared script restored for dissemination.');
             }
         } catch {
             // Ignore restore parse error.
@@ -714,6 +1181,303 @@ const PodcastStudioPage = ({ onNavigate }) => {
             // Ignore local storage restore failures.
         }
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadSubscriptionStatus = async () => {
+            try {
+                const res = await apiService.getMyFeatureAccess();
+                if (!cancelled) {
+                    setSubscriptionStatus(res.data ?? res);
+                }
+            } catch {
+                if (!cancelled) {
+                    setSubscriptionStatus(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setSubscriptionStatusLoading(false);
+                }
+            }
+        };
+
+        loadSubscriptionStatus();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        autosaveRestoreAppliedRef.current = true;
+
+        const restoreFromLocalAutosave = () => {
+            try {
+                const raw = localStorage.getItem(PODCAST_AUTOSAVE_STORAGE_KEY);
+                if (!raw) {
+                    return false;
+                }
+
+                const parsed = JSON.parse(raw);
+                const snapshot = parsed?.snapshot;
+                const version = String(parsed?.version || '').trim();
+
+                if (!snapshot || typeof snapshot !== 'object') {
+                    return false;
+                }
+
+                applySessionSnapshot(snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from local autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoreFromServerAutosave = async () => {
+            try {
+                const response = await authService.getPodcastSessionSnapshot('main');
+                if (!response?.hasSnapshot || !response?.snapshot) {
+                    return false;
+                }
+
+                const version = String(response.version || '').trim();
+                if (version && version === autosaveVersionRef.current) {
+                    return true;
+                }
+
+                applySessionSnapshot(response.snapshot);
+                if (version) {
+                    autosaveVersionRef.current = version;
+                }
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+                setStatus('Recovered podcast session from cloud autosave.');
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const restoredLocal = restoreFromLocalAutosave();
+        if (!restoredLocal) {
+            void restoreFromServerAutosave();
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!autosaveRestoreAppliedRef.current) {
+            return;
+        }
+
+        const persistAutosave = async () => {
+            const snapshot = buildSessionSnapshot();
+            const version = Date.now().toString();
+
+            try {
+                localStorage.setItem(PODCAST_AUTOSAVE_STORAGE_KEY, JSON.stringify({ version, snapshot }));
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Ignore local autosave errors.
+            }
+
+            try {
+                const response = await authService.savePodcastSessionSnapshot({
+                    roomId: 'main',
+                    version,
+                    snapshot
+                });
+
+                const committedVersion = String(response?.version || version).trim();
+                autosaveVersionRef.current = committedVersion;
+                setLastAutosavedAt(new Date().toLocaleTimeString());
+            } catch {
+                // Keep local autosave even if cloud snapshot fails.
+            }
+        };
+
+        const timeoutId = window.setTimeout(() => {
+            void persistAutosave();
+        }, 1000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [
+        title,
+        format,
+        scriptText,
+        scriptPipeline,
+        storyAngle,
+        urgency,
+        selectedMode,
+        runOrderApproved,
+        teamMembersList,
+        teamCreatorId,
+        teamCreatorLabel,
+        designeeKeys,
+        workspacePages,
+        activeWorkspacePageId,
+        workflowStage,
+        isCameraOn,
+        isMuted,
+        guestCamOn,
+        guestMuted,
+        guestConnected
+    ]);
+
+    useEffect(() => {
+        let active = true;
+
+        const applyRemoteSharedScript = (payload) => {
+            const hasSharedScript = payload?.hasSharedScript === true;
+            if (!hasSharedScript) {
+                return;
+            }
+
+            const incomingVersion = String(payload?.version || payload?.sharedAtUtc || '').trim();
+            if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                return;
+            }
+
+            if (incomingVersion) {
+                sharedScriptVersionRef.current = incomingVersion;
+            }
+
+            const incomingScript = String(payload?.scriptText || '').trim();
+            const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                ? {
+                    segment1: String(payload.scriptPipeline.segment1 || ''),
+                    segment2: String(payload.scriptPipeline.segment2 || ''),
+                    segment3: String(payload.scriptPipeline.segment3 || ''),
+                    segment4: String(payload.scriptPipeline.segment4 || '')
+                }
+                : null;
+
+            if (incomingScript) {
+                setScriptText(incomingScript);
+            }
+
+            if (incomingPipeline) {
+                setScriptPipeline(incomingPipeline);
+            }
+
+            if (incomingScript && activeWorkspacePage) {
+                setWorkspacePages((previous) => previous.map((page) => (
+                    page.id === activeWorkspacePage.id
+                        ? { ...page, content: incomingScript }
+                        : page
+                )));
+            }
+
+            setStatus('Shared script synced from the team cloud room.');
+        };
+
+        const loadSharedScriptFromServer = async () => {
+            try {
+                const payload = await authService.getSharedPodcastScript('main');
+                if (!active) {
+                    return;
+                }
+
+                applyRemoteSharedScript(payload);
+            } catch {
+                // Server sync unavailable; keep local tandem sync active.
+            }
+        };
+
+        void loadSharedScriptFromServer();
+
+        const intervalId = window.setInterval(() => {
+            void loadSharedScriptFromServer();
+        }, 10000);
+
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                void loadSharedScriptFromServer();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            active = false;
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
+    }, [activeWorkspacePage]);
+
+    useEffect(() => {
+        const applySharedPayload = (raw) => {
+            try {
+                if (!raw) {
+                    return;
+                }
+
+                const payload = JSON.parse(raw);
+                const incomingVersion = String(payload?.version || payload?.sharedAt || '').trim();
+                if (incomingVersion && incomingVersion === sharedScriptVersionRef.current) {
+                    return;
+                }
+
+                if (incomingVersion) {
+                    sharedScriptVersionRef.current = incomingVersion;
+                }
+
+                const incomingScript = String(payload?.scriptText || '').trim();
+                const incomingPipeline = payload?.scriptPipeline && typeof payload.scriptPipeline === 'object'
+                    ? {
+                        segment1: String(payload.scriptPipeline.segment1 || ''),
+                        segment2: String(payload.scriptPipeline.segment2 || ''),
+                        segment3: String(payload.scriptPipeline.segment3 || ''),
+                        segment4: String(payload.scriptPipeline.segment4 || '')
+                    }
+                    : null;
+
+                if (incomingScript) {
+                    setScriptText(incomingScript);
+                }
+
+                if (incomingPipeline) {
+                    setScriptPipeline(incomingPipeline);
+                }
+
+                if (incomingScript && activeWorkspacePage) {
+                    setWorkspacePages((previous) => previous.map((page) => (
+                        page.id === activeWorkspacePage.id
+                            ? { ...page, content: incomingScript }
+                            : page
+                    )));
+                }
+
+                if (payload?.shared) {
+                    setStatus('Shared script received for dissemination.');
+                }
+            } catch {
+                // Ignore malformed shared payload
+            }
+        };
+
+        const handleSharedPayloadStorage = (event) => {
+            if (event.key === SHARED_SCRIPT_STORAGE_KEY && event.newValue) {
+                applySharedPayload(event.newValue);
+            }
+        };
+
+        window.addEventListener('storage', handleSharedPayloadStorage);
+        applySharedPayload(localStorage.getItem(SHARED_SCRIPT_STORAGE_KEY));
+        return () => {
+            window.removeEventListener('storage', handleSharedPayloadStorage);
+        };
+    }, [activeWorkspacePage]);
 
     // Recording Functions
     const startRecording = async () => {
@@ -1043,6 +1807,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         const candidateName = resolvedName || 'Remote User';
         const displayName = candidateName.charAt(0).toUpperCase() + candidateName.slice(1);
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier || displayName);
+        const existingGuest = teamMembersList.find((member) => (
+            resolveMemberKey(member) === normalizedIdentifier
+        ));
+
+        if (syncRole === 'Guest' && !existingGuest && activeRemoteGuests.length >= MAX_REMOTE_GUEST_MONITORS) {
+            setSyncMessage(`Remote guest split monitor is full (${MAX_REMOTE_GUEST_MONITORS}/${MAX_REMOTE_GUEST_MONITORS}).`);
+            setStatus('Remote guest split monitor is full. Remove one guest to add another.');
+            return;
+        }
+
         const login = resolveLoginStatus(identifier);
 
         const updatedList = upsertTeamMember({
@@ -1069,6 +1844,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleGuestInvite = () => {
         const gName = guestNameInput.trim();
         if (!gName) return;
+
+        const normalizedIdentifier = normalizeLoginIdentifier(gName);
+        const existingGuest = teamMembersList.find((member) => (
+            resolveMemberKey(member) === normalizedIdentifier
+        ));
+
+        if (!existingGuest && activeRemoteGuests.length >= MAX_REMOTE_GUEST_MONITORS) {
+            setStatus('Remote guest split monitor is full. Remove one guest to add another.');
+            return;
+        }
+
         const login = resolveLoginStatus(gName);
         const updatedList = upsertTeamMember({
             name: gName,
@@ -1142,6 +1928,39 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setStatus(`Connection broken for ${member?.name || 'team member'}.`);
     };
 
+    const toggleJoinRoom = (member) => {
+        if (!isCreator && !isDesignee) {
+            setStatus('Only the team creator or a workflow designee can admit members into the room.');
+            return;
+        }
+
+        const targetKey = resolveMemberKey(member);
+        if (!targetKey) {
+            setStatus('This person needs a username/email before room admission can be toggled.');
+            return;
+        }
+
+        const updatedList = teamMembersList.map((entry) => {
+            if (resolveMemberKey(entry) !== targetKey) {
+                return entry;
+            }
+
+            const currentlyJoined = String(entry?.loginState || '').toLowerCase() === 'online';
+            return {
+                ...entry,
+                coupled: !currentlyJoined,
+                loginState: currentlyJoined ? 'pending' : 'online',
+                loginStatus: currentlyJoined ? 'Awaiting login in room' : 'Joined room',
+                status: currentlyJoined ? 'Waiting for room admission' : 'Synced in Tandem',
+                syncedAt: new Date().toLocaleTimeString()
+            };
+        });
+
+        setTeamMembersList(updatedList);
+        broadcastTandemState({ teamMembersList: updatedList });
+        setStatus(`Room admission updated for ${member?.name || 'team member'}.`);
+    };
+
     const addWorkspacePage = () => {
         const page = createWorkspacePage(newPageType, newPageTitle);
         const nextPages = [page, ...workspacePages];
@@ -1187,13 +2006,96 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const handleShareScript = () => {
+        const sharedAt = new Date().toISOString();
+        const sharedPayload = {
+            scriptText,
+            scriptPipeline,
+            shared: true,
+            sharedAt,
+            version: sharedAt,
+            senderRole: controlRole
+        };
+
         try {
             localStorage.setItem('wiseSharedPodcastScript', scriptText);
+            localStorage.setItem(SHARED_SCRIPT_STORAGE_KEY, JSON.stringify(sharedPayload));
         } catch {
             // Best effort only.
         }
-        broadcastTandemState({ scriptText, shared: true });
-        setStatus('Script shared and synced across all connected tandem team members.');
+
+        broadcastTandemState({ scriptText, scriptPipeline, shared: true, sharedAt });
+
+        const remotePayload = {
+            roomId: 'main',
+            scriptText,
+            scriptPipeline: {
+                segment1: String(scriptPipeline.segment1 || ''),
+                segment2: String(scriptPipeline.segment2 || ''),
+                segment3: String(scriptPipeline.segment3 || ''),
+                segment4: String(scriptPipeline.segment4 || '')
+            }
+        };
+
+        void authService.sharePodcastScript(remotePayload)
+            .then((response) => {
+                if (response?.version) {
+                    sharedScriptVersionRef.current = String(response.version);
+                }
+                setStatus('Script shared for dissemination across all connected tandem team members.');
+            })
+            .catch(() => {
+                setStatus('Script shared locally. Team cloud sync will retry on next refresh.');
+            });
+    };
+
+    const updateScriptPipelineSegment = (segmentKey, value) => {
+        if (!canEditScriptPipeline) {
+            setStatus('Only Owner, Producer, Director/Editor, or Host can fill script pipeline segments.');
+            return;
+        }
+
+        const nextPipeline = {
+            ...scriptPipeline,
+            [segmentKey]: value
+        };
+        setScriptPipeline(nextPipeline);
+        setRunOrderApproved(false);
+        broadcastTandemState({ scriptPipeline: nextPipeline, runOrderApproved: false });
+    };
+
+    const applyScriptPipelineToScript = () => {
+        const composed = scriptPipelineSegments
+            .map((segment) => {
+                const value = String(scriptPipeline[segment.key] || '').trim();
+                if (!value) {
+                    return '';
+                }
+                return `${segment.label}:\n${value}`;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+
+        if (!composed) {
+            setStatus('Fill at least one script pipeline segment before applying to live script.');
+            return;
+        }
+
+        setScriptText(composed);
+        setRunOrderApproved(false);
+        if (activeWorkspacePage) {
+            const updatedPages = workspacePages.map((page) => (
+                page.id === activeWorkspacePage.id
+                    ? { ...page, content: composed }
+                    : page
+            ));
+            setWorkspacePages(updatedPages);
+            broadcastTandemState({ scriptText: composed, scriptPipeline, workspacePages: updatedPages, runOrderApproved: false });
+            setStatus('Script pipeline applied to live script.');
+            return;
+        }
+
+        broadcastTandemState({ scriptText: composed, scriptPipeline, runOrderApproved: false });
+        setStatus('Script pipeline applied to live script.');
     };
 
     const setRemoteGuestMode = () => {
@@ -1230,6 +2132,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setTitle('');
         setStoryAngle('');
         setScriptText('');
+        setScriptPipeline(createEmptyScriptPipeline());
         setRunOrderApproved(false);
         setWorkspacePages(clearedPages);
         setWorkflowStage('Plan');
@@ -1239,10 +2142,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setGuestNameInput('');
         setNewPageTitle('');
 
+        try {
+            localStorage.removeItem('wisePodcastScriptDraft');
+            localStorage.removeItem(PODCAST_AUTOSAVE_STORAGE_KEY);
+            localStorage.removeItem('wiseSharedPodcastScript');
+            localStorage.removeItem(SHARED_SCRIPT_STORAGE_KEY);
+        } catch {
+            // Best effort cleanup only.
+        }
+
         broadcastTandemState({
             title: '',
             storyAngle: '',
             scriptText: '',
+            scriptPipeline: createEmptyScriptPipeline(),
             runOrderApproved: false,
             workspacePages: clearedPages,
             workflowStage: 'Plan'
@@ -1321,15 +2234,17 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const hasCoreBrief = Boolean(String(title || '').trim()) && Boolean(String(storyAngle || '').trim());
-    const hasScript = Boolean(String(scriptText || '').trim());
+    const hasScriptPipeline = scriptPipelineSegments.some((segment) => Boolean(String(scriptPipeline[segment.key] || '').trim()));
+    const hasScript = Boolean(String(scriptText || '').trim()) || hasScriptPipeline;
     const hasTeamReady = teamMembersList.some((member) => member?.coupled !== false);
-    const hasRecording = Boolean(recordedVideoUrl);
+    const hasRecording = Boolean(recordedVideoUrl || savedRecordingMediaUrl || hasSavedRecording);
+    const playbackMediaUrl = String(recordedVideoUrl || savedRecordingMediaUrl || '').trim();
 
     const flowSteps = [
+        { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
         { id: 'format', label: 'Format and urgency selected', done: Boolean(format && urgency), hint: 'Pick show structure and dispatch priority' },
-        { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
-        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Write your own script using the helper prompts' },
+        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Fill Script Pipeline segments or write your own script' },
         { id: 'approval', label: 'Run order approved', done: runOrderApproved, hint: 'Lock segment order before recording' },
         { id: 'publish', label: 'Recording saved to library', done: hasSavedRecording, hint: 'Record, review, then save to Ravensight Library' }
     ];
@@ -1346,49 +2261,140 @@ const PodcastStudioPage = ({ onNavigate }) => {
         { id: 'Ship', hint: 'Publish and handoff' }
     ];
 
-    const runNextStudioAction = async () => {
+    const nextRequiredFlow = (() => {
+        if (!hasTeamReady) {
+            return {
+                stage: 'Team',
+                actionLabel: 'Sync your team',
+                message: 'Pair at least one teammate or guest before moving forward in the flow.'
+            };
+        }
+
         if (!hasCoreBrief) {
-            setStatus('Complete episode title and story angle to lock your recording brief.');
-            setWorkflowStage('Plan');
-            return;
+            return {
+                stage: 'Plan',
+                actionLabel: 'Complete episode brief',
+                message: 'Complete episode title and story angle to lock your recording brief.'
+            };
         }
 
         if (!hasScript) {
-            setWorkflowStage('Script');
-            setStatus('Add your own script content before continuing. Helpers are shown, but no script is prefilled.');
-            return;
+            return {
+                stage: 'Script',
+                actionLabel: 'Write your script',
+                message: 'Fill Script Pipeline segments or add your own script content before continuing. No prewritten script is inserted.'
+            };
         }
 
         if (!runOrderApproved) {
-            setWorkflowStage('Script');
+            return {
+                stage: 'Script',
+                actionLabel: 'Approve run order',
+                message: 'Approve run order before going live.'
+            };
+        }
+
+        if (!isRecording && !hasRecording) {
+            return {
+                stage: 'Record',
+                actionLabel: 'Start recording',
+                message: 'Start recording when your team and script are ready.'
+            };
+        }
+
+        if (hasRecording && !hasSavedRecording) {
+            return {
+                stage: 'Review',
+                actionLabel: 'Save recording',
+                message: 'Save your recording to Ravensight Library before shipping.'
+            };
+        }
+
+        return {
+            stage: 'Ship',
+            actionLabel: 'Flow complete',
+            message: 'Podcast flow complete. Recording is saved and ready for Ravensight publishing.'
+        };
+    })();
+
+    const handleWorkflowStageSelect = (stageId) => {
+        if (isGuidedStudioLocked) {
+            promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.');
+            return;
+        }
+
+        if (stageId === nextRequiredFlow.stage || stageId === workflowStage) {
+            setWorkflowStage(stageId);
+            return;
+        }
+
+        const stageOrder = ['Plan', 'Script', 'Team', 'Record', 'Review', 'Ship'];
+        const requestedIndex = stageOrder.indexOf(stageId);
+        const requiredIndex = stageOrder.indexOf(nextRequiredFlow.stage);
+
+        if (requestedIndex > requiredIndex) {
+            setWorkflowStage(nextRequiredFlow.stage);
+            setStatus(`Next required stage: ${nextRequiredFlow.stage}. ${nextRequiredFlow.message}`);
+            return;
+        }
+
+        setWorkflowStage(stageId);
+    };
+
+    const runNextStudioAction = async () => {
+        if (isGuidedStudioLocked) {
+            promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.');
+            return;
+        }
+
+        setWorkflowStage(nextRequiredFlow.stage);
+
+        if (nextRequiredFlow.stage === 'Plan') {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Team') {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Script' && !hasScript) {
+            setStatus(nextRequiredFlow.message);
+            return;
+        }
+
+        if (nextRequiredFlow.stage === 'Script' && !runOrderApproved) {
             handleApproveRunOrder();
             return;
         }
 
-        if (!isRecording && !hasRecording) {
-            setWorkflowStage('Record');
+        if (nextRequiredFlow.stage === 'Record') {
             handleStartRecordingFromFlow();
             return;
         }
 
-        if (hasRecording && !hasSavedRecording) {
-            setWorkflowStage('Review');
+        if (nextRequiredFlow.stage === 'Review') {
             await saveRecordingToLibrary();
             return;
         }
 
-        setWorkflowStage('Ship');
-        setStatus('Podcast flow complete. Recording is saved and ready for Ravensight publishing.');
+        setStatus(nextRequiredFlow.message);
     };
 
-    const nextFlowActionLabel = (() => {
-        if (!hasCoreBrief) return 'Complete episode brief';
-        if (!hasScript) return 'Write your script';
-        if (!runOrderApproved) return 'Approve run order';
-        if (!isRecording && !hasRecording) return 'Start recording';
-        if (hasRecording && !hasSavedRecording) return 'Save recording';
-        return 'Flow complete';
-    })();
+    const nextFlowActionLabel = nextRequiredFlow.actionLabel;
+    const isGuidedStudioUnlocked = Boolean(
+        subscriptionStatus?.features?.find((f) => f.key === 'guided-studio-flow')?.canAccess
+        || subscriptionStatus?.isAdmin
+        || subscriptionStatus?.hasActiveSubscription
+    );
+    const isGuidedStudioLocked = subscriptionStatusLoading || !isGuidedStudioUnlocked;
+
+    const promptGuidedStudioUpgrade = (reason = 'Unlock Guided Studio Flow to continue. Stripe checkout opens with the plan list.') => {
+        setSelectedPlan('podcast_pro');
+        setShowPricingModal(true);
+        setStatus(reason);
+    };
 
     const audienceSummary = useMemo(() => ({
         segments: (formatDefinitions[format]?.segments || scriptBlocks).length,
@@ -1463,6 +2469,25 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
                         {/* Top Action Buttons */}
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={handleForceShutdownFeed}
+                                disabled={!canForceShutdownFeed}
+                                style={{
+                                    border: '1px solid rgba(248, 113, 113, 0.7)',
+                                    background: 'rgba(127, 29, 29, 0.5)',
+                                    color: '#fecaca',
+                                    borderRadius: '999px',
+                                    padding: '10px 16px',
+                                    fontWeight: '700',
+                                    cursor: canForceShutdownFeed ? 'pointer' : 'not-allowed',
+                                    opacity: canForceShutdownFeed ? 1 : 0.55
+                                }}
+                                title="Upper-level control: shut down all active camera and footage feeds"
+                            >
+                                Cut footage feed
+                            </button>
+
                             {!isRecording ? (
                                 <button
                                     type="button"
@@ -1578,6 +2603,208 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
                         Creator: {teamCreatorLabel || 'Pending'} · Designees: {designeeKeys.length} · Current stage: {workflowStage}
                     </div>
+                    {lastAutosavedAt && (
+                        <div style={{ fontSize: '12px', color: '#86efac' }}>
+                            Autosaved at {lastAutosavedAt}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Ravensight Podcast Capabilities Dashboard ── */}
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,15,55,0.92))',
+                    border: '1px solid rgba(129,140,248,0.3)',
+                    borderRadius: '20px',
+                    padding: '22px',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.35)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '20px' }}>🎙️</span>
+                                <div>
+                                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#e2e8f0', letterSpacing: '0.02em' }}>
+                                        Podcast Control Room Capabilities
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                        Podcast Studio now runs inside Ravensight — team recording and publishing in one production lane.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                background: 'rgba(34,197,94,0.12)',
+                                border: '1px solid rgba(34,197,94,0.3)',
+                                borderRadius: '999px',
+                                padding: '5px 12px',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                color: '#4ade80'
+                            }}>
+                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
+                                2 feature groups unlocked
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Feature cards */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '18px' }}>
+                        {/* Direct publishing — Unlocked */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.7))',
+                            border: '1px solid rgba(52,211,153,0.35)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>📡</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#4ade80', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.35)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Unlocked
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Direct publishing</div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                Send content to connected channels without manual copy-paste steps.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(52,211,153,0.45)', background: 'rgba(16,185,129,0.12)', color: '#34d399', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Publish now →
+                            </button>
+                        </div>
+
+                        {/* Scheduling & queueing — Unlocked */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(15,23,42,0.7))',
+                            border: '1px solid rgba(56,189,248,0.3)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>🗓️</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Unlocked
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Scheduling &amp; queueing</div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                Plan a content run in advance so publishing keeps moving when the team is offline.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(56,189,248,0.35)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Open planner →
+                            </button>
+                        </div>
+
+                        {/* Growth analytics — gated */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.5)',
+                            border: '1px solid rgba(100,116,139,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px',
+                            opacity: 0.75
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>📊</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Needs growth suite
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Growth analytics</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                                Use trend and audience signals to prioritize what gets posted next.
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+                                Try free for 14 days with Growth Suite
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => { setSelectedPlan('growth_suite'); setShowPricingModal(true); }}
+                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                View pricing →
+                            </button>
+                        </div>
+
+                        {/* Team workflows — gated */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.5)',
+                            border: '1px solid rgba(100,116,139,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px',
+                            opacity: 0.75
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>🏗️</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Needs studio plus
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Team workflows</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                                Bring reviewers, editors, and operators into the same publishing lane.
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+                                Try free for 7 days with Studio Plus
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => { setSelectedPlan('studio_plus'); setShowPricingModal(true); }}
+                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                View pricing →
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Billing status bar */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: 'rgba(248,113,113,0.08)',
+                        border: '1px solid rgba(248,113,113,0.25)',
+                        borderRadius: '12px',
+                        padding: '12px 16px',
+                        flexWrap: 'wrap',
+                        gap: '10px'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '18px' }}>💳</span>
+                            <div>
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fca5a5' }}>Billing status</div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                    Subscription not active — Synced from Stripe with status <strong style={{ color: '#f87171' }}>inactive</strong>.
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => navigateToFeaturePage('revenue', 'Opening Billing & Revenue...')}
+                            style={{
+                                border: '1px solid rgba(248,113,113,0.4)',
+                                background: 'rgba(248,113,113,0.12)',
+                                color: '#fca5a5',
+                                borderRadius: '8px',
+                                padding: '7px 14px',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap'
+                            }}
+                        >
+                            Manage billing →
+                        </button>
+                    </div>
                 </div>
 
                 <div style={{
@@ -1590,21 +2817,62 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#99f6e4', fontWeight: 700 }}>
                             Guided Studio Flow
                         </div>
+                        {isGuidedStudioLocked && (
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '10px',
+                                flexWrap: 'wrap',
+                                background: 'rgba(129,140,248,0.10)',
+                                border: '1px solid rgba(129,140,248,0.28)',
+                                borderRadius: '12px',
+                                padding: '12px 14px'
+                            }}>
+                                <div>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
+                                        {subscriptionStatusLoading ? 'Checking billing access...' : 'Guided Studio Flow is locked'}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
+                                        {subscriptionStatusLoading
+                                            ? 'Verifying Stripe subscription status before enabling the flow.'
+                                            : 'Open the pricing list to attach Stripe checkout and unlock Plan, Script, Record, Review, and Ship.'}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => promptGuidedStudioUpgrade(subscriptionStatusLoading ? 'Checking Stripe access...' : 'Guided Studio Flow is locked until a paid plan is active.')}
+                                    style={{
+                                        border: '1px solid rgba(129,140,248,0.45)',
+                                        background: 'rgba(129,140,248,0.18)',
+                                        color: '#c4b5fd',
+                                        borderRadius: '10px',
+                                        padding: '9px 14px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    View pricing &amp; unlock
+                                </button>
+                            </div>
+                        )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {workflowStages.map((stage) => (
                                 <button
                                     key={stage.id}
                                     type="button"
-                                    onClick={() => setWorkflowStage(stage.id)}
+                                    onClick={() => (isGuidedStudioLocked ? promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.') : handleWorkflowStageSelect(stage.id))}
                                     style={{
                                         border: workflowStage === stage.id ? '1px solid #34d399' : '1px solid var(--border-color)',
-                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
+                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : isGuidedStudioLocked ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.03)',
                                         color: 'var(--text-color)',
                                         borderRadius: '999px',
                                         padding: '7px 12px',
-                                        cursor: 'pointer',
+                                        cursor: isGuidedStudioLocked ? 'pointer' : 'pointer',
                                         fontSize: '12px',
-                                        fontWeight: workflowStage === stage.id ? 700 : 500
+                                        fontWeight: workflowStage === stage.id ? 700 : 500,
+                                        opacity: isGuidedStudioLocked && workflowStage !== stage.id ? 0.8 : 1
                                     }}
                                     title={stage.hint}
                                 >
@@ -1622,12 +2890,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '4px' }}>
                                 Follow the flow that reliably ships: brief, script, approval, recording, then library save.
                             </div>
+                            <div style={{ fontSize: '12px', color: '#99f6e4', marginTop: '4px' }}>
+                                Next required stage: {nextRequiredFlow.stage}
+                            </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: '11px', color: 'var(--light-color)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                                 Flow progress
                             </div>
                             <div style={{ fontSize: '24px', fontWeight: 800 }}>{flowProgressPercent}%</div>
+                            {isGuidedStudioLocked && (
+                                <div style={{ fontSize: '11px', color: '#c4b5fd', marginTop: '4px' }}>
+                                    Paid plan required
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1680,7 +2956,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </button>
                             <button
                                 type="button"
-                                onClick={runNextStudioAction}
+                                onClick={() => (isGuidedStudioLocked ? promptGuidedStudioUpgrade('Guided Studio Flow is locked until a paid plan is active.') : runNextStudioAction())}
                                 disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
                                 style={{
                                     border: 'none',
@@ -1701,35 +2977,142 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
                 {(workflowStage === 'Ship') && (
                 <div style={{
-                    background: 'linear-gradient(160deg, rgba(79, 70, 229, 0.14), rgba(15, 23, 42, 0.85))',
-                    border: '1px solid rgba(129, 140, 248, 0.35)',
-                    borderRadius: '18px',
-                    padding: '20px'
+                    background: 'linear-gradient(160deg, rgba(79,70,229,0.16), rgba(15,23,42,0.94))',
+                    border: '1px solid rgba(129,140,248,0.35)',
+                    borderRadius: '20px',
+                    padding: '22px'
                 }}>
-                    <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c4b5fd', fontWeight: 700 }}>
-                        Site Feature Connections
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '20px' }}>🚀</span>
+                                <span style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 800, color: '#c4b5fd' }}>
+                                    Ship &amp; Distribute
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 800, fontSize: '20px', color: '#e2e8f0' }}>
+                                {title || 'Untitled Episode'}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                                Format: {format} · Urgency: {urgency} · {storyAngle ? `"${storyAngle.slice(0,60)}"` : 'No story angle set'}
+                            </div>
+                        </div>
+                        {hasSavedRecording && savedRecordingMediaUrl && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.35)', color: '#4ade80', fontSize: '12px', fontWeight: 700, padding: '5px 12px', borderRadius: '999px' }}>
+                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80' }} />
+                                Recording ready
+                            </span>
+                        )}
                     </div>
-                    <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '6px' }}>
-                        Move this episode through the rest of WiseRavenShare without breaking workflow context.
+
+                    {/* 2-column: publish + queue */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '18px' }}>
+                        {/* Publish to platform */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.55)',
+                            border: '1px solid rgba(129,140,248,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#a5b4fc', fontWeight: 700, marginBottom: '12px' }}>
+                                Publish to platform
+                            </div>
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => openRavensightTab('upload', 'Sending to Ravensight for publishing...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(129,140,248,0.35)', background: 'rgba(79,70,229,0.14)', color: '#c4b5fd', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>🎬</span>
+                                    <span>Ravensight Library</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Upload →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.1)', color: '#34d399', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📺</span>
+                                    <span>Newsroom Video desk</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Handoff →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('social-feeds', 'Opening Social Feeds...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📡</span>
+                                    <span>Cross-post to social feeds</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Post →</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Schedule & queue */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.55)',
+                            border: '1px solid rgba(234,179,8,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fde68a', fontWeight: 700, marginBottom: '12px' }}>
+                                Schedule &amp; queue
+                            </div>
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(234,179,8,0.35)', background: 'rgba(234,179,8,0.12)', color: '#fde68a', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>🗓️</span>
+                                    <span>Add to release planner</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Schedule →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('podcast-rights-studio', 'Opening Podcast Rights Studio...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.1)', color: '#c4b5fd', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📜</span>
+                                    <span>Set episode rights</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Rights →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => openRavensightTab('library', 'Opening Ravensight Library...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(14,165,233,0.3)', background: 'rgba(14,165,233,0.1)', color: '#7dd3fc', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📚</span>
+                                    <span>View episode library</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Library →</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
-                        <button type="button" onClick={() => openRavensightTab('library', 'Opening Ravensight Library for saved podcast review...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(129, 140, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            📚 Open Ravensight Library
-                        </button>
-                        <button type="button" onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload for external distribution...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            📤 Open Ravensight Upload
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video handoff desk...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🎥 Open Newsroom Video
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(147, 51, 234, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🤝 Open Collaboration
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(234, 179, 8, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🗂 Open Planner
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('my-library', 'Opening My Library for related assets...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(14, 165, 233, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🎵 Open Music Library
+
+                    {/* Collaboration row */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        background: 'rgba(147,51,234,0.08)',
+                        border: '1px solid rgba(147,51,234,0.25)',
+                        borderRadius: '12px',
+                        padding: '12px 16px',
+                        flexWrap: 'wrap'
+                    }}>
+                        <span style={{ fontSize: '18px' }}>🤝</span>
+                        <div style={{ flex: 1, minWidth: '180px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>Bring in the team</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>Loop reviewers and editors in before final release.</div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')}
+                            style={{ border: '1px solid rgba(147,51,234,0.4)', background: 'rgba(147,51,234,0.16)', color: '#d8b4fe', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                            Open collaboration →
                         </button>
                     </div>
                 </div>
@@ -1835,6 +3218,56 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             {syncMessage}
                         </div>
                     )}
+
+                    <div style={{
+                        marginTop: '14px',
+                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                        borderRadius: '12px',
+                        padding: '12px',
+                        background: 'rgba(15, 23, 42, 0.55)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#7dd3fc' }}>
+                            Remote Guest Split Monitor (Startup Preview)
+                        </div>
+                        <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+                            {splitGuestMonitors.map((guest, index) => (
+                                <div
+                                    key={`startup-split-${index}`}
+                                    style={{
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '10px',
+                                        background: 'rgba(2, 6, 23, 0.7)',
+                                        minHeight: '102px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        textAlign: 'center',
+                                        padding: '8px'
+                                    }}
+                                >
+                                    {guest ? (
+                                        <>
+                                            <div style={{ fontSize: '18px' }}>👤</div>
+                                            <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '4px' }}>{guest.name}</div>
+                                            <div style={{ fontSize: '10px', color: '#93c5fd', marginTop: '2px' }}>
+                                                Slot {index + 1} active
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div style={{ fontSize: '16px', opacity: 0.7 }}>➕</div>
+                                            <div style={{ fontSize: '11px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                                Open slot {index + 1}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#bae6fd' }}>
+                            Add guests from Team setup. Up to {MAX_REMOTE_GUEST_MONITORS} remote guest monitors are shown.
+                        </div>
+                    </div>
+
                     <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
                         <button type="button" onClick={handleSyncConnection} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(2, 132, 199, 0.2)', color: 'var(--text-color)', padding: '8px', cursor: 'pointer' }}>
                             Sync Connection
@@ -1913,7 +3346,55 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                         </div>
 
-                        {/* Guest Cam A Stream */}
+                        <div style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '14px',
+                            background: 'rgba(15, 23, 42, 0.7)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                            minHeight: '180px',
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
+                            <div style={{
+                                padding: '8px 10px',
+                                borderBottom: '1px solid var(--border-color)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}>
+                                <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#86efac', fontWeight: 700 }}>
+                                    Live Video Feed Bridge
+                                </span>
+                                <span style={{ fontSize: '11px', color: podcastBridgeState.connected ? '#4ade80' : '#fca5a5' }}>
+                                    {podcastBridgeState.connected ? 'SignalR connected' : 'SignalR reconnecting'}
+                                </span>
+                            </div>
+
+                            {podcastBridgeState.activeFootage?.mediaUrl ? (
+                                <>
+                                    <video
+                                        ref={podcastBridgeVideoRef}
+                                        src={podcastBridgeState.activeFootage.mediaUrl}
+                                        poster={podcastBridgeState.activeFootage.thumbnailUrl || undefined}
+                                        controls
+                                        autoPlay
+                                        playsInline
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', flex: 1 }}
+                                    />
+                                    <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border-color)', fontSize: '12px', color: 'var(--light-color)' }}>
+                                        {podcastBridgeState.activeFootage.title || 'Incoming footage'}
+                                    </div>
+                                </>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '18px', color: 'var(--light-color)', marginTop: 'auto', marginBottom: 'auto' }}>
+                                    Waiting for videographer feed selection from Ravensight Video Feed.
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Remote Guest Split Monitor (up to 3) */}
                         <div style={{
                             border: '1px solid var(--border-color)',
                             borderRadius: '14px',
@@ -1921,17 +3402,54 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             padding: '14px',
                             position: 'relative'
                         }}>
-                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>Guest Cam A (Remote)</div>
-                            <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
-                                <div style={{ fontSize: '32px' }}>👤</div>
-                                <div style={{ fontWeight: 700, marginTop: '6px' }}>
-                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'No guest paired'}
-                                </div>
-                                <div style={{ fontSize: '12px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
-                                    {guestCamOn ? 'Connected · Audio Active' : 'Camera Muted'}
-                                </div>
+                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>
+                                Remote Guest Split Monitor (Up To 3)
                             </div>
-                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '6px' }}>
+
+                            <div style={{
+                                marginTop: '12px',
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                                gap: '8px'
+                            }}>
+                                {splitGuestMonitors.map((guest, index) => (
+                                    <div
+                                        key={`split-guest-${index}`}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '10px',
+                                            background: 'rgba(15, 23, 42, 0.55)',
+                                            minHeight: '132px',
+                                            display: 'grid',
+                                            placeItems: 'center',
+                                            textAlign: 'center',
+                                            padding: '10px'
+                                        }}
+                                    >
+                                        {guest ? (
+                                            <>
+                                                <div style={{ fontSize: '22px' }}>👤</div>
+                                                <div style={{ fontWeight: 700, marginTop: '4px' }}>{guest.name}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--light-color)', marginTop: '2px' }}>
+                                                    {guest.locale || 'Remote'}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
+                                                    {guestCamOn ? 'Camera On' : 'Camera Off'}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div style={{ fontSize: '20px', opacity: 0.7 }}>➕</div>
+                                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>
+                                                    Open slot {index + 1}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
                                 <button
                                     type="button"
                                     onClick={() => setGuestCamOn(!guestCamOn)}
@@ -1963,20 +3481,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     {!guestMuted ? '🎙️ Mic Active' : '🔇 Muted'}
                                 </button>
                             </div>
-                        </div>
-
-                        {/* Guest Cam B Stream */}
-                        <div style={{
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '14px',
-                            background: 'linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))',
-                            padding: '14px'
-                        }}>
-                            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--light-color)' }}>Guest Cam B (Backup)</div>
-                            <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
-                                <div style={{ fontSize: '32px' }}>📱</div>
-                                <div style={{ fontWeight: 700, marginTop: '6px' }}>Mobile Backup Feed</div>
-                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '4px' }}>Standby · WebRTC</div>
+                            <div style={{ marginTop: '8px', textAlign: 'center', fontSize: '11px', color: '#bae6fd' }}>
+                                Active remote guests: {activeRemoteGuests.length}/{MAX_REMOTE_GUEST_MONITORS}
                             </div>
                         </div>
 
@@ -1994,13 +3500,56 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ marginTop: '8px', fontSize: '11px', color: '#c084fc' }}>
                                 Auto-synced with Script Lead edits
                             </div>
+
+                            <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#fca5a5' }}>
+                                    Director Commands
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('cut', 'Cut to next frame now.')}
+                                        style={{ border: '1px solid rgba(248, 113, 113, 0.5)', background: 'rgba(127, 29, 29, 0.35)', color: '#fecaca', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        CUT
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('hold', 'Hold this shot for continuity.')}
+                                        style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.08)', color: 'var(--text-color)', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        HOLD
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => issueControlCommand('resume', 'Resume normal camera movement.')}
+                                        style={{ border: '1px solid rgba(74, 222, 128, 0.45)', background: 'rgba(22, 163, 74, 0.22)', color: '#bbf7d0', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                    >
+                                        RESUME
+                                    </button>
+                                </div>
+                                {podcastBridgeState.latestCommand && (
+                                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                                        Last command: {String(podcastBridgeState.latestCommand.command || '').toUpperCase()} {podcastBridgeState.latestCommand.status ? `(${podcastBridgeState.latestCommand.status})` : ''}
+                                    </div>
+                                )}
+                                {podcastBridgeState.commandResponses?.length > 0 && (
+                                    <div style={{ maxHeight: '80px', overflowY: 'auto', fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 8px', background: 'rgba(0,0,0,0.2)' }}>
+                                        {podcastBridgeState.commandResponses.slice(-3).map((response) => (
+                                            <div key={response.responseId || `${response.responderUserId}-${response.respondedAtUtc}`}>
+                                                {response.responderUserName || 'Operator'}: {response.message || 'Acknowledged'}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
                 )}
 
                 {/* Recorded Session Preview & Library Export */}
-                {(workflowStage === 'Review' || workflowStage === 'Ship') && recordedVideoUrl && (
+                {(workflowStage === 'Review' || workflowStage === 'Ship') && playbackMediaUrl && (
                     <div style={{
                         background: 'var(--card-bg)',
                         border: '1px solid var(--highlight-color)',
@@ -2013,7 +3562,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '14px' }}>
                             <div>
                                 <video
-                                    src={recordedVideoUrl}
+                                    src={playbackMediaUrl}
                                     controls
                                     style={{ width: '100%', borderRadius: '12px', background: '#000' }}
                                 />
@@ -2025,7 +3574,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         type="text"
                                         value={videoTitle}
                                         onChange={(e) => setVideoTitle(e.target.value)}
-                                        placeholder={title || 'My Podcast Recording'}
+                                        placeholder="Enter a recording title"
                                         style={{
                                             padding: '10px 12px',
                                             borderRadius: '8px',
@@ -2071,7 +3620,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         {isPublishingEpisodePost ? 'Publishing...' : '📰 Publish to Feed'}
                                     </button>
                                     <a
-                                        href={recordedVideoUrl}
+                                        href={playbackMediaUrl}
                                         download={`podcast_recording_${Date.now()}.webm`}
                                         style={{
                                             border: '1px solid var(--border-color)',
@@ -2133,8 +3682,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     <span style={{ color: permissions.canGoLive ? '#4ade80' : 'var(--light-color)' }}>
                                         {permissions.canGoLive ? '✓ Can present live' : '✗ Cannot go live'}
                                     </span>
-                                    <span style={{ color: permissions.canEditScript ? '#4ade80' : 'var(--light-color)' }}>
-                                        {permissions.canEditScript ? '✓ Can edit script' : '✗ Script locked'}
+                                    <span style={{ color: canEditLiveScript ? '#4ade80' : 'var(--light-color)' }}>
+                                        {canEditLiveScript ? '✓ Can edit script' : '✗ Script locked'}
                                     </span>
                                     <span style={{ color: permissions.canApproveSegments ? '#4ade80' : 'var(--light-color)' }}>
                                         {permissions.canApproveSegments ? '✓ Can approve segments' : '✗ Cannot approve'}
@@ -2287,7 +3836,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         broadcastTandemState({ scriptText: event.target.value, runOrderApproved: false });
                                     }}
                                     rows={8}
-                                    disabled={!permissions.canEditScript}
+                                    disabled={!canEditLiveScript}
                                     style={{
                                         padding: '12px',
                                         borderRadius: '10px',
@@ -2295,13 +3844,59 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         background: 'rgba(255,255,255,0.04)',
                                         color: 'var(--text-color)',
                                         resize: 'vertical',
-                                        opacity: permissions.canEditScript ? 1 : 0.6
+                                        opacity: canEditLiveScript ? 1 : 0.6
                                     }}
                                 />
                                 <div style={{ fontSize: '12px', color: '#93c5fd' }}>
-                                    Helper only: define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
+                                    Helper only: no prewritten script is inserted. Define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
                                 </div>
                             </label>
+
+                            <div style={{ display: 'grid', gap: '10px', marginTop: '6px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                    <span style={{ color: 'var(--light-color)', fontWeight: 700 }}>Script Pipeline Segment Form (1-4)</span>
+                                    <button
+                                        type="button"
+                                        onClick={applyScriptPipelineToScript}
+                                        disabled={!canEditScriptPipeline}
+                                        style={{
+                                            border: '1px solid var(--highlight-color)',
+                                            background: 'rgba(56, 189, 248, 0.15)',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '10px',
+                                            padding: '8px 12px',
+                                            cursor: canEditScriptPipeline ? 'pointer' : 'not-allowed',
+                                            opacity: canEditScriptPipeline ? 1 : 0.65,
+                                            fontWeight: 700
+                                        }}
+                                    >
+                                        Apply Pipeline to Live Script
+                                    </button>
+                                </div>
+
+                                {scriptPipelineSegments.map((segment) => (
+                                    <label key={segment.key} style={{ display: 'grid', gap: '6px' }}>
+                                        <span style={{ color: 'var(--light-color)' }}>{segment.label}</span>
+                                        <textarea
+                                            value={scriptPipeline[segment.key] || ''}
+                                            placeholder={segment.helper}
+                                            onChange={(event) => updateScriptPipelineSegment(segment.key, event.target.value)}
+                                            rows={3}
+                                            disabled={!canEditScriptPipeline}
+                                            style={{
+                                                padding: '10px',
+                                                borderRadius: '10px',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255,255,255,0.03)',
+                                                color: 'var(--text-color)',
+                                                resize: 'vertical',
+                                                opacity: canEditScriptPipeline ? 1 : 0.65
+                                            }}
+                                        />
+                                        <span style={{ fontSize: '12px', color: '#93c5fd' }}>{segment.helper}</span>
+                                    </label>
+                                ))}
+                            </div>
 
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                                 <button
@@ -2325,11 +3920,30 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <button
                                     type="button"
                                     onClick={() => {
+                                        const snapshot = buildSessionSnapshot();
+                                        const version = Date.now().toString();
                                         try {
                                             localStorage.setItem('wisePodcastScriptDraft', scriptText);
-                                        } catch {}
+                                            localStorage.setItem(PODCAST_AUTOSAVE_STORAGE_KEY, JSON.stringify({ version, snapshot }));
+                                            autosaveVersionRef.current = version;
+                                            setLastAutosavedAt(new Date().toLocaleTimeString());
+                                        } catch {
+                                            // Ignore local save errors.
+                                        }
+
+                                        void authService.savePodcastSessionSnapshot({
+                                            roomId: 'main',
+                                            version,
+                                            snapshot
+                                        }).then((response) => {
+                                            const committedVersion = String(response?.version || version).trim();
+                                            autosaveVersionRef.current = committedVersion;
+                                        }).catch(() => {
+                                            // Cloud save best effort only.
+                                        });
+
                                         broadcastTandemState({ scriptText });
-                                        setStatus('Script draft saved successfully to local studio storage.');
+                                        setStatus('Script draft saved to studio storage and cloud autosave.');
                                     }}
                                     style={{
                                         border: '1px solid var(--border-color)',
@@ -2522,6 +4136,27 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                             <div>{member.locale}</div>
                                             <div>{member.device}</div>
                                             <div style={{ display: 'flex', gap: '6px', marginTop: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleJoinRoom(member)}
+                                                    disabled={!isCreator && !isDesignee}
+                                                    style={{
+                                                        border: '1px solid rgba(16, 185, 129, 0.55)',
+                                                        borderRadius: '6px',
+                                                        background: member.loginState === 'online'
+                                                            ? 'rgba(14, 116, 144, 0.25)'
+                                                            : 'rgba(16, 185, 129, 0.25)',
+                                                        color: member.loginState === 'online' ? '#bae6fd' : '#86efac',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: (isCreator || isDesignee) ? 'pointer' : 'not-allowed',
+                                                        opacity: (isCreator || isDesignee) ? 1 : 0.65,
+                                                        fontWeight: 700
+                                                    }}
+                                                    title="JoinRoom toggle admission"
+                                                >
+                                                    {member.loginState === 'online' ? 'JoinRoom: ON' : 'JoinRoom: OFF'}
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => toggleDesignee(member)}
@@ -2721,6 +4356,184 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 </div>
                 )}
             </div>
+
+            {/* ── Pricing Modal ── */}
+            {showPricingModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '20px'
+                }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(15,23,42,0.99), rgba(30,15,55,0.95))',
+                        border: '1px solid rgba(129,140,248,0.3)',
+                        borderRadius: '24px',
+                        padding: '32px',
+                        maxWidth: '900px',
+                        maxHeight: '85vh',
+                        overflowY: 'auto',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+                    }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                            <div>
+                                <div style={{ fontSize: '20px', fontWeight: 800, color: '#e2e8f0', marginBottom: '4px' }}>
+                                    🚀 Podcast Studio Plans
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                                    Choose your tier and start your free trial today — no credit card required.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowPricingModal(false)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    fontSize: '24px',
+                                    cursor: 'pointer',
+                                    color: '#94a3b8'
+                                }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Billing cycle toggle */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '12px', color: billingCycle === 'monthly' ? '#e2e8f0' : '#94a3b8', fontWeight: billingCycle === 'monthly' ? 700 : 400 }}>Monthly</span>
+                            <button
+                                type="button"
+                                onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'annual' : 'monthly')}
+                                style={{
+                                    background: 'rgba(129,140,248,0.2)',
+                                    border: '1px solid rgba(129,140,248,0.3)',
+                                    borderRadius: '20px',
+                                    padding: '4px 12px',
+                                    fontSize: '12px',
+                                    color: '#a5b4fc',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {billingCycle === 'monthly' ? 'Switch to Annual' : 'Switch to Monthly'}
+                            </button>
+                            <span style={{ fontSize: '12px', color: billingCycle === 'annual' ? '#e2e8f0' : '#94a3b8', fontWeight: billingCycle === 'annual' ? 700 : 400 }}>
+                                Annual {billingCycle === 'annual' && '(Save 20%)'}
+                            </span>
+                        </div>
+
+                        {/* Plans grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                            {Object.entries(PODCAST_PRICING_PLANS).map(([key, plan]) => {
+                                const priceUsd = billingCycle === 'monthly' ? (plan.prices.monthly / 100).toFixed(2) : (plan.prices.annual / 100).toFixed(2);
+                                const billingLabel = billingCycle === 'monthly' ? '/month' : '/year';
+                                const isSelected = selectedPlan === key;
+                                return (
+                                    <div
+                                        key={key}
+                                        style={{
+                                            background: isSelected ? 'rgba(129,140,248,0.15)' : 'rgba(30,15,55,0.8)',
+                                            border: isSelected ? '2px solid rgba(129,140,248,0.6)' : '1px solid rgba(129,140,248,0.2)',
+                                            borderRadius: '16px',
+                                            padding: '20px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            position: 'relative'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = 'rgba(129,140,248,0.08)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = 'rgba(30,15,55,0.8)';
+                                        }}
+                                        onClick={() => setSelectedPlan(key)}
+                                    >
+                                        {plan.featured && (
+                                            <div style={{ position: 'absolute', top: '-12px', left: '16px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#1f2937', padding: '2px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                                                BEST VALUE
+                                            </div>
+                                        )}
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <div style={{ fontSize: '16px', fontWeight: 800, color: '#e2e8f0', marginBottom: '2px' }}>
+                                                {plan.name}
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                                                {plan.tagline}
+                                            </div>
+                                        </div>
+                                        <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid rgba(129,140,248,0.15)' }}>
+                                            <div style={{ fontSize: '28px', fontWeight: 900, color: '#e2e8f0' }}>
+                                                ${priceUsd}
+                                                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 400, marginLeft: '4px' }}>
+                                                    {billingLabel}
+                                                </span>
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                                                {plan.trial.message}
+                                            </div>
+                                        </div>
+                                        <div style={{ marginBottom: '16px', flex: 1 }}>
+                                            {plan.features.map((feature, idx) => (
+                                                <div key={idx} style={{ fontSize: '12px', color: '#cbd5e1', display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                                    <span style={{ color: '#4ade80', fontWeight: 700 }}>✓</span>
+                                                    <span>{feature}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleStartTrial(key)}
+                                            style={{
+                                                width: '100%',
+                                                border: isSelected ? '1px solid rgba(129,140,248,0.6)' : '1px solid rgba(129,140,248,0.3)',
+                                                background: isSelected ? 'rgba(129,140,248,0.25)' : 'rgba(129,140,248,0.1)',
+                                                color: '#a5b4fc',
+                                                borderRadius: '10px',
+                                                padding: '10px 16px',
+                                                fontSize: '13px',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = 'rgba(129,140,248,0.35)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = isSelected ? 'rgba(129,140,248,0.25)' : 'rgba(129,140,248,0.1)';
+                                            }}
+                                        >
+                                            Start {plan.trial.days}-day free trial
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* FAQ */}
+                        <div style={{ background: 'rgba(30,15,55,0.6)', border: '1px solid rgba(129,140,248,0.15)', borderRadius: '12px', padding: '16px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '8px' }}>
+                                ❓ Common Questions
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#cbd5e1', display: 'grid', gap: '8px' }}>
+                                <div><strong>• Billing:</strong> Your trial auto-converts to a paid subscription on day 15 (or 8/30 depending on plan). Cancel anytime from Settings.</div>
+                                <div><strong>• Multiple plans:</strong> You can only have one active subscription. Upgrading cancels your current plan.</div>
+                                <div><strong>• Money-back:</strong> Not happy? Email support@wiseravenshare.com within 14 days for a full refund.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Compartment>
     );
 };

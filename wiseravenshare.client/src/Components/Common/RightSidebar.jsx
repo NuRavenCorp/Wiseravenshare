@@ -52,6 +52,63 @@ const seedUsers = [
     { id: 'seed-ravensignal', name: 'RavenSignal', handle: '@ravensignal', avatar: 'RS' }
 ];
 
+const isPlaceholderIdentity = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === '' || text === 'user' || text === '@user' || text === 'unknown' || text === 'local user';
+};
+
+const looksLikeOpaqueIdentity = (value) => {
+    const text = String(value || '').trim().replace(/^@+/, '');
+    return /^[a-f0-9]{12,}$/i.test(text) || /^user[0-9a-f]{8,}$/i.test(text);
+};
+
+const isRenderableSuggestedProfile = (profile) => {
+    if (!profile?.id) {
+        return false;
+    }
+
+    if (seedUsers.some((seed) => seed.id === profile.id)) {
+        return true;
+    }
+
+    const name = String(profile?.name || '').trim();
+    const handle = String(profile?.handle || profile?.username || '').trim().replace(/^@+/, '');
+
+    if (isPlaceholderIdentity(name) || isPlaceholderIdentity(handle)) {
+        return false;
+    }
+
+    if (looksLikeOpaqueIdentity(profile.id) && (!name || looksLikeOpaqueIdentity(name)) && (!handle || looksLikeOpaqueIdentity(handle))) {
+        return false;
+    }
+
+    return Boolean(name || handle);
+};
+
+const normalizeSuggestedProfile = (profile) => {
+    const seedById = seedUsers.find((seed) => seed.id === profile?.id);
+
+    const rawHandle = String(profile?.handle || '').trim().replace(/^@+/, '');
+    const fallbackFromId = String(profile?.id || '').trim().replace(/^seed-/, '').replace(/[^a-zA-Z0-9_]+/g, '').toLowerCase();
+    const seedHandle = String(seedById?.handle || '').trim().replace(/^@+/, '');
+    const normalizedHandle = !isPlaceholderIdentity(rawHandle)
+        ? rawHandle
+        : (!isPlaceholderIdentity(seedHandle) ? seedHandle : (fallbackFromId || 'member'));
+
+    const rawName = String(profile?.name || '').trim();
+    const seedName = String(seedById?.name || '').trim();
+    const normalizedName = !isPlaceholderIdentity(rawName)
+        ? rawName
+        : (!isPlaceholderIdentity(seedName) ? seedName : normalizedHandle);
+
+    return {
+        ...profile,
+        name: normalizedName,
+        handle: `@${normalizedHandle}`,
+        avatar: profile?.avatar || (normalizedName[0] || 'U').toUpperCase()
+    };
+};
+
 const readPosts = () => {
     try {
         const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
@@ -547,7 +604,7 @@ const RightSidebar = ({ onNavigate }) => {
 
             const posts = readPosts();
             posts.forEach((post) => {
-                if (!post?.userId) return;
+                if (!post?.userId || !isRenderableSuggestedProfile(post.user)) return;
                 socialGraphService.registerUserProfile({
                     id: post.userId,
                     name: post.user?.name,
@@ -568,8 +625,9 @@ const RightSidebar = ({ onNavigate }) => {
 
             const candidates = socialGraphService
                 .getProfiles([...candidateIds])
-                .filter((candidate) => candidate?.id && candidate.id !== user.id && !following.includes(candidate.id))
+                .filter((candidate) => isRenderableSuggestedProfile(candidate) && candidate.id !== user.id && !following.includes(candidate.id))
                 .map((candidate) => {
+                    const normalizedCandidate = normalizeSuggestedProfile(candidate);
                     const counts = socialGraphService.getCounts(candidate.id);
                     const candidateFollowerIds = socialGraphService.getFollowerIds(candidate.id);
                     const mutualCount = candidateFollowerIds.filter((id) => following.includes(id)).length;
@@ -578,7 +636,7 @@ const RightSidebar = ({ onNavigate }) => {
                     const rankScore = followMetrics.followScore;
 
                     return {
-                        ...candidate,
+                        ...normalizedCandidate,
                         followers: formatFollowers(counts.followers),
                         mutualCount,
                         rankScore,
@@ -595,7 +653,7 @@ const RightSidebar = ({ onNavigate }) => {
                     .filter((seed) => seed.id !== user.id && !following.includes(seed.id))
                     .slice(0, 3)
                     .map((seed, index) => ({
-                        ...seed,
+                        ...normalizeSuggestedProfile(seed),
                         followers: `${(10 - (index * 1.6)).toFixed(1)}K`,
                         mutualCount: 0
                     }));

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSavedMedia } from '../hooks/useSavedMedia';
+import { apiService } from '../Services/api';
 
 const STORAGE_KEY = 'wisePodcastRightsLibrary';
 
@@ -92,7 +94,75 @@ const contractBundles = [
     }
 ];
 
+const defaultGuestCredits = ['Guest 1', 'Guest 2', 'Guest 3'];
+
+const stringifyShaFingerprint = (sha256 = '') => {
+    const normalized = String(sha256 || '').trim();
+    if (!normalized) return 'SHA-256 hash saved locally';
+    return `SHA-256: ${normalized}`;
+};
+
+const parseMetadataObject = (metadata) => {
+    if (!metadata) return {};
+    if (typeof metadata === 'object') return metadata;
+    try {
+        return JSON.parse(metadata);
+    } catch {
+        return {};
+    }
+};
+
+const toRightsMetadata = (entry) => ({
+    rightsStudio: {
+        episodeLicense: entry.licenseType || 'Owner-controlled',
+        rights: entry.rights || '',
+        usage: entry.usage || '',
+        guests: Array.isArray(entry.guests) ? entry.guests : [],
+        audioFingerprint: {
+            sha256: entry.fingerprintSha256 || '',
+            label: entry.fingerprint || stringifyShaFingerprint(entry.fingerprintSha256),
+            savedLocally: true,
+            method: 'SHA-256 client digest'
+        },
+        transcriptHash: entry.transcriptHash || null,
+        updatedAt: new Date().toISOString()
+    }
+});
+
+const mapSavedMediaToEpisode = (item) => {
+    const metadata = parseMetadataObject(item?.mediaMetadata);
+    const rightsStudio = metadata?.rightsStudio || {};
+    const audioFingerprint = rightsStudio?.audioFingerprint || {};
+
+    const sha256 = String(audioFingerprint?.sha256 || '').trim();
+    const guests = Array.isArray(rightsStudio?.guests) && rightsStudio.guests.length > 0
+        ? rightsStudio.guests
+        : [];
+
+    return {
+        id: `saved-${item.id}`,
+        mediaId: item.id,
+        title: item.title || 'Podcast episode',
+        status: 'Protected',
+        owner: 'You',
+        episodeNumber: String(item.id || '').slice(0, 8).toUpperCase(),
+        duration: item.durationSeconds ? `${Math.round(item.durationSeconds)}s` : '00:00',
+        format: 'Podcast',
+        rights: rightsStudio?.rights || 'Master retained by creator',
+        usage: rightsStudio?.usage || 'Creator-controlled distribution',
+        fingerprintSha256: sha256,
+        fingerprint: String(audioFingerprint?.label || stringifyShaFingerprint(sha256)),
+        licenseType: rightsStudio?.episodeLicense || 'Owner-controlled',
+        category: 'Saved episode',
+        cover: '🎧',
+        guests,
+        transcriptHash: rightsStudio?.transcriptHash || null,
+        isUserCreated: true
+    };
+};
+
 const MusicRightsStudioPage = ({ user, onNavigate }) => {
+    const { getLibrary, saveMedia, updateMedia } = useSavedMedia();
     const [library, setLibrary] = useState(() => {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -106,8 +176,11 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
     const [selectedId, setSelectedId] = useState('ep-001');
     const [selectedContract, setSelectedContract] = useState(contractBundles[1].id);
     const [isUploading, setIsUploading] = useState(false);
+    const [isSyncingLibrary, setIsSyncingLibrary] = useState(false);
+    const [syncMessage, setSyncMessage] = useState('');
     const [userHasContent, setUserHasContent] = useState(false);
     const [showUploadPrompt, setShowUploadPrompt] = useState(false);
+    const [guestCreditsInput, setGuestCreditsInput] = useState('');
 
     useEffect(() => {
         const active = library.some((entry) => entry.id === selectedId);
@@ -120,6 +193,29 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
     }, [library]);
 
+    useEffect(() => {
+        let active = true;
+        const loadRemotePodcastRights = async () => {
+            try {
+                setIsSyncingLibrary(true);
+                const response = await getLibrary(1, 100, { mediaType: 'Podcast' });
+                const items = Array.isArray(response?.items) ? response.items : [];
+                if (!active || items.length === 0) return;
+                setLibrary(items.map(mapSavedMediaToEpisode));
+                setSyncMessage('Podcast rights synced from your WiseRavenShare library.');
+            } catch {
+                if (active) {
+                    setSyncMessage('Using local rights library. Sign in to sync across devices.');
+                }
+            } finally {
+                if (active) setIsSyncingLibrary(false);
+            }
+        };
+
+        loadRemotePodcastRights();
+        return () => { active = false; };
+    }, [getLibrary]);
+
     // Check if user has any user-created content (non-seed library)
     useEffect(() => {
         const hasUserCreated = library.some((entry) => entry.isUserCreated || !seedLibrary.some((seed) => seed.id === entry.id));
@@ -131,8 +227,32 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
         [library, selectedId]
     );
 
-    const updateSelectedAsset = (changes) => {
-        setLibrary((prev) => prev.map((entry) => entry.id === selectedAsset?.id ? { ...entry, ...changes } : entry));
+    useEffect(() => {
+        setGuestCreditsInput(Array.isArray(selectedAsset?.guests) ? selectedAsset.guests.join(' • ') : '');
+    }, [selectedAsset?.id, selectedAsset?.guests]);
+
+    const persistEpisodeRights = async (entry) => {
+        if (!entry?.mediaId) return;
+        await updateMedia(entry.mediaId, {
+            title: entry.title,
+            description: entry.rights || null,
+            tags: ['podcast', 'rights'],
+            mediaMetadata: toRightsMetadata(entry)
+        });
+    };
+
+    const updateSelectedAsset = async (changes, options = { persist: false }) => {
+        if (!selectedAsset) return;
+        const nextAsset = { ...selectedAsset, ...changes };
+        setLibrary((prev) => prev.map((entry) => entry.id === selectedAsset.id ? nextAsset : entry));
+        if (options.persist) {
+            try {
+                await persistEpisodeRights(nextAsset);
+                setSyncMessage('Rights metadata saved to WiseRavenShare.');
+            } catch {
+                setSyncMessage('Saved locally. Remote rights sync failed.');
+            }
+        }
     };
 
     const addNewEpisode = () => {
@@ -181,24 +301,60 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
                 format: 'Solo',
                 rights: 'Master retained by creator',
                 usage: 'Creator-controlled distribution',
-                fingerprint: `SHA-256: ${hashHex}`,
+                fingerprintSha256: hashHex,
+                fingerprint: stringifyShaFingerprint(hashHex),
                 licenseType: 'Owner-controlled',
                 category: 'Uploaded episode',
                 cover: '🎧',
-                guests: [],
+                guests: [...defaultGuestCredits],
                 transcriptHash: null,
                 isUserCreated: true
             };
 
-            setLibrary((prev) => [nextEntry, ...prev]);
-            setSelectedId(nextEntry.id);
+            const uploadResult = await apiService.uploadMedia(file, 'audio', {
+                title: nextEntry.title,
+                description: nextEntry.rights
+            });
+            const persistedMediaUrl = String(
+                uploadResult?.data?.mediaUrl
+                || uploadResult?.data?.filePath
+                || uploadResult?.data?.url
+                || ''
+            ).trim();
+            if (!persistedMediaUrl) {
+                throw new Error('Upload completed but no media URL was returned.');
+            }
+
+            const saved = await saveMedia({
+                title: nextEntry.title,
+                description: nextEntry.rights,
+                mediaType: 'Podcast',
+                mediaUrl: persistedMediaUrl,
+                tags: ['podcast', 'rights'],
+                isVisibleInFeed: false,
+                mediaMetadata: toRightsMetadata(nextEntry)
+            });
+
+            const persistedEntry = mapSavedMediaToEpisode(saved);
+            setLibrary((prev) => [persistedEntry, ...prev]);
+            setSelectedId(persistedEntry.id);
             setShowUploadPrompt(true);
+            setSyncMessage('Episode uploaded with SHA-256 fingerprint and rights metadata.');
         } catch (error) {
             console.error('Upload failed', error);
+            setSyncMessage('Episode upload failed. Please retry.');
         } finally {
             setIsUploading(false);
             event.target.value = '';
         }
+    };
+
+    const handleSaveGuestCredits = async () => {
+        const guests = guestCreditsInput
+            .split(/[•,\n]/g)
+            .map((value) => value.trim())
+            .filter(Boolean);
+        await updateSelectedAsset({ guests }, { persist: true });
     };
 
     const handleExportRightsPacket = () => {
@@ -295,6 +451,9 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
                 </div>
                 <p style={{ margin: '12px 0 0', color: 'var(--light-color)', lineHeight: 1.6, maxWidth: '900px' }}>
                     Keep your podcast episodes, transcripts, guest credits, and distribution rights secure and under your complete control. No platform can claim ownership of your show.
+                </p>
+                <p style={{ margin: '10px 0 0', color: '#67e8f9', fontSize: '12px' }}>
+                    {isSyncingLibrary ? 'Syncing rights library from server...' : (syncMessage || 'Rights metadata is synced with WiseRavenShare when available.')}
                 </p>
             </div>
 
@@ -404,6 +563,38 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
                             </div>
                         )}
 
+                        <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                            <input
+                                type="text"
+                                value={guestCreditsInput}
+                                onChange={(event) => setGuestCreditsInput(event.target.value)}
+                                placeholder="Guest 1 • Guest 2 • Guest 3"
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(15, 23, 42, 0.5)',
+                                    color: 'var(--text-color)',
+                                    padding: '10px 12px'
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={handleSaveGuestCredits}
+                                style={{
+                                    justifySelf: 'start',
+                                    borderRadius: '999px',
+                                    border: '1px solid var(--highlight-color)',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    padding: '7px 12px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Save guest credits
+                            </button>
+                        </div>
+
                         <div style={{ marginTop: '18px' }}>
                             <div style={{ fontSize: '12px', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>
                                 Episode license
@@ -417,7 +608,7 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
                                             licenseType: option.id,
                                             rights: option.id === 'Owner-controlled' ? 'Master retained by creator' : option.id === 'Creative Commons' ? 'CC-licensed attribution required' : option.id === 'Commercial licensing' ? 'Licensed for syndication and commercial use' : 'Custom guest and partnership agreement',
                                             usage: option.id === 'Owner-controlled' ? 'Creator-controlled distribution' : option.id === 'Creative Commons' ? 'Non-commercial use with attribution' : option.id === 'Commercial licensing' ? 'Commercial syndication and sponsorships' : 'Agreement-based usage terms'
-                                        })}
+                                        }, { persist: true })}
                                         style={{
                                             borderRadius: '12px',
                                             border: selectedAsset?.licenseType === option.id ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',

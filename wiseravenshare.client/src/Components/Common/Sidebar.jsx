@@ -39,7 +39,7 @@ const normalizeConnection = (connection, platform) => {
                         : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
-        enabled: Boolean(connection?.enabled),
+        enabled: Boolean(connection?.enabled || username || profileUrl || feedUrl),
         username,
         resolvedUrl: feedUrl || profileUrl || fallbackUrl
     };
@@ -114,6 +114,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'bookmarks', icon: 'fas fa-bookmark', label: 'Bookmarks' },
         { id: 'notifications', icon: 'fas fa-bell', label: 'Notifications' },
         { id: 'messages', icon: 'fas fa-envelope', label: 'Messages' },
+        { id: 'wisecoin', icon: 'fas fa-coins', label: '💎 WiseCoin' },
         { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
         { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },
@@ -121,6 +122,9 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
         { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
+        { id: 'fm-tuner', icon: 'fas fa-broadcast-tower', label: 'FM Radio' },
+        { id: 'music-player', icon: 'fas fa-compact-disc', label: 'Wise-tracks' },
+        { id: 'collaboration', icon: 'fas fa-users', label: 'Collaborate' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
@@ -133,7 +137,11 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             8,
             0,
             { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
-            { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' }
+            { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' },
+            { id: 'site-crawler-audit', icon: 'fas fa-spider', label: 'Site Crawler' },
+            { id: 'crawler-metrics', icon: 'fas fa-chart-pie', label: 'Crawler Metrics' },
+            { id: 'radio-creator', icon: 'fas fa-microphone-alt', label: 'Radio Creator' },
+            { id: 'assistant', icon: 'fas fa-robot', label: 'AI Assistant' }
         );
     }
 

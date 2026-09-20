@@ -74,6 +74,15 @@ services:
   - key: Persistence__RequireDatabase
     scope: RUN_AND_BUILD_TIME
     value: "true"
+  - key: STRIPE_PUBLISHABLE_API
+    scope: RUN_AND_BUILD_TIME
+    value: ${STRIPE_PUBLISHABLE_API}
+  - key: STRIPE_RESTRICTED_API
+    scope: RUN_AND_BUILD_TIME
+    value: ${STRIPE_RESTRICTED_API}
+  - key: STRIPE_SECRET_API
+    scope: RUN_AND_BUILD_TIME
+    value: ${STRIPE_SECRET_API}
   - key: STRIPE_SECRET_KEY
     scope: RUN_AND_BUILD_TIME
     type: SECRET
@@ -98,6 +107,26 @@ services:
     scope: RUN_AND_BUILD_TIME
     type: SECRET
     value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+  - key: Authentication__OAuthProviders__Google__RedirectUri
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${GOOGLE_OAUTH_REDIRECT_URI}
+  - key: Authentication__OAuthProviders__Microsoft__ClientId
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_CLIENT_ID}
+  - key: Authentication__OAuthProviders__Microsoft__ClientSecret
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_CLIENT_SECRET}
+  - key: Authentication__OAuthProviders__Microsoft__TenantId
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_TENANT_ID}
+  - key: Authentication__OAuthProviders__Microsoft__RedirectUri
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: ${MICROSOFT_OAUTH_REDIRECT_URI}
   - key: Social__Facebook__PageId
     scope: RUN_AND_BUILD_TIME
     type: SECRET
@@ -188,7 +217,7 @@ static_sites:
     value: ${APP_URL}/api/ravensight
   - key: VITE_STRIPE_PUBLISHABLE_KEY
     scope: BUILD_TIME
-    value: ${STRIPE_PUBLISHABLE_KEY}
+    value: ${STRIPE_PUBLISHABLE_API}
   - key: VITE_ADMIN_EMAILS
     scope: BUILD_TIME
     value: admin@wise-ravens.com

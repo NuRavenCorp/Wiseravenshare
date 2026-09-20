@@ -80,15 +80,22 @@ public class PaymentsController : ControllerBase
                 name: "Growth Suite",
                 tagline: "For creators scaling their audience",
                 badge: "Best for growth",
-                defaultMonthlyAmount: 39,
-                defaultAnnualAmount: 390),
+                defaultMonthlyAmount: 49,
+                defaultAnnualAmount: 490),
             BuildCatalogPlan(
                 planId: "studio_plus",
                 name: "Studio Plus",
                 tagline: "For teams and agencies",
                 badge: "For teams",
-                defaultMonthlyAmount: 79,
-                defaultAnnualAmount: 790)
+                defaultMonthlyAmount: 99,
+                defaultAnnualAmount: 990),
+            BuildCatalogPlan(
+                planId: "podcast_pro",
+                name: "Podcast Pro Bundle",
+                tagline: "Growth Suite + Studio Plus + priority support",
+                badge: "Best value",
+                defaultMonthlyAmount: 149,
+                defaultAnnualAmount: 1490)
         };
 
         return Ok(new
@@ -118,6 +125,8 @@ public class PaymentsController : ControllerBase
         var growthSuiteAnnual = ResolvePriceIdRaw("growth_suite", "annual");
         var studioPlusMonthly = ResolvePriceIdRaw("studio_plus", "monthly");
         var studioPlusAnnual = ResolvePriceIdRaw("studio_plus", "annual");
+        var podcastProMonthly = ResolvePriceIdRaw("podcast_pro", "monthly");
+        var podcastProAnnual = ResolvePriceIdRaw("podcast_pro", "annual");
 
         var issues = new List<string>();
 
@@ -161,6 +170,12 @@ public class PaymentsController : ControllerBase
         if (string.IsNullOrWhiteSpace(studioPlusAnnual)) issues.Add("missing: studio_plus annual price id");
         else if (!IsStripePriceId(studioPlusAnnual)) issues.Add("invalid: studio_plus annual must start with price_");
 
+        if (string.IsNullOrWhiteSpace(podcastProMonthly)) issues.Add("missing: podcast_pro monthly price id");
+        else if (!IsStripePriceId(podcastProMonthly)) issues.Add("invalid: podcast_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(podcastProAnnual)) issues.Add("missing: podcast_pro annual price id");
+        else if (!IsStripePriceId(podcastProAnnual)) issues.Add("invalid: podcast_pro annual must start with price_");
+
         return Ok(new
         {
             configured = issues.Count == 0,
@@ -201,6 +216,11 @@ public class PaymentsController : ControllerBase
                 {
                     monthly = new { value = studioPlusMonthly, validPriceId = IsStripePriceId(studioPlusMonthly) },
                     annual = new { value = studioPlusAnnual, validPriceId = IsStripePriceId(studioPlusAnnual) }
+                },
+                podcast_pro = new
+                {
+                    monthly = new { value = podcastProMonthly, validPriceId = IsStripePriceId(podcastProMonthly) },
+                    annual = new { value = podcastProAnnual, validPriceId = IsStripePriceId(podcastProAnnual) }
                 }
             },
             issues
@@ -328,6 +348,7 @@ public class PaymentsController : ControllerBase
             "creator_pro" => "CreatorPro",
             "growth_suite" => "GrowthSuite",
             "studio_plus" => "StudioPlus",
+            "podcast_pro" => "PodcastPro",
             _ => "CreatorPro"
         };
 
@@ -339,6 +360,7 @@ public class PaymentsController : ControllerBase
             "creator_pro" => "CREATOR_PRO",
             "growth_suite" => "GROWTH_SUITE",
             "studio_plus" => "STUDIO_PLUS",
+            "podcast_pro" => "PODCAST_PRO",
             _ => "CREATOR_PRO"
         };
 

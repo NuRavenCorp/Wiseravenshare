@@ -107,7 +107,13 @@ public sealed class FeatureCompartmentService : IFeatureCompartmentService
         new("truth-engine", "Truth Engine", "Truth and verification workflow surfaces.", ["/api/truth", "/api/truthengine"]),
         new("communications", "Communications", "Communique, notifications, and related messaging features.", ["/api/communication", "/api/communique"]),
         new("media-library", "Media Library", "Library and media management surfaces.", ["/api/medialibrary", "/api/mylibrary", "/api/ravensight/media", "/api/video", "/api/audio"]),
-        new("fm-tuner", "FM Tuner", "FM radio and track player surfaces.", ["/api/fmtuner", "/api/fm"])
+        new("fm-tuner", "FM Tuner", "FM radio and track player surfaces.", ["/api/fmtuner", "/api/fm"]),
+        new("guided-studio-flow", "Guided Studio Flow", "Podcast Studio guided workflow: Plan, Script, Team, Record, Review, Ship.", ["/api/podcast/studio", "/api/podcaststudio"]),
+        new("podcast-analytics", "Podcast Analytics", "Growth analytics and audience insights for podcast content.", ["/api/podcast/analytics", "/api/growth/podcast"]),
+        new("team-workflows", "Team Workflows", "Multi-role review, approval, and publishing lanes.", ["/api/team/workflows", "/api/studio/team"]),
+        new("script-pipeline", "Script Pipeline", "Structured script pipeline segments for show production.", ["/api/podcast/script"]),
+        new("ai-copywriting", "AI Copywriting", "AI-assisted script and copy generation.", ["/api/aiassistant/copy", "/api/copy"]),
+        new("podcast-pro-bundle", "Podcast Pro Bundle", "Full access to all podcast studio capabilities.", ["/api/podcast"])
     ];
 
     public FeatureCompartmentService(AppDbContext db, ISiteCrawlerService siteCrawlerService)

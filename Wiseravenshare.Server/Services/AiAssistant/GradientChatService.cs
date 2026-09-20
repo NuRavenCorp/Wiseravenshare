@@ -34,13 +34,61 @@ public class GradientChatService : IOllamaChatService
         _logger = logger;
     }
 
-    private string BaseUrl => (_configuration["Gradient:BaseUrl"] ?? "https://ingress.do-ai.run/v1").Trim().TrimEnd('/');
+    private string BaseUrl => ResolveBaseUrl();
 
     private string DefaultModel => (_configuration["Gradient:DefaultModel"] ?? "gpt-4o-mini").Trim();
 
-    private string InferenceKey => (_configuration["Gradient:InferenceKey"] ?? string.Empty).Trim();
+    private string InferenceKey => ResolveInferenceKey();
 
     private bool IsConfigured => !string.IsNullOrWhiteSpace(InferenceKey);
+
+    private string ResolveBaseUrl()
+    {
+        var configured = FirstNonEmpty(
+            _configuration["Gradient:BaseUrl"],
+            _configuration["GRADIENT_BASE_URL"],
+            _configuration["DIGITALOCEAN_AI_BASE_URL"],
+            "https://ingress.do-ai.run/v1");
+
+        var value = configured.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return "https://ingress.do-ai.run/v1";
+        }
+
+        // DigitalOcean examples commonly omit /v1; normalize to the OpenAI-compatible base.
+        if (uri.Host.Contains("do-ai.run", StringComparison.OrdinalIgnoreCase)
+            && (uri.AbsolutePath == "/" || string.IsNullOrWhiteSpace(uri.AbsolutePath)))
+        {
+            return value + "/v1";
+        }
+
+        return value;
+    }
+
+    private string ResolveInferenceKey()
+    {
+        return FirstNonEmpty(
+            _configuration["Gradient:InferenceKey"],
+            _configuration["DO_GRADIENT_INFERENCE_KEY"],
+            _configuration["GRADIENT_INFERENCE_KEY"],
+            _configuration["DIGITALOCEAN_AI_INFERENCE_KEY"],
+            _configuration["OPENAI_API_KEY"]);
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            var trimmed = (value ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                return trimmed;
+            }
+        }
+
+        return string.Empty;
+    }
 
     public async Task<IReadOnlyList<string>> GetModelsAsync()
     {

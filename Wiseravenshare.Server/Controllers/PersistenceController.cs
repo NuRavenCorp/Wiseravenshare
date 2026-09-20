@@ -208,32 +208,6 @@ public sealed class PersistenceController : ControllerBase
 
     private bool IsConfiguredAdminEmail(string email)
     {
-        var section = _configuration.GetSection("Admin:Emails");
-
-        // JSON array form (appsettings.json).
-        var asArray = section.Get<string[]>();
-        if (asArray is { Length: > 0 } && asArray.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        // Scalar / comma-separated form (Admin__Emails env var).
-        var scalar = section.Value;
-        if (!string.IsNullOrWhiteSpace(scalar))
-        {
-            var matches = scalar.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(value => string.Equals(value, email, StringComparison.OrdinalIgnoreCase));
-            if (matches)
-            {
-                return true;
-            }
-        }
-
-        // Configured auth users (Authentication:Users__N__Email).
-        var configuredAuthUsers = _configuration.GetSection("Authentication:Users").GetChildren()
-            .Select(child => child["Email"] ?? child.Value)
-            .Where(value => !string.IsNullOrWhiteSpace(value));
-
-        return configuredAuthUsers.Any(value => string.Equals(value?.Trim(), email, StringComparison.OrdinalIgnoreCase));
+        return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
     }
 }

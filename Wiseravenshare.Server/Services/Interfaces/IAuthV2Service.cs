@@ -41,6 +41,7 @@ public sealed class AuthV2User
 {
     public string Id { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; } = true;
     public string Username { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;

@@ -5,7 +5,7 @@ import VideoFeedMini from '../Components/Feed/VideoFeedMini.jsx';
 import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
-import { rankPostsByPredictedEngagement } from '../Services/EngagementAlgorithms';
+import { rankCommunityFirstPosts } from '../Services/EngagementAlgorithms';
 import { truthEngine } from '../Services/truthEngine';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import OnboardingCard from '../Components/Common/OnboardingCard';
@@ -24,6 +24,42 @@ const parseAdminEmails = () => {
         .filter(Boolean);
 
     return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
+
+const readReactionIds = (storageKey) => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        if (!Array.isArray(raw)) {
+            return new Set();
+        }
+
+        return new Set(
+            raw
+                .map((item) => String(item?.id || '').trim())
+                .filter(Boolean)
+        );
+    } catch {
+        return new Set();
+    }
+};
+
+const applyStoredReactions = (items) => {
+    const source = Array.isArray(items) ? items : [];
+    const likedIds = readReactionIds('wiseLikedPosts');
+    const repostedIds = readReactionIds('wiseRepostedPosts');
+
+    return source.map((post) => {
+        const postId = String(post?.id || '').trim();
+        if (!postId) {
+            return post;
+        }
+
+        return {
+            ...post,
+            isLiked: Boolean(post?.isLiked) || likedIds.has(postId),
+            isReposted: Boolean(post?.isReposted) || repostedIds.has(postId)
+        };
+    });
 };
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
@@ -162,10 +198,10 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                 const normalizedPayload = normalizePostsPayload(response?.data ?? response);
                 const backendPosts = normalizedPayload.map(normalizePost);
                 const storedPosts = readStoredFeedPosts().map(normalizePost);
-                const mergedPosts = mergeFeedPosts(storedPosts, backendPosts);
+                const mergedPosts = applyStoredReactions(mergeFeedPosts(storedPosts, backendPosts));
                 setPosts(mergedPosts.length > 0 ? mergedPosts : samplePosts);
             } catch {
-                const storedPosts = readStoredFeedPosts().map(normalizePost);
+                const storedPosts = applyStoredReactions(readStoredFeedPosts().map(normalizePost));
                 setPosts(storedPosts.length > 0 ? storedPosts : samplePosts);
             }
         };
@@ -273,41 +309,49 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleLike = async (postId) => {
         try {
-            const currentPost = posts.find((item) => item.id === postId);
-            const updated = currentPost?.isLiked
+            // Only backend-stored posts (valid UUIDs) can be liked via API.
+            const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId);
+            if (!isValidGuid) {
+                addTruthAlert('info', 'Likes are only available for WiseRaven posts.', null);
+                return;
+            }
+
+            const currentPost = posts.find((post) => post.id === postId);
+            const isCurrentlyLiked = Boolean(currentPost?.isLiked);
+
+            const updated = isCurrentlyLiked
                 ? await apiService.unlikePost(postId)
                 : await apiService.likePost(postId);
 
-            const nextLikesCount = Number(
-                updated?.likesCount
-                ?? updated?.LikesCount
-                ?? currentPost?.likes
-                ?? currentPost?.likesCount
-                ?? 0
-            );
-            const nextIsLiked = Boolean(
-                updated?.isLiked
-                ?? updated?.IsLiked
-                ?? !currentPost?.isLiked
-            );
-
-            // Track the like interaction for personalization.
-            const post = posts.find((p) => p.id === postId);
-            if (post) {
-                track('Like', 'Post', postId, {
-                    title: post.content?.slice(0, 100) || '',
-                    tags: extractPostTags(post),
-                });
+            if (!isCurrentlyLiked) {
+                // Track the like interaction for personalization.
+                if (currentPost) {
+                    track('Like', 'Post', postId, {
+                        title: currentPost.content?.slice(0, 100) || '',
+                        tags: extractPostTags(currentPost),
+                    });
+                }
             }
+
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
-                        ? {
-                            ...post,
-                            likes: nextLikesCount,
-                            likesCount: nextLikesCount,
-                            isLiked: nextIsLiked
-                        }
+                        ? (() => {
+                            const baseCount = Number(post.likesCount ?? post.likes ?? 0);
+                            const resolvedIsLiked = typeof updated?.isLiked === 'boolean'
+                                ? updated.isLiked
+                                : !isCurrentlyLiked;
+                            const resolvedLikesCount = Number.isFinite(Number(updated?.likesCount))
+                                ? Number(updated.likesCount)
+                                : Math.max(0, baseCount + (resolvedIsLiked ? 1 : -1));
+
+                            return {
+                                ...post,
+                                likes: resolvedLikesCount,
+                                likesCount: resolvedLikesCount,
+                                isLiked: resolvedIsLiked
+                            };
+                        })()
                         : post
                 );
 
@@ -331,41 +375,78 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleRepost = async (postId) => {
         try {
-            const currentPost = posts.find((item) => item.id === postId);
-            const updated = currentPost?.isReposted
+            const currentPost = posts.find((post) => post.id === postId);
+            const isCurrentlyReposted = Boolean(currentPost?.isReposted);
+
+            const updated = isCurrentlyReposted
                 ? await apiService.unrepostPost(postId)
                 : await apiService.repostPost(postId);
 
-            const nextRepostsCount = Number(
-                updated?.repostsCount
-                ?? updated?.RepostsCount
-                ?? currentPost?.reposts
-                ?? currentPost?.repostsCount
-                ?? 0
-            );
-            const nextIsReposted = Boolean(
-                updated?.isReposted
-                ?? updated?.IsReposted
-                ?? !currentPost?.isReposted
-            );
+            setPosts((prev) => {
+                const next = prev.map((post) =>
+                    post.id === postId
+                        ? (() => {
+                            const baseCount = Number(post.repostsCount ?? post.reposts ?? 0);
+                            const resolvedIsReposted = typeof updated?.isReposted === 'boolean'
+                                ? updated.isReposted
+                                : !isCurrentlyReposted;
+                            const resolvedRepostsCount = Number.isFinite(Number(updated?.repostsCount))
+                                ? Number(updated.repostsCount)
+                                : Math.max(0, baseCount + (resolvedIsReposted ? 1 : -1));
 
-            setPosts((prev) => prev.map((post) =>
-                post.id === postId
-                    ? {
-                        ...post,
-                        reposts: nextRepostsCount,
-                        repostsCount: nextRepostsCount,
-                        isReposted: nextIsReposted
-                    }
-                    : post
-            ));
-            addTruthAlert('success', nextIsReposted ? 'Repost saved.' : 'Repost removed.', null);
+                            return {
+                                ...post,
+                                reposts: resolvedRepostsCount,
+                                repostsCount: resolvedRepostsCount,
+                                isReposted: resolvedIsReposted
+                            };
+                        })()
+                        : post
+                );
+
+                try {
+                    const reposted = next.filter((p) => p.isReposted);
+                    localStorage.setItem('wiseRepostedPosts', JSON.stringify(reposted));
+                    window.dispatchEvent(new Event('wiseraven:reposts-updated'));
+                } catch {
+                    // Ignore local cache sync failures.
+                }
+
+                return next;
+            });
+            addTruthAlert('success', isCurrentlyReposted ? 'Repost removed.' : 'Repost saved.', null);
         } catch (error) {
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
                 : 'Failed to update repost.';
             addTruthAlert('error', message, null);
         }
+    };
+
+    const handleLoadComments = async (postId) => {
+        const response = await apiService.getComments(postId);
+        return Array.isArray(response?.data) ? response.data : [];
+    };
+
+    const handleAddComment = async (postId, content) => {
+        const response = await apiService.addComment(postId, content);
+        const comment = response?.data || response;
+
+        setPosts((prev) => prev.map((post) => {
+            if (post.id !== postId) {
+                return post;
+            }
+
+            const nextCommentsCount = Number(comment?.commentsCount);
+            const fallbackCount = Number(post.commentsCount ?? post.comments?.length ?? 0) + 1;
+
+            return {
+                ...post,
+                commentsCount: Number.isFinite(nextCommentsCount) ? nextCommentsCount : fallbackCount
+            };
+        }));
+
+        return comment;
     };
 
     const handleFollow = (userId) => {
@@ -482,8 +563,35 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         }
     };
 
+    const quickActions = [
+        {
+            id: 'amateur-journalist',
+            label: 'Amateur Journalist',
+            description: 'Local dispatches first',
+            accent: 'rgba(59, 130, 246, 0.16)',
+            icon: '✍️'
+        },
+        {
+            id: 'my-library',
+            label: 'My Library',
+            description: 'Saved media vault',
+            accent: 'rgba(168, 85, 247, 0.16)',
+            icon: '📚'
+        },
+        {
+            id: 'radio-creator',
+            label: 'Radio Creator',
+            description: 'Broadcast studio',
+            accent: 'rgba(34, 197, 94, 0.16)',
+            icon: '📻'
+        }
+    ];
+
     const rankedFeedPosts = useMemo(() => {
-        const ranked = rankPostsByPredictedEngagement(posts, { horizonHours: 18 });
+        const ranked = rankCommunityFirstPosts(posts, {
+            horizonHours: 18,
+            userLocation: localRegion
+        });
 
         if (feedScope !== 'local' || !localRegion) {
             return ranked;
@@ -492,12 +600,14 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         return [...ranked].sort((left, right) => {
             const leftLocal = isLocalPost(left);
             const rightLocal = isLocalPost(right);
+            const leftPriority = (leftLocal ? 1 : 0) + (left.isCommunityFirst ? 1 : 0);
+            const rightPriority = (rightLocal ? 1 : 0) + (right.isCommunityFirst ? 1 : 0);
 
-            if (leftLocal === rightLocal) {
-                return 0;
+            if (leftPriority !== rightPriority) {
+                return rightPriority - leftPriority;
             }
 
-            return leftLocal ? -1 : 1;
+            return (right.communityFirstScore || 0) - (left.communityFirstScore || 0);
         });
     }, [posts, feedScope, localRegion]);
 
@@ -602,7 +712,41 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                     : 'National feed is active.'}
             </div>
 
-            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
+            <div style={{ marginBottom: '18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                {quickActions.map((action) => (
+                    <button
+                        key={action.id}
+                        type="button"
+                        onClick={() => onNavigate?.(action.id)}
+                        style={{
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '14px',
+                            background: action.accent,
+                            color: 'var(--text-color)',
+                            textAlign: 'left',
+                            padding: '14px 16px',
+                            cursor: 'pointer',
+                            boxShadow: '0 8px 18px rgba(15, 23, 42, 0.18)'
+                        }}
+                    >
+                        <div style={{ fontSize: '20px', marginBottom: '8px' }}>{action.icon}</div>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>{action.label}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{action.description}</div>
+                    </button>
+                ))}
+            </div>
+
+            <div style={{ marginBottom: '16px', border: '1px solid rgba(34, 197, 94, 0.35)', borderRadius: '12px', background: 'rgba(34, 197, 94, 0.08)', padding: '12px 14px', color: 'var(--text-color)' }}>
+                <strong style={{ color: '#86efac' }}>Phase 1:</strong> Community-first ranking is now boosting local and amateur journalist dispatches ahead of generic viral noise.
+            </div>
+
+            <PostCreator
+                onPostCreate={handlePostCreate}
+                addTruthAlert={addTruthAlert}
+                currentUser={currentUser}
+                onNavigate={onNavigate}
+                hideMultiPlatformPublish={true}
+            />
             <div style={{ marginTop: '20px' }}>
                 {rankedFeedPosts.map(post => (
                     <PostCard
@@ -610,6 +754,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         post={post}
                         onLike={handleLike}
                         onRepost={handleRepost}
+                        onLoadComments={handleLoadComments}
+                        onAddComment={handleAddComment}
                         onDispute={handleDisputePost}
                         onVerify={handleVerifyPost}
                         integrityReport={integrityReports[post.id]}

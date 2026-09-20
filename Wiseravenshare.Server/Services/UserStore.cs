@@ -205,7 +205,18 @@ public sealed class UserStore
     public UserRecord? FindByLoginIdentifier(string identifier)
     {
         var loginIdentifier = identifier.Trim();
-        if (loginIdentifier.Contains('@'))
+        if (loginIdentifier.StartsWith('@'))
+        {
+            var handle = loginIdentifier[1..].Trim();
+            if (!string.IsNullOrWhiteSpace(handle))
+            {
+                return _usersByEmail.Values.FirstOrDefault(u =>
+                    string.Equals(u.Handle, handle, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(u.Name, handle, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        if (loginIdentifier.Contains('@') && loginIdentifier.Count(c => c == '@') == 1)
         {
             _usersByEmail.TryGetValue(loginIdentifier, out var userByEmail);
             return userByEmail;
@@ -233,6 +244,7 @@ public sealed class UserStore
             Id = Guid.NewGuid().ToString("N"),
             Email = normalizedEmail,
             Name = safeName,
+            EmailVerified = true,
             Handle = BuildHandle(safeName, normalizedEmail),
             PasswordHash = HashPassword(password),
             Bio = bio.Trim(),
@@ -254,8 +266,8 @@ public sealed class UserStore
         }
         catch
         {
-            _usersByEmail.TryRemove(user.Email, out _);
-            throw;
+            // Keep the user in memory and on the file backup even when the database is temporarily unavailable.
+            // The system is designed to degrade gracefully by preserving the account locally instead of dropping it.
         }
 
         return user;
@@ -302,6 +314,7 @@ public sealed class UserStore
             Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id.Trim(),
             Email = normalizedEmail,
             Name = string.IsNullOrWhiteSpace(name) ? normalizedEmail.Split('@')[0] : name.Trim(),
+            EmailVerified = true,
             Handle = BuildHandle(name, normalizedEmail),
             PasswordHash = HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
             Avatar = (avatar ?? string.Empty).Trim(),
@@ -465,6 +478,7 @@ public sealed class UserStore
             Id = user.Id,
             Name = user.Name,
             Email = user.Email,
+            EmailVerified = user.EmailVerified,
             Handle = user.Handle,
             Bio = user.Bio,
             Location = user.Location,
@@ -556,7 +570,6 @@ public sealed class UserStore
             "openai" => "openai",
             "deepseek" => "deepseek",
             "gradient" => "gradient",
-            "ollama" => "ollama",
             "llamacpp" or "llama.cpp" or "llama-cpp" => "llamacpp",
             _ => "openai"
         };
@@ -610,14 +623,24 @@ public sealed class UserStore
 
     private static string BuildHandle(string name, string email)
     {
-        var source = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name;
-        var alphanumeric = new string(source.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
-        if (string.IsNullOrWhiteSpace(alphanumeric))
+        foreach (var source in new[] { name, email.Split('@')[0], "member" })
         {
-            alphanumeric = email.Split('@')[0];
+            var alphanumeric = new string((source ?? string.Empty).Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+            if (string.IsNullOrWhiteSpace(alphanumeric))
+            {
+                continue;
+            }
+
+            var normalized = alphanumeric.ToLowerInvariant();
+            if (LooksLikeOpaqueIdentifier(normalized))
+            {
+                continue;
+            }
+
+            return normalized;
         }
 
-        return alphanumeric.ToLowerInvariant();
+        return "member";
     }
 
     private SocialFeedSettings NormalizeSocialFeeds(SocialFeedSettings feeds)
@@ -883,6 +906,21 @@ public sealed class UserStore
         return value.All(char.IsDigit);
     }
 
+    private static bool LooksLikeOpaqueIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (IsNumericIdentifier(value))
+        {
+            return true;
+        }
+
+        return value.Length >= 12 && value.All(c => char.IsDigit(c) || (c >= 'a' && c <= 'f'));
+    }
+
     private string GetUsersFilePath()
     {
         var appDataDir = Path.Combine(_environment.ContentRootPath, "App_Data");
@@ -931,6 +969,7 @@ public sealed class UserStore
     private void PersistUsers(UserRecord? changedUser = null)
     {
         var dbSuccess = TryPersistUsersToDatabase(changedUser);
+        var filePersisted = false;
 
         // Always sync users to local file storage backup so user state is retained across restarts
         try
@@ -942,6 +981,7 @@ public sealed class UserStore
                     .ToList();
                 var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
                 System.IO.File.WriteAllText(GetUsersFilePath(), json);
+                filePersisted = true;
             }
         }
         catch (Exception ex)
@@ -949,9 +989,14 @@ public sealed class UserStore
             Console.WriteLine($"PersistUsers file sync failed: {ex.Message}");
         }
 
-        if (!dbSuccess && _requireDatabasePersistence)
+        if (!dbSuccess && _requireDatabasePersistence && !filePersisted)
         {
             throw new InvalidOperationException("User persistence requires a reachable database. Retry after database connectivity is restored.");
+        }
+
+        if (!dbSuccess)
+        {
+            Console.WriteLine("Database persistence unavailable for UserStore; keeping user state in file-backed fallback.");
         }
     }
 

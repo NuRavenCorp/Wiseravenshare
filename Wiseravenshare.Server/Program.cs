@@ -19,6 +19,7 @@ using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.Services.FM;
 using Wiseravenshare.Server.Services.Personalization;
+using Wiseravenshare.Server.Services.Crawler;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -1479,7 +1480,7 @@ CREATE INDEX IF NOT EXISTS idx_regional_trend_country_cat
     await pCmd.ExecuteNonQueryAsync(cancellationToken);
 }
 
-// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -1489,6 +1490,7 @@ var fallbackClientOrigins = new[]
 {
     "https://wise-ravens.com",
     "https://www.wise-ravens.com",
+    "https://cdn.wise-ravens.com",
     "https://wiseravenshare.com",
     "https://www.wiseravenshare.com"
 };
@@ -1528,16 +1530,18 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
     options.KnownProxies.Clear();
 });
 
-builder.Services.AddScoped<FeatureCompartmentLockFilter>();
-builder.Services.AddScoped<IFeatureCompartmentService, FeatureCompartmentService>();
-builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
-builder.Services.AddControllers(options =>
-{
-    options.Filters.AddService<FeatureCompartmentLockFilter>();
-});
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Emit camelCase JSON for all API responses so JS clients read counts directly.
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
+builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Crawler"));
+builder.Services.Configure<PerformanceAnalyzerOptions>(builder.Configuration.GetSection("Crawler:Performance"));
 
 if (useRedisCache && !string.IsNullOrWhiteSpace(cacheConnection))
 {
@@ -1588,6 +1592,53 @@ builder.Services.AddOutputCache(options =>
 });
 
 builder.Services.AddSignalR();
+
+// Assistant AI Service Configuration
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.AssistantOptions>(
+    builder.Configuration.GetSection("Assistant"));
+builder.Services.Configure<WiseRavenShare.Server.Infrastructure.External.OpenAiOptions>(
+    builder.Configuration.GetSection("OpenAI"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(
+    builder.Configuration.GetSection("Whisper"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.TtsOptions>(
+    builder.Configuration.GetSection("Tts"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WebGroundingOptions>(
+    builder.Configuration.GetSection("WebGrounding"));
+
+builder.Services.AddHttpClient<WiseRavenShare.Server.Infrastructure.External.OpenAiClient>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ISpeechToTextService,
+    WiseRavenShare.Server.Application.Services.Assistant.SpeechToTextService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ITextToSpeechService,
+    WiseRavenShare.Server.Application.Services.Assistant.TextToSpeechService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.IWebGroundingService,
+    WiseRavenShare.Server.Application.Services.Assistant.WebGroundingService>();
+
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.ILlmGateway,
+    WiseRavenShare.Server.Infrastructure.External.LlmGatewayAdapter>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IEmbeddingService,
+    WiseRavenShare.Server.Application.Services.Assistant.EmbeddingService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IPgVectorStore,
+    WiseRavenShare.Server.Infrastructure.Vector.PgVectorStore>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IRagRetriever,
+    WiseRavenShare.Server.Application.Services.Assistant.RagRetriever>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantOrchestrator,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantOrchestrator>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IChatterLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.ChatterLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IFeedbackLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.FeedbackLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantSafetyService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantSafetyService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantPersonaService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantPersonaService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.PromptBuilder>();
+
+// Craft Intelligence Services
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Craft.ICraftCoachingService,
+    WiseRavenShare.Server.Application.Services.Craft.CraftCoachingService>();
+
+builder.Services.AddHostedService<WiseRavenShare.Server.HostedServices.ChatterLearningBackgroundService>();
+
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
 builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -1612,6 +1663,17 @@ builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureS
 builder.Services.AddScoped<IMediaRepository, MediaRepository>();
 builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
 builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
+// Assistant repositories
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantConversationRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantConversationRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantMessageRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantMessageRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantFeedbackRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantFeedbackRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantKnowledgeRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantKnowledgeRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantLearningSampleRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantLearningSampleRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -1639,6 +1701,28 @@ builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
 builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
 builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
 builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
+builder.Services.AddScoped<ICrawlerOrchestrator, CrawlerOrchestrator>();
+builder.Services.AddScoped<IPageFetcher, PageFetcher>();
+builder.Services.AddScoped<IHtmlParser, HtmlParser>();
+builder.Services.AddScoped<IHealthScoreCalculator, HealthScoreCalculator>();
+builder.Services.AddScoped<IReportGenerator, ReportGenerator>();
+builder.Services.AddScoped<IJavaScriptRenderer, PlaywrightJavaScriptRenderer>();
+builder.Services.AddScoped<IPageAnalyzer, SeoAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, PerformanceAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, AccessibilityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, SecurityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, ContentAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, LinkAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, MobileAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, StructuredDataAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, BestPracticesAnalyzer>();
+builder.Services.AddHttpClient("SiteCrawlerClient")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        AllowAutoRedirect = false,
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    });
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
@@ -1660,27 +1744,24 @@ builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
-// AI assistant — select provider via AiProvider config (gradient|deepseek|ollama|llamacpp).
-// Gradient: Uses DigitalOcean Gradient Agentic Cloud inference endpoint.
-// DeepSeek: Uses cloud API with advanced reasoning.
-// Ollama: Uses local OpenAI-compatible API (requires Ollama container).
-// LlamaCPP: Uses local llama-server (default, inside compose network).
-var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
-if (aiProvider == "gradient")
+// AI assistant — select provider via AiProvider config (gradient|deepseek|digitalocean|dochatbot|do-chatbot|llamacpp).
+// DigitalOcean chatbot path is the production default.
+var aiProvider = (builder.Configuration["AiProvider"] ?? "digitalocean").Trim().ToLowerInvariant();
+if (aiProvider is "gradient" or "digitalocean" or "dochatbot" or "do-chatbot")
 {
     builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
 }
-else if (aiProvider == "deepseek")
+else if (aiProvider is "deepseek")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
-else if (aiProvider == "ollama")
+else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local")
 {
-    builder.Services.AddHttpClient<IOllamaChatService, OllamaChatService>();
+    builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
 else
 {
-    builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
+    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
 }
 builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
@@ -1692,6 +1773,7 @@ builder.Services.AddSingleton<TeamAccessService>();
 builder.Services.AddSingleton<PerformanceMetricsService>();
 builder.Services.AddScoped<OutputCacheInvalidationService>();
 builder.Services.AddSingleton<VideoFeedCollaborationService>();
+builder.Services.AddSingleton<PodcastVideoBridgeStateService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
@@ -1707,6 +1789,7 @@ builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinRolloutService, Wiseravenshare.Server.Services.Currency.WiseCoinRolloutService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IEngagementMultiplierService, Wiseravenshare.Server.Services.Currency.EngagementMultiplierService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
 // Daily ledger anchor + integrity check (hash chain tamper-evidence).
@@ -2051,11 +2134,17 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseHttpsRedirection();
+}
+
+app.UseForwardedHeaders();
+app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
 }
 
 // Security headers for all responses
@@ -2074,6 +2163,18 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "font-src 'self' data: https:; " +
+        "connect-src 'self' https: wss:; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "upgrade-insecure-requests";
     context.Response.Headers["X-XSS-Protection"] = "0"; // CSP is the modern replacement
     if (!app.Environment.IsDevelopment())
     {
@@ -2104,7 +2205,6 @@ app.Use(async (context, next) =>
     }
 });
 
-app.UseForwardedHeaders();
 app.UseCors("ClientPolicy");
 app.UseRequestTimeouts();
 app.UseAuthentication();
@@ -2159,7 +2259,7 @@ if (frontendDistExists)
     });
 }
 
-// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/health/db", async () =>
 {
@@ -2285,6 +2385,15 @@ ORDER BY ""MigrationId"";";
             .Where(expected => !actualTables.Contains(expected))
             .ToArray();
 
+        // Local helper to read simple boolean flags from environment variables.
+        static bool ParseBoolEnv(string key)
+        {
+            var v = Environment.GetEnvironmentVariable(key);
+            return !string.IsNullOrWhiteSpace(v)
+                && (v.Equals("1", StringComparison.OrdinalIgnoreCase)
+                    || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+        }
+
         return Results.Ok(new
         {
             status = "ok",
@@ -2311,6 +2420,14 @@ ORDER BY ""MigrationId"";";
                 hasUserRetentionTable = hasUserTable,
                 hasVideoRetentionTable = hasVideoTable,
                 hasVideoCommentsRetentionTable = hasVideoCommentsTable,
+
+                // Social media integration feature flags
+                supportsTikTok = ParseBoolEnv("INTEGRATION_TIKTOK_ENABLED"),
+                supportsFacebook = ParseBoolEnv("INTEGRATION_FACEBOOK_ENABLED"),
+                supportsReddit = ParseBoolEnv("INTEGRATION_REDDIT_ENABLED"),
+                supportsYouTube = ParseBoolEnv("INTEGRATION_YOUTUBE_ENABLED"),
+                supportsInstagram = ParseBoolEnv("INTEGRATION_INSTAGRAM_ENABLED"),
+
                 hasBucketRegistryTable = hasBucketObjectsTable,
                 expectedBucketName = configuredBucketName,
                 expectedProjectFolder = NormalizeFolderPath(configuredProjectFolder),
@@ -2324,5 +2441,8 @@ ORDER BY ""MigrationId"";";
         return Results.Problem($"Database connectivity check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
+
+// Seed Craft Intelligence domains on startup
+await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
