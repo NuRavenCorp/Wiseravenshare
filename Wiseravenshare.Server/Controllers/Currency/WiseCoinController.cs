@@ -275,6 +275,11 @@ public class WiseCoinController : ControllerBase
     public async Task<IActionResult> AllocateAllUsers([FromBody] RolloutRequest? request = null)
     {
         var amountPerUser = request?.AmountPerUser ?? 100m;
+        if (amountPerUser <= 0)
+        {
+            return BadRequest(new { error = "Amount per user must be positive" });
+        }
+
         var result = await _rolloutService.AllocateAllAsync(amountPerUser);
         
         _logger.LogInformation(

@@ -515,14 +515,16 @@ public class PostService : IPostService
             });
         }
 
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+
         // Update engagement in content crawler (fire-and-forget)
         try
         {
             _ = _contentCrawler.UpdateEngagementAsync(
                 postId,
                 post.ViewsCount,
-                post.LikesCount + 1,  // Include this new like
-                post.RepostsCount
+                interaction.LikesCount,
+                interaction.RepostsCount
             );
         }
         catch (Exception ex)
@@ -530,7 +532,17 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
         }
 
-        return await BuildPostInteractionDtoAsync(postId, userId);
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
     }
 
     public async Task<PostInteractionDto> UnlikePostAsync(Guid userId, Guid postId)
@@ -543,7 +555,25 @@ public class PostService : IPostService
 
         await _postRepository.UnlikePostAsync(postId, userId);
         _logger.LogInformation("User {UserId} unliked post {PostId}", userId, postId);
-        return await BuildPostInteractionDtoAsync(postId, userId);
+
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        _ = _contentCrawler.UpdateEngagementAsync(
+            postId,
+            post.ViewsCount,
+            interaction.LikesCount,
+            interaction.RepostsCount);
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
     }
 
     public async Task<PostInteractionDto> RepostPostAsync(Guid userId, Guid postId)
@@ -587,14 +617,16 @@ public class PostService : IPostService
             });
         }
 
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+
         // Update engagement in content crawler (fire-and-forget)
         try
         {
             _ = _contentCrawler.UpdateEngagementAsync(
                 postId,
                 post.ViewsCount,
-                post.LikesCount,
-                post.RepostsCount + 1  // Include this new repost
+                interaction.LikesCount,
+                interaction.RepostsCount
             );
         }
         catch (Exception ex)
@@ -602,7 +634,17 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
         }
 
-        return await BuildPostInteractionDtoAsync(postId, userId);
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
     }
 
     public async Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId)
@@ -615,7 +657,25 @@ public class PostService : IPostService
 
         await _postRepository.UnrepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} unreposted post {PostId}", userId, postId);
-        return await BuildPostInteractionDtoAsync(postId, userId);
+
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        _ = _contentCrawler.UpdateEngagementAsync(
+            postId,
+            post.ViewsCount,
+            interaction.LikesCount,
+            interaction.RepostsCount);
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
     }
 
     public async Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId)

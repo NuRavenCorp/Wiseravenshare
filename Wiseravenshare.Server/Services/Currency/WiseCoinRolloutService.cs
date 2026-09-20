@@ -10,7 +10,7 @@ namespace Wiseravenshare.Server.Services.Currency;
 public interface IWiseCoinRolloutService
 {
     /// <summary>Performs the initial allocation for a user (one-time, 100 WSC).</summary>
-    Task<bool> AllocateInitialWSCAsync(Guid userId);
+    Task<bool> AllocateInitialWSCAsync(Guid userId, decimal amount = 100m);
     
     /// <summary>Batch allocate to all users who haven't received initial allocation.</summary>
     Task<RolloutResult> AllocateAllAsync(decimal amountPerUser = 100m);
@@ -52,8 +52,14 @@ public class WiseCoinRolloutService : IWiseCoinRolloutService
         _logger = logger;
     }
 
-    public async Task<bool> AllocateInitialWSCAsync(Guid userId)
+    public async Task<bool> AllocateInitialWSCAsync(Guid userId, decimal amount = INITIAL_ALLOCATION_AMOUNT)
     {
+        if (amount <= 0)
+        {
+            _logger.LogWarning("Skipped initial allocation for user {UserId} because amount {Amount} is not positive", userId, amount);
+            return false;
+        }
+
         var wallet = await _wiseCoinService.GetOrCreateWalletAsync(userId);
         
         if (wallet.HasReceivedInitialAllocation)
@@ -65,7 +71,7 @@ public class WiseCoinRolloutService : IWiseCoinRolloutService
         // Award the initial allocation
         var result = await _wiseCoinService.EarnWSCAsync(
             userId,
-            INITIAL_ALLOCATION_AMOUNT,
+            amount,
             TransactionType.CommunityBonus,
             "WiseCoin rollout initial allocation",
             applyMultipliers: false);
@@ -79,10 +85,10 @@ public class WiseCoinRolloutService : IWiseCoinRolloutService
         // Mark wallet as having received allocation
         wallet.HasReceivedInitialAllocation = true;
         wallet.InitialAllocationDate = DateTime.UtcNow;
-        wallet.InitialAllocationAmount = INITIAL_ALLOCATION_AMOUNT;
+        wallet.InitialAllocationAmount = amount;
 
         await _walletRepository.UpdateAsync(wallet);
-        _logger.LogInformation("Allocated {Amount} WSC to user {UserId}", INITIAL_ALLOCATION_AMOUNT, userId);
+        _logger.LogInformation("Allocated {Amount} WSC to user {UserId}", amount, userId);
 
         return true;
     }
@@ -91,9 +97,8 @@ public class WiseCoinRolloutService : IWiseCoinRolloutService
     {
         var result = new RolloutResult();
         var usersNeedingAllocation = await _db.Users
-            .Join(_db.WiseCoins, u => u.Id, w => w.UserId, (u, w) => new { u, w })
-            .Where(uw => !uw.w.HasReceivedInitialAllocation)
-            .Select(uw => uw.u.Id)
+            .Where(u => !_db.WiseCoins.Any(w => w.UserId == u.Id && w.HasReceivedInitialAllocation))
+            .Select(u => u.Id)
             .ToListAsync();
 
         result.TotalUsersEligible = usersNeedingAllocation.Count;
@@ -102,7 +107,7 @@ public class WiseCoinRolloutService : IWiseCoinRolloutService
         {
             try
             {
-                var success = await AllocateInitialWSCAsync(userId);
+                var success = await AllocateInitialWSCAsync(userId, amountPerUser);
                 if (success)
                 {
                     result.SuccessfulAllocations++;

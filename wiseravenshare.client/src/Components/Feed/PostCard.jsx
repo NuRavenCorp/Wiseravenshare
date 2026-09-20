@@ -175,6 +175,8 @@ const PostCard = ({
         return items;
     }, [post.mediaUrl, post.url, post.videoUrl, post.imageUrl, post.mediaUrls]);
 
+    const likesCount = Number(post.likesCount ?? post.likes ?? 0);
+    const repostsCount = Number(post.repostsCount ?? post.reposts ?? 0);
     const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
 
     const handleToggleComments = async () => {
@@ -446,8 +448,8 @@ const PostCard = ({
             </div>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                <button onClick={() => onLike?.(post.id)}>{post.isLiked ? 'Liked' : 'Like'} ({post.likes ?? 0})</button>
-                <button onClick={() => onRepost?.(post.id)}>{post.isReposted ? 'Reposted' : 'Repost'} ({post.reposts ?? 0})</button>
+                <button onClick={() => onLike?.(post.id)}>{post.isLiked ? 'Liked' : 'Like'} ({likesCount})</button>
+                <button onClick={() => onRepost?.(post.id)}>{post.isReposted ? 'Reposted' : 'Repost'} ({repostsCount})</button>
                 <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
                 <button onClick={() => onVerify?.(post)}>Verify</button>
                 <button onClick={() => onDispute?.(post)}>Dispute</button>

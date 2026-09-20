@@ -38,7 +38,10 @@ const normalizeSocialFeeds = (socialFeeds) => {
         tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
         instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'))
+        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
 };
 
@@ -144,7 +147,10 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         tikTok: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         facebook: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         instagram: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
+        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        twitter: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        linkedIn: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
+        bluesky: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
     };
     const [posts, setPosts] = useState([]);
     const [likedPosts, setLikedPosts] = useState([]);
