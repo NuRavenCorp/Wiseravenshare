@@ -661,7 +661,354 @@ STRIPE_PRICE_LICENSE_PACK_ID=price_XXXX
 
 ---
 
-## I — Stripe Products to Create (Quick checklist)
+## J — IP Publishing Agent & Form Automation Bot
+
+**Autonomous agents that handle government filing on your behalf.**
+
+Wiseravenshare operates an IP Publishing Agent and Form Automation Bot that:
+1. Monitor payment confirmations for copyright/trademark filings
+2. Generate complete application forms from user-submitted data
+3. Automate online form submission to Copyright Office and USPTO portals
+4. Poll government status portals for registration updates
+5. Monitor email for office actions (refusals/requirements)
+6. Notify users of progress and send registration certificates
+
+### J.1 — How It Works
+
+**Step 1: User Submits Filing**
+- User fills copyright or trademark form, uploads files, pays
+- Wiseravenshare validates filing completeness
+
+**Step 2: Agent Form Generation**
+- Publishing Agent generates complete form data (JSON/XML)
+- Converts user inputs to government-compliant format
+- Prepares all attachments and specimens
+
+**Step 3: Bot Submission (Automated)**
+- Form Automation Bot launches browser instance (Playwright/Selenium)
+- Navigates to Copyright Office eCO portal or USPTO TEAS+ system
+- Fills form fields with generated data
+- Uploads files (audio, images, documents)
+- Handles CAPTCHAs or interactive challenges
+- Submits form and captures confirmation number
+
+**Step 4: Status Polling**
+- Bot periodically checks government portals for updates
+- Monitors email for Copyright Office/USPTO notifications
+- Extracts registration numbers and office action details
+- Updates Wiseravenshare database automatically
+
+**Step 5: Office Action Handling**
+- If government issues office action (refusal/requirement), agent detects it
+- Auto-generates response suggestions for user review
+- Allows user to upload amended materials
+- Resubmits response to government automatically
+
+**Step 6: Registration Completion**
+- Bot detects registration certificate from government
+- Downloads and archives certificate in Wiseravenshare
+- Notifies user via email and dashboard
+- Stores registration number for future reference
+
+### J.2 — Agent Capabilities
+
+**Form Generation**
+- Converts user data to Copyright Office forms (SR, PA, TX, Combined)
+- Generates USPTO TEAS+ trademark forms (TX, VI, SR, Combined)
+- Supports multiple languages for international filings (future)
+- Validates data completeness before submission
+
+**Browser Automation (Playwright/Selenium)**
+- Headless browser for production (no UI overhead)
+- Headed browser for debugging and testing
+- Session management and cookie persistence
+- Screenshot capture for error diagnostics
+- Timeout and retry logic for network failures
+
+**Form Filling & Submission**
+- Field-by-field form completion from structured data
+- File upload handling (multipart form data)
+- Dynamic form detection (handles portal UI changes)
+- Dropdown/select menus for classifications and choices
+- Checkbox and radio button handling
+
+**Status Polling**
+- Periodic checks of Copyright Office public records
+- USPTO trademark application status tracker polling
+- Email monitoring via IMAP (Gmail, Outlook, etc.)
+- Receipt number and application number extraction
+- Office action detection and content parsing
+
+**Office Action Response**
+- Automatic detection of office action emails
+- Content parsing to extract requirements
+- Response suggestion generation
+- User review and approval workflow
+- Automatic resubmission via portal
+
+### J.3 — Technology Stack
+
+**Backend (C# .NET)**
+```
+IPPublishingAgent
+├── PublishCopyrightFiling() — generates SR/PA/TX forms
+├── PublishTrademarkFiling() — generates TX/VI/SR forms
+├── GenerateCopyrightForm() — JSON form builder
+├── GenerateTrademarkForm() — TEAS+ form builder
+└── HandleOfficeAction() — office action processor
+
+IPFormAutomationBot
+├── SubmitCopyrightFormAsync() — Playwright automation
+├── SubmitTrademarkFormAsync() — TEAS+ submission
+├── PollCopyrightStatusAsync() — status checker
+├── PollTrademarkStatusAsync() — USPTO tracker
+├── MonitorCopyrightEmailAsync() — IMAP monitor
+└── MonitorTrademarkEmailAsync() — IMAP monitor
+
+IPPublishingAgentHostedService
+└── ExecuteAsync() — background polling loop (5-min intervals)
+```
+
+**Frontend (React)**
+```
+IPPublishingAgentApi
+├── submitCopyright() — trigger filing submission
+├── submitTrademark() — trigger filing submission
+├── getTaskStatus() — check agent progress
+├── getFilingTasks() — view all tasks for filing
+├── submitOfficeActionResponse() — submit response
+├── checkStatusNow() — force status check
+├── getDiagnostics() — admin diagnostics
+└── getBotLogs() — admin bot logs
+```
+
+**Browser Automation**
+- Playwright (recommended) or Selenium WebDriver
+- Headless Chromium for production
+- Video recording of submissions (for audit trail)
+- Screenshot on error for debugging
+
+**Email Monitoring**
+- IMAP client for Gmail, Outlook, Yahoo, etc.
+- Scheduled polling for incoming government emails
+- Attachment extraction (certificates, office actions)
+- Content parsing with regex and NLP
+
+### J.4 — API Endpoints
+
+```
+# Submission endpoints
+POST /api/ip-publishing-agent/copyright/submit
+  → Queue copyright filing for automated submission
+  ← {taskId, status, formGenerated, estimatedSubmissionTime}
+
+POST /api/ip-publishing-agent/trademark/submit
+  → Queue trademark filing for automated submission
+  ← {taskId, status, formGenerated, estimatedSubmissionTime}
+
+# Task monitoring
+GET /api/ip-publishing-agent/task/{taskId}/status
+  → Get single task progress
+  ← {taskId, status, governmentConfirmationNumber, officeAction, ...}
+
+GET /api/ip-publishing-agent/filing/{filingId}/tasks
+  → Get all tasks for filing
+  ← {filingId, tasks[], summary}
+
+# Office action handling
+POST /api/ip-publishing-agent/task/{taskId}/office-action-response
+  → Submit user's response to office action
+  ← {taskId, status, estimatedResubmissionTime, deadline}
+
+# Manual status checks
+POST /api/ip-publishing-agent/task/{taskId}/check-status-now
+  → Force immediate status check (don't wait for polling)
+  ← {taskId, status, message}
+
+# Admin only
+GET /api/ip-publishing-agent/diagnostics
+  → Agent health, statistics, recent errors
+  ← {agentStatus, statistics, recentErrors}
+
+GET /api/ip-publishing-agent/bot/logs
+  → Bot execution logs for debugging
+  ← {logs[], limit}
+```
+
+### J.5 — Task Lifecycle States
+
+| Status | Meaning |
+|--------|---------|
+| **Pending** | Task created, awaiting form generation |
+| **InProgress** | Form generated, queued for submission |
+| **Submitted** | Form submitted to government, confirmation received |
+| **Processing** | Government processing application |
+| **ActionRequired** | Office action issued, response needed |
+| **Completed** | Registration granted, certificate received |
+| **Failed** | Submission or processing failed |
+
+### J.6 — Agent Background Service
+
+**Runs continuously in background (5-minute polling cycle)**
+
+```csharp
+IPPublishingAgentHostedService
+├── Every 5 minutes:
+│   ├── Query DB for filings in "SubmittedToOffice" status
+│   ├── Create publishing tasks from filings
+│   ├── Call FormAutomationBot.SubmitFormAsync()
+│   ├── Poll for registration updates
+│   ├── Check email for office actions
+│   └── Update database task statuses
+└── Error logging + retry logic
+```
+
+**Configurable intervals via environment:**
+```yaml
+- key: IP_AGENT_POLLING_INTERVAL_MINUTES
+  value: 5
+- key: IP_BOT_SUBMISSION_TIMEOUT_MINUTES
+  value: 15
+- key: IP_BOT_EMAIL_POLL_INTERVAL_MINUTES
+  value: 30
+```
+
+### J.7 — Database Schema (To Be Implemented)
+
+```sql
+-- Publishing agent tasks
+CREATE TABLE FilingPublishingTasks (
+    TaskId NVARCHAR(255) PRIMARY KEY,
+    FilingId NVARCHAR(255) NOT NULL,
+    FilingType NVARCHAR(50),  -- "Copyright" or "Trademark"
+    FormCode NVARCHAR(50),    -- SR, PA, TX, VI, SR, etc.
+    Status INT,               -- 1=Pending, 2=InProgress, ... 7=Failed
+    
+    -- Form generation
+    GeneratedFormContent NVARCHAR(MAX),
+    FormTemplateUsed NVARCHAR(100),
+    FormGeneratedAt DATETIME,
+    
+    -- Government submission
+    GovernmentApplicationNumber NVARCHAR(100),
+    GovernmentConfirmationEmail NVARCHAR(255),
+    SubmittedAt DATETIME,
+    SubmissionAttempts INT,
+    
+    -- Status tracking
+    LastStatusCheckAt DATETIME,
+    NextStatusCheckAt DATETIME,
+    LatestStatusFromGovt NVARCHAR(MAX),
+    
+    -- Office actions
+    OfficeActionReceived NVARCHAR(MAX),
+    OfficeActionReceivedAt DATETIME,
+    OfficeActionDeadline DATETIME,
+    AutoResponseGenerated BIT,
+    AutoResponseContent NVARCHAR(MAX),
+    
+    -- Logging
+    AgentNotes NVARCHAR(MAX),
+    CreatedAt DATETIME NOT NULL,
+    UpdatedAt DATETIME NOT NULL,
+    
+    FOREIGN KEY (FilingId) REFERENCES CopyrightFilings(Id) OR TrademarkFilings(Id)
+);
+```
+
+### J.8 — Pricing (Included in Copyright/Trademark Filing)
+
+**No separate charge for automation — included in filing cost:**
+- Copyright filing: $97.50-$195 (includes automated eCO submission)
+- Trademark filing: $375-$750 (includes automated TEAS+ submission)
+
+**Value-add to users:**
+- No need to navigate government portals
+- No need to fill repetitive forms
+- Automatic status tracking
+- Automatic office action handling
+- Email-based progress notifications
+
+### J.9 — Security & Compliance
+
+**Authentication & Authorization**
+- Bot uses Service Account credentials (not user credentials)
+- No user passwords stored in Wiseravenshare
+- Credentials stored in encrypted vault
+- All submissions logged for audit trail
+
+**Data Privacy**
+- Filings stored in encrypted database
+- Email passwords never stored (OAuth/app passwords only)
+- Certificates archived with access controls
+- GDPR-compliant retention policies
+
+**Bot Fingerprinting**
+- User-Agent rotation to avoid detection
+- Browser automation detection prevention
+- Residential proxy support (future)
+- Rate limiting compliance with government portals
+
+### J.10 — Error Handling & Retries
+
+**Submission failures**
+- Retry up to 3 times with exponential backoff
+- Log failure reason (network, portal error, validation error)
+- Notify user of failure + manual submission option
+
+**Office portal timeouts**
+- Timeout: 15 minutes per submission
+- Auto-retry if network connectivity issue
+- Alert admin if consistent failures
+
+**Email parsing errors**
+- Fallback to manual status check
+- Store raw email for manual review
+- Log parsing error for debugging
+
+**CAPTCHA handling**
+- Attempt automated CAPTCHA solving (if available)
+- Escalate to user for manual resolution (if needed)
+- Store screenshot for debugging
+
+### J.11 — Monitoring & Observability
+
+**Metrics to track:**
+- Total filings submitted (by type, form code)
+- Submission success rate
+- Average time from submission to registration
+- Office action frequency and types
+- Email parsing success rate
+- Bot error rate and types
+
+**Logs to maintain:**
+- Every form submission attempt (with screenshot on error)
+- Every status poll
+- Every email received/parsed
+- Every office action handled
+- Agent startup/shutdown events
+
+**Alerts to configure:**
+- Submission failures > 5% in 1 hour
+- Status polling failures > 3 consecutive
+- Office action response deadline within 7 days
+- Agent service down
+- Database write failures
+
+### J.12 — Future Enhancements
+
+- [ ] Multi-language support (Spanish, French, etc.)
+- [ ] International trademark filings (WIPO, EPO)
+- [ ] International copyright (BERNE treaty countries)
+- [ ] Automated office action response generation
+- [ ] Appeals process automation
+- [ ] Batch filing submissions (cost discount)
+- [ ] API integration with Copyright Office (if available)
+- [ ] OAuth flow for secure email access
+- [ ] Advanced NLP for office action parsing
+- [ ] Mobile app notifications for status updates
+
+---
 
 - [ ] A1 Creator Pro — monthly + annual prices
 - [ ] A2 Growth Suite — monthly + annual prices
