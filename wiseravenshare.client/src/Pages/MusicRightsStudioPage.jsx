@@ -105,6 +105,257 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const [sharingTrackId, setSharingTrackId]= useState(null);
   const [showIPInfo,     setShowIPInfo]    = useState(false);
 
+  // ── Register Original Track (paid feature) ─────────────────────────────────
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [showPaymentGate,   setShowPaymentGate]   = useState(false);
+  const [registering,       setRegistering]       = useState(false);
+  const [registrationDoc,   setRegistrationDoc]   = useState(null);
+  const [analysing,         setAnalysing]         = useState(false);
+  const [regForm, setRegForm] = useState({
+    title: '', artistName: '', album: '', genre: '', yearOfCreation: new Date().getFullYear(),
+    bpm: '', musicalKey: '', isrc: '', label: '', coWriters: '', description: '',
+    lyricsExcerpt: '', file: null, sha256Fingerprint: '', musicCharacterization: '',
+    originalWorkConfirmed: false, rightsOwnerConfirmed: false,
+  });
+  const regFileInputRef = useRef(null);
+
+  const openRegisterModal = () => {
+    const token = localStorage.getItem('authToken');
+    if (!token || !currentUser) {
+      addToast('Please sign in to register a track.', 'warning');
+      return;
+    }
+    // Always show payment gate first (user selects plan or skips if already paid)
+    setShowPaymentGate(true);
+  };
+
+  const proceedToRegistration = () => {
+    setShowPaymentGate(false);
+    setShowRegisterModal(true);
+  };
+
+  // Web Audio API: analyse first 20 bars (~40 seconds at 120 BPM)
+  const analyseFirst20Bars = async (file) => {
+    setAnalysing(true);
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      const ctx = new AudioCtx();
+
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      const sampleRate = audioBuffer.sampleRate;
+      const totalSamples = audioBuffer.length;
+      // Analyse the first 40 seconds (covers ~20 bars at 120 BPM in 4/4)
+      const analysisSamples = Math.min(totalSamples, sampleRate * 40);
+      const channelData = audioBuffer.getChannelData(0).slice(0, analysisSamples);
+
+      // RMS energy
+      let sumSq = 0;
+      for (let i = 0; i < channelData.length; i++) sumSq += channelData[i] ** 2;
+      const rms = Math.sqrt(sumSq / channelData.length);
+      const rmsDb = Math.round(20 * Math.log10(rms + 1e-10));
+
+      // Zero crossing rate (higher = more percussive/noisy)
+      let zcrCount = 0;
+      for (let i = 1; i < channelData.length; i++) {
+        if (channelData[i] * channelData[i - 1] < 0) zcrCount++;
+      }
+      const zcr = zcrCount / channelData.length;
+
+      // Peak amplitude
+      let peak = 0;
+      for (let i = 0; i < channelData.length; i++) {
+        if (Math.abs(channelData[i]) > peak) peak = Math.abs(channelData[i]);
+      }
+      const peakDb = Math.round(20 * Math.log10(peak + 1e-10));
+
+      // FFT-based spectral centroid (brightness)
+      const fftSize = 2048;
+      const offlineCtx = new OfflineAudioContext(1, fftSize, sampleRate);
+      const sourceNode = offlineCtx.createBufferSource();
+      const fftBuffer = offlineCtx.createBuffer(1, fftSize, sampleRate);
+      fftBuffer.copyToChannel(channelData.slice(0, fftSize), 0);
+      sourceNode.buffer = fftBuffer;
+      const analyserNode = offlineCtx.createAnalyser();
+      analyserNode.fftSize = fftSize;
+      sourceNode.connect(analyserNode);
+      analyserNode.connect(offlineCtx.destination);
+      sourceNode.start(0);
+      await offlineCtx.startRendering();
+      const freqData = new Uint8Array(analyserNode.frequencyBinCount);
+      analyserNode.getByteFrequencyData(freqData);
+
+      let weightedSum = 0, magSum = 0;
+      for (let i = 0; i < freqData.length; i++) {
+        const freq = (i * sampleRate) / fftSize;
+        weightedSum += freq * freqData[i];
+        magSum += freqData[i];
+      }
+      const spectralCentroid = magSum > 0 ? Math.round(weightedSum / magSum) : 0;
+
+      // Sub-band energy ratios
+      let subBass = 0, bass = 0, mid = 0, presence = 0, brilliance = 0;
+      for (let i = 0; i < freqData.length; i++) {
+        const freq = (i * sampleRate) / fftSize;
+        const e = freqData[i];
+        if (freq < 60)            subBass   += e;
+        else if (freq < 250)      bass      += e;
+        else if (freq < 2000)     mid       += e;
+        else if (freq < 6000)     presence  += e;
+        else                      brilliance += e;
+      }
+      const totalE = subBass + bass + mid + presence + brilliance || 1;
+      const bassRatio      = Math.round((subBass + bass) / totalE * 100);
+      const midRatio       = Math.round(mid / totalE * 100);
+      const brillianceRatio = Math.round((presence + brilliance) / totalE * 100);
+
+      // Classify texture
+      const toneQuality = zcr < 0.02
+        ? 'smooth / tonal'
+        : zcr < 0.08
+          ? 'balanced'
+          : 'percussive / textured';
+
+      const brightnessDesc = spectralCentroid < 800
+        ? 'warm and low'
+        : spectralCentroid < 2500
+          ? 'balanced, full-range'
+          : 'bright and airy';
+
+      const dynamicRange = peakDb - rmsDb;
+      const dynamicDesc = dynamicRange > 18 ? 'wide dynamic range' : dynamicRange > 10 ? 'moderate dynamics' : 'compressed / dense';
+
+      const durationSec = Math.round(analysisSamples / sampleRate);
+      const durationFmt = durationSec >= 60
+        ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
+        : `${durationSec}s`;
+
+      await ctx.close();
+
+      return [
+        `Audio duration analysed: ${durationFmt} (first 20 bars / up to 40 seconds)`,
+        `Texture: ${toneQuality} (zero-crossing rate: ${(zcr * 1000).toFixed(1)}/1000 samples)`,
+        `Spectral character: ${brightnessDesc} (centroid: ${spectralCentroid} Hz)`,
+        `Energy distribution: ${bassRatio}% bass · ${midRatio}% mids · ${brillianceRatio}% high-end`,
+        `Volume level: RMS ${rmsDb} dBFS · Peak ${peakDb} dBFS · ${dynamicDesc}`,
+        `Sample rate: ${sampleRate} Hz · Channels: ${audioBuffer.numberOfChannels}`,
+      ].join('\n');
+    } catch (err) {
+      console.warn('Audio analysis failed:', err);
+      return null;
+    } finally {
+      setAnalysing(false);
+    }
+  };
+
+  const handleRegFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) { addToast('Please select an audio file.', 'error'); return; }
+
+    // Auto-fill title/artist from filename
+    const base = file.name.replace(/\.[^/.]+$/, '').replace(/[_]+/g, ' ').trim();
+    const parts = base.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+    const inferred = parts.length >= 2 ? { artistName: parts[0], title: parts[1] } : { title: base };
+
+    // SHA-256 fingerprint
+    let sha256Fingerprint = '';
+    try {
+      const buf  = await file.arrayBuffer();
+      const hash = await crypto.subtle.digest('SHA-256', buf);
+      sha256Fingerprint = Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {}
+
+    setRegForm((p) => ({ ...p, file, sha256Fingerprint, musicCharacterization: '', ...inferred }));
+    addToast('File selected. Click "Analyse First 20 Bars" to generate the music characterization.', 'info');
+  };
+
+  const handleAnalyse = async () => {
+    if (!regForm.file) { addToast('Select an audio file first.', 'warning'); return; }
+    const result = await analyseFirst20Bars(regForm.file);
+    if (result) {
+      setRegForm((p) => ({ ...p, musicCharacterization: result }));
+      addToast('Music characterization complete.', 'success');
+    } else {
+      addToast('Analysis could not be completed. You can describe the first 20 bars manually.', 'warning');
+    }
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    if (!regForm.title.trim()) { addToast('Track title is required.', 'warning'); return; }
+    if (!regForm.artistName.trim()) { addToast('Artist name is required.', 'warning'); return; }
+    if (!regForm.originalWorkConfirmed || !regForm.rightsOwnerConfirmed) {
+      addToast('Both declarations are required before registering.', 'error'); return;
+    }
+
+    setRegistering(true);
+    try {
+      const token = localStorage.getItem('authToken');
+      const payload = {
+        title:                 regForm.title.trim(),
+        artistName:            regForm.artistName.trim(),
+        album:                 regForm.album.trim() || null,
+        genre:                 regForm.genre.trim() || null,
+        yearOfCreation:        regForm.yearOfCreation ? Number(regForm.yearOfCreation) : null,
+        bpm:                   regForm.bpm ? parseFloat(regForm.bpm) : null,
+        musicalKey:            regForm.musicalKey.trim() || null,
+        isrc:                  regForm.isrc.trim() || null,
+        label:                 regForm.label.trim() || null,
+        coWriters:             regForm.coWriters.trim() || null,
+        description:           regForm.description.trim() || null,
+        lyricsExcerpt:         regForm.lyricsExcerpt.trim() || null,
+        musicCharacterization: regForm.musicCharacterization.trim() || null,
+        sha256Fingerprint:     regForm.sha256Fingerprint || null,
+      };
+
+      const res = await fetch('/api/music-rights/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token || ''}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 402) {
+        setShowRegisterModal(false);
+        setShowPaymentGate(true);
+        addToast('A paid Music Rights plan is required. Please select a plan.', 'info');
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        addToast(err.message || 'Registration failed. Please try again.', 'error');
+        return;
+      }
+
+      const data = await res.json();
+      setRegistrationDoc(data);
+      setShowRegisterModal(false);
+      addToast(`✅ Track registered! ID: REG-${data.registrationId}`, 'success');
+    } catch (err) {
+      addToast(err?.message || 'Registration failed.', 'error');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const downloadDocument = (htmlString, registrationId) => {
+    const blob = new Blob([htmlString], { type: 'text/html; charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `WiseRaven-Registration-REG-${registrationId}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const [uploadFormData, setUploadFormData] = useState({
     title: '', artist: '', album: '', genre: '', file: null,
     originalWorkConfirmed: false,
@@ -117,6 +368,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getBaseFileName = (n = '') => n.replace(/\.[^/.]+$/, '').trim();
   const normalizeText   = (v = '') => v.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+
 
   const toBlobStreamUrl = (relativePath = '') => {
     const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
@@ -480,8 +732,11 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           <button className="btn-outline" onClick={() => onNavigate('music-player')}>
             <FiPlay /> Open Studio Player
           </button>
+          <button className="btn-primary" style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', border: 'none' }} onClick={openRegisterModal}>
+            🛡️ Register Original Track
+          </button>
           <button className="btn-primary" onClick={() => setShowUploadForm(!showUploadForm)}>
-            <FiUpload /> Register New Track
+            <FiUpload /> Quick Upload
           </button>
         </div>
       </div>
@@ -759,6 +1014,259 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           </div>
         )}
       </div>
+
+      {/* ── Payment Gate Modal ─────────────────────────────────────────────── */}
+      {showPaymentGate && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9990, padding: '20px'
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,15,55,0.95))',
+            border: '1px solid rgba(129,140,248,0.35)', borderRadius: '24px',
+            padding: '32px', maxWidth: '780px', width: '100%', maxHeight: '85vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.55)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: '#e2e8f0', marginBottom: '4px' }}>
+                  🛡️ Register Original Track
+                </div>
+                <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                  Paid service · Timestamped ownership certificate with 20-bar music characterization
+                </div>
+              </div>
+              <button type="button" onClick={() => setShowPaymentGate(false)}
+                style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+            </div>
+
+            <div style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', borderRadius: '12px', padding: '14px', marginBottom: '20px', fontSize: '13px', color: '#cbd5e1' }}>
+              📄 Your registration certificate will include: <strong>unique registration ID · server-stamped date &amp; time · all form fields · first-20-bar music analysis · SHA-256 fingerprint · ownership declaration</strong>. Download as an HTML document printable to PDF.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+              {PROTECTION_PLANS.map((plan) => {
+                const style = plan.id === 'standard' ? { border: '2px solid #3b82f6' } : { border: '1px solid rgba(129,140,248,0.25)' };
+                return (
+                  <div key={plan.id} style={{
+                    background: 'rgba(15,23,42,0.7)', borderRadius: '16px',
+                    padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px',
+                    ...style
+                  }}>
+                    {plan.badge && (
+                      <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '2px 8px', borderRadius: '999px', alignSelf: 'flex-start' }}>
+                        {plan.badge}
+                      </span>
+                    )}
+                    <div style={{ fontWeight: 800, fontSize: '15px', color: '#e2e8f0' }}>{plan.name}</div>
+                    <div style={{ fontSize: '20px', fontWeight: 900, color: '#a5b4fc' }}>{plan.price}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>or {plan.annualPrice}</div>
+                    <ul style={{ fontSize: '12px', color: '#cbd5e1', paddingLeft: '14px', margin: '4px 0', display: 'grid', gap: '4px' }}>
+                      {plan.features.map((f) => <li key={f}>{f}</li>)}
+                    </ul>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: 'auto', flexWrap: 'wrap' }}>
+                      <button type="button" onClick={() => handleStripeCheckout(plan, 'monthly')}
+                        style={{ flex: 1, border: 'none', background: `linear-gradient(135deg,${plan.color},${plan.color}cc)`, color: '#fff', borderRadius: '8px', padding: '8px 10px', fontWeight: 700, fontSize: '11px', cursor: 'pointer' }}>
+                        Monthly
+                      </button>
+                      <button type="button" onClick={() => handleStripeCheckout(plan, 'annual')}
+                        style={{ flex: 1, border: `1px solid ${plan.color}55`, background: 'transparent', color: plan.color, borderRadius: '8px', padding: '8px 10px', fontWeight: 700, fontSize: '11px', cursor: 'pointer' }}>
+                        Annual
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button type="button" onClick={proceedToRegistration}
+                style={{ border: '1px solid rgba(129,140,248,0.4)', background: 'rgba(129,140,248,0.12)', color: '#a5b4fc', borderRadius: '10px', padding: '11px 24px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
+                I already have an active plan — Continue to Registration →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Registration Form Modal ────────────────────────────────────────── */}
+      {showRegisterModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9991, padding: '16px'
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg,rgba(15,23,42,0.99),rgba(30,15,55,0.96))',
+            border: '1px solid rgba(129,140,248,0.3)', borderRadius: '24px',
+            padding: '28px', maxWidth: '820px', width: '100%', maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.6)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: '#e2e8f0' }}>📋 Original Track Registration Form</div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>All fields are included in the official ownership certificate.</div>
+              </div>
+              <button type="button" onClick={() => setShowRegisterModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+            </div>
+
+            <form onSubmit={handleRegisterSubmit} style={{ display: 'grid', gap: '14px' }}>
+              {/* File + Analysis */}
+              <div style={{ background: 'rgba(129,140,248,0.07)', border: '1px solid rgba(129,140,248,0.2)', borderRadius: '12px', padding: '16px', display: 'grid', gap: '10px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#a5b4fc', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Audio File &amp; 20-Bar Analysis</div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ flex: 1, minWidth: '180px' }}>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Audio File <span style={{ color: '#f87171' }}>*</span></div>
+                    <input type="file" accept="audio/*" ref={regFileInputRef} onChange={handleRegFileSelect}
+                      style={{ fontSize: '13px', color: '#e2e8f0', width: '100%' }} />
+                  </label>
+                  <button type="button" onClick={handleAnalyse} disabled={!regForm.file || analysing}
+                    style={{
+                      border: '1px solid rgba(16,185,129,0.45)', background: 'rgba(16,185,129,0.12)',
+                      color: '#34d399', borderRadius: '10px', padding: '10px 16px', fontWeight: 700,
+                      fontSize: '12px', cursor: regForm.file && !analysing ? 'pointer' : 'not-allowed',
+                      opacity: !regForm.file || analysing ? 0.6 : 1, whiteSpace: 'nowrap'
+                    }}>
+                    {analysing ? '🔍 Analysing...' : '🎵 Analyse First 20 Bars'}
+                  </button>
+                </div>
+                {regForm.sha256Fingerprint && (
+                  <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    SHA-256: {regForm.sha256Fingerprint}
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>
+                    Music Characterization — First 20 Bars <span style={{ color: '#64748b' }}>(auto-filled by analysis or describe manually)</span>
+                  </div>
+                  <textarea value={regForm.musicCharacterization}
+                    onChange={(e) => setRegForm((p) => ({ ...p, musicCharacterization: e.target.value }))}
+                    rows={4} placeholder="Describe the opening 20 bars: tempo, key feel, instruments, mood, structure..."
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(129,140,248,0.25)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Track details */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                {[
+                  { label: 'Track Title *', key: 'title', placeholder: 'My Original Song', required: true },
+                  { label: 'Artist / Stage Name *', key: 'artistName', placeholder: 'Your Name', required: true },
+                  { label: 'Album / Project', key: 'album', placeholder: 'Album name' },
+                  { label: 'Genre', key: 'genre', placeholder: 'Hip-Hop, Jazz, Pop...' },
+                  { label: 'Year of Creation', key: 'yearOfCreation', placeholder: '2025', type: 'number' },
+                  { label: 'BPM / Tempo', key: 'bpm', placeholder: '120', type: 'number' },
+                  { label: 'Musical Key', key: 'musicalKey', placeholder: 'C major / A minor' },
+                  { label: 'ISRC Code', key: 'isrc', placeholder: 'CC-XXX-YY-NNNNN' },
+                  { label: 'Label / Publisher', key: 'label', placeholder: 'Independent / Label name' },
+                  { label: 'Co-writers', key: 'coWriters', placeholder: 'Full names of all co-writers' },
+                ].map(({ label, key, placeholder, required, type }) => (
+                  <label key={key} style={{ display: 'grid', gap: '4px' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>{label}</span>
+                    <input
+                      type={type || 'text'}
+                      value={regForm[key] ?? ''}
+                      onChange={(e) => setRegForm((p) => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      required={required}
+                      style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid rgba(129,140,248,0.25)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: '13px' }}
+                    />
+                  </label>
+                ))}
+              </div>
+
+              {/* Description + lyrics */}
+              {[
+                { label: 'Description', key: 'description', placeholder: 'Brief description of the work, its inspiration, and intended use...', rows: 3 },
+                { label: 'Lyrics Excerpt (First Verse / Hook)', key: 'lyricsExcerpt', placeholder: 'Include the opening lyrics as part of the ownership record...', rows: 4 },
+              ].map(({ label, key, placeholder, rows }) => (
+                <label key={key} style={{ display: 'grid', gap: '4px' }}>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{label}</span>
+                  <textarea value={regForm[key] ?? ''} onChange={(e) => setRegForm((p) => ({ ...p, [key]: e.target.value }))}
+                    rows={rows} placeholder={placeholder}
+                    style={{ padding: '10px', borderRadius: '8px', border: '1px solid rgba(129,140,248,0.25)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: '13px', resize: 'vertical' }} />
+                </label>
+              ))}
+
+              {/* Declarations */}
+              <div style={{ display: 'grid', gap: '10px', background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: '10px', padding: '14px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fca5a5', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Required Declarations</div>
+                {[
+                  { key: 'originalWorkConfirmed', label: 'I confirm this track is my original creation and I hold or co-hold the master and publishing rights. I am not uploading a cover, remix, or sample of another artist\'s work without the required licenses.' },
+                  { key: 'rightsOwnerConfirmed', label: 'I authorise WiseRavenShare to create a timestamped rights registration record, compute a cryptographic fingerprint, and include the information in an official ownership certificate.' },
+                ].map(({ key, label }) => (
+                  <label key={key} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={regForm[key]} onChange={(e) => setRegForm((p) => ({ ...p, [key]: e.target.checked }))}
+                      style={{ marginTop: '2px', flexShrink: 0 }} />
+                    <span style={{ fontSize: '12px', color: '#cbd5e1' }}>{label}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowRegisterModal(false)}
+                  style={{ border: '1px solid var(--border-color)', background: 'transparent', color: '#94a3b8', borderRadius: '10px', padding: '11px 18px', cursor: 'pointer', fontWeight: 600 }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={registering}
+                  style={{ border: 'none', background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: '#fff', borderRadius: '10px', padding: '11px 22px', fontWeight: 700, fontSize: '14px', cursor: registering ? 'wait' : 'pointer', opacity: registering ? 0.7 : 1 }}>
+                  {registering ? '⏳ Registering...' : '🛡️ Generate Ownership Certificate'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Registration Document View ─────────────────────────────────────── */}
+      {registrationDoc && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9992, padding: '16px'
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: '16px', maxWidth: '940px', width: '100%',
+            maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.6)'
+          }}>
+            {/* Doc toolbar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', borderRadius: '16px 16px 0 0', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: '#1e3a5f', fontSize: '14px' }}>
+                  ✅ Ownership Certificate — REG-{registrationDoc.registrationId}
+                </div>
+                <div style={{ fontSize: '11px', color: '#718096', marginTop: '2px' }}>{registrationDoc.metadata?.title} · {registrationDoc.metadata?.artist}</div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button"
+                  onClick={() => downloadDocument(registrationDoc.document, registrationDoc.registrationId)}
+                  style={{ border: '1px solid #1e3a5f', background: '#1e3a5f', color: '#fff', borderRadius: '8px', padding: '7px 14px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>
+                  ⬇ Download HTML
+                </button>
+                <button type="button"
+                  onClick={() => window.print()}
+                  style={{ border: '1px solid #4a5568', background: 'transparent', color: '#4a5568', borderRadius: '8px', padding: '7px 14px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>
+                  🖨️ Print to PDF
+                </button>
+                <button type="button" onClick={() => setRegistrationDoc(null)}
+                  style={{ border: '1px solid #e2e8f0', background: 'transparent', color: '#718096', borderRadius: '8px', padding: '7px 14px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>
+                  Close
+                </button>
+              </div>
+            </div>
+            {/* Iframe doc preview */}
+            <iframe
+              srcDoc={registrationDoc.document}
+              title="Ownership Registration Certificate"
+              style={{ flex: 1, border: 'none', borderRadius: '0 0 16px 16px' }}
+              sandbox="allow-same-origin"
+            />
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
