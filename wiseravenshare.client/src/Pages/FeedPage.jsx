@@ -376,12 +376,12 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const handleRepost = async (postId) => {
         try {
             const currentPost = posts.find((post) => post.id === postId);
-            if (currentPost?.isReposted) {
-                addTruthAlert('info', 'You already reposted this post.', null);
-                return;
-            }
+            const isCurrentlyReposted = Boolean(currentPost?.isReposted);
 
-            const updated = await apiService.repostPost(postId);
+            const updated = isCurrentlyReposted
+                ? await apiService.unrepostPost(postId)
+                : await apiService.repostPost(postId);
+
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
@@ -389,7 +389,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                             const baseCount = Number(post.repostsCount ?? post.reposts ?? 0);
                             const resolvedIsReposted = typeof updated?.isReposted === 'boolean'
                                 ? updated.isReposted
-                                : true;
+                                : !isCurrentlyReposted;
                             const resolvedRepostsCount = Number.isFinite(Number(updated?.repostsCount))
                                 ? Number(updated.repostsCount)
                                 : Math.max(0, baseCount + (resolvedIsReposted ? 1 : -1));
@@ -414,7 +414,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
                 return next;
             });
-            addTruthAlert('success', 'Repost saved.', null);
+            addTruthAlert('success', isCurrentlyReposted ? 'Repost removed.' : 'Repost saved.', null);
         } catch (error) {
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
