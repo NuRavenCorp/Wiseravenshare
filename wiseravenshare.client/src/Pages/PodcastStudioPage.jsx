@@ -8,6 +8,7 @@ import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
 import { useCollaborationHub } from '../hooks/useCollaborationHub';
+import { subscriptionService } from '../Services/subscriptionService';
 
 const initialTeamMembers = [];
 
@@ -170,6 +171,73 @@ const apiRoleToRoleLabel = {
     'script-lead': 'Script Lead'
 };
 
+// Podcast Studio Pricing Plans
+const PODCAST_PRICING_PLANS = {
+    growthSuite: {
+        id: 'growth-suite',
+        name: 'Growth Suite',
+        tagline: 'Unlock trending analytics & audience insights',
+        features: [
+            'Growth analytics & trending content dashboard',
+            'Audience sentiment tracking across platforms',
+            '30-day performance history',
+            'Topic recommendations based on trends',
+            'Monthly download reports'
+        ],
+        prices: {
+            monthly: 4900, // $49/month
+            annual: 49000  // $490/year (saves $98/year)
+        },
+        trial: {
+            days: 14,
+            message: 'Try Growth Suite for 14 days free — no credit card required'
+        }
+    },
+    studioPlus: {
+        id: 'studio-plus',
+        name: 'Studio Plus',
+        tagline: 'Bring reviewers, editors, and team operators into one lane',
+        features: [
+            'Team review workflows (unlimited reviewers)',
+            'Assignment & approval chains',
+            'Permission-based editing roles',
+            'Team member analytics & activity logs',
+            'Multi-role simultaneous editing',
+            'Team workspace with shared assets'
+        ],
+        prices: {
+            monthly: 9900, // $99/month
+            annual: 99000  // $990/year (saves $198/year)
+        },
+        trial: {
+            days: 7,
+            message: 'Try Studio Plus for 7 days free — invite your team'
+        }
+    },
+    podcastProBundle: {
+        id: 'podcast-pro',
+        name: 'Podcast Pro Bundle',
+        tagline: 'Growth Suite + Studio Plus + priority support',
+        features: [
+            'Everything in Growth Suite',
+            'Everything in Studio Plus',
+            '24/7 priority email support',
+            'Monthly strategy calls with our team',
+            'Custom episode templates',
+            'Advanced analytics export'
+        ],
+        prices: {
+            monthly: 14900, // $149/month (save $35 vs individual)
+            annual: 149000  // $1,490/year (saves $470/year)
+        },
+        trial: {
+            days: 30,
+            message: 'Try Podcast Pro for 30 days free — full feature access'
+        },
+        featured: true
+    }
+};
+
 const normalizeLoginIdentifier = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
 
 const inferIdentifierType = (identifier) => {
@@ -259,6 +327,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
     const [permissions, setPermissions] = useState(rolePermissions.Owner);
+
+    // Pricing & Subscription State
+    const [showPricingModal, setShowPricingModal] = useState(false);
+    const [selectedPlan, setSelectedPlan] = useState(null);
+    const [billingCycle, setBillingCycle] = useState('monthly');
 
     // Recording State
     const [isRecording, setIsRecording] = useState(false);
@@ -695,6 +768,35 @@ const PodcastStudioPage = ({ onNavigate }) => {
             forceStopCamera: true,
             forceStopFeed: true
         });
+    };
+
+    const handleStartTrial = async (planKey) => {
+        try {
+            const planPriceIdMap = {
+                'growthSuite': process.env.REACT_APP_STRIPE_GROWTH_SUITE_PRICE_ID || 'price_growth_suite',
+                'studioPlus': process.env.REACT_APP_STRIPE_STUDIO_PLUS_PRICE_ID || 'price_studio_plus',
+                'podcastProBundle': process.env.REACT_APP_STRIPE_PODCAST_PRO_PRICE_ID || 'price_podcast_pro'
+            };
+
+            const priceId = planPriceIdMap[planKey];
+            const successUrl = `${window.location.origin}/podcast-studio?checkout=success`;
+            const cancelUrl = `${window.location.origin}/podcast-studio?checkout=cancel`;
+
+            const result = await subscriptionService.createCheckoutSession({
+                priceId,
+                successUrl,
+                cancelUrl,
+                plan: planKey,
+                billingCycle: billingCycle
+            });
+
+            if (result?.url) {
+                window.location.href = result.url;
+            }
+        } catch (error) {
+            console.error('Checkout error:', error);
+            setStatus(`Unable to start checkout: ${error?.message || 'Unknown error'}`);
+        }
     };
 
     const issueControlCommand = async (command, note = '') => {
@@ -2511,12 +2613,15 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
                                 Use trend and audience signals to prioritize what gets posted next.
                             </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+                                Try free for 14 days with Growth Suite
+                            </div>
                             <button
                                 type="button"
-                                onClick={() => navigateToFeaturePage('growth', 'Opening Growth suite...')}
-                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                                onClick={() => { setSelectedPlan('growthSuite'); setShowPricingModal(true); }}
+                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                             >
-                                Upgrade to unlock
+                                View pricing →
                             </button>
                         </div>
 
@@ -2538,12 +2643,15 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
                                 Bring reviewers, editors, and operators into the same publishing lane.
                             </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+                                Try free for 7 days with Studio Plus
+                            </div>
                             <button
                                 type="button"
-                                onClick={() => navigateToFeaturePage('team-launchpad', 'Opening Team Launchpad...')}
-                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                                onClick={() => { setSelectedPlan('studioPlus'); setShowPricingModal(true); }}
+                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                             >
-                                Upgrade to unlock
+                                View pricing →
                             </button>
                         </div>
                     </div>
@@ -4092,6 +4200,184 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 </div>
                 )}
             </div>
+
+            {/* ── Pricing Modal ── */}
+            {showPricingModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '20px'
+                }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(15,23,42,0.99), rgba(30,15,55,0.95))',
+                        border: '1px solid rgba(129,140,248,0.3)',
+                        borderRadius: '24px',
+                        padding: '32px',
+                        maxWidth: '900px',
+                        maxHeight: '85vh',
+                        overflowY: 'auto',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+                    }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                            <div>
+                                <div style={{ fontSize: '20px', fontWeight: 800, color: '#e2e8f0', marginBottom: '4px' }}>
+                                    🚀 Podcast Studio Plans
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                                    Choose your tier and start your free trial today — no credit card required.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowPricingModal(false)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    fontSize: '24px',
+                                    cursor: 'pointer',
+                                    color: '#94a3b8'
+                                }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Billing cycle toggle */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '12px', color: billingCycle === 'monthly' ? '#e2e8f0' : '#94a3b8', fontWeight: billingCycle === 'monthly' ? 700 : 400 }}>Monthly</span>
+                            <button
+                                type="button"
+                                onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'annual' : 'monthly')}
+                                style={{
+                                    background: 'rgba(129,140,248,0.2)',
+                                    border: '1px solid rgba(129,140,248,0.3)',
+                                    borderRadius: '20px',
+                                    padding: '4px 12px',
+                                    fontSize: '12px',
+                                    color: '#a5b4fc',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {billingCycle === 'monthly' ? 'Switch to Annual' : 'Switch to Monthly'}
+                            </button>
+                            <span style={{ fontSize: '12px', color: billingCycle === 'annual' ? '#e2e8f0' : '#94a3b8', fontWeight: billingCycle === 'annual' ? 700 : 400 }}>
+                                Annual {billingCycle === 'annual' && '(Save 20%)'}
+                            </span>
+                        </div>
+
+                        {/* Plans grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                            {Object.entries(PODCAST_PRICING_PLANS).map(([key, plan]) => {
+                                const priceUsd = billingCycle === 'monthly' ? (plan.prices.monthly / 100).toFixed(2) : (plan.prices.annual / 100).toFixed(2);
+                                const billingLabel = billingCycle === 'monthly' ? '/month' : '/year';
+                                const isSelected = selectedPlan === key;
+                                return (
+                                    <div
+                                        key={key}
+                                        style={{
+                                            background: isSelected ? 'rgba(129,140,248,0.15)' : 'rgba(30,15,55,0.8)',
+                                            border: isSelected ? '2px solid rgba(129,140,248,0.6)' : '1px solid rgba(129,140,248,0.2)',
+                                            borderRadius: '16px',
+                                            padding: '20px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            position: 'relative'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = 'rgba(129,140,248,0.08)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = 'rgba(30,15,55,0.8)';
+                                        }}
+                                        onClick={() => setSelectedPlan(key)}
+                                    >
+                                        {plan.featured && (
+                                            <div style={{ position: 'absolute', top: '-12px', left: '16px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#1f2937', padding: '2px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                                                BEST VALUE
+                                            </div>
+                                        )}
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <div style={{ fontSize: '16px', fontWeight: 800, color: '#e2e8f0', marginBottom: '2px' }}>
+                                                {plan.name}
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                                                {plan.tagline}
+                                            </div>
+                                        </div>
+                                        <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid rgba(129,140,248,0.15)' }}>
+                                            <div style={{ fontSize: '28px', fontWeight: 900, color: '#e2e8f0' }}>
+                                                ${priceUsd}
+                                                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 400, marginLeft: '4px' }}>
+                                                    {billingLabel}
+                                                </span>
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                                                {plan.trial.message}
+                                            </div>
+                                        </div>
+                                        <div style={{ marginBottom: '16px', flex: 1 }}>
+                                            {plan.features.map((feature, idx) => (
+                                                <div key={idx} style={{ fontSize: '12px', color: '#cbd5e1', display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                                    <span style={{ color: '#4ade80', fontWeight: 700 }}>✓</span>
+                                                    <span>{feature}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleStartTrial(key)}
+                                            style={{
+                                                width: '100%',
+                                                border: isSelected ? '1px solid rgba(129,140,248,0.6)' : '1px solid rgba(129,140,248,0.3)',
+                                                background: isSelected ? 'rgba(129,140,248,0.25)' : 'rgba(129,140,248,0.1)',
+                                                color: '#a5b4fc',
+                                                borderRadius: '10px',
+                                                padding: '10px 16px',
+                                                fontSize: '13px',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = 'rgba(129,140,248,0.35)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = isSelected ? 'rgba(129,140,248,0.25)' : 'rgba(129,140,248,0.1)';
+                                            }}
+                                        >
+                                            Start {plan.trial.days}-day free trial
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* FAQ */}
+                        <div style={{ background: 'rgba(30,15,55,0.6)', border: '1px solid rgba(129,140,248,0.15)', borderRadius: '12px', padding: '16px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '8px' }}>
+                                ❓ Common Questions
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#cbd5e1', display: 'grid', gap: '8px' }}>
+                                <div><strong>• Billing:</strong> Your trial auto-converts to a paid subscription on day 15 (or 8/30 depending on plan). Cancel anytime from Settings.</div>
+                                <div><strong>• Multiple plans:</strong> You can only have one active subscription. Upgrading cancels your current plan.</div>
+                                <div><strong>• Money-back:</strong> Not happy? Email support@wiseravenshare.com within 14 days for a full refund.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Compartment>
     );
 };
