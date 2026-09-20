@@ -193,7 +193,7 @@ const PODCAST_PRICING_PLANS = {
             message: 'Try Growth Suite for 14 days free — no credit card required'
         }
     },
-    studioPlus: {
+    studio_plus: {
         id: 'studio-plus',
         name: 'Studio Plus',
         tagline: 'Bring reviewers, editors, and team operators into one lane',
@@ -214,7 +214,7 @@ const PODCAST_PRICING_PLANS = {
             message: 'Try Studio Plus for 7 days free — invite your team'
         }
     },
-    podcastProBundle: {
+    podcast_pro: {
         id: 'podcast-pro',
         name: 'Podcast Pro Bundle',
         tagline: 'Growth Suite + Studio Plus + priority support',
@@ -773,9 +773,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleStartTrial = async (planKey) => {
         try {
             const planPriceIdMap = {
-                'growthSuite': process.env.REACT_APP_STRIPE_GROWTH_SUITE_PRICE_ID || 'price_growth_suite',
-                'studioPlus': process.env.REACT_APP_STRIPE_STUDIO_PLUS_PRICE_ID || 'price_studio_plus',
-                'podcastProBundle': process.env.REACT_APP_STRIPE_PODCAST_PRO_PRICE_ID || 'price_podcast_pro'
+                'growth_suite': process.env.REACT_APP_STRIPE_GROWTH_SUITE_PRICE_ID || 'price_growth_suite',
+                'studio_plus': process.env.REACT_APP_STRIPE_STUDIO_PLUS_PRICE_ID || 'price_studio_plus',
+                'podcast_pro': process.env.REACT_APP_STRIPE_PODCAST_PRO_PRICE_ID || 'price_podcast_pro'
             };
 
             const priceId = planPriceIdMap[planKey];
@@ -2618,7 +2618,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                             <button
                                 type="button"
-                                onClick={() => { setSelectedPlan('growthSuite'); setShowPricingModal(true); }}
+                                onClick={() => { setSelectedPlan('growth_suite'); setShowPricingModal(true); }}
                                 style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                             >
                                 View pricing →
@@ -2648,7 +2648,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             </div>
                             <button
                                 type="button"
-                                onClick={() => { setSelectedPlan('studioPlus'); setShowPricingModal(true); }}
+                                onClick={() => { setSelectedPlan('studio_plus'); setShowPricingModal(true); }}
                                 style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                             >
                                 View pricing →
