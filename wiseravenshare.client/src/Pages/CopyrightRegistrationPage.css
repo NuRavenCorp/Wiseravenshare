@@ -347,6 +347,100 @@
   margin: 0;
 }
 
+.price-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 0.9em;
+}
+
+.price-breakdown-grid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+  padding: 10px;
+  background: #f0f4ff;
+  border-radius: 6px;
+}
+
+.copyright-fee {
+  color: #666;
+  font-size: 0.95em;
+}
+
+.plus {
+  color: #999;
+  font-weight: bold;
+}
+
+.markup-fee {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.equals {
+  color: #999;
+  font-weight: bold;
+}
+
+.total-price {
+  color: #28a745;
+  font-weight: 700;
+  font-size: 1.1em;
+  padding: 0 8px;
+  background: white;
+  border-radius: 4px;
+  border: 2px solid #28a745;
+}
+
+.cost-breakdown {
+  background: #f0f4ff;
+  border: 2px solid #667eea;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 15px 0;
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.breakdown-row.highlight {
+  background: #fff3cd;
+  padding: 12px;
+  border-radius: 4px;
+  margin: 8px 0;
+  font-weight: 600;
+  color: #856404;
+  border-bottom: none;
+}
+
+.breakdown-row.total {
+  border-bottom: none;
+  font-weight: 700;
+  font-size: 1.15em;
+  color: #28a745;
+  padding-top: 15px;
+  margin-top: 10px;
+  border-top: 2px solid #28a745;
+}
+
+.breakdown-row .label {
+  font-weight: 600;
+  color: #333;
+}
+
+.breakdown-row .amount {
+  color: #28a745;
+  font-weight: 700;
+}
+
 .steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));

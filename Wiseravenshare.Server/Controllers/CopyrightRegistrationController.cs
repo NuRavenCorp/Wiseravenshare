@@ -70,7 +70,7 @@ public class CopyrightRegistrationController : ControllerBase
 
     /// <summary>
     /// POST /api/copyright-registration/calculate-cost
-    /// Calculates total registration cost for selected forms (pass-through pricing).
+    /// Calculates total registration cost for selected forms with 50% Wiseravenshare markup.
     /// </summary>
     [HttpPost("calculate-cost")]
     [ProducesResponseType(typeof(CostResponse), 200)]
@@ -81,15 +81,17 @@ public class CopyrightRegistrationController : ControllerBase
 
         try
         {
-            var totalCost = _copyrightService.CalculateRegistrationCost(request.FormCodes);
+            var breakdown = _copyrightService.GetCostBreakdown(request.FormCodes);
             var response = new CostResponse
             {
                 SelectedForms = request.FormCodes,
-                TotalCostUsd = totalCost,
-                MarkupPercentage = 0,
-                Note = "Zero markup pricing: amount charged equals exact U.S. Copyright Office fee"
+                CopyrightOfficeFees = breakdown.copyrightOfficeFees,
+                WiseravenMarkup = breakdown.wiseravenMarkup,
+                TotalCostUsd = breakdown.totalUserPrice,
+                MarkupPercentage = 50,
+                Note = "50% Wiseravenshare markup: Copyright Office fees plus service fee"
             };
-            _logger.LogInformation($"Calculated cost ${totalCost:F2} for forms: {string.Join(", ", request.FormCodes)}");
+            _logger.LogInformation($"Calculated cost ${breakdown.totalUserPrice:F2} (CO: ${breakdown.copyrightOfficeFees:F2} + Wiseravenshare: ${breakdown.wiseravenMarkup:F2}) for forms: {string.Join(", ", request.FormCodes)}");
             return Ok(response);
         }
         catch (Exception ex)
@@ -162,6 +164,8 @@ public class CostCalculationRequest
 public class CostResponse
 {
     public List<string> SelectedForms { get; set; }
+    public decimal CopyrightOfficeFees { get; set; }
+    public decimal WiseravenMarkup { get; set; }
     public decimal TotalCostUsd { get; set; }
     public int MarkupPercentage { get; set; }
     public string Note { get; set; }
