@@ -1450,7 +1450,15 @@ export const apiService = {
     voteTruthClaim: (claimId, vote, confidence = 5) => api.post('/truthengine/vote', { claimId, vote, confidence }),
     detectTruthContradictions: (claim) => api.post('/truthengine/contradictions', { claim }),
     analyzeTruthTemporal: (claim) => api.post('/truthengine/temporal', { claim }),
-    getTruthEngineStats: () => api.get('/truthengine/stats')
+    getTruthEngineStats: () => api.get('/truthengine/stats'),
+
+    // Feature Release (Admin + User access)
+    getFeatureReleaseCatalog: () => api.get('/admin/feature-release/catalog'),
+    releaseFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/release`, { reason }),
+    gateFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/gate`, { reason }),
+    releaseAllFeatures: (reason = '') => api.post('/admin/feature-release/release-all', { reason }),
+    gateAllFeatures: (reason = '') => api.post('/admin/feature-release/gate-all', { reason }),
+    getMyFeatureAccess: () => api.get('/features/my-access')
 };
 
 export default api;

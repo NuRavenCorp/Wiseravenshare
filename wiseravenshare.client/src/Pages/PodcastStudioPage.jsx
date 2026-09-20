@@ -1128,9 +1128,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
         const loadSubscriptionStatus = async () => {
             try {
-                const status = await subscriptionService.getSubscriptionStatus();
+                const res = await apiService.getMyFeatureAccess();
                 if (!cancelled) {
-                    setSubscriptionStatus(status);
+                    setSubscriptionStatus(res.data ?? res);
                 }
             } catch {
                 if (!cancelled) {
@@ -2324,7 +2324,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const nextFlowActionLabel = nextRequiredFlow.actionLabel;
-    const isGuidedStudioUnlocked = Boolean(subscriptionStatus?.hasActiveSubscription);
+    const isGuidedStudioUnlocked = Boolean(
+        subscriptionStatus?.features?.find((f) => f.key === 'guided-studio-flow')?.canAccess
+        || subscriptionStatus?.isAdmin
+        || subscriptionStatus?.hasActiveSubscription
+    );
     const isGuidedStudioLocked = subscriptionStatusLoading || !isGuidedStudioUnlocked;
 
     const promptGuidedStudioUpgrade = (reason = 'Unlock Guided Studio Flow to continue. Stripe checkout opens with the plan list.') => {

@@ -22,6 +22,7 @@ import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
+import FeatureReleaseAdminPage from './Pages/FeatureReleaseAdminPage';
 import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
 import CrawlerMetricsInsightsPage from './Pages/CrawlerMetricsInsightsPage';
 import AssistantPage from './Pages/AssistantPage';
@@ -535,6 +536,10 @@ const App = () => {
                 return isAdminUser
                     ? <TeamAccessAdminPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'feature-release':
+                return isAdminUser
+                    ? <FeatureReleaseAdminPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'site-crawler-audit':
                 return isAdminUser
                     ? <SiteCrawlerDashboardPage />
@@ -767,6 +772,7 @@ const App = () => {
             { id: 'growth', label: 'Growth' },
             { id: 'revenue', label: 'Revenue' },
             { id: 'team-access-admin', label: 'Team Access' },
+            { id: 'feature-release', label: 'Feature Release' },
             { id: 'site-crawler-audit', label: 'Site Crawler Audit' },
             { id: 'crawler-metrics', label: 'Crawler Metrics' },
             { id: 'music-rights-studio', label: 'Music Rights' },
