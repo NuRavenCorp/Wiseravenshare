@@ -2398,6 +2398,197 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     )}
                 </div>
 
+                {/* ── Ravensight Podcast Capabilities Dashboard ── */}
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,15,55,0.92))',
+                    border: '1px solid rgba(129,140,248,0.3)',
+                    borderRadius: '20px',
+                    padding: '22px',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.35)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '20px' }}>🎙️</span>
+                                <div>
+                                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#e2e8f0', letterSpacing: '0.02em' }}>
+                                        Podcast Control Room Capabilities
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                        Podcast Studio now runs inside Ravensight — team recording and publishing in one production lane.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                background: 'rgba(34,197,94,0.12)',
+                                border: '1px solid rgba(34,197,94,0.3)',
+                                borderRadius: '999px',
+                                padding: '5px 12px',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                color: '#4ade80'
+                            }}>
+                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
+                                2 feature groups unlocked
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Feature cards */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '18px' }}>
+                        {/* Direct publishing — Unlocked */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.7))',
+                            border: '1px solid rgba(52,211,153,0.35)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>📡</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#4ade80', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.35)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Unlocked
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Direct publishing</div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                Send content to connected channels without manual copy-paste steps.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(52,211,153,0.45)', background: 'rgba(16,185,129,0.12)', color: '#34d399', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Publish now →
+                            </button>
+                        </div>
+
+                        {/* Scheduling & queueing — Unlocked */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(15,23,42,0.7))',
+                            border: '1px solid rgba(56,189,248,0.3)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>🗓️</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Unlocked
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Scheduling &amp; queueing</div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                Plan a content run in advance so publishing keeps moving when the team is offline.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(56,189,248,0.35)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Open planner →
+                            </button>
+                        </div>
+
+                        {/* Growth analytics — gated */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.5)',
+                            border: '1px solid rgba(100,116,139,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px',
+                            opacity: 0.75
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>📊</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Needs growth suite
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Growth analytics</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                                Use trend and audience signals to prioritize what gets posted next.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => navigateToFeaturePage('growth', 'Opening Growth suite...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Upgrade to unlock
+                            </button>
+                        </div>
+
+                        {/* Team workflows — gated */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.5)',
+                            border: '1px solid rgba(100,116,139,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px',
+                            opacity: 0.75
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '22px' }}>🏗️</div>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                                    Needs studio plus
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Team workflows</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                                Bring reviewers, editors, and operators into the same publishing lane.
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => navigateToFeaturePage('team-launchpad', 'Opening Team Launchpad...')}
+                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Upgrade to unlock
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Billing status bar */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: 'rgba(248,113,113,0.08)',
+                        border: '1px solid rgba(248,113,113,0.25)',
+                        borderRadius: '12px',
+                        padding: '12px 16px',
+                        flexWrap: 'wrap',
+                        gap: '10px'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '18px' }}>💳</span>
+                            <div>
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fca5a5' }}>Billing status</div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                    Subscription not active — Synced from Stripe with status <strong style={{ color: '#f87171' }}>inactive</strong>.
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => navigateToFeaturePage('revenue', 'Opening Billing & Revenue...')}
+                            style={{
+                                border: '1px solid rgba(248,113,113,0.4)',
+                                background: 'rgba(248,113,113,0.12)',
+                                color: '#fca5a5',
+                                borderRadius: '8px',
+                                padding: '7px 14px',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap'
+                            }}
+                        >
+                            Manage billing →
+                        </button>
+                    </div>
+                </div>
+
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85))',
                     border: '1px solid rgba(16, 185, 129, 0.35)',
@@ -2522,35 +2713,142 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
                 {(workflowStage === 'Ship') && (
                 <div style={{
-                    background: 'linear-gradient(160deg, rgba(79, 70, 229, 0.14), rgba(15, 23, 42, 0.85))',
-                    border: '1px solid rgba(129, 140, 248, 0.35)',
-                    borderRadius: '18px',
-                    padding: '20px'
+                    background: 'linear-gradient(160deg, rgba(79,70,229,0.16), rgba(15,23,42,0.94))',
+                    border: '1px solid rgba(129,140,248,0.35)',
+                    borderRadius: '20px',
+                    padding: '22px'
                 }}>
-                    <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c4b5fd', fontWeight: 700 }}>
-                        Site Feature Connections
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '20px' }}>🚀</span>
+                                <span style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 800, color: '#c4b5fd' }}>
+                                    Ship &amp; Distribute
+                                </span>
+                            </div>
+                            <div style={{ fontWeight: 800, fontSize: '20px', color: '#e2e8f0' }}>
+                                {title || 'Untitled Episode'}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                                Format: {format} · Urgency: {urgency} · {storyAngle ? `"${storyAngle.slice(0,60)}"` : 'No story angle set'}
+                            </div>
+                        </div>
+                        {hasSavedRecording && savedRecordingMediaUrl && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.35)', color: '#4ade80', fontSize: '12px', fontWeight: 700, padding: '5px 12px', borderRadius: '999px' }}>
+                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80' }} />
+                                Recording ready
+                            </span>
+                        )}
                     </div>
-                    <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '6px' }}>
-                        Move this episode through the rest of WiseRavenShare without breaking workflow context.
+
+                    {/* 2-column: publish + queue */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '18px' }}>
+                        {/* Publish to platform */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.55)',
+                            border: '1px solid rgba(129,140,248,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#a5b4fc', fontWeight: 700, marginBottom: '12px' }}>
+                                Publish to platform
+                            </div>
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => openRavensightTab('upload', 'Sending to Ravensight for publishing...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(129,140,248,0.35)', background: 'rgba(79,70,229,0.14)', color: '#c4b5fd', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>🎬</span>
+                                    <span>Ravensight Library</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Upload →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.1)', color: '#34d399', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📺</span>
+                                    <span>Newsroom Video desk</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Handoff →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('social-feeds', 'Opening Social Feeds...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📡</span>
+                                    <span>Cross-post to social feeds</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Post →</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Schedule & queue */}
+                        <div style={{
+                            background: 'rgba(15,23,42,0.55)',
+                            border: '1px solid rgba(234,179,8,0.25)',
+                            borderRadius: '14px',
+                            padding: '16px'
+                        }}>
+                            <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fde68a', fontWeight: 700, marginBottom: '12px' }}>
+                                Schedule &amp; queue
+                            </div>
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(234,179,8,0.35)', background: 'rgba(234,179,8,0.12)', color: '#fde68a', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>🗓️</span>
+                                    <span>Add to release planner</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Schedule →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigateToFeaturePage('podcast-rights-studio', 'Opening Podcast Rights Studio...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.1)', color: '#c4b5fd', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📜</span>
+                                    <span>Set episode rights</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Rights →</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => openRavensightTab('library', 'Opening Ravensight Library...')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(14,165,233,0.3)', background: 'rgba(14,165,233,0.1)', color: '#7dd3fc', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                >
+                                    <span style={{ fontSize: '18px' }}>📚</span>
+                                    <span>View episode library</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Library →</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
-                        <button type="button" onClick={() => openRavensightTab('library', 'Opening Ravensight Library for saved podcast review...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(129, 140, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            📚 Open Ravensight Library
-                        </button>
-                        <button type="button" onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload for external distribution...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            📤 Open Ravensight Upload
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video handoff desk...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🎥 Open Newsroom Video
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(147, 51, 234, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🤝 Open Collaboration
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(234, 179, 8, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🗂 Open Planner
-                        </button>
-                        <button type="button" onClick={() => navigateToFeaturePage('my-library', 'Opening My Library for related assets...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(14, 165, 233, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
-                            🎵 Open Music Library
+
+                    {/* Collaboration row */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        background: 'rgba(147,51,234,0.08)',
+                        border: '1px solid rgba(147,51,234,0.25)',
+                        borderRadius: '12px',
+                        padding: '12px 16px',
+                        flexWrap: 'wrap'
+                    }}>
+                        <span style={{ fontSize: '18px' }}>🤝</span>
+                        <div style={{ flex: 1, minWidth: '180px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>Bring in the team</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>Loop reviewers and editors in before final release.</div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')}
+                            style={{ border: '1px solid rgba(147,51,234,0.4)', background: 'rgba(147,51,234,0.16)', color: '#d8b4fe', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                            Open collaboration →
                         </button>
                     </div>
                 </div>
