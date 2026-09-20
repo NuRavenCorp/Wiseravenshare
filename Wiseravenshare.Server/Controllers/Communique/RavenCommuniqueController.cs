@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.Entities.Communique;
@@ -12,6 +13,9 @@ namespace Wiseravenshare.Server.Controllers.Communique;
 [Authorize]
 public class RavenCommuniqueController : ControllerBase
 {
+    private const int MaxDispatchLogEntries = 300;
+    private static readonly ConcurrentQueue<CommuniqueDispatchLogEntry> DispatchLog = new();
+
     private readonly ICommuniqueMessagingService _messagingService;
     private readonly ICommuniqueCallService _callService;
     private readonly ILogger<RavenCommuniqueController> _logger;
@@ -34,6 +38,7 @@ public class RavenCommuniqueController : ControllerBase
             return BadRequest(new { error = "Invalid request." });
 
         var result = await _messagingService.SendSmsAsync(request.To, request.Message);
+        AppendDispatchLog("sms", request.To, request.Message, result);
         if (!result.Success)
             return BadRequest(new { error = result.ErrorMessage ?? "Failed to send SMS." });
 
@@ -48,6 +53,7 @@ public class RavenCommuniqueController : ControllerBase
             return BadRequest(new { error = "Invalid request." });
 
         var result = await _messagingService.SendWhatsAppAsync(request.To, request.Message);
+        AppendDispatchLog("whatsapp", request.To, request.Message, result);
         if (!result.Success)
             return BadRequest(new { error = result.ErrorMessage ?? "Failed to send WhatsApp message." });
 
@@ -68,6 +74,7 @@ public class RavenCommuniqueController : ControllerBase
             case "sms":
             {
                 var result = await _messagingService.SendSmsAsync(request.To, request.Message);
+                AppendDispatchLog("sms", request.To, request.Message, result);
                 if (!result.Success)
                     return BadRequest(new { error = result.ErrorMessage ?? "SMS failed." });
                 return Ok(new { messageSid = result.MessageSid, channel = "sms" });
@@ -76,6 +83,7 @@ public class RavenCommuniqueController : ControllerBase
             case "whatsapp":
             {
                 var result = await _messagingService.SendWhatsAppAsync(request.To, request.Message);
+                AppendDispatchLog("whatsapp", request.To, request.Message, result);
                 if (!result.Success)
                     return BadRequest(new { error = result.ErrorMessage ?? "WhatsApp failed." });
                 return Ok(new { messageSid = result.MessageSid, channel = "whatsapp" });
@@ -90,8 +98,11 @@ public class RavenCommuniqueController : ControllerBase
                 }
                 catch (InvalidOperationException ex)
                 {
+                    AppendDispatchLog("voice", request.To, request.Message, MessageSendResult.Fail(ex.Message, "voice"));
                     return BadRequest(new { error = ex.Message });
                 }
+
+                AppendDispatchLog("voice", request.To, request.Message, MessageSendResult.Ok(call.ProviderCallId ?? call.CallId, "voice"));
 
                 return Ok(new
                 {
@@ -113,6 +124,118 @@ public class RavenCommuniqueController : ControllerBase
     {
         return Ok(new { messageSid, status = "pending" });
     }
+
+    /// <summary>Aggregated outbound dispatch log across sms / whatsapp / voice channels.</summary>
+    [HttpGet("messages")]
+    public IActionResult GetMessages([FromQuery] string? channel = null, [FromQuery] int limit = 25)
+    {
+        var safeLimit = Math.Clamp(limit, 1, 100);
+        var normalizedChannel = string.IsNullOrWhiteSpace(channel)
+            ? string.Empty
+            : channel.Trim().ToLowerInvariant();
+        var callerId = User.GetUserId().ToString();
+
+        var items = DispatchLog
+            .Where(entry => string.Equals(entry.UserId, callerId, StringComparison.OrdinalIgnoreCase))
+            .Where(entry => string.IsNullOrWhiteSpace(normalizedChannel)
+                || string.Equals(entry.Channel, normalizedChannel, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(entry => entry.RequestedAtUtc)
+            .Take(safeLimit)
+            .ToArray();
+
+        return Ok(items);
+    }
+
+    /// <summary>Start a phone verification using Twilio Verify (sms | whatsapp).</summary>
+    [HttpPost("verify/start")]
+    public async Task<IActionResult> StartVerification([FromBody] StartVerificationRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { error = "Invalid request." });
+
+        var channel = string.IsNullOrWhiteSpace(request.Channel) ? "sms" : request.Channel.Trim().ToLowerInvariant();
+        if (!string.Equals(channel, "sms", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(channel, "whatsapp", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = "Unsupported verification channel. Use sms or whatsapp." });
+        }
+
+        var result = await _messagingService.StartVerificationAsync(request.To, channel);
+        AppendDispatchLog($"verify-{channel}", request.To, "Verification code requested", result.Success
+            ? MessageSendResult.Ok(result.Sid, $"verify-{channel}")
+            : MessageSendResult.Fail(result.ErrorMessage, $"verify-{channel}"));
+
+        if (!result.Success)
+            return BadRequest(new { error = result.ErrorMessage ?? "Failed to start verification." });
+
+        return Ok(new
+        {
+            sid = result.Sid,
+            status = result.Status,
+            channel = result.Channel
+        });
+    }
+
+    /// <summary>Check a phone verification code using Twilio Verify.</summary>
+    [HttpPost("verify/check")]
+    public async Task<IActionResult> CheckVerification([FromBody] CheckVerificationRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { error = "Invalid request." });
+
+        var result = await _messagingService.CheckVerificationAsync(request.To, request.Code);
+        AppendDispatchLog("verify-check", request.To, "Verification code submitted", result.Success
+            ? MessageSendResult.Ok(result.Sid, "verify-check")
+            : MessageSendResult.Fail(result.ErrorMessage, "verify-check"));
+
+        if (!result.Success)
+            return BadRequest(new { error = result.ErrorMessage ?? "Failed to check verification code." });
+
+        return Ok(new
+        {
+            sid = result.Sid,
+            status = result.Status,
+            approved = result.Approved,
+            channel = result.Channel
+        });
+    }
+
+    private void AppendDispatchLog(string channel, string to, string message, MessageSendResult result)
+    {
+        var callerId = User.GetUserId().ToString();
+        var trimmedMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message.Trim();
+        var preview = trimmedMessage.Length <= 160 ? trimmedMessage : $"{trimmedMessage[..160]}…";
+
+        DispatchLog.Enqueue(new CommuniqueDispatchLogEntry
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            UserId = callerId,
+            Channel = string.IsNullOrWhiteSpace(channel) ? "sms" : channel.Trim().ToLowerInvariant(),
+            To = to.Trim(),
+            MessagePreview = preview,
+            Success = result.Success,
+            MessageSid = result.MessageSid ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty,
+            RequestedAtUtc = DateTime.UtcNow
+        });
+
+        while (DispatchLog.Count > MaxDispatchLogEntries && DispatchLog.TryDequeue(out _))
+        {
+        }
+    }
+}
+
+public sealed class CommuniqueDispatchLogEntry
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string Channel { get; set; } = "sms";
+    public string To { get; set; } = string.Empty;
+    public string MessagePreview { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public string MessageSid { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
+    public DateTime RequestedAtUtc { get; set; }
 }
 
 public class SmsRequest
@@ -136,4 +259,23 @@ public class CommuniqueRequest
 
     [MaxLength(1600)]
     public string Message { get; set; } = string.Empty;
+}
+
+public class StartVerificationRequest
+{
+    [Required]
+    public string To { get; set; } = string.Empty;
+
+    [Required]
+    public string Channel { get; set; } = "sms";
+}
+
+public class CheckVerificationRequest
+{
+    [Required]
+    public string To { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(10)]
+    public string Code { get; set; } = string.Empty;
 }

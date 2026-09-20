@@ -2,6 +2,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.AiAssistant;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -11,15 +14,103 @@ namespace Wiseravenshare.Server.Controllers;
 [Produces("application/json")]
 public class AiAssistantController : ControllerBase
 {
-    private readonly IOllamaChatService _chatService;
+    private readonly IOllamaChatService _defaultChatService;
+    private readonly IUserAiConnectorChatService _userConnectorChatService;
+    private readonly UserStore _userStore;
     private readonly IAiJobQueue _jobQueue;
     private readonly ILogger<AiAssistantController> _logger;
 
-    public AiAssistantController(IOllamaChatService chatService, IAiJobQueue jobQueue, ILogger<AiAssistantController> logger)
+    public AiAssistantController(
+        IOllamaChatService defaultChatService,
+        IUserAiConnectorChatService userConnectorChatService,
+        UserStore userStore,
+        IAiJobQueue jobQueue,
+        ILogger<AiAssistantController> logger)
     {
-        _chatService = chatService;
+        _defaultChatService = defaultChatService;
+        _userConnectorChatService = userConnectorChatService;
+        _userStore = userStore;
         _jobQueue = jobQueue;
         _logger = logger;
+    }
+
+    [Authorize]
+    [HttpGet("connector")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetConnectorSettings()
+    {
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var settings = _userStore.GetAiConnectorSettings(userId);
+            return Ok(new
+            {
+                settings.Enabled,
+                settings.Provider,
+                settings.BaseUrl,
+                settings.DefaultModel,
+                hasApiKey = settings.HasApiKey,
+                apiKeyMasked = settings.ApiKeyMasked,
+                settings.UpdatedAtUtc
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+    }
+
+    [Authorize]
+    [HttpPut("connector")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult UpdateConnectorSettings([FromBody] UpdateUserAiConnectorRequest request)
+    {
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized();
+        }
+
+        if (request is null)
+        {
+            return BadRequest(new { message = "Connector settings payload is required." });
+        }
+
+        if (request.Enabled && string.IsNullOrWhiteSpace(request.BaseUrl))
+        {
+            return BadRequest(new { message = "Base URL is required when connector is enabled." });
+        }
+
+        try
+        {
+            var settings = _userStore.UpdateAiConnectorSettings(userId, request);
+            return Ok(new
+            {
+                settings.Enabled,
+                settings.Provider,
+                settings.BaseUrl,
+                settings.DefaultModel,
+                hasApiKey = settings.HasApiKey,
+                apiKeyMasked = settings.ApiKeyMasked,
+                settings.UpdatedAtUtc
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
+        }
     }
 
     /// <summary>Health check + initializes Ollama connection. Called when AI Assistant page loads.</summary>
@@ -28,36 +119,55 @@ public class AiAssistantController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Health()
     {
+        var connector = ResolveCurrentUserConnectorSettings();
+        var usingConnector = _userConnectorChatService.IsConfigured(connector);
+
         try
         {
-            var models = await _chatService.GetModelsAsync();
+            var models = usingConnector
+                ? await _userConnectorChatService.GetModelsAsync(connector!)
+                : await _defaultChatService.GetModelsAsync();
+
             var isOnline = models.Count > 0;
+            var provider = usingConnector
+                ? (connector?.Provider ?? "user-ai")
+                : "platform-default";
             
             if (!isOnline)
             {
-                _logger.LogWarning("Ollama health check: no models available");
+                _logger.LogWarning("AI health check: no models available for provider {Provider}", provider);
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = "Ollama is not ready yet. Please wait or ensure Ollama is running." 
+                    message = usingConnector
+                        ? "Your AI connector is not ready yet."
+                        : "AI backend is not ready yet.",
+                    provider,
+                    usingUserConnector = usingConnector
                 });
             }
 
             return Ok(new 
             { 
                 online = true, 
-                message = "Ollama is online and ready", 
+                message = usingConnector ? "Your AI connector is online and ready" : "AI backend is online and ready", 
                 modelCount = models.Count,
-                models = models
+                models = models,
+                provider,
+                usingUserConnector = usingConnector
             });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Ollama health check failed");
+            _logger.LogWarning(ex, "AI health check failed");
             return StatusCode(503, new 
             { 
                 online = false, 
-                message = "Ollama is offline. Please start Ollama and try again.",
+                message = usingConnector
+                    ? "Your AI connector is offline. Check your URL/key and try again."
+                    : "AI backend is offline. Please try again.",
+                provider = usingConnector ? (connector?.Provider ?? "user-ai") : "platform-default",
+                usingUserConnector = usingConnector,
                 error = ex.Message 
             });
         }
@@ -68,8 +178,17 @@ public class AiAssistantController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetModels()
     {
-        var models = await _chatService.GetModelsAsync();
-        return Ok(new { models });
+        var connector = ResolveCurrentUserConnectorSettings();
+        var usingConnector = _userConnectorChatService.IsConfigured(connector);
+        var models = usingConnector
+            ? await _userConnectorChatService.GetModelsAsync(connector!)
+            : await _defaultChatService.GetModelsAsync();
+        return Ok(new
+        {
+            models,
+            provider = usingConnector ? (connector?.Provider ?? "user-ai") : "platform-default",
+            usingUserConnector = usingConnector
+        });
     }
 
     /// <summary>Sends a chat message (with optional history) to the AI assistant.</summary>
@@ -83,7 +202,24 @@ public class AiAssistantController : ControllerBase
             return BadRequest(new { message = "Message is required." });
         }
 
-        var result = await _chatService.ChatAsync(request);
+        var connector = ResolveCurrentUserConnectorSettings();
+        var usingConnector = _userConnectorChatService.IsConfigured(connector);
+        AiChatResponse result;
+
+        if (usingConnector)
+        {
+            result = await _userConnectorChatService.ChatAsync(request, connector!);
+            if (!result.Success)
+            {
+                _logger.LogWarning("User AI connector chat failed. Falling back to platform provider.");
+                result = await _defaultChatService.ChatAsync(request);
+            }
+        }
+        else
+        {
+            result = await _defaultChatService.ChatAsync(request);
+        }
+
         return Ok(result);
     }
 
@@ -107,12 +243,44 @@ public class AiAssistantController : ControllerBase
         Response.StatusCode = StatusCodes.Status200OK;
         Response.ContentType = "text/event-stream";
 
-        await foreach (var token in _chatService.ChatStreamAsync(request, ct))
+        var connector = ResolveCurrentUserConnectorSettings();
+        var usingConnector = _userConnectorChatService.IsConfigured(connector);
+
+        var stream = usingConnector
+            ? _userConnectorChatService.ChatStreamAsync(request, connector!, ct)
+            : _defaultChatService.ChatStreamAsync(request, ct);
+
+        await foreach (var token in stream)
         {
             await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
         }
 
         await Response.WriteAsync("data: [DONE]\n\n", ct);
+    }
+
+    private string CurrentUserId()
+    {
+        return User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? string.Empty;
+    }
+
+    private UserAiConnectorSettings? ResolveCurrentUserConnectorSettings()
+    {
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return null;
+        }
+
+        try
+        {
+            return _userStore.GetAiConnectorSettingsInternal(userId);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // ---- Background AI jobs (queue + poll) — for bursty creator features ----

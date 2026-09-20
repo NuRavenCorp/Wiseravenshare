@@ -7,6 +7,7 @@ public interface IRavensightPhotoService
     Task<RavensightSavedMediaFile> SavePhotoAsync(
         IFormFile file,
         string? destinationFolder,
+    string? userStorageIdentity,
         CancellationToken cancellationToken = default);
 }
 
@@ -22,12 +23,14 @@ public sealed class RavensightPhotoService : IRavensightPhotoService
     public Task<RavensightSavedMediaFile> SavePhotoAsync(
         IFormFile file,
         string? destinationFolder,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default)
     {
         return _mediaPathService.SaveFileAsync(
             file,
             RavensightMediaType.Photo,
             destinationFolder,
+            userStorageIdentity,
             cancellationToken);
     }
 }

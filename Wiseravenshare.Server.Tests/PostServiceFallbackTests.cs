@@ -18,6 +18,8 @@ public class PostServiceFallbackTests
             new ThrowingPostRepository(),
             new StubUserRepository(),
             new StubTruthService(),
+            null!,
+            null!,
             NullLogger<PostService>.Instance);
 
         var result = await service.CreatePostAsync(
@@ -43,6 +45,8 @@ public class PostServiceFallbackTests
             new StubPostRepository(),
             new ThrowingUserRepository(),
             new StubTruthService(),
+            null!,
+            null!,
             NullLogger<PostService>.Instance);
 
         var result = await service.CreatePostAsync(

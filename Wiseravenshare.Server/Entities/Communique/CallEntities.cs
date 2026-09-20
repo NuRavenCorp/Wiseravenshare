@@ -87,6 +87,60 @@ public sealed class MessageSendResult
         new() { Success = false, ErrorMessage = error, Channel = channel };
 }
 
+public sealed class CommuniqueVerificationStartResult
+{
+    public bool Success { get; init; }
+    public string Sid { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public string Channel { get; init; } = "sms";
+    public string ErrorMessage { get; init; } = string.Empty;
+
+    public static CommuniqueVerificationStartResult Ok(string sid, string status, string channel) =>
+        new()
+        {
+            Success = true,
+            Sid = sid ?? string.Empty,
+            Status = status ?? string.Empty,
+            Channel = channel ?? "sms"
+        };
+
+    public static CommuniqueVerificationStartResult Fail(string errorMessage, string channel) =>
+        new()
+        {
+            Success = false,
+            ErrorMessage = errorMessage ?? string.Empty,
+            Channel = channel ?? "sms"
+        };
+}
+
+public sealed class CommuniqueVerificationCheckResult
+{
+    public bool Success { get; init; }
+    public bool Approved { get; init; }
+    public string Sid { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public string Channel { get; init; } = "sms";
+    public string ErrorMessage { get; init; } = string.Empty;
+
+    public static CommuniqueVerificationCheckResult Ok(string sid, string status, string channel, bool approved) =>
+        new()
+        {
+            Success = true,
+            Approved = approved,
+            Sid = sid ?? string.Empty,
+            Status = status ?? string.Empty,
+            Channel = channel ?? "sms"
+        };
+
+    public static CommuniqueVerificationCheckResult Fail(string errorMessage, string channel) =>
+        new()
+        {
+            Success = false,
+            ErrorMessage = errorMessage ?? string.Empty,
+            Channel = channel ?? "sms"
+        };
+}
+
 public sealed class ExternalCallStartResult
 {
     public bool IsSuccess { get; init; }

@@ -4,7 +4,7 @@
 // in Services/realtimeHub.js so dev/prod URL resolution stays consistent.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { LogLevel } from '@microsoft/signalr';
+import { HubConnectionState, LogLevel } from '@microsoft/signalr';
 import { createHubConnection } from '../Services/realtimeHub.js';
 import { getAuthToken } from '../Services/authStorage.js';
 
@@ -25,56 +25,97 @@ export const useCollaborationHub = () => {
     const connectionRef = useRef(null);
     const eventCallbacks = useRef(new Map());
     const startedRef = useRef(false);
+    const connectPromiseRef = useRef(null);
+
+    const hasLiveConnection = () => {
+        const connection = connectionRef.current;
+        return Boolean(connection)
+            && (connection.state === HubConnectionState.Connected || connection.state === HubConnectionState.Connecting);
+    };
 
     const connect = useCallback(async () => {
-        if (!getAuthToken() || startedRef.current) return;
+        if (hasLiveConnection()) {
+            return connectionRef.current;
+        }
 
-        setIsConnecting(true);
-        try {
-            const connection = createHubConnection(HUB_PATH);
+        if (connectPromiseRef.current) {
+            return await connectPromiseRef.current;
+        }
 
-            for (const eventName of EVENT_NAMES) {
-                connection.on(eventName, (data) => {
-                    const callbacks = eventCallbacks.current.get(eventName);
-                    if (callbacks) callbacks.forEach((fn) => fn(data));
-                });
-            }
+        if (!getAuthToken()) {
+            setError('Please sign in to use collaboration rooms.');
+            setIsConnected(false);
+            throw new Error('Please sign in to use collaboration rooms.');
+        }
 
-            connection.onreconnecting(() => setIsConnected(false));
-            connection.onreconnected(() => setIsConnected(true));
-            connection.onclose(() => {
+        const connectPromise = (async () => {
+            setIsConnecting(true);
+            try {
+                let connection = connectionRef.current;
+                if (!connection) {
+                    connection = createHubConnection(HUB_PATH);
+
+                    for (const eventName of EVENT_NAMES) {
+                        connection.on(eventName, (data) => {
+                            const callbacks = eventCallbacks.current.get(eventName);
+                            if (callbacks) callbacks.forEach((fn) => fn(data));
+                        });
+                    }
+
+                    connection.onreconnecting(() => setIsConnected(false));
+                    connection.onreconnected(() => setIsConnected(true));
+                    connection.onclose(() => {
+                        setIsConnected(false);
+                        startedRef.current = false;
+                    });
+
+                    connectionRef.current = connection;
+                }
+
+                if (connection.state === HubConnectionState.Disconnected) {
+                    await connection.start();
+                }
+
+                startedRef.current = true;
+                setIsConnected(connection.state === HubConnectionState.Connected);
+                setError(null);
+                return connection;
+            } catch (err) {
+                console.error('Collaboration hub connection failed:', err);
+                setError(err?.message || 'Connection failed');
                 setIsConnected(false);
                 startedRef.current = false;
-            });
+                throw err;
+            } finally {
+                setIsConnecting(false);
+                connectPromiseRef.current = null;
+            }
+        })();
 
-            await connection.start();
-            connectionRef.current = connection;
-            startedRef.current = true;
-            setIsConnected(true);
-            setError(null);
-        } catch (err) {
-            console.error('Collaboration hub connection failed:', err);
-            setError(err?.message || 'Connection failed');
-            setIsConnected(false);
-            startedRef.current = false;
-        } finally {
-            setIsConnecting(false);
-        }
+        connectPromiseRef.current = connectPromise;
+        return await connectPromise;
     }, []);
 
     const disconnect = useCallback(async () => {
         if (connectionRef.current) {
             try { await connectionRef.current.stop(); } catch { /* ignore */ }
             connectionRef.current = null;
+            connectPromiseRef.current = null;
             startedRef.current = false;
             setIsConnected(false);
         }
     }, []);
 
     const invoke = useCallback(async (method, ...args) => {
-        if (!connectionRef.current) throw new Error('Collaboration connection not established');
+        const connection = connectionRef.current;
+        if (!connection || connection.state !== HubConnectionState.Connected) {
+            await connect();
+        }
+        if (!connectionRef.current || connectionRef.current.state !== HubConnectionState.Connected) {
+            throw new Error('Collaboration connection not established');
+        }
         return await connectionRef.current.invoke(method, ...args);
-    }, []);
+    }, [connect]);
 
     const onEvent = useCallback((eventName, callback) => {
         if (!eventCallbacks.current.has(eventName)) {
@@ -103,6 +144,8 @@ export const useCollaborationHub = () => {
         invoke('UpdatePresence', status, activity), [invoke]);
     const bridgeToExternalPlatform = useCallback((platform, targetUserId, data) =>
         invoke('BridgeToExternalPlatform', platform, targetUserId, data), [invoke]);
+    const getMyRooms = useCallback((take = 25) =>
+        invoke('GetMyRooms', take), [invoke]);
 
     useEffect(() => {
         connect();
@@ -125,6 +168,7 @@ export const useCollaborationHub = () => {
         startFileTransfer,
         sendFileChunk,
         updatePresence,
-        bridgeToExternalPlatform
+        bridgeToExternalPlatform,
+        getMyRooms
     };
 };

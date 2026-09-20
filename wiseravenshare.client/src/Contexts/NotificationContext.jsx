@@ -15,6 +15,66 @@ export const NotificationProvider = ({ children }) => {
     const [notifications, setNotifications] = useState([]);
     const [toasts, setToasts] = useState([]);
     const notificationConnectionRef = useRef(null);
+    const audioContextRef = useRef(null);
+    const lastRavenCawAtRef = useRef(0);
+
+    const ensureAudioContext = useCallback(() => {
+        if (typeof window === 'undefined') {
+            return null;
+        }
+
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) {
+            return null;
+        }
+
+        if (!audioContextRef.current) {
+            audioContextRef.current = new AudioContextCtor();
+        }
+
+        return audioContextRef.current;
+    }, []);
+
+    const playRavenCaw = useCallback(() => {
+        const now = Date.now();
+        if (now - lastRavenCawAtRef.current < 1200) {
+            return;
+        }
+        lastRavenCawAtRef.current = now;
+
+        const audioContext = ensureAudioContext();
+        if (!audioContext) {
+            return;
+        }
+
+        if (audioContext.state === 'suspended') {
+            audioContext.resume().catch(() => null);
+        }
+
+        const startAt = audioContext.currentTime + 0.02;
+        const masterGain = audioContext.createGain();
+        masterGain.gain.setValueAtTime(0.0001, startAt);
+        masterGain.gain.exponentialRampToValueAtTime(0.26, startAt + 0.02);
+        masterGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.34);
+        masterGain.connect(audioContext.destination);
+
+        const cawToneA = audioContext.createOscillator();
+        cawToneA.type = 'sawtooth';
+        cawToneA.frequency.setValueAtTime(760, startAt);
+        cawToneA.frequency.exponentialRampToValueAtTime(460, startAt + 0.16);
+        cawToneA.frequency.exponentialRampToValueAtTime(390, startAt + 0.3);
+        cawToneA.connect(masterGain);
+        cawToneA.start(startAt);
+        cawToneA.stop(startAt + 0.34);
+
+        const cawToneB = audioContext.createOscillator();
+        cawToneB.type = 'square';
+        cawToneB.frequency.setValueAtTime(520, startAt + 0.06);
+        cawToneB.frequency.exponentialRampToValueAtTime(300, startAt + 0.24);
+        cawToneB.connect(masterGain);
+        cawToneB.start(startAt + 0.06);
+        cawToneB.stop(startAt + 0.33);
+    }, [ensureAudioContext]);
 
     const addNotification = useCallback((notification) => {
         const newNotification = {
@@ -60,6 +120,22 @@ export const NotificationProvider = ({ children }) => {
     const deleteNotification = useCallback((id) => {
         setNotifications(prev => prev.filter(notif => notif.id !== id));
     }, []);
+
+    useEffect(() => {
+        const unlockAudio = () => {
+            const audioContext = ensureAudioContext();
+            if (audioContext?.state === 'suspended') {
+                audioContext.resume().catch(() => null);
+            }
+        };
+
+        window.addEventListener('pointerdown', unlockAudio, { passive: true });
+        window.addEventListener('keydown', unlockAudio);
+        return () => {
+            window.removeEventListener('pointerdown', unlockAudio);
+            window.removeEventListener('keydown', unlockAudio);
+        };
+    }, [ensureAudioContext]);
 
     useEffect(() => {
         const handlePlannerNotification = (event) => {
@@ -120,6 +196,7 @@ export const NotificationProvider = ({ children }) => {
                     source: 'personnel',
                     fromPersonnel: true
                 });
+                playRavenCaw();
                 addToast(`${title}${messageBody ? ` - ${messageBody}` : ''}`, 'info');
             });
 
@@ -158,7 +235,7 @@ export const NotificationProvider = ({ children }) => {
                 connection.stop().catch(() => null);
             }
         };
-    }, [addNotification, addToast]);
+    }, [addNotification, addToast, playRavenCaw]);
 
     const clearAll = useCallback(() => {
         setNotifications([]);

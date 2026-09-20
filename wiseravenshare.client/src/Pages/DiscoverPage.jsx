@@ -4,6 +4,9 @@ import { apiService } from '../Services/api';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
+import { usePersonalization } from '../hooks/usePersonalization';
+import { crawlerService } from '../Services/crawlerService';
+import { resolveArticleImage } from '../utils/newsImageUtils';
 
 const MAX_STORED_POSTS = 120;
 
@@ -159,10 +162,20 @@ const normalizeNewsItem = (item, index) => ({
     title: item.title || 'AI News update',
     source: item.source || 'WiseRaven',
     summary: item.summary || item.content || 'News summary unavailable.',
+    imageUrl: resolveArticleImage(item),
     externalUrl: toSafeAbsoluteUrl(item.externalUrl || item.url || item.link || item.sourceUrl)
         || buildSearchUrl(item.title, item.source),
     category: inferNewsCategory(item)
 });
+
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
 
 const DiscoverPage = ({ onNavigate }) => {
     const [posts, setPosts] = useState([]);
@@ -172,7 +185,56 @@ const DiscoverPage = ({ onNavigate }) => {
     const [followingIds, setFollowingIds] = useState([]);
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [focusedTopic, setFocusedTopic] = useState('');
+    const [focusedTopicSource, setFocusedTopicSource] = useState(null);
+    const [personalizedTrends, setPersonalizedTrends] = useState([]);
+    const [crawlerTrending, setCrawlerTrending] = useState(null);
     const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
+    const { getTrending, track } = usePersonalization();
+
+    // Load personalized regional trends to supplement the topic list.
+    useEffect(() => {
+        getTrending('General').then((items) => {
+            if (Array.isArray(items) && items.length > 0) {
+                setPersonalizedTrends(items);
+            }
+        }).catch(() => {});
+    }, []);
+
+    // Load crawler trending features to enhance discovery.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCrawlerTrending = async () => {
+            if (!isAdminUser) {
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+                return;
+            }
+
+            try {
+                const summary = await crawlerService.getSummary();
+                if (!cancelled) {
+                    setCrawlerTrending(summary);
+                }
+            } catch (err) {
+                console.error('Failed to load crawler trending:', err);
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+            }
+        };
+
+        void loadCrawlerTrending();
+        return () => {
+            cancelled = true;
+        };
+    }, [isAdminUser]);
 
     useEffect(() => {
         loadDiscoverContent();
@@ -189,15 +251,26 @@ const DiscoverPage = ({ onNavigate }) => {
             const storedFocus = JSON.parse(localStorage.getItem('wiseDiscoverFocus') || 'null');
             const nextSection = String(storedFocus?.section || '').trim();
             const nextTopic = normalizeTopicValue(storedFocus?.topic);
+            const nextSource = storedFocus?.source && typeof storedFocus.source === 'object'
+                ? {
+                    postId: String(storedFocus.source.postId || '').trim(),
+                    userId: String(storedFocus.source.userId || '').trim(),
+                    userName: String(storedFocus.source.userName || '').trim(),
+                    userHandle: String(storedFocus.source.userHandle || '').trim(),
+                    preview: String(storedFocus.source.preview || '').trim()
+                }
+                : null;
 
             if (nextSection) {
                 setActiveSection(nextSection);
             }
 
             setFocusedTopic(nextTopic);
+            setFocusedTopicSource(nextSource);
             localStorage.removeItem('wiseDiscoverFocus');
         } catch {
             setFocusedTopic('');
+            setFocusedTopicSource(null);
         }
     }, []);
 
@@ -282,17 +355,37 @@ const DiscoverPage = ({ onNavigate }) => {
             });
         });
 
-        const topicBuckets = (Array.isArray(topics) ? topics : [])
-            .slice(0, 12)
-            .map((topic, index) => ({
-                id: topic.id || `topic-${index}`,
-                name: normalizeTopicValue(topic.name || topic.topic || `topic${index + 1}`),
-                label: toTrendTopicLabel(topic),
-                count: Number(topic.count) || Number(topic.posts) || 0,
-                description: `Explore the latest activity around ${toTrendTopicLabel(topic)}.`,
-                externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
-                    || buildSearchUrl(toTrendTopicLabel(topic))
-            }));
+        // Merge platform topics with personalized regional trends.
+        const personalizedBuckets = (Array.isArray(personalizedTrends) ? personalizedTrends : [])
+            .map((t, index) => ({
+                id: `persona-trend-${index}`,
+                name: normalizeTopicValue(String(t.topic || '')),
+                label: `#${normalizeTopicValue(String(t.topic || 'trend'))}`,
+                count: Number(t.score) || 0,
+                description: `Trending in your region · ${t.source || 'WiseRaven'}`,
+                externalUrl: buildSearchUrl(String(t.topic || '')),
+                isPersonalized: true
+            }))
+            .filter((t) => t.name.length > 1);
+
+        const topicBuckets = [
+            ...(Array.isArray(topics) ? topics : [])
+                .slice(0, 8)
+                .map((topic, index) => ({
+                    id: topic.id || `topic-${index}`,
+                    name: normalizeTopicValue(topic.name || topic.topic || `topic${index + 1}`),
+                    label: toTrendTopicLabel(topic),
+                    count: Number(topic.count) || Number(topic.posts) || 0,
+                    description: `Explore the latest activity around ${toTrendTopicLabel(topic)}.`,
+                    externalUrl: toSafeAbsoluteUrl(topic.externalUrl || topic.url || topic.link)
+                        || buildSearchUrl(toTrendTopicLabel(topic))
+                })),
+            ...personalizedBuckets.filter((pb) =>
+                !(Array.isArray(topics) ? topics : []).some(
+                    (t) => normalizeTopicValue(t.name || t.topic) === pb.name
+                )
+            )
+        ].slice(0, 16);
 
         let storedNews = [];
         try {
@@ -342,7 +435,7 @@ const DiscoverPage = ({ onNavigate }) => {
             political: political.length > 0 ? political : mergedNews.filter((item) => item.category === 'Politics').slice(0, 6),
             posts: posts.slice(0, 8)
         };
-    }, [followingIds, posts, topics]);
+    }, [followingIds, posts, topics, personalizedTrends]);
 
     useEffect(() => {
         const availableSections = ['people', 'groups', 'topics', 'news', 'currentEvents', 'headlines', 'political'];
@@ -482,8 +575,62 @@ const DiscoverPage = ({ onNavigate }) => {
 
             case 'topics':
                 return (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                        {discoverBuckets.topics.map((topic) => (
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                        {focusedTopicSource && (
+                            <div
+                                style={{
+                                    border: '1px solid var(--highlight-color)',
+                                    borderRadius: '12px',
+                                    padding: '12px',
+                                    background: 'rgba(79, 116, 214, 0.12)'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                                    <div>
+                                        <div style={{ fontSize: '11px', color: 'var(--highlight-color)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Source context</div>
+                                        <div style={{ fontWeight: 700, marginTop: '4px' }}>{focusedTopicSource.userName || 'Community voice'}</div>
+                                        {focusedTopicSource.userHandle && (
+                                            <div style={{ color: 'var(--light-color)', fontSize: '12px' }}>{focusedTopicSource.userHandle}</div>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!focusedTopicSource.userId) return;
+                                            try {
+                                                localStorage.setItem('wiseProfileFocus', JSON.stringify({
+                                                    id: focusedTopicSource.userId,
+                                                    name: focusedTopicSource.userName,
+                                                    handle: focusedTopicSource.userHandle
+                                                }));
+                                            } catch {
+                                                // Ignore storage failures and still navigate.
+                                            }
+                                            onNavigate?.('profile');
+                                        }}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            background: 'rgba(255,255,255,0.04)',
+                                            color: 'var(--text-color)',
+                                            borderRadius: '999px',
+                                            padding: '6px 10px',
+                                            cursor: 'pointer',
+                                            fontSize: '12px'
+                                        }}
+                                    >
+                                        Open source author
+                                    </button>
+                                </div>
+                                {focusedTopicSource.preview && (
+                                    <div style={{ marginTop: '8px', color: 'var(--text-color)', fontSize: '13px', lineHeight: 1.5 }}>
+                                        {focusedTopicSource.preview}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                            {discoverBuckets.topics.map((topic) => (
                             (() => {
                                 const isFocusedTopic = normalizeTopicValue(topic.label || topic.name) === focusedTopic;
 
@@ -522,7 +669,8 @@ const DiscoverPage = ({ onNavigate }) => {
                             </div>
                                 );
                             })()
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 );
 
@@ -542,21 +690,64 @@ const DiscoverPage = ({ onNavigate }) => {
                 return (
                     <div style={{ display: 'grid', gap: '10px' }}>
                         {laneItems.map((item) => (
-                            <div key={item.id} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '12px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'start' }}>
-                                    <strong>{item.title}</strong>
-                                    <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', padding: '4px 8px', borderRadius: '999px', whiteSpace: 'nowrap' }}>
-                                        {item.category || laneTitle}
-                                    </span>
+                            <div
+                                key={item.id}
+                                style={{
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '16px',
+                                    overflow: 'hidden',
+                                    background: 'rgba(255,255,255,0.03)'
+                                }}
+                            >
+                                <div style={{ position: 'relative' }}>
+                                    <img
+                                        src={item.imageUrl}
+                                        alt={item.title}
+                                        loading="lazy"
+                                        referrerPolicy="no-referrer"
+                                        style={{
+                                            width: '100%',
+                                            height: '180px',
+                                            objectFit: 'cover',
+                                            display: 'block',
+                                            background: '#0f172a'
+                                        }}
+                                        onError={(event) => {
+                                            event.currentTarget.src = resolveArticleImage({
+                                                title: item.title,
+                                                source: item.source,
+                                                category: item.category
+                                            });
+                                        }}
+                                    />
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 'auto 0 0 0',
+                                            padding: '18px 14px 12px',
+                                            background: 'linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.82) 100%)',
+                                            color: '#fff'
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '12px', opacity: 0.9 }}>{item.source}</div>
+                                        <div style={{ fontWeight: 800, fontSize: '18px', lineHeight: 1.25 }}>{item.title}</div>
+                                    </div>
                                 </div>
-                                <div style={{ fontSize: '14px', color: 'var(--light-color)' }}>{item.summary}</div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{item.source}</span>
-                                    {item.externalUrl && (
-                                        <a href={item.externalUrl} target="_blank" rel="noreferrer noopener" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            Open source
-                                        </a>
-                                    )}
+                                <div style={{ padding: '12px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'start' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', padding: '4px 8px', borderRadius: '999px', whiteSpace: 'nowrap' }}>
+                                            {item.category || laneTitle}
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '14px', color: 'var(--light-color)', lineHeight: 1.6 }}>{item.summary}</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{item.source}</span>
+                                        {item.externalUrl && (
+                                            <a href={item.externalUrl} target="_blank" rel="noreferrer noopener" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                                Open source
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -608,6 +799,17 @@ const DiscoverPage = ({ onNavigate }) => {
                     <div>
                         <h2 style={{ marginBottom: '4px' }}>Discover</h2>
                         <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>Browse people, groups, topics, news items, current events, headlines, and political coverage.</div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                            <button type="button" onClick={() => onNavigate?.('fm-tuner')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open FM Tuner
+                            </button>
+                            <button type="button" onClick={() => onNavigate?.('my-library')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open My Library
+                            </button>
+                            <button type="button" onClick={() => onNavigate?.('feed')} style={{ border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', borderRadius: '999px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
+                                Open Feed
+                            </button>
+                        </div>
                     </div>
                     <span style={{ fontSize: '12px', color: 'var(--light-color)', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '6px 10px' }}>
                         {discoverSections.length} lanes
@@ -736,31 +938,76 @@ const DiscoverPage = ({ onNavigate }) => {
             )}
 
             {topics.length > 0 && (
-                <div
-                    style={{
-                        background: 'var(--card-bg)',
-                        borderRadius: '12px',
-                        padding: '20px',
-                        marginBottom: '20px',
-                        border: '1px solid var(--border-color)'
-                    }}
-                >
-                    <h3 style={{ marginBottom: '12px' }}>Trending Topics</h3>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                        {topics.map((topic) => (
-                            <span
-                                key={topic.id || topic.name || topic.topic}
-                                style={{
-                                    padding: '6px 14px',
-                                    background: 'rgba(255,255,255,0.05)',
-                                    borderRadius: '20px'
-                                }}
-                            >
-                                {toTrendTopicLabel(topic)} <span style={{ color: 'var(--highlight-color)' }}>{Number(topic.count) || Number(topic.posts) || 0}</span>
-                            </span>
-                        ))}
+                <>
+                    <div
+                        style={{
+                            background: 'var(--card-bg)',
+                            borderRadius: '12px',
+                            padding: '20px',
+                            marginBottom: '20px',
+                            border: '1px solid var(--border-color)'
+                        }}
+                    >
+                        <h3 style={{ marginBottom: '12px' }}>Trending Topics</h3>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                            {topics.map((topic) => (
+                                <span
+                                    key={topic.id || topic.name || topic.topic}
+                                    style={{
+                                        padding: '6px 14px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '20px'
+                                    }}
+                                >
+                                    {toTrendTopicLabel(topic)} <span style={{ color: 'var(--highlight-color)' }}>{Number(topic.count) || Number(topic.posts) || 0}</span>
+                                </span>
+                            ))}
+                        </div>
                     </div>
-                </div>
+
+                    {crawlerTrending?.topConnectedPages && crawlerTrending.topConnectedPages.length > 0 && (
+                        <div
+                            style={{
+                                background: 'var(--card-bg)',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                marginBottom: '20px',
+                                border: '1px solid rgba(34, 197, 94, 0.3)',
+                                backgroundImage: 'linear-gradient(135deg, rgba(34, 197, 94, 0.05) 0%, transparent 100%)'
+                            }}
+                        >
+                            <h3 style={{ marginBottom: '12px', color: 'rgba(34, 197, 94, 1)' }}>🎯 Trending Features</h3>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                                {crawlerTrending.topConnectedPages.slice(0, 8).map((page) => (
+                                    <button
+                                        key={page.pageId}
+                                        onClick={() => onNavigate?.(page.pageId)}
+                                        style={{
+                                            padding: '6px 14px',
+                                            background: 'rgba(34, 197, 94, 0.1)',
+                                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                                            borderRadius: '20px',
+                                            color: 'var(--text-color)',
+                                            cursor: 'pointer',
+                                            fontSize: '13px',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = 'rgba(34, 197, 94, 0.2)';
+                                            e.currentTarget.style.transform = 'scale(1.05)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'rgba(34, 197, 94, 0.1)';
+                                            e.currentTarget.style.transform = 'scale(1)';
+                                        }}
+                                    >
+                                        {page.label} <span style={{ color: 'rgba(34, 197, 94, 0.8)', fontSize: '11px', marginLeft: '4px' }}>•{page.score}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );

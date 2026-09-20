@@ -7,14 +7,23 @@ import {
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
-import AudioPlayer from '../Components/Ravensight/AudioPlayer';
 import '../Styles/MusicRightsStudio.css';
 
-// ─── Stripe Product IDs (from environment) ────────────────────────────────────
-const STRIPE_PRODUCT_IDS = {
-  basic: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_PROD_ID || 'prod_basic_fallback',
-  standard: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_PROD_ID || 'prod_standard_fallback',
-  pro: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID || 'prod_pro_fallback',
+// ─── Stripe Price IDs (from environment) ─────────────────────────────────────
+// Uses per-interval price IDs so checkout can charge the correct billing cycle.
+const STRIPE_PRICE_IDS = {
+  basic: {
+    monthly: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_PRICE_ID || '',
+    annual: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_PRICE_ID || '',
+  },
+  standard: {
+    monthly: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_PRICE_ID || '',
+    annual: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_PRICE_ID || '',
+  },
+  pro: {
+    monthly: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_PRICE_ID || '',
+    annual: import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_PRICE_ID || '',
+  },
 };
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
@@ -26,7 +35,8 @@ const PROTECTION_PLANS = [
     annualPrice: '$49.99 / yr',
     badge: null,
     color: '#22c55e',
-    stripeProductId: STRIPE_PRODUCT_IDS.basic,
+    stripeMonthlyPriceId: STRIPE_PRICE_IDS.basic.monthly,
+    stripeAnnualPriceId: STRIPE_PRICE_IDS.basic.annual,
     features: [
       'Timestamped upload proof of creation',
       'SHA-256 cryptographic fingerprint stored per track',
@@ -34,7 +44,8 @@ const PROTECTION_PLANS = [
       'DMCA takedown request template & guidance',
       'Permanent proof-of-creation certificate (PDF)',
     ],
-    cta: 'Start Basic',
+    ctaMonthly: 'Start Basic Monthly',
+    ctaAnnual: 'Start Basic Annual',
   },
   {
     id: 'standard',
@@ -43,7 +54,8 @@ const PROTECTION_PLANS = [
     annualPrice: '$149.99 / yr',
     badge: 'Popular',
     color: '#3b82f6',
-    stripeProductId: STRIPE_PRODUCT_IDS.standard,
+    stripeMonthlyPriceId: STRIPE_PRICE_IDS.standard.monthly,
+    stripeAnnualPriceId: STRIPE_PRICE_IDS.standard.annual,
     features: [
       'Everything in Basic',
       'Cross-platform infringement monitoring (FB, TikTok, YouTube, IG)',
@@ -52,7 +64,8 @@ const PROTECTION_PLANS = [
       'Revenue split tracking for collaborators',
       'Streaming royalty registration guidance',
     ],
-    cta: 'Start Standard',
+    ctaMonthly: 'Start Standard Monthly',
+    ctaAnnual: 'Start Standard Annual',
   },
   {
     id: 'pro',
@@ -61,7 +74,8 @@ const PROTECTION_PLANS = [
     annualPrice: '$299.99 / yr',
     badge: 'Best Value',
     color: '#a855f7',
-    stripeProductId: STRIPE_PRODUCT_IDS.pro,
+    stripeMonthlyPriceId: STRIPE_PRICE_IDS.pro.monthly,
+    stripeAnnualPriceId: STRIPE_PRICE_IDS.pro.annual,
     features: [
       'Everything in Standard',
       'PRO (ASCAP / BMI / SESAC) registration guidance',
@@ -71,7 +85,8 @@ const PROTECTION_PLANS = [
       'Dedicated IP advisor on-call',
       'Monetization & licensing deal tracking dashboard',
     ],
-    cta: 'Start Pro',
+    ctaMonthly: 'Start Pro Monthly',
+    ctaAnnual: 'Start Pro Annual',
   },
 ];
 
@@ -102,6 +117,84 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getBaseFileName = (n = '') => n.replace(/\.[^/.]+$/, '').trim();
   const normalizeText   = (v = '') => v.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const toBlobStreamUrl = (relativePath = '') => {
+    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return '';
+    const encoded = normalized
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+  };
+
+  const normalizePlaybackUrl = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) {
+      return raw;
+    }
+
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
+      try {
+        const parsed = new URL(raw);
+        return `${parsed.pathname}${parsed.search}`;
+      } catch {
+        return raw;
+      }
+    }
+
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return '';
+  };
+
+  const normalizeMusicTrack = (track) => {
+    if (!track || typeof track !== 'object') return null;
+
+    const fileName = String(track.fileName || track.FileName || '').trim();
+    const relativePath = String(
+      track.relativePath
+      || track.RelativePath
+      || track.objectKey
+      || track.ObjectKey
+      || ''
+    ).trim();
+    const directMediaUrl = normalizePlaybackUrl(
+      track.mediaUrl
+      || track.MediaUrl
+      || track.url
+      || track.Url
+      || track.fileUrl
+      || track.FileUrl
+      || ''
+    );
+
+    const blobStreamUrl = toBlobStreamUrl(relativePath);
+    const fileNameStreamUrl = fileName
+      ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
+      : '';
+    const mediaUrl = blobStreamUrl || fileNameStreamUrl || directMediaUrl;
+
+    return {
+      id: String(track.id || track.Id || `music_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+      title: String(track.title || track.Title || 'Untitled').trim(),
+      artist: String(track.artist || track.Artist || '').trim(),
+      album: String(track.album || track.Album || '').trim(),
+      genre: String(track.genre || track.Genre || '').trim(),
+      mediaUrl,
+      url: mediaUrl,
+      fileName,
+      relativePath,
+      uploadedAt: track.uploadedAt || track.UploadedAt || new Date().toISOString(),
+      duration: String(track.duration || track.Duration || '0:00'),
+      fingerprint: track.fingerprint || track.Fingerprint || null,
+      protected: track.protected !== false,
+    };
+  };
 
   const inferFromFileName = (fileName = '') => {
     const base  = normalizeText(getBaseFileName(fileName));
@@ -137,48 +230,78 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   };
 
   // ── Stripe Checkout Handler ────────────────────────────────────────
-  const handleStripeCheckout = async (plan) => {
+  const handleStripeCheckout = async (plan, interval = 'monthly') => {
     try {
       if (!currentUser) {
         addToast('Please sign in to purchase a plan', 'error');
         return;
       }
 
-      const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-      if (!publishableKey) {
-        addToast('Stripe configuration unavailable', 'error');
-        console.error('VITE_STRIPE_PUBLISHABLE_KEY not set');
+      const requestedInterval = interval === 'annual' ? 'annual' : 'monthly';
+      const selectedPriceId = requestedInterval === 'annual'
+        ? plan.stripeAnnualPriceId
+        : plan.stripeMonthlyPriceId;
+
+      if (!selectedPriceId) {
+        addToast(`Plan not yet available for ${requestedInterval} billing.`, 'info');
         return;
       }
 
-      if (!plan.stripeProductId || plan.stripeProductId.includes('fallback')) {
-        addToast(`Plan not yet available. Please check back soon.`, 'info');
+      if (!String(selectedPriceId).startsWith('price_')) {
+        addToast('Stripe plan is misconfigured. Expected a Stripe Price ID (price_...).', 'error');
         return;
       }
+
+      const origin = window.location.origin;
+      const successUrl = `${origin}/?subscription=success`;
+      const cancelUrl = `${origin}/?subscription=cancelled`;
 
       // Create Stripe Checkout Session via backend
-      const response = await fetch('/api/stripe/checkout-session', {
+      const response = await fetch('/api/billing/checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
         },
         body: JSON.stringify({
-          planId: plan.id,
-          priceId: plan.stripeProductId,
-          productId: plan.stripeProductId,
-          userEmail: currentUser.email,
-          userName: currentUser.name,
-        }),
+          priceId: selectedPriceId,
+          successUrl,
+          cancelUrl
+        })
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        addToast(errorData.error || 'Failed to create checkout session', 'error');
+        let message = 'Failed to create checkout session';
+        try {
+          const payload = await response.json();
+          message = payload?.message || payload?.error || message;
+        } catch {
+          // Keep fallback message
+        }
+        addToast(message, 'error');
         return;
       }
 
-      const { sessionId } = await response.json();
+      const payload = await response.json();
+
+      const sessionId = payload?.sessionId || payload?.id;
+      const checkoutUrl = payload?.url;
+
+      if (checkoutUrl) {
+        window.location.assign(checkoutUrl);
+        return;
+      }
+
+      if (!sessionId) {
+        addToast('Failed to create checkout session', 'error');
+        return;
+      }
+
+      const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+      if (!publishableKey) {
+        addToast('Stripe publishable key is missing for client redirect.', 'error');
+        return;
+      }
 
       // Redirect to Stripe Checkout
       const stripe = window.Stripe(publishableKey);
@@ -187,10 +310,12 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
         if (error) {
           addToast(error.message, 'error');
         }
+      } else {
+        addToast('Unable to initialize Stripe checkout.', 'error');
       }
     } catch (error) {
       console.error('Stripe checkout error:', error);
-      addToast('Checkout failed. Please try again.', 'error');
+      addToast(error?.message || 'Checkout failed. Please try again.', 'error');
     }
   };
 
@@ -205,25 +330,18 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           });
           if (res.ok) {
             const data = await res.json();
-            const tracks = Array.isArray(data) ? data.map(t => ({
-              id: t.id,
-              title: t.title || 'Untitled',
-              artist: t.artist || '',
-              album: t.album || '',
-              genre: t.genre || '',
-              mediaUrl: t.mediaUrl,
-              fileName: t.fileName,
-              uploadedAt: t.uploadedAt,
-              duration: '0:00',
-              fingerprint: t.fingerprint,
-              protected: true,
-            })) : [];
+            const tracks = Array.isArray(data)
+              ? data.map(normalizeMusicTrack).filter(Boolean)
+              : [];
             setMusicLibrary(tracks);
             return;
           }
         } else {
           const stored = localStorage.getItem('wiseMusic_library');
-          if (stored) setMusicLibrary(JSON.parse(stored));
+          if (stored) {
+            const tracks = JSON.parse(stored).map(normalizeMusicTrack).filter(Boolean);
+            setMusicLibrary(tracks);
+          }
         }
       } catch { setMusicLibrary([]); }
     })();
@@ -281,14 +399,17 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
 
       if (res.ok) {
         const result = await res.json();
+        const normalizedUploadedTrack = normalizeMusicTrack(result?.track || result?.file || result || {});
         const newTrack = {
-          id:          result.mediaAssetId || `music_${Date.now()}`,
-          title:       uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
-          artist:      uploadFormData.artist || '',
-          album:       uploadFormData.album  || '',
-          genre:       uploadFormData.genre  || '',
-          mediaUrl:    result.file?.mediaUrl || URL.createObjectURL(uploadFormData.file),
-          fileName:    result.file?.fileName || uploadFormData.file.name,
+          id:          normalizedUploadedTrack?.id || result.mediaAssetId || `music_${Date.now()}`,
+          title:       normalizedUploadedTrack?.title || uploadFormData.title || getBaseFileName(uploadFormData.file.name) || 'Untitled',
+          artist:      normalizedUploadedTrack?.artist || uploadFormData.artist || '',
+          album:       normalizedUploadedTrack?.album || uploadFormData.album  || '',
+          genre:       normalizedUploadedTrack?.genre || uploadFormData.genre  || '',
+          mediaUrl:    normalizedUploadedTrack?.mediaUrl || URL.createObjectURL(uploadFormData.file),
+          url:         normalizedUploadedTrack?.mediaUrl || URL.createObjectURL(uploadFormData.file),
+          relativePath: normalizedUploadedTrack?.relativePath || '',
+          fileName:    normalizedUploadedTrack?.fileName || result.file?.fileName || uploadFormData.file.name,
           uploadedAt:  new Date().toISOString(),
           duration:    detectedDuration,
           fingerprint: fp,
@@ -438,23 +559,19 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
                     <li key={f}><FiCheck className="check-icon" /> {f}</li>
                   ))}
                 </ul>
-                <button className="plan-cta"
-                  onClick={() => { handleStripeCheckout(plan); }}>
-                  {plan.cta}
-                </button>
+                <div className="plan-cta-row">
+                  <button className="plan-cta"
+                    onClick={() => { handleStripeCheckout(plan, 'monthly'); }}>
+                    {plan.ctaMonthly}
+                  </button>
+                  <button className="plan-cta plan-cta-secondary"
+                    onClick={() => { handleStripeCheckout(plan, 'annual'); }}>
+                    {plan.ctaAnnual}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── Audio Preview Player ── */}
-      {selectedTrack && (
-        <div className="mrs-player-wrap">
-          <AudioPlayer track={selectedTrack} showVisualizer
-            onEnded={() => setSelectedTrack(null)}
-            onError={() => { addToast('Playback error', 'error'); setSelectedTrack(null); }}
-          />
         </div>
       )}
 
@@ -601,7 +718,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
                 <div className="track-actions">
                   {/* Play */}
                   <button className="action-btn"
-                    onClick={() => { setSelectedTrack(track); setPlayingTrackId(track.id); }}
+                    onClick={() => { setSelectedTrack(normalizeMusicTrack(track)); setPlayingTrackId(track.id); }}
                     title="Preview">
                     {playingTrackId === track.id && selectedTrack?.id === track.id
                       ? <FiPause /> : <FiPlay />}

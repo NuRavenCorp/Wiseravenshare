@@ -33,7 +33,7 @@ public class PaymentsController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetPublicConfig()
     {
-        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_KEY");
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
         return Ok(new
         {
             publishableKey,
@@ -47,6 +47,27 @@ public class PaymentsController : ControllerBase
     {
         var catalog = new[]
         {
+            BuildCatalogPlan(
+                planId: "ip_basic",
+                name: "IP Protection Basic",
+                tagline: "Proof-of-creation and DMCA starter protection",
+                badge: "Entry level",
+                defaultMonthlyAmount: 5,
+                defaultAnnualAmount: 50),
+            BuildCatalogPlan(
+                planId: "ip_standard",
+                name: "IP Protection Standard",
+                tagline: "Monitoring and takedown support",
+                badge: "Popular",
+                defaultMonthlyAmount: 15,
+                defaultAnnualAmount: 150),
+            BuildCatalogPlan(
+                planId: "ip_pro",
+                name: "IP Protection Pro",
+                tagline: "Full IP protection and licensing support",
+                badge: "Best value",
+                defaultMonthlyAmount: 30,
+                defaultAnnualAmount: 300),
             BuildCatalogPlan(
                 planId: "creator_pro",
                 name: "Creator Pro",
@@ -77,10 +98,119 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    [HttpGet("health")]
+    [AllowAnonymous]
+    public IActionResult GetStripeHealth()
+    {
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+        var webhookSecret = ResolveConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+
+        var creatorProMonthly = ResolvePriceIdRaw("creator_pro", "monthly");
+        var creatorProAnnual = ResolvePriceIdRaw("creator_pro", "annual");
+        var ipBasicMonthly = ResolvePriceIdRaw("ip_basic", "monthly");
+        var ipBasicAnnual = ResolvePriceIdRaw("ip_basic", "annual");
+        var ipStandardMonthly = ResolvePriceIdRaw("ip_standard", "monthly");
+        var ipStandardAnnual = ResolvePriceIdRaw("ip_standard", "annual");
+        var ipProMonthly = ResolvePriceIdRaw("ip_pro", "monthly");
+        var ipProAnnual = ResolvePriceIdRaw("ip_pro", "annual");
+        var growthSuiteMonthly = ResolvePriceIdRaw("growth_suite", "monthly");
+        var growthSuiteAnnual = ResolvePriceIdRaw("growth_suite", "annual");
+        var studioPlusMonthly = ResolvePriceIdRaw("studio_plus", "monthly");
+        var studioPlusAnnual = ResolvePriceIdRaw("studio_plus", "annual");
+
+        var issues = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(publishableKey)) issues.Add("missing: Stripe publishable key");
+        if (string.IsNullOrWhiteSpace(secretKey)) issues.Add("missing: Stripe secret key");
+        if (string.IsNullOrWhiteSpace(webhookSecret)) issues.Add("missing: Stripe webhook secret");
+
+        if (string.IsNullOrWhiteSpace(creatorProMonthly)) issues.Add("missing: creator_pro monthly price id");
+        else if (!IsStripePriceId(creatorProMonthly)) issues.Add("invalid: creator_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(creatorProAnnual)) issues.Add("missing: creator_pro annual price id");
+        else if (!IsStripePriceId(creatorProAnnual)) issues.Add("invalid: creator_pro annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipBasicMonthly)) issues.Add("missing: ip_basic monthly price id");
+        else if (!IsStripePriceId(ipBasicMonthly)) issues.Add("invalid: ip_basic monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipBasicAnnual)) issues.Add("missing: ip_basic annual price id");
+        else if (!IsStripePriceId(ipBasicAnnual)) issues.Add("invalid: ip_basic annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipStandardMonthly)) issues.Add("missing: ip_standard monthly price id");
+        else if (!IsStripePriceId(ipStandardMonthly)) issues.Add("invalid: ip_standard monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipStandardAnnual)) issues.Add("missing: ip_standard annual price id");
+        else if (!IsStripePriceId(ipStandardAnnual)) issues.Add("invalid: ip_standard annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipProMonthly)) issues.Add("missing: ip_pro monthly price id");
+        else if (!IsStripePriceId(ipProMonthly)) issues.Add("invalid: ip_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(ipProAnnual)) issues.Add("missing: ip_pro annual price id");
+        else if (!IsStripePriceId(ipProAnnual)) issues.Add("invalid: ip_pro annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(growthSuiteMonthly)) issues.Add("missing: growth_suite monthly price id");
+        else if (!IsStripePriceId(growthSuiteMonthly)) issues.Add("invalid: growth_suite monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(growthSuiteAnnual)) issues.Add("missing: growth_suite annual price id");
+        else if (!IsStripePriceId(growthSuiteAnnual)) issues.Add("invalid: growth_suite annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(studioPlusMonthly)) issues.Add("missing: studio_plus monthly price id");
+        else if (!IsStripePriceId(studioPlusMonthly)) issues.Add("invalid: studio_plus monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(studioPlusAnnual)) issues.Add("missing: studio_plus annual price id");
+        else if (!IsStripePriceId(studioPlusAnnual)) issues.Add("invalid: studio_plus annual must start with price_");
+
+        return Ok(new
+        {
+            configured = issues.Count == 0,
+            keys = new
+            {
+                publishableKeyConfigured = !string.IsNullOrWhiteSpace(publishableKey),
+                secretKeyConfigured = !string.IsNullOrWhiteSpace(secretKey),
+                webhookSecretConfigured = !string.IsNullOrWhiteSpace(webhookSecret)
+            },
+            plans = new
+            {
+                ip_basic = new
+                {
+                    monthly = new { value = ipBasicMonthly, validPriceId = IsStripePriceId(ipBasicMonthly) },
+                    annual = new { value = ipBasicAnnual, validPriceId = IsStripePriceId(ipBasicAnnual) }
+                },
+                ip_standard = new
+                {
+                    monthly = new { value = ipStandardMonthly, validPriceId = IsStripePriceId(ipStandardMonthly) },
+                    annual = new { value = ipStandardAnnual, validPriceId = IsStripePriceId(ipStandardAnnual) }
+                },
+                ip_pro = new
+                {
+                    monthly = new { value = ipProMonthly, validPriceId = IsStripePriceId(ipProMonthly) },
+                    annual = new { value = ipProAnnual, validPriceId = IsStripePriceId(ipProAnnual) }
+                },
+                creator_pro = new
+                {
+                    monthly = new { value = creatorProMonthly, validPriceId = IsStripePriceId(creatorProMonthly) },
+                    annual = new { value = creatorProAnnual, validPriceId = IsStripePriceId(creatorProAnnual) }
+                },
+                growth_suite = new
+                {
+                    monthly = new { value = growthSuiteMonthly, validPriceId = IsStripePriceId(growthSuiteMonthly) },
+                    annual = new { value = growthSuiteAnnual, validPriceId = IsStripePriceId(growthSuiteAnnual) }
+                },
+                studio_plus = new
+                {
+                    monthly = new { value = studioPlusMonthly, validPriceId = IsStripePriceId(studioPlusMonthly) },
+                    annual = new { value = studioPlusAnnual, validPriceId = IsStripePriceId(studioPlusAnnual) }
+                }
+            },
+            issues
+        });
+    }
+
     [HttpPost("checkout-session")]
     public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
     {
-        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_KEY");
+        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
         if (string.IsNullOrWhiteSpace(secretKey))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Stripe secret key is not configured." });
@@ -179,6 +309,12 @@ public class PaymentsController : ControllerBase
 
     private string ResolvePriceId(string plan, string billingCycle)
     {
+        var rawPriceId = ResolvePriceIdRaw(plan, billingCycle);
+        return IsStripePriceId(rawPriceId) ? rawPriceId : string.Empty;
+    }
+
+    private string ResolvePriceIdRaw(string plan, string billingCycle)
+    {
         var normalizedPlan = string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim();
         var normalizedCycle = string.Equals(billingCycle, "annual", StringComparison.OrdinalIgnoreCase)
             ? "annual"
@@ -186,10 +322,24 @@ public class PaymentsController : ControllerBase
 
         var planKey = normalizedPlan.ToLowerInvariant() switch
         {
+            "ip_basic" => "IpBasic",
+            "ip_standard" => "IpStandard",
+            "ip_pro" => "IpPro",
             "creator_pro" => "CreatorPro",
             "growth_suite" => "GrowthSuite",
             "studio_plus" => "StudioPlus",
             _ => "CreatorPro"
+        };
+
+        var envToken = normalizedPlan.ToLowerInvariant() switch
+        {
+            "ip_basic" => "IP_BASIC",
+            "ip_standard" => "IP_STANDARD",
+            "ip_pro" => "IP_PRO",
+            "creator_pro" => "CREATOR_PRO",
+            "growth_suite" => "GROWTH_SUITE",
+            "studio_plus" => "STUDIO_PLUS",
+            _ => "CREATOR_PRO"
         };
 
         var sectionKey = normalizedCycle == "annual"
@@ -197,8 +347,8 @@ public class PaymentsController : ControllerBase
             : $"Stripe:Price{planKey}MonthlyId";
 
         var envKey = normalizedCycle == "annual"
-            ? $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_ANNUAL_ID"
-            : $"STRIPE_PRICE_{planKey.ToUpperInvariant()}_MONTHLY_ID";
+            ? $"STRIPE_PRICE_{envToken}_ANNUAL_ID"
+            : $"STRIPE_PRICE_{envToken}_MONTHLY_ID";
 
         var resolved = ResolveConfig(sectionKey, envKey);
         if (!string.IsNullOrWhiteSpace(resolved))
@@ -217,9 +367,29 @@ public class PaymentsController : ControllerBase
         return ResolveConfig(legacySectionKey, legacyEnvKey);
     }
 
-    private string ResolveConfig(string sectionKey, string envKey)
+    private static bool IsStripePriceId(string? value)
     {
-        return (_configuration[sectionKey] ?? _configuration[envKey] ?? string.Empty).Trim();
+        return !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string ResolveConfig(string sectionKey, params string[] envKeys)
+    {
+        var value = _configuration[sectionKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        foreach (var envKey in envKeys)
+        {
+            value = _configuration[envKey];
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
     }
 
     private object BuildCatalogPlan(

@@ -25,6 +25,15 @@ const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').t
 
 const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
 
+const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'wiseravenshare.com'];
+
+const isFirstPartyHost = (host = '') => {
+    const normalized = String(host || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return FIRST_PARTY_HOSTS.some((root) => normalized === root || normalized.endsWith(`.${root}`));
+};
+
 const getAbsoluteHost = (value = '') => {
     try {
         return new URL(String(value || '').trim()).hostname.toLowerCase();
@@ -53,6 +62,11 @@ const resolveApiBaseUrl = () => {
         && isDigitalOceanAppHost(host)
         && configuredHost
         && configuredHost !== host;
+    const shouldPreferSameOriginOnFirstPartyDomain = configuredIsAbsolute
+        && configuredHost
+        && configuredHost !== host
+        && isFirstPartyHost(host)
+        && isFirstPartyHost(configuredHost);
 
     // Hybrid runtimes do not host the API at localhost from the device perspective.
     if (isHybridRuntime) {
@@ -68,6 +82,11 @@ const resolveApiBaseUrl = () => {
     }
 
     if (shouldPreferSameOriginOnDoPreview) {
+        return `${window.location.origin}/api`;
+    }
+
+    // Avoid cross-domain auth/session edge cases between first-party aliases.
+    if (shouldPreferSameOriginOnFirstPartyDomain) {
         return `${window.location.origin}/api`;
     }
 
@@ -88,7 +107,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 
 const isAuthEndpoint = (url = '') => {
     const value = String(url || '').toLowerCase();
-    return value.includes('auth/');
+    return value.includes('auth/') || value.includes('auth-v2/');
 };
 
 const handleUnauthorized = () => {
@@ -292,6 +311,137 @@ const toArrayPayload = (payload) => {
     return [];
 };
 
+const isLikelyFileSystemPath = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return false;
+
+    return /^[a-z]:[\\/]/i.test(text)
+        || text.startsWith('\\\\')
+        || text.startsWith('file:');
+};
+
+const normalizeWebMediaUrl = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+
+    if (text.startsWith('data:') || text.startsWith('blob:') || /^https?:\/\//i.test(text)) {
+        return text;
+    }
+
+    if (text.startsWith('/')) {
+        return text;
+    }
+
+    if (text.startsWith('api/')) {
+        return `/${text}`;
+    }
+
+    return '';
+};
+
+const toSafeObjectPath = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (normalizeWebMediaUrl(text) || isLikelyFileSystemPath(text)) return '';
+
+    return text
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .join('/');
+};
+
+const extractFileName = (...candidates) => {
+    for (const candidate of candidates) {
+        const text = String(candidate || '').trim();
+        if (!text) continue;
+
+        const cleaned = text.replace(/[?#].*$/, '').replace(/\\/g, '/');
+        const name = cleaned.split('/').pop() || '';
+        if (name) {
+            return name;
+        }
+    }
+
+    return '';
+};
+
+const toMediaUploadUrl = (payload = {}) => {
+    const source = payload?.data || payload || {};
+    const directCandidates = [
+        source.mediaUrl,
+        source.file?.mediaUrl,
+        source.file?.MediaUrl,
+        source.file?.publicUrl,
+        source.file?.PublicUrl,
+        source.track?.mediaUrl,
+        source.video?.mediaUrl,
+        source.video?.MediaUrl,
+        source.video?.videoUrl,
+        source.video?.VideoUrl,
+        source.filePath
+    ];
+
+    for (const candidate of directCandidates) {
+        const normalized = normalizeWebMediaUrl(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    const relativePath = toSafeObjectPath(
+        source.file?.relativePath
+        || source.file?.RelativePath
+        || source.track?.relativePath
+        || source.track?.RelativePath
+        || source.filePath
+        || ''
+    );
+    if (relativePath) {
+        const encoded = relativePath
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+        if (encoded) {
+            return `/api/videostreaming/blob/${encoded}`;
+        }
+    }
+
+    const fileName = extractFileName(
+        source.fileName,
+        source.file?.fileName,
+        source.file?.FileName,
+        source.track?.fileName,
+        source.track?.FileName,
+        source.video?.fileName,
+        source.video?.FileName,
+        source.filePath
+    );
+    if (fileName) {
+        return `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
+    }
+
+    return '';
+};
+
+const normalizeMediaUploadResponse = (response) => {
+    const source = response?.data || {};
+    const mediaUrl = toMediaUploadUrl(source);
+    if (!mediaUrl) {
+        return response;
+    }
+
+    return {
+        ...response,
+        data: {
+            ...source,
+            mediaUrl,
+            filePath: source.filePath || mediaUrl
+        }
+    };
+};
+
 const toTrendingTopics = (payload) => {
     const source = toArrayPayload(payload?.articles ? payload.articles : payload);
 
@@ -417,7 +567,7 @@ async function refreshAccessToken() {
         refreshInFlight = (async () => {
             try {
                 const response = await axios.post(
-                    `${API_BASE_URL.replace(/\/+$/, '')}/auth/refresh-token`,
+                    `${API_BASE_URL.replace(/\/+$/, '')}/auth-v2/refresh-token`,
                     { refreshToken },
                     { timeout: 20000 }
                 );
@@ -502,18 +652,27 @@ export const apiService = {
     // Auth endpoints
     login: (email, password) => {
         const normalizedLogin = String(email || '').trim();
-        return api.post('/auth/login', {
+        return api.post('/auth-v2/login', {
             email: normalizedLogin,
             usernameOrEmail: normalizedLogin,
             password
         });
     },
-    register: (userData) => api.post('/auth/register', userData),
-    logout: () => api.post('/auth/logout'),
-    verifyToken: (token) => api.post('/auth/verify', { token }),
+    register: (userData) => api.post('/auth-v2/register', userData),
+    logout: () => api.post('/auth-v2/logout'),
+    verifyToken: (token) => api.post('/auth-v2/verify', { token }),
     updateProfile: (userId, updates) => api.put(`/users/${userId}`, updates),
     getSocialFeeds: (userId) => api.get(`/users/${userId}/feeds`),
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),
+    getInstrumentConnections: () => api.get('/instrumentconnections'),
+    upsertInstrumentConnection: (payload) => api.post('/instrumentconnections', payload),
+    registerBluetoothPair: (payload) => api.post('/instrumentconnections/bluetooth/pair', payload),
+    instrumentConnectionHeartbeat: (id) => api.post(`/instrumentconnections/${id}/heartbeat`),
+    removeInstrumentConnection: (id) => api.delete(`/instrumentconnections/${id}`),
+    getStudioCaptureProfile: () => api.get('/studio-capture/profile'),
+    upsertStudioCaptureProfile: (payload) => api.post('/studio-capture/profile', payload),
+    getStudioCaptureSources: (limit = 20) => api.get(`/studio-capture/sources?limit=${Math.max(1, Math.floor(limit || 20))}`),
+    recordStudioCaptureSource: (payload) => api.post('/studio-capture/sources', payload),
 
     // Posts endpoints
     getPosts: async (params = {}) => {
@@ -868,7 +1027,7 @@ export const apiService = {
     },
     addBookmark: async (postId) => {
         try {
-            return await api.post(`/bookmarks/${postId}`);
+            return await api.post(`/posts/${postId}/bookmark`);
         } catch (error) {
             const status = Number(error?.response?.status || 0);
             if (!isMissingEndpointStatus(status)) {
@@ -881,12 +1040,12 @@ export const apiService = {
                 normalized.unshift({ id: postId, createdAt: new Date().toISOString() });
             }
             safeWriteJson('wiseBookmarks', normalized);
-            return { data: { success: true, fallback: true } };
+            return { data: { success: true, fallback: true, isBookmarked: true } };
         }
     },
     removeBookmark: async (postId) => {
         try {
-            return await api.delete(`/bookmarks/${postId}`);
+            return await api.delete(`/posts/${postId}/bookmark`);
         } catch (error) {
             const status = Number(error?.response?.status || 0);
             if (!isMissingEndpointStatus(status)) {
@@ -896,7 +1055,7 @@ export const apiService = {
             const bookmarks = safeReadJson('wiseBookmarks', []);
             const normalized = (Array.isArray(bookmarks) ? bookmarks : []).filter((item) => item?.id !== postId);
             safeWriteJson('wiseBookmarks', normalized);
-            return { data: { success: true, fallback: true } };
+            return { data: { success: true, fallback: true, isBookmarked: false } };
         }
     },
 
@@ -904,8 +1063,12 @@ export const apiService = {
     uploadMedia: async (file, type, options = {}) => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Uploaded media');
         formData.append('description', options.description || 'Uploaded from Wise-Raven');
+        if (type === 'photo') {
+            formData.append('caption', options.caption || options.description || options.title || '');
+        }
         formData.append('publishToYouTube', String(Boolean(options.publishToYouTube && type === 'video')));
         formData.append('publishToTikTok', String(Boolean(options.publishToTikTok && type === 'video')));
         formData.append('publishToFacebook', String(Boolean(options.publishToFacebook && type === 'video')));
@@ -918,7 +1081,6 @@ export const apiService = {
         formData.append('destinationFolder', options.destinationFolder || '');
 
         const requestConfig = {
-            headers: { 'Content-Type': 'multipart/form-data' },
             onUploadProgress: (progressEvent) => {
                 if (typeof options.onProgress === 'function') {
                     const total = progressEvent.total || progressEvent.loaded || 1;
@@ -932,15 +1094,15 @@ export const apiService = {
 
         for (const url of candidateUrls) {
             try {
-                return await axios.post(url, formData, {
+                const response = await axios.post(url, formData, {
                     ...requestConfig,
                     headers: {
-                        ...requestConfig.headers,
                         ...(getAuthToken()
                             ? { Authorization: `Bearer ${getAuthToken()}` }
                             : {})
                     }
                 });
+                return normalizeMediaUploadResponse(response);
             } catch (error) {
                 lastError = error;
                 const status = error?.response?.status;
@@ -957,6 +1119,7 @@ export const apiService = {
     uploadMusicTrack: async (file, options = {}) => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Untitled track');
         formData.append('artist', options.artist || '');
         formData.append('album', options.album || '');
@@ -967,9 +1130,7 @@ export const apiService = {
         }
 
         try {
-            return await api.post('/ravensight/media/music/save', formData, {
-                headers: {}
-            });
+            return await api.post('/ravensight/media/music/save', formData);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
         }
@@ -984,6 +1145,122 @@ export const apiService = {
             }
 
             return { data: [] };
+        }
+    },
+    getPhotoLibrary: async () => {
+        try {
+            return await api.get('/ravensight/media/photos');
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to load photo library.');
+        }
+    },
+    deletePhotoLibraryItem: async (photoId) => {
+        const normalizedPhotoId = String(photoId || '').trim();
+        if (!normalizedPhotoId) {
+            throw new Error('Photo id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/media/photos/${encodeURIComponent(normalizedPhotoId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove photo from your library.');
+        }
+    },
+    deleteSavedMediaItem: async (mediaId) => {
+        const normalizedMediaId = String(mediaId || '').trim();
+        if (!normalizedMediaId) {
+            throw new Error('Media id is required.');
+        }
+
+        try {
+            return await api.delete(`/SavedMedia/${encodeURIComponent(normalizedMediaId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove saved media item.');
+        }
+    },
+    deleteMusicLibraryItem: async (trackId) => {
+        const normalizedTrackId = String(trackId || '').trim();
+        if (!normalizedTrackId) {
+            throw new Error('Track id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/media/music/${encodeURIComponent(normalizedTrackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove track from your library.');
+        }
+    },
+    deleteVideoLibraryItem: async (videoId) => {
+        const normalizedVideoId = String(videoId || '').trim();
+        if (!normalizedVideoId) {
+            throw new Error('Video id is required.');
+        }
+
+        try {
+            return await api.delete(`/ravensight/videos/${encodeURIComponent(normalizedVideoId)}`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (status === 404 || status === 405) {
+                try {
+                    return await api.delete(`/video/${encodeURIComponent(normalizedVideoId)}`);
+                } catch (fallbackError) {
+                    throw normalizeApiError(fallbackError, 'Failed to remove video from your library.');
+                }
+            }
+
+            throw normalizeApiError(error, 'Failed to remove video from your library.');
+        }
+    },
+    getVideoLibrary: async () => {
+        try {
+            return await api.get('/ravensight/media/videos');
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to load video library.');
+        }
+    },
+    getMusicPlayerState: async () => {
+        try {
+            return await api.get('/ravensight/media/music/player-state');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load music player state. Please try again.');
+            }
+
+            return { data: null };
+        }
+    },
+    saveMusicPlayerState: async (state) => {
+        try {
+            return await api.put('/ravensight/media/music/player-state', state || {});
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to save music player state. Please try again.');
+        }
+    },
+    addMusicFavorite: async (trackId) => {
+        try {
+            return await api.post(`/ravensight/media/music/favorites/${encodeURIComponent(trackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to add track to favorites. Please try again.');
+        }
+    },
+    removeMusicFavorite: async (trackId) => {
+        try {
+            return await api.delete(`/ravensight/media/music/favorites/${encodeURIComponent(trackId)}`);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to remove track from favorites. Please try again.');
+        }
+    },
+    recordMusicPlay: async (trackId, options = {}) => {
+        const params = {
+            positionSeconds: Math.max(0, Number(options.positionSeconds || 0)),
+            completed: Boolean(options.completed)
+        };
+
+        try {
+            return await api.post(`/ravensight/media/music/history/${encodeURIComponent(trackId)}`, null, { params });
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to save play history. Please try again.');
         }
     },
 

@@ -11,6 +11,9 @@ export const detectPlatform = () => {
     else if (ua.includes('FBAN') || ua.includes('FB_IAB') || ua.includes('Facebook')) platform = 'facebook';
     else if (ua.includes('Instagram')) platform = 'instagram';
     else if (ua.includes('Twitter')) platform = 'twitter';
+    else if (ua.includes('YouTube')) platform = 'youtube';
+    else if (ua.includes('LinkedIn')) platform = 'linkedin';
+    else if (ua.includes('Snapchat')) platform = 'snapchat';
     else if (/Capacitor/i.test(ua)) platform = 'capacitor';
 
     const isWebview = /webview|wv;/i.test(ua)
@@ -39,6 +42,9 @@ export const getPlatformSpecificUrl = (platform, path) => {
         facebook: '?utm_source=facebook&utm_medium=webview',
         instagram: '?utm_source=instagram&utm_medium=webview',
         twitter: '?utm_source=twitter&utm_medium=webview',
+        youtube: '?utm_source=youtube&utm_medium=webview',
+        linkedin: '?utm_source=linkedin&utm_medium=webview',
+        snapchat: '?utm_source=snapchat&utm_medium=webview',
         web: ''
     };
     const suffix = params[platform] || '';

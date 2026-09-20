@@ -11,6 +11,7 @@ public interface IRavensightVideoService
         string? title,
         string? description,
         string? destinationFolder,
+    string? userStorageIdentity,
         PrivacyStatus privacy = PrivacyStatus.Unlisted,
         CancellationToken cancellationToken = default);
 }
@@ -30,6 +31,7 @@ public sealed class RavensightVideoService : IRavensightVideoService
         string? title,
         string? description,
         string? destinationFolder,
+        string? userStorageIdentity,
         PrivacyStatus privacy = PrivacyStatus.Unlisted,
         CancellationToken cancellationToken = default)
     {
@@ -37,6 +39,7 @@ public sealed class RavensightVideoService : IRavensightVideoService
             file,
             RavensightMediaType.Video,
             destinationFolder,
+            userStorageIdentity,
             cancellationToken);
 
         var entity = new Video

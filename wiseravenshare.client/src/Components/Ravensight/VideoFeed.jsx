@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaThumbsUp, FaComment, FaShare, FaDownload, FaVideo, FaUsers, FaTrash } from 'react-icons/fa';
+import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaVideo, FaUsers, FaTrash } from 'react-icons/fa';
+import '@flaticon/flaticon-uicons/css/all/all.css';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
@@ -282,6 +283,13 @@ const VideoFeed = ({ onNotification }) => {
         return `${Math.floor(days / 365)} years ago`;
     };
 
+    const actionIconStyle = {
+        fontSize: '16px',
+        lineHeight: 1,
+        width: '16px',
+        textAlign: 'center'
+    };
+
     const VideoCard = ({ video }) => {
         const [isPlaying, setIsPlaying] = useState(false);
         const [isMuted, setIsMuted] = useState(true);
@@ -534,7 +542,7 @@ const VideoFeed = ({ onNotification }) => {
                                 cursor: 'pointer'
                             }}
                         >
-                            <FaThumbsUp /> {video.likes}
+                            <i className="fi fi-br-heart" aria-hidden="true" style={actionIconStyle} /> {video.likes}
                         </button>
                         <button style={{
                             display: 'flex',
@@ -545,7 +553,7 @@ const VideoFeed = ({ onNotification }) => {
                             color: 'var(--text-color)',
                             cursor: 'pointer'
                         }}>
-                            <FaComment /> {video.comments}
+                            <i className="fi fi-br-comment-dots" aria-hidden="true" style={actionIconStyle} /> {video.comments}
                         </button>
                         <button style={{
                             display: 'flex',
@@ -561,7 +569,7 @@ const VideoFeed = ({ onNotification }) => {
                             disabled={isSharing}
                             title="Share this video to connected social channels"
                         >
-                            <FaShare /> {isSharing ? 'Sharing...' : 'Share'}
+                            <i className="fi fi-br-stamp" aria-hidden="true" style={actionIconStyle} /> {isSharing ? 'Sharing...' : 'Share'}
                         </button>
                         <button
                             onClick={() => handleSaveToLibrary(video)}
@@ -578,7 +586,7 @@ const VideoFeed = ({ onNotification }) => {
                             disabled={isSaving}
                             title="Save this feed item to My Library"
                         >
-                            <FaDownload /> {isSaving ? 'Saving...' : 'Save'}
+                            <i className="fi fi-br-bookmark" aria-hidden="true" style={actionIconStyle} /> {isSaving ? 'Saving...' : 'Bookmark'}
                         </button>
                         <button
                             onClick={() => setScriptVideo(video)}

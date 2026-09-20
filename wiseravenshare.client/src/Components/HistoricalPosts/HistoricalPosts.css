@@ -1,0 +1,251 @@
+/* wiseravenshare.client/src/Components/HistoricalPosts/HistoricalPosts.css */
+
+.historical-posts {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  min-height: 100vh;
+}
+
+.historical-header {
+  text-align: center;
+  margin-bottom: 40px;
+  padding: 30px 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.historical-header h1 {
+  margin: 0 0 10px 0;
+  color: #2c3e50;
+  font-size: 2.5em;
+}
+
+.subtitle {
+  color: #7f8c8d;
+  font-size: 1.1em;
+  margin: 0;
+}
+
+/* View Tabs */
+.view-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.tab {
+  padding: 12px 24px;
+  border: 2px solid #3498db;
+  background: white;
+  color: #3498db;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.tab:hover {
+  background: #ecf0f1;
+}
+
+.tab.active {
+  background: #3498db;
+  color: white;
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+}
+
+/* Content Area */
+.historical-content {
+  background: white;
+  border-radius: 12px;
+  padding: 30px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  min-height: 400px;
+}
+
+.loading {
+  text-align: center;
+  padding: 60px 20px;
+  font-size: 1.2em;
+  color: #7f8c8d;
+}
+
+.loading::after {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-left: 10px;
+  border: 3px solid #ecf0f1;
+  border-radius: 50%;
+  border-top-color: #3498db;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-message {
+  background: #fee;
+  color: #c33;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #c33;
+}
+
+/* Timeline Controls */
+.timeline-container {
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 30px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.timeline-controls label {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.timeline-controls select {
+  padding: 8px 12px;
+  border: 2px solid #3498db;
+  border-radius: 6px;
+  font-size: 1em;
+  cursor: pointer;
+  background: white;
+  color: #2c3e50;
+}
+
+.timeline-controls select:focus {
+  outline: none;
+  border-color: #2980b9;
+  box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+}
+
+/* Buttons */
+.btn-back {
+  display: inline-block;
+  padding: 10px 20px;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1em;
+  margin-bottom: 20px;
+  transition: background 0.3s ease;
+}
+
+.btn-back:hover {
+  background: #7f8c8d;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .historical-posts {
+    padding: 15px;
+  }
+
+  .historical-header h1 {
+    font-size: 2em;
+  }
+
+  .historical-content {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .historical-posts {
+    padding: 10px;
+  }
+
+  .historical-header {
+    padding: 20px 15px;
+  }
+
+  .historical-header h1 {
+    font-size: 1.8em;
+  }
+
+  .subtitle {
+    font-size: 1em;
+  }
+
+  .view-tabs {
+    gap: 8px;
+  }
+
+  .tab {
+    padding: 10px 16px;
+    font-size: 0.9em;
+  }
+
+  .historical-content {
+    padding: 15px;
+  }
+
+  .timeline-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .historical-posts {
+    padding: 5px;
+  }
+
+  .historical-header {
+    padding: 15px 10px;
+    margin-bottom: 20px;
+  }
+
+  .historical-header h1 {
+    font-size: 1.5em;
+  }
+
+  .view-tabs {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tab {
+    width: 100%;
+    text-align: center;
+  }
+
+  .historical-content {
+    padding: 10px;
+    min-height: 300px;
+  }
+}

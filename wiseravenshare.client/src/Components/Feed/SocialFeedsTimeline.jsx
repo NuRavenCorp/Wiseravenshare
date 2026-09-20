@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../Services/api';
 import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
+const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'linkedin', 'bluesky']);
 
 const PLATFORMS = [
     { id: 'all', label: 'All Feeds', icon: '🌐', color: '#a855f7' },
@@ -11,9 +12,6 @@ const PLATFORMS = [
     { id: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9' },
     { id: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4' },
     { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
-    { id: 'twitter', label: 'Twitter / X', icon: '🐦', color: '#38bdf8' },
-    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' },
-    { id: 'bluesky', label: 'Bluesky', icon: '🦋', color: '#60a5fa' },
     { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
@@ -51,13 +49,7 @@ const normalizeConnection = (connection, platform) => {
             ? (username ? `https://www.instagram.com/${username}` : '')
             : platform === 'youtube'
                 ? (username ? `https://www.youtube.com/@${username}` : '')
-                : platform === 'twitter'
-                    ? (username ? `https://twitter.com/${username}` : '')
-                    : platform === 'linkedin'
-                        ? (username ? `https://www.linkedin.com/in/${username}` : '')
-                        : platform === 'bluesky'
-                            ? (username ? `https://bsky.app/profile/${username}` : '')
-                            : (username ? `https://www.tiktok.com/@${username}` : '');
+                : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(safeConnection.enabled || username || feedUrl || profileUrl),
@@ -143,10 +135,7 @@ const normalizeFeeds = (feeds) => {
         tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         facebook: getConnection(source, 'facebook', 'Facebook'),
         instagram: getConnection(source, 'instagram', 'Instagram'),
-        youtube: getConnection(source, 'youtube', 'YouTube'),
-        twitter: getConnection(source, 'twitter', 'Twitter'),
-        linkedin: getConnection(source, 'linkedin', 'LinkedIn'),
-        bluesky: getConnection(source, 'bluesky', 'Bluesky')
+        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube')
     };
 };
 
@@ -249,65 +238,34 @@ const getSnapshot = (user) => {
         facebook: normalizeConnection(feeds.facebook, 'facebook'),
         instagram: normalizeConnection(feeds.instagram, 'instagram'),
         youtube: normalizeConnection(feeds.youtube, 'youtube'),
-        twitter: normalizeConnection(feeds.twitter, 'twitter'),
-        linkedin: normalizeConnection(feeds.linkedin, 'linkedin'),
-        bluesky: normalizeConnection(feeds.bluesky, 'bluesky'),
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
 };
 
-const normalizeFeedConnections = (feeds = {}) => ({
-    facebook: {
-        enabled: Boolean(feeds.facebook?.enabled),
-        username: String(feeds.facebook?.username || '').trim(),
-        profileUrl: String(feeds.facebook?.profileUrl || '').trim(),
-        feedUrl: String(feeds.facebook?.feedUrl || '').trim(),
-        designation: String(feeds.facebook?.designation || '').trim()
-    },
-    tikTok: {
-        enabled: Boolean(feeds.tikTok?.enabled),
-        username: String(feeds.tikTok?.username || '').trim(),
-        profileUrl: String(feeds.tikTok?.profileUrl || '').trim(),
-        feedUrl: String(feeds.tikTok?.feedUrl || '').trim(),
-        designation: String(feeds.tikTok?.designation || '').trim()
-    },
-    instagram: {
-        enabled: Boolean(feeds.instagram?.enabled),
-        username: String(feeds.instagram?.username || '').trim(),
-        profileUrl: String(feeds.instagram?.profileUrl || '').trim(),
-        feedUrl: String(feeds.instagram?.feedUrl || '').trim(),
-        designation: String(feeds.instagram?.designation || '').trim()
-    },
-    youtube: {
-        enabled: Boolean(feeds.youtube?.enabled),
-        username: String(feeds.youtube?.username || '').trim(),
-        profileUrl: String(feeds.youtube?.profileUrl || '').trim(),
-        feedUrl: String(feeds.youtube?.feedUrl || '').trim(),
-        designation: String(feeds.youtube?.designation || '').trim()
-    },
-    twitter: {
-        enabled: Boolean(feeds.twitter?.enabled),
-        username: String(feeds.twitter?.username || '').trim(),
-        profileUrl: String(feeds.twitter?.profileUrl || '').trim(),
-        feedUrl: String(feeds.twitter?.feedUrl || '').trim(),
-        designation: String(feeds.twitter?.designation || '').trim()
-    },
-    linkedin: {
-        enabled: Boolean(feeds.linkedin?.enabled),
-        username: String(feeds.linkedin?.username || '').trim(),
-        profileUrl: String(feeds.linkedin?.profileUrl || '').trim(),
-        feedUrl: String(feeds.linkedin?.feedUrl || '').trim(),
-        designation: String(feeds.linkedin?.designation || '').trim()
-    },
-    bluesky: {
-        enabled: Boolean(feeds.bluesky?.enabled),
-        username: String(feeds.bluesky?.username || '').trim(),
-        profileUrl: String(feeds.bluesky?.profileUrl || '').trim(),
-        feedUrl: String(feeds.bluesky?.feedUrl || '').trim(),
-        designation: String(feeds.bluesky?.designation || '').trim()
-    }
-});
+const normalizeFeedConnections = (feeds = {}) => {
+    const getFeed = (source, ...keys) => {
+        for (const key of keys) {
+            if (source?.[key]) return source[key];
+        }
+        return {};
+    };
+
+    const normalizeConn = (conn = {}) => ({
+        enabled: Boolean(conn?.enabled),
+        username: String(conn?.username || '').trim(),
+        profileUrl: String(conn?.profileUrl || '').trim(),
+        feedUrl: String(conn?.feedUrl || '').trim(),
+        designation: String(conn?.designation || '').trim()
+    });
+
+    return {
+        facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
+        tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
+        instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
+        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube'))
+    };
+};
 
 const getConnectedPlatforms = (snapshot) => {
     const source = snapshot || {};
@@ -333,11 +291,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [postMessage, setPostMessage] = useState('');
     const [mediaUrlInput, setMediaUrlInput] = useState('');
     const [linkUrlInput, setLinkUrlInput] = useState('');
-    const [publishFacebook, setPublishFacebook] = useState(true);
+    const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
-    const [publishTwitter, setPublishTwitter] = useState(false);
-    const [publishLinkedIn, setPublishLinkedIn] = useState(false);
+    const [publishInstagram, setPublishInstagram] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
     const [displayTemplate, setDisplayTemplate] = useState('cards');
@@ -352,10 +309,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         facebook: snapshot.facebook.username || '',
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
-        youtube: snapshot.youtube.username || '',
-        twitter: snapshot.twitter.username || '',
-        linkedin: snapshot.linkedin.username || '',
-        bluesky: snapshot.bluesky.username || ''
+        youtube: snapshot.youtube.username || ''
     });
 
     // Demo Guide Expansion
@@ -368,6 +322,50 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [showDeveloperApis, setShowDeveloperApis] = useState(false);
     const [providerStatuses, setProviderStatuses] = useState([]);
     const [providerStatusError, setProviderStatusError] = useState('');
+    const handleInputRefs = useRef({});
+
+    const platformDisplayNames = {
+        facebook: 'Facebook',
+        tiktok: 'TikTok',
+        youtube: 'YouTube',
+        instagram: 'Instagram'
+    };
+
+    const focusHandleInput = (platform) => {
+        const input = handleInputRefs.current[platform];
+        if (input && typeof input.focus === 'function') {
+            input.focus();
+            if (typeof input.select === 'function') {
+                input.select();
+            }
+        }
+    };
+
+    const launchConnectPlatform = async (platform) => {
+        const normalized = String(platform || '').trim().toLowerCase();
+        if (!normalized) {
+            return;
+        }
+
+        if (normalized === 'tiktok') {
+            try {
+                const redirectUri = `${window.location.origin}/api/auth/oauth/tiktok/callback`;
+                const res = await socialService.getTikTokAuthUrl(redirectUri);
+                if (res?.authUrl) {
+                    window.open(res.authUrl, '_blank', 'width=600,height=700');
+                    setConnectionNotice('TikTok OAuth opened in a new window.');
+                }
+            } catch (err) {
+                setConnectionNotice(err?.message || 'Failed to launch TikTok OAuth dialog.');
+            }
+            return;
+        }
+
+        setActivePlatform(normalized);
+        setShowHandleConfig(true);
+        setConnectionNotice(`Enter your ${platformDisplayNames[normalized] || normalized} handle and save to connect the feed.`);
+        window.setTimeout(() => focusHandleInput(normalized), 0);
+    };
 
     useEffect(() => {
         setSnapshot(getSnapshot(user));
@@ -400,6 +398,39 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, []);
 
     useEffect(() => {
+        try {
+            const raw = localStorage.getItem('wiseSocialAggregatorIntent');
+            if (!raw) {
+                return;
+            }
+
+            const detail = JSON.parse(raw);
+            const createdAt = Number(detail?.createdAt || 0);
+            const isFresh = Number.isFinite(createdAt) && (Date.now() - createdAt) < 5 * 60 * 1000;
+            if (!isFresh) {
+                localStorage.removeItem('wiseSocialAggregatorIntent');
+                return;
+            }
+
+            const platform = String(detail?.platform || '').trim().toLowerCase().replace('-feed', '');
+            const hasKnownPlatform = platform && PLATFORMS.some((item) => item.id === platform);
+            if (hasKnownPlatform) {
+                setActivePlatform(platform);
+            }
+
+            if (detail?.openConfig) {
+                setShowHandleConfig(true);
+                const targetPlatform = hasKnownPlatform ? platform : 'facebook';
+                window.setTimeout(() => focusHandleInput(targetPlatform), 0);
+            }
+
+            localStorage.removeItem('wiseSocialAggregatorIntent');
+        } catch {
+            localStorage.removeItem('wiseSocialAggregatorIntent');
+        }
+    }, []);
+
+    useEffect(() => {
         const refresh = () => setSnapshot(getSnapshot(user));
         refresh();
         const intervalId = setInterval(refresh, REFRESH_MS);
@@ -424,8 +455,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         const loadProviderStatuses = async () => {
             try {
                 const statuses = await socialService.getProviderStatuses();
+                const filteredStatuses = (Array.isArray(statuses) ? statuses : []).filter(
+                    (provider) => !DISABLED_SOCIAL_PLATFORMS.has(String(provider?.platform || '').trim().toLowerCase())
+                );
                 if (!cancelled) {
-                    setProviderStatuses(Array.isArray(statuses) ? statuses : []);
+                    setProviderStatuses(filteredStatuses);
                     setProviderStatusError('');
                 }
             } catch (error) {
@@ -471,10 +505,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: loadedFeeds.facebook.username,
                     tiktok: loadedFeeds.tikTok.username,
                     instagram: loadedFeeds.instagram.username,
-                    youtube: loadedFeeds.youtube.username,
-                    twitter: loadedFeeds.twitter.username,
-                    linkedin: loadedFeeds.linkedin.username,
-                    bluesky: loadedFeeds.bluesky.username
+                    youtube: loadedFeeds.youtube.username
                 });
             } catch {
                 if (cancelled) return;
@@ -482,10 +513,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: snapshot.facebook.username || '',
                     tiktok: snapshot.tikTok.username || '',
                     instagram: snapshot.instagram.username || '',
-                    youtube: snapshot.youtube.username || '',
-                    twitter: snapshot.twitter.username || '',
-                    linkedin: snapshot.linkedin.username || '',
-                    bluesky: snapshot.bluesky.username || ''
+                    youtube: snapshot.youtube.username || ''
                 });
             }
         };
@@ -505,8 +533,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 const socialItems = await socialService.getCombinedFeed(
                     compact ? 5 : 15,
                     snapshot.facebook.username || undefined,
-                    snapshot.tikTok.username || undefined,
-                    snapshot.bluesky.username || undefined
+                    snapshot.tikTok.username || undefined
                 );
 
                 const rssResults = await Promise.all(customRssFeeds.map(async (feed) => {
@@ -524,15 +551,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }
                 }));
                 const rssItems = rssResults.flat();
-                const apiSocialItems = Array.isArray(socialItems) ? socialItems : [];
+                const apiSocialItems = (Array.isArray(socialItems) ? socialItems : []).filter((item) => {
+                    const platform = String(item?.platform || '').trim().toLowerCase();
+                    return !DISABLED_SOCIAL_PLATFORMS.has(platform);
+                });
                 const fallbackItems = [
                     buildConnectionFeedItem('facebook', snapshot.facebook, snapshot.checkedAt),
                     buildConnectionFeedItem('tiktok', snapshot.tikTok, snapshot.checkedAt),
                     buildConnectionFeedItem('instagram', snapshot.instagram, snapshot.checkedAt),
-                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt),
-                    buildConnectionFeedItem('twitter', snapshot.twitter, snapshot.checkedAt),
-                    buildConnectionFeedItem('linkedin', snapshot.linkedin, snapshot.checkedAt),
-                    buildConnectionFeedItem('bluesky', snapshot.bluesky, snapshot.checkedAt)
+                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt)
                 ].filter(Boolean);
 
                 const mergedSocialItems = [...apiSocialItems];
@@ -573,7 +600,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.bluesky.username, customRssFeeds]);
+    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, customRssFeeds]);
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
@@ -589,10 +616,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
             tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
             instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
-            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
-            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter),
-            linkedin: keepConnectionMetadata(snapshot.linkedin, handles.linkedin),
-            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky)
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube)
         };
 
         try {
@@ -601,7 +625,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             if (userId) {
                 try {
                     const response = await apiService.updateSocialFeeds(userId, updatedFeeds);
-                    persistedFeeds = normalizeFeedConnections(response?.data || response || updatedFeeds);
+                    const responseData = response?.data?.socialFeeds || response?.socialFeeds || response?.data || response;
+                    persistedFeeds = normalizeFeedConnections(responseData);
                 } catch (err) {
                     console.warn('Backend social feed save failed, using local cache fallback:', err);
                 }
@@ -612,6 +637,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             const nextUser = { ...cachedUser, ...user, socialFeeds: persistedFeeds };
             localStorage.setItem('user_data', JSON.stringify(nextUser));
             window.dispatchEvent(new Event('wiseraven:social-updated'));
+            
+            // Update snapshot with new feeds
+            setSnapshot(normalizeFeeds(persistedFeeds));
+            
             const nextSnapshot = getSnapshot(nextUser);
             const connected = getConnectedPlatforms(nextSnapshot);
             setConnectionNotice(
@@ -632,6 +661,12 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const handlePublishPost = async (e) => {
         e?.preventDefault();
         if (!postMessage.trim()) return;
+
+        const noneSelected = !publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram;
+        if (noneSelected) {
+            setPublishResults([{ platform: 'general', success: false, error: 'Select at least one platform before publishing.' }]);
+            return;
+        }
 
         setIsPublishing(true);
         setPublishResults(null);
@@ -654,13 +689,18 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
                 publishToTikTok: publishTikTok && isVideoUrl,
-                publishToYouTube: publishYouTube && isVideoUrl
+                publishToYouTube: publishYouTube && isVideoUrl,
+                publishToInstagram: publishInstagram
             });
 
             setPublishResults(response?.results || []);
             setPostMessage('');
             setMediaUrlInput('');
             setLinkUrlInput('');
+            setPublishFacebook(false);
+            setPublishTikTok(false);
+            setPublishYouTube(false);
+            setPublishInstagram(false);
         } catch (err) {
             setPublishResults([{ platform: 'general', success: false, error: err?.message || 'Publishing request failed.' }]);
         } finally {
@@ -749,51 +789,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             });
         }
 
-        if (snapshot.youtube.enabled || snapshot.youtube.resolvedUrl) {
+        if (snapshot.youtube?.enabled || snapshot.youtube?.resolvedUrl) {
             items.push({
                 id: 'youtube',
                 platform: 'YouTube',
                 icon: '▶️',
                 color: '#f87171',
-                username: snapshot.youtube.username,
-                designation: snapshot.youtube.designation,
-                url: snapshot.youtube.resolvedUrl
-            });
-        }
-
-        if (snapshot.twitter.enabled || snapshot.twitter.resolvedUrl) {
-            items.push({
-                id: 'twitter',
-                platform: 'Twitter / X',
-                icon: '🐦',
-                color: '#38bdf8',
-                username: snapshot.twitter.username,
-                designation: snapshot.twitter.designation,
-                url: snapshot.twitter.resolvedUrl
-            });
-        }
-
-        if (snapshot.linkedin.enabled || snapshot.linkedin.resolvedUrl) {
-            items.push({
-                id: 'linkedin',
-                platform: 'LinkedIn',
-                icon: '💼',
-                color: '#60a5fa',
-                username: snapshot.linkedin.username,
-                designation: snapshot.linkedin.designation,
-                url: snapshot.linkedin.resolvedUrl
-            });
-        }
-
-        if (snapshot.bluesky.enabled || snapshot.bluesky.resolvedUrl) {
-            items.push({
-                id: 'bluesky',
-                platform: 'Bluesky',
-                icon: '🦋',
-                color: '#60a5fa',
-                username: snapshot.bluesky.username,
-                designation: snapshot.bluesky.designation,
-                url: snapshot.bluesky.resolvedUrl
+                username: snapshot.youtube?.username,
+                designation: snapshot.youtube?.designation,
+                url: snapshot.youtube?.resolvedUrl
             });
         }
 
@@ -1091,6 +1095,24 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                     Read: {provider.readConfigured ? 'configured' : 'not configured'} · Publish: {provider.publishConfigured ? 'configured' : 'not configured'}
                                 </div>
                                 <div style={{ color: '#cbd5e1', marginTop: '2px' }}>{provider.detail}</div>
+                                <div style={{ marginTop: '8px' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => launchConnectPlatform(provider.platform)}
+                                        style={{
+                                            border: '1px solid rgba(103, 232, 249, 0.35)',
+                                            background: 'rgba(103, 232, 249, 0.12)',
+                                            color: '#67e8f9',
+                                            borderRadius: '999px',
+                                            padding: '5px 10px',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        {provider.platform === 'tiktok' ? 'Connect TikTok Account' : 'Connect'}
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -1139,113 +1161,79 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 >
                     <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
-                        🔗 Configure Social Media Handles / Page IDs
+                        🔗 Configure Social Media Handles & Page IDs
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Just enter your public handle or page name. No API keys are required from users here.
+                        Enter your public username, page name, or numeric ID for each platform. Your feeds will sync automatically once saved.
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>📘 Facebook Page ID or Handle</span>
+                            <span style={{ fontWeight: 700, color: '#93c5fd' }}>📘 Facebook</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Page username or numeric Page ID (e.g. <em>MyBrandPage</em> or <em>109283749283</em>). Found in Page Settings → Page Info.</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.facebook = node; }}
                                 type="text"
                                 value={handles.facebook}
                                 onChange={(e) => setHandles({ ...handles, facebook: e.target.value })}
-                                placeholder="e.g. MyBrandPage or 109283749283"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="MyBrandPage or 109283749283"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #93c5fd44', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>🎵 TikTok Username</span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 700, color: '#67e8f9' }}>🎵 TikTok</span>
                                 <button
                                     type="button"
-                                    onClick={async () => {
-                                        try {
-                                            const redirectUri = `${window.location.origin}/oauth/tiktok/callback`;
-                                            const res = await socialService.getTikTokAuthUrl(redirectUri);
-                                            if (res?.authUrl) {
-                                                window.open(res.authUrl, '_blank', 'width=600,height=700');
-                                            }
-                                        } catch (err) {
-                                            alert('Failed to launch TikTok OAuth dialog. Ensure Social:TikTok:ClientKey is set.');
-                                        }
-                                    }}
+                                    onClick={async () => { launchConnectPlatform('tiktok'); }}
                                     style={{
                                         border: 'none',
                                         background: 'rgba(103, 232, 249, 0.2)',
                                         color: '#67e8f9',
                                         borderRadius: '4px',
-                                        padding: '2px 6px',
+                                        padding: '2px 8px',
                                         fontSize: '10px',
                                         cursor: 'pointer',
                                         fontWeight: 700
                                     }}
                                 >
-                                    🔑 Authorize OAuth v2
+                                    🔑 OAuth Login
                                 </button>
-                            </span>
+                            </div>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your TikTok @username (without the @). Use OAuth Login for API publishing access.</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.tiktok = node; }}
                                 type="text"
                                 value={handles.tiktok}
                                 onChange={(e) => setHandles({ ...handles, tiktok: e.target.value })}
-                                placeholder="e.g. creatorname"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="creatorusername"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #67e8f944', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>📸 Instagram Username</span>
+                            <span style={{ fontWeight: 700, color: '#f9a8d4' }}>📸 Instagram</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Instagram @username (without the @). Must be a Business or Creator account for publishing.</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.instagram = node; }}
                                 type="text"
                                 value={handles.instagram}
                                 onChange={(e) => setHandles({ ...handles, instagram: e.target.value })}
-                                placeholder="e.g. mybrand"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="mybrandusername"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #f9a8d444', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>▶️ YouTube Channel Handle</span>
+                            <span style={{ fontWeight: 700, color: '#f87171' }}>▶️ YouTube</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your channel handle (e.g. <em>@MyChannel</em>) or Channel ID (e.g. <em>UCxxxxxxx</em>). Found in YouTube Studio → Channel → Advanced settings.</span>
                             <input
+                                ref={(node) => { handleInputRefs.current.youtube = node; }}
                                 type="text"
                                 value={handles.youtube}
                                 onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
-                                placeholder="e.g. MyChannel"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🐦 Twitter / X Handle</span>
-                            <input
-                                type="text"
-                                value={handles.twitter}
-                                onChange={(e) => setHandles({ ...handles, twitter: e.target.value })}
-                                placeholder="e.g. twitterhandle"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>💼 LinkedIn Profile/Company ID</span>
-                            <input
-                                type="text"
-                                value={handles.linkedin}
-                                onChange={(e) => setHandles({ ...handles, linkedin: e.target.value })}
-                                placeholder="e.g. company-name"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
-                            />
-                        </label>
-                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                            <span>🦋 Bluesky Handle</span>
-                            <input
-                                type="text"
-                                value={handles.bluesky}
-                                onChange={(e) => setHandles({ ...handles, bluesky: e.target.value })}
-                                placeholder="e.g. wiseravenshare.bsky.social"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                                placeholder="@MyChannel or UCxxxxxxxx"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #f8717144', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
                     </div>
@@ -1268,7 +1256,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </form>
             )}
 
-            {/* Interactive Multi-Platform Post Creator */}
             <form
                 onSubmit={handlePublishPost}
                 style={{
@@ -1279,15 +1266,56 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     marginBottom: '18px'
                 }}
             >
-                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    ✍️ Post to Social Media Feed ({activeMeta.label})
+                <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ✍️ Publish to Social Platforms
                 </div>
+
+                {/* Platform selector pills — pick one or many */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                    {[
+                        { key: 'facebook', label: 'Facebook', icon: '📘', color: '#93c5fd', value: publishFacebook, set: setPublishFacebook },
+                        { key: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4', value: publishInstagram, set: setPublishInstagram },
+                        { key: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9', value: publishTikTok, set: setPublishTikTok, note: 'video required' },
+                        { key: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171', value: publishYouTube, set: setPublishYouTube, note: 'video required' }
+                    ].map(({ key, label, icon, color, value, set, note }) => (
+                        <button
+                            key={key}
+                            type="button"
+                            onClick={() => set(!value)}
+                            style={{
+                                border: `2px solid ${value ? color : 'var(--border-color)'}`,
+                                background: value ? `${color}22` : 'rgba(15,23,42,0.4)',
+                                color: value ? color : 'var(--light-color)',
+                                borderRadius: '10px',
+                                padding: '8px 14px',
+                                fontSize: '12px',
+                                fontWeight: value ? 700 : 400,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                gap: '2px',
+                                minWidth: '96px'
+                            }}
+                        >
+                            <span style={{ fontSize: '18px' }}>{icon}</span>
+                            <span>{label}</span>
+                            {note && <span style={{ fontSize: '10px', opacity: 0.75 }}>{note}</span>}
+                        </button>
+                    ))}
+                </div>
+
+                {(!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram) && (
+                    <div style={{ fontSize: '12px', color: '#fca5a5', marginBottom: '10px' }}>
+                        ⚠️ Select at least one platform above before publishing.
+                    </div>
+                )}
 
                 <textarea
                     rows={3}
                     value={postMessage}
                     onChange={(e) => setPostMessage(e.target.value)}
-                    placeholder={`Write an update or post to publish to ${activeMeta.label} or cross-post across platforms...`}
+                    placeholder="Write a post or update to publish…"
                     style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1300,53 +1328,47 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '10px' }}>
-                    <input
-                        type="url"
-                        value={mediaUrlInput}
-                        onChange={(e) => setMediaUrlInput(e.target.value)}
-                        placeholder="Video / Photo URL (optional for TikTok/YouTube)"
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                    />
-                    <input
-                        type="url"
-                        value={linkUrlInput}
-                        onChange={(e) => setLinkUrlInput(e.target.value)}
-                        placeholder="Link URL (optional for Facebook/LinkedIn)"
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                    />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--light-color)' }}>Video / Photo URL <span style={{ opacity: 0.7 }}>(required for TikTok & YouTube)</span></span>
+                        <input
+                            type="url"
+                            value={mediaUrlInput}
+                            onChange={(e) => setMediaUrlInput(e.target.value)}
+                            placeholder="https://… (.mp4, .jpg, etc.)"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--light-color)' }}>Link URL <span style={{ opacity: 0.7 }}>(optional, for Facebook / Instagram)</span></span>
+                        <input
+                            type="url"
+                            value={linkUrlInput}
+                            onChange={(e) => setLinkUrlInput(e.target.value)}
+                            placeholder="https://…"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        />
+                    </label>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishFacebook} onChange={(e) => setPublishFacebook(e.target.checked)} />
-                            📘 Facebook
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishTikTok} onChange={(e) => setPublishTikTok(e.target.checked)} />
-                            🎵 TikTok
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={publishYouTube} onChange={(e) => setPublishYouTube(e.target.checked)} />
-                            ▶️ YouTube
-                        </label>
-                    </div>
-
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
                         type="submit"
-                        disabled={isPublishing || !postMessage.trim()}
+                        disabled={isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)}
                         style={{
                             border: 'none',
-                            background: isPublishing ? 'var(--border-color)' : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
+                            background: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram))
+                                ? 'var(--border-color)'
+                                : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                             color: '#fff',
                             borderRadius: '8px',
-                            padding: '10px 20px',
+                            padding: '10px 24px',
                             fontWeight: 700,
-                            cursor: isPublishing ? 'wait' : 'pointer'
+                            cursor: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)) ? 'not-allowed' : 'pointer',
+                            fontSize: '13px'
                         }}
                     >
-                        {isPublishing ? 'Publishing...' : '🚀 Publish Post'}
+                        {isPublishing ? 'Publishing…' : '🚀 Publish Post'}
                     </button>
                 </div>
 
@@ -1536,8 +1558,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             </div>
 
                             {item.mediaUrl && (
-                                <div style={{ marginTop: '8px' }}>
-                                    <img src={item.mediaUrl} alt="Feed Media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
+                                <div style={{ marginTop: '8px', width: '100%', display: 'block' }}>
+                                    <img src={item.mediaUrl} alt="Feed Media" style={{ width: '100%', maxHeight: '300px', objectFit: 'cover', display: 'block', borderRadius: '8px' }} />
                                 </div>
                             )}
 

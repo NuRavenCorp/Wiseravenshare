@@ -1,0 +1,437 @@
+/* wiseravenshare.client/src/Components/Communication/TwoFactorAuthTest.css */
+
+.twofa-test-container {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 40px 20px;
+}
+
+.test-panel {
+    max-width: 900px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+.test-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 32px;
+    text-align: center;
+}
+
+.test-header h1 {
+    margin: 0 0 8px 0;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.test-header p {
+    margin: 0;
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+/* Steps */
+.test-steps {
+    display: flex;
+    justify-content: space-between;
+    padding: 40px 32px;
+    background: #f9f9f9;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    flex: 1;
+    position: relative;
+}
+
+.step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 24px;
+    right: -32px;
+    width: 24px;
+    height: 2px;
+    background: #ddd;
+}
+
+.step.active::after {
+    background: #667eea;
+}
+
+.step-number {
+    min-width: 48px;
+    width: 48px;
+    height: 48px;
+    background: #e0e0e0;
+    color: #666;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 18px;
+    transition: all 0.3s ease;
+}
+
+.step.active .step-number {
+    background: #667eea;
+    color: white;
+}
+
+.step.completed .step-number {
+    background: #28a745;
+    color: white;
+}
+
+.step-content h3 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.step-content p {
+    margin: 0;
+    font-size: 12px;
+    color: #666;
+}
+
+/* Status Messages */
+.status-message {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 32px 24px 32px;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    animation: slideDown 0.3s ease-in-out;
+}
+
+.status-message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.status-message.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.status-message .icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+/* Test Form */
+.test-form {
+    padding: 32px;
+}
+
+.form-section {
+    background: #f9f9f9;
+    padding: 24px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+}
+
+.form-section h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #1a1a1a;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: all 0.2s ease;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group input.code-input {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+}
+
+.form-group small {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #666;
+}
+
+.success-section {
+    text-align: center;
+    background: #d4edda;
+}
+
+.success-checkmark {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 16px;
+    background: #28a745;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    animation: scaleIn 0.4s ease-in-out;
+}
+
+.error-section {
+    text-align: center;
+    background: #f8d7da;
+}
+
+.error-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 16px;
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    animation: scaleIn 0.4s ease-in-out;
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Buttons */
+.btn {
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-block;
+    margin-right: 12px;
+    margin-top: 12px;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: #667eea;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #5568d3;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.btn-secondary {
+    background: #e0e0e0;
+    color: #1a1a1a;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #d0d0d0;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 12px;
+    margin-top: 0;
+}
+
+/* Test Log */
+.test-log {
+    background: #1a1a1a;
+    color: #0f0;
+    padding: 24px;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    margin-bottom: 24px;
+}
+
+.test-log h3 {
+    margin: 0 0 12px 0;
+    color: #0f0;
+}
+
+.log-entries {
+    max-height: 300px;
+    overflow-y: auto;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 12px;
+    min-height: 100px;
+}
+
+.log-entry {
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.log-entry.info {
+    color: #0f0;
+}
+
+.log-entry.success {
+    color: #0f0;
+}
+
+.log-entry.error {
+    color: #f00;
+}
+
+.log-entry.warning {
+    color: #ff0;
+}
+
+.no-logs {
+    color: #666;
+    font-style: italic;
+    margin: 0;
+}
+
+/* Alternative Test */
+.alternative-test {
+    background: #e7f2ff;
+    padding: 24px;
+    border-radius: 8px;
+    border: 2px dashed #667eea;
+    margin-bottom: 24px;
+}
+
+.alternative-test h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.alternative-test p {
+    margin: 0 0 16px 0;
+    color: #666;
+}
+
+/* Test Instructions */
+.test-instructions {
+    background: #fff3cd;
+    padding: 24px;
+    border-radius: 8px;
+    border: 1px solid #ffc107;
+}
+
+.test-instructions h3 {
+    margin: 0 0 12px 0;
+    color: #856404;
+}
+
+.test-instructions ol {
+    margin: 0 0 12px 0;
+    padding-left: 20px;
+    color: #856404;
+}
+
+.test-instructions li {
+    margin-bottom: 8px;
+}
+
+.note {
+    margin: 12px 0 0 0;
+    padding: 12px;
+    background: white;
+    border-left: 4px solid #ffc107;
+    color: #856404;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .test-steps {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .step:not(:last-child)::after {
+        display: none;
+    }
+
+    .test-header {
+        padding: 24px 16px;
+    }
+
+    .test-form {
+        padding: 16px;
+    }
+
+    .form-section {
+        padding: 16px;
+    }
+
+    .btn {
+        display: block;
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 8px;
+    }
+}

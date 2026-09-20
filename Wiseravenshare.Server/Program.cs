@@ -16,7 +16,9 @@ using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Middleware;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
-using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
+using Wiseravenshare.Server.Services.FM;
+using Wiseravenshare.Server.Services.Personalization;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Globalization;
@@ -99,7 +101,11 @@ static string ResolvePrimaryConnectionString(IConfiguration configuration)
         return NormalizeConnectionString(databaseUrl);
     }
 
-    return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+    var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+        ?? configuration.GetConnectionString("DatabaseConnection")
+        ?? string.Empty;
+
+    return NormalizeConnectionString(defaultConnection);
 }
 
 static string ResolveExpectedDatabaseName(IConfiguration configuration)
@@ -593,9 +599,15 @@ CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
     CONSTRAINT uq_bucket_objects_bucket_key UNIQUE (bucket_name, object_key)
 );
 
-ALTER TABLE app_data.bucket_objects
-    ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
-    ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+DO $$
+BEGIN
+    IF pg_catalog.has_table_privilege(current_user, 'app_data.bucket_objects', 'update') THEN
+        ALTER TABLE app_data.bucket_objects
+            ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
+            ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_bucket_objects_owner_created
     ON app_data.bucket_objects (owner_user_id, created_at DESC);
@@ -725,7 +737,613 @@ CREATE TABLE IF NOT EXISTS app_data.file_transfers (
 CREATE INDEX IF NOT EXISTS idx_bridge_sessions_platform_user
     ON app_data.bridge_sessions (platform, external_user_id);
 CREATE INDEX IF NOT EXISTS idx_room_participants_room
-    ON app_data.room_participants (room_id, is_active);";
+    ON app_data.room_participants (room_id, is_active);
+
+CREATE TABLE IF NOT EXISTS app_data.""InstrumentConnections"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(120) NOT NULL,
+    ""DeviceName"" VARCHAR(255) NOT NULL,
+    ""Transport"" VARCHAR(40) NOT NULL DEFAULT 'wired',
+    ""HardwareAddress"" VARCHAR(120),
+    ""IsPaired"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsTrusted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LastSeenAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
+    ON app_data.""InstrumentConnections"" (""UserId"");
+CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
+    ON app_data.""InstrumentConnections"" (""UserId"", ""DeviceIdentifier"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureRigProfiles"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigName"" VARCHAR(150) NOT NULL DEFAULT 'WiseRaven Capture Rig',
+    ""AnalogInputChannels"" INTEGER NOT NULL DEFAULT 2,
+    ""HasAnalogPreamps"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasUsbCConnectivity"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasBluetoothPairing"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasMidiInOut"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasWifi6Streaming"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""EnableIpProtection"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Notes"" VARCHAR(1200) NULL,
+    ""LastConfiguredAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_capture_rig_profiles_user
+    ON app_data.""StudioCaptureRigProfiles"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureSourceCaptures"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigProfileId"" UUID NULL,
+    ""SourceType"" VARCHAR(30) NOT NULL DEFAULT 'analog',
+    ""SourceName"" VARCHAR(255) NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(255) NOT NULL,
+    ""FileName"" VARCHAR(255) NULL,
+    ""DurationSeconds"" NUMERIC NULL,
+    ""ChannelCount"" INTEGER NULL,
+    ""CapturedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""FingerprintHash"" VARCHAR(128) NOT NULL,
+    ""FingerprintedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_user_time
+    ON app_data.""StudioCaptureSourceCaptures"" (""UserId"", ""CapturedAtUtc"" DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_rig
+    ON app_data.""StudioCaptureSourceCaptures"" (""RigProfileId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""MediaType"" INTEGER NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""FileName"" VARCHAR(255) NOT NULL,
+    ""FilePath"" VARCHAR(2048) NOT NULL,
+    ""FileUrl"" VARCHAR(2048) NOT NULL,
+    ""MimeType"" VARCHAR(255) NOT NULL,
+    ""FileSize"" BIGINT NOT NULL DEFAULT 0,
+    ""Width"" INTEGER NULL,
+    ""Height"" INTEGER NULL,
+    ""Duration"" INTEGER NULL,
+    ""ThumbnailPath"" VARCHAR(2048) NULL,
+    ""ThumbnailUrl"" VARCHAR(2048) NULL,
+    ""PreviewPath"" VARCHAR(2048) NULL,
+    ""PreviewUrl"" VARCHAR(2048) NULL,
+    ""Metadata"" JSONB NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""Views"" INTEGER NOT NULL DEFAULT 0,
+    ""Downloads"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_items_user
+    ON app_data.""MediaItems"" (""UserId"");
+CREATE INDEX IF NOT EXISTS idx_media_items_type_status
+    ON app_data.""MediaItems"" (""MediaType"", ""Status"");
+CREATE INDEX IF NOT EXISTS idx_media_items_created
+    ON app_data.""MediaItems"" (""CreatedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(100) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""UsageCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_tags_name
+    ON app_data.""MediaTags"" (""Name"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItemTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""TagId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_item_tags_media_tag
+    ON app_data.""MediaItemTags"" (""MediaId"", ""TagId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaComments"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ParentCommentId"" UUID NULL,
+    ""Content"" VARCHAR(2000) NOT NULL,
+    ""LikesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RepliesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsSoftDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""TimestampSeconds"" INTEGER NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_comments_media
+    ON app_data.""MediaComments"" (""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_comments_user
+    ON app_data.""MediaComments"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylists"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""CoverImageUrl"" VARCHAR(2048) NULL,
+    ""ItemCount"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_playlists_user
+    ON app_data.""MediaPlaylists"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylistItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PlaylistId"" UUID NOT NULL,
+    ""MediaId"" UUID NOT NULL,
+    ""OrderIndex"" INTEGER NOT NULL DEFAULT 0,
+    ""AddedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_media
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_order
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""OrderIndex"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaViewHistories"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ViewedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PositionSeconds"" INTEGER NULL,
+    ""ViewDuration"" INTEGER NULL,
+    ""DeviceInfo"" VARCHAR(256) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_view_histories_media_user_time
+    ON app_data.""MediaViewHistories"" (""MediaId"", ""UserId"", ""ViewedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_likes_media_user
+    ON app_data.""MediaLikes"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_bookmarks_media_user
+    ON app_data.""MediaBookmarks"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'FM',
+    ""City"" VARCHAR(255) NULL,
+    ""Country"" VARCHAR(255) NULL,
+    ""State"" VARCHAR(50) NULL,
+    ""Latitude"" DOUBLE PRECISION NULL,
+    ""Longitude"" DOUBLE PRECISION NULL,
+    ""StreamUrl"" VARCHAR(500) NOT NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""Genre"" VARCHAR(50) NOT NULL DEFAULT 'General',
+    ""Language"" VARCHAR(100) NOT NULL DEFAULT 'English',
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsFeatured"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Bitrate"" INTEGER NOT NULL DEFAULT 128,
+    ""Codec"" VARCHAR(50) NULL,
+    ""CreatedBy"" UUID NULL,
+    ""IsVerified"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""VerifiedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequency_band
+    ON app_data.""FMStations"" (""Frequency"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequencykey_band
+    ON app_data.""FMStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_featured
+    ON app_data.""FMStations"" (""IsFeatured"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_listeners
+    ON app_data.""FMStations"" (""Listeners"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_likes_station_user
+    ON app_data.""FMStationLikes"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_bookmarks_station_user
+    ON app_data.""FMStationBookmarks"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationHistory"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ListenedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fm_station_history_user_time
+    ON app_data.""FMStationHistory"" (""UserId"", ""ListenedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMUserPreferences"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""FavoriteGenres"" TEXT[] NULL,
+    ""FavoriteLanguages"" TEXT[] NULL,
+    ""RecentStations"" JSONB NULL,
+    ""Volume"" INTEGER NOT NULL DEFAULT 80,
+    ""AutoPlay"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowLyrics"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowAlbumArt"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LowQualityMode"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_user_preferences_user
+    ON app_data.""FMUserPreferences"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""CreatorRadioStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""Genre"" VARCHAR(255) NULL,
+    ""SubGenre"" VARCHAR(255) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""StreamUrl"" VARCHAR(500) NULL,
+    ""StreamKey"" VARCHAR(500) NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""SocialLinks"" VARCHAR(500) NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""LastLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledEndAt"" TIMESTAMPTZ NULL,
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""TotalListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""PeakListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""FollowerCount"" INTEGER NOT NULL DEFAULT 0,
+    ""AllowChat"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowRequests"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowShoutouts"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""RequireApproval"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Schedule"" JSONB NULL,
+    ""Playlist"" JSONB NULL,
+    ""Settings"" JSONB NULL,
+    ""IsMonetized"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""SubscriptionPrice"" NUMERIC(18,2) NULL,
+    ""AllowDonations"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DonationLink"" TEXT NULL,
+    ""IsProprietaryFrequency"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""FrequencyLockedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_creator_radio_creator
+    ON app_data.""CreatorRadioStations"" (""CreatorId"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_frequencykey_band
+    ON app_data.""CreatorRadioStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_live_status
+    ON app_data.""CreatorRadioStations"" (""IsLive"", ""Status"", ""Visibility"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationSchedules"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""DayOfWeek"" INTEGER NOT NULL,
+    ""StartTime"" INTERVAL NOT NULL,
+    ""EndTime"" INTERVAL NOT NULL,
+    ""Timezone"" VARCHAR(64) NOT NULL DEFAULT 'UTC',
+    ""IsRecurring"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""SpecificDate"" TIMESTAMPTZ NULL,
+    ""HostName"" VARCHAR(255) NULL,
+    ""Genre"" VARCHAR(255) NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_schedule_station_day_start
+    ON app_data.""RadioStationSchedules"" (""StationId"", ""DayOfWeek"", ""StartTime"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationEpisodes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""ScheduleId"" UUID NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""AudioUrl"" VARCHAR(500) NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""BroadcastDate"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ListenCount"" INTEGER NOT NULL DEFAULT 0,
+    ""LikeCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CommentCount"" INTEGER NOT NULL DEFAULT 0,
+    ""ShareCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLiveRecording"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsPublished"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_episode_station_broadcast
+    ON app_data.""RadioStationEpisodes"" (""StationId"", ""BroadcastDate"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFollows"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""FollowedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsNotified"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_follows_station_user
+    ON app_data.""RadioStationFollows"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationListens"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""StartedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""EndedAt"" TIMESTAMPTZ NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""DeviceInfo"" VARCHAR(255) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_listens_station_started
+    ON app_data.""RadioStationListens"" (""StationId"", ""StartedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationRequests"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""SongTitle"" VARCHAR(255) NOT NULL,
+    ""ArtistName"" VARCHAR(255) NULL,
+    ""Message"" VARCHAR(500) NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PlayedAt"" TIMESTAMPTZ NULL,
+    ""PlayedBy"" UUID NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_requests_station_status_time
+    ON app_data.""RadioStationRequests"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationShoutouts"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Message"" VARCHAR(500) NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ReadAt"" TIMESTAMPTZ NULL,
+    ""AcknowledgedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_shoutouts_station_status_time
+    ON app_data.""RadioStationShoutouts"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFrequencyClaims"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""IsLocked"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LockedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_freq_claims_key_band
+    ON app_data.""RadioStationFrequencyClaims"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_station
+    ON app_data.""RadioStationFrequencyClaims"" (""StationId"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_creator
+    ON app_data.""RadioStationFrequencyClaims"" (""CreatorId"");";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task EnsureColumnPatchesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+-- Users table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Users""
+    ADD COLUMN IF NOT EXISTS ""PasswordResetToken"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL;
+
+-- Posts table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Posts""
+    ADD COLUMN IF NOT EXISTS ""IsTruthDispatch"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""IsSensitive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthDeclarationAccepted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthCorrection"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""TruthSources"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""Latitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""Longitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""LocationName"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""MediaMetadata"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""SharesCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""ViewsCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""IsPinned"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""QuoteOfId"" UUID NULL;
+
+-- WiseCoins table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""WiseCoins"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Balance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""StakedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalEarned"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalSpent"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- CoinTransactions table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""CoinTransactions"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""WiseCoinId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""TargetUserId"" UUID NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Amount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""NetAmount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Fee"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHoursValue"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHourRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Description"" TEXT NOT NULL DEFAULT '',
+    ""ReferenceId"" TEXT NULL,
+    ""ReferenceType"" TEXT NULL,
+    ""Metadata"" TEXT NULL,
+    ""Hash"" TEXT NULL,
+    ""PreviousHash"" TEXT NULL,
+    ""CompletedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- Content crawler catalog (personalization phase 3)
+CREATE TABLE IF NOT EXISTS app_data.content_crawler_catalog (
+    id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    content_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    country_code TEXT NULL,
+    score FLOAT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
@@ -779,12 +1397,103 @@ CREATE INDEX IF NOT EXISTS idx_zernio_account_mappings_profile_platform
     await connection.OpenAsync(cancellationToken);
     await using var command = new NpgsqlCommand(sql, connection);
     await command.ExecuteNonQueryAsync(cancellationToken);
+
+    // ── Personalization & Learning tables ─────────────────────────────────
+    const string personalizationSql = @"
+CREATE TABLE IF NOT EXISTS app_data.""UserPersonalizationProfiles"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""AgeRange"" VARCHAR(20) NULL, ""Gender"" VARCHAR(20) NULL,
+    ""Location"" VARCHAR(255) NULL, ""CountryCode"" VARCHAR(10) NULL,
+    ""RegionCode"" VARCHAR(20) NULL, ""Timezone"" VARCHAR(50) NULL,
+    ""Occupation"" VARCHAR(255) NULL, ""Languages"" TEXT NULL,
+    ""LifeStage"" INTEGER NOT NULL DEFAULT 0,
+    ""LifeInterests"" TEXT NULL, ""CurrentGoals"" TEXT NULL, ""LifeEvents"" TEXT NULL,
+    ""FavoriteGenres"" TEXT NULL, ""FavoriteTopics"" TEXT NULL,
+    ""FavoriteCreators"" TEXT NULL, ""PreferredContentTypes"" TEXT NULL,
+    ""ActiveHours"" TEXT NULL, ""ActiveDays"" TEXT NULL,
+    ""AverageSessionDurationSeconds"" INTEGER NOT NULL DEFAULT 0,
+    ""LastActiveAt"" TIMESTAMPTZ NULL,
+    ""EmbeddingVector"" TEXT NULL, ""BehavioralPatterns"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_persona_userid
+    ON app_data.""UserPersonalizationProfiles"" (""UserId"");
+CREATE TABLE IF NOT EXISTS app_data.""UserInteractionEvents"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL, ""Type"" INTEGER NOT NULL,
+    ""TargetType"" VARCHAR(64) NOT NULL, ""TargetId"" UUID NULL,
+    ""TargetTitle"" VARCHAR(500) NULL, ""TargetCategory"" VARCHAR(255) NULL,
+    ""TargetTags"" TEXT NULL, ""EngagementScore"" INTEGER NULL,
+    ""DurationSeconds"" INTEGER NULL, ""DeviceType"" VARCHAR(64) NULL,
+    ""CountryCode"" VARCHAR(10) NULL, ""RegionCode"" VARCHAR(20) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_interaction_userid_created
+    ON app_data.""UserInteractionEvents"" (""UserId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_interaction_country
+    ON app_data.""UserInteractionEvents"" (""CountryCode"", ""CreatedAt"" DESC);
+CREATE TABLE IF NOT EXISTS app_data.""PersonalizationTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL, ""Description"" VARCHAR(500) NULL,
+    ""Category"" INTEGER NOT NULL DEFAULT 0,
+    ""Weight"" INTEGER NOT NULL DEFAULT 1, ""UsageCount"" INTEGER NOT NULL DEFAULT 0,
+    ""Synonyms"" TEXT NULL, ""RelatedTags"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ptag_name
+    ON app_data.""PersonalizationTags"" (LOWER(""Name""));
+CREATE TABLE IF NOT EXISTS app_data.""PersonalizationTagMappings"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""TagId"" UUID NOT NULL, ""TargetType"" VARCHAR(64) NOT NULL, ""TargetId"" UUID NOT NULL,
+    ""Confidence"" INTEGER NOT NULL DEFAULT 100, ""IsAutoGenerated"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ptag_mapping_target
+    ON app_data.""PersonalizationTagMappings"" (""TargetType"", ""TargetId"");
+CREATE TABLE IF NOT EXISTS app_data.""RegionalTrendSnapshots"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""CountryCode"" VARCHAR(10) NOT NULL DEFAULT 'GLOBAL',
+    ""Category"" VARCHAR(20) NOT NULL DEFAULT 'General',
+    ""TopicsJson"" TEXT NOT NULL DEFAULT '[]',
+    ""SnapshotAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ExpiresAt""  TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '2 hours',
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_regional_trend_country_cat
+    ON app_data.""RegionalTrendSnapshots"" (""CountryCode"", ""Category"", ""ExpiresAt"" DESC);
+";
+    await using var pConn = new NpgsqlConnection(connectionString);
+    await pConn.OpenAsync(cancellationToken);
+    await using var pCmd = new NpgsqlCommand(personalizationSql, pConn);
+    await pCmd.ExecuteNonQueryAsync(cancellationToken);
 }
 
 // â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+var fallbackClientOrigins = new[]
+{
+    "https://wise-ravens.com",
+    "https://www.wise-ravens.com",
+    "https://wiseravenshare.com",
+    "https://www.wiseravenshare.com"
+};
+var allowedClientOrigins = configuredClientOrigins
+    .Concat(fallbackClientOrigins)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
 var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
@@ -819,7 +1528,13 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
     options.KnownProxies.Clear();
 });
 
-builder.Services.AddControllers();
+builder.Services.AddScoped<FeatureCompartmentLockFilter>();
+builder.Services.AddScoped<IFeatureCompartmentService, FeatureCompartmentService>();
+builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.AddService<FeatureCompartmentLockFilter>();
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
@@ -874,19 +1589,35 @@ builder.Services.AddOutputCache(options =>
 
 builder.Services.AddSignalR();
 // Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
-builder.Services.AddSingleton<IPlatformBridgeService, PlatformBridgeService>();
+builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
+{
     options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
-        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data")));
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data"));
+    // Suppress PendingModelChangesWarning so MigrateAsync() can run existing
+    // migrations even when the EF model has un-migrated additions.  Tables
+    // missing from the migration history are caught at runtime via the per-
+    // service EnsureTable helpers rather than crashing startup.
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+});
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 // Generic repository open registration (currency/badge subsystems resolve IRepository<TEntity>).
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.Infrastructure.Data.Repositories.Repository<>));
 builder.Services.AddScoped<IPostRepository, PostRepository>();
 builder.Services.AddScoped<ITruthRepository, TruthRepository>();
 builder.Services.AddScoped<IAgentRepository, AgentRepository>();
+builder.Services.AddScoped<IStudioCaptureRigProfileRepository, StudioCaptureRigProfileRepository>();
+builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureSourceCaptureRepository>();
+builder.Services.AddScoped<IMediaRepository, MediaRepository>();
+builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
+builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Interfaces.IAuthV2Service, AuthV2Service>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, Wiseravenshare.Server.Services.Media.MediaService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
 builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
@@ -900,13 +1631,23 @@ builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageSer
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddScoped<IFrequencyIntegrityService, FrequencyIntegrityService>();
+builder.Services.AddScoped<IFMStationService, FMStationService>();
+builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationService>();
+builder.Services.AddScoped<IIcecastStreamService, IcecastStreamService>();
+builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
+builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
+builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
+builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
+builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();
+builder.Services.AddContentTrendingBackgroundJob(enabled: true);
 builder.Services.AddHttpClient("SocialPublish");
 builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();
 // Cross-platform publishing: one publisher per platform + orchestrator + repository.
@@ -919,11 +1660,21 @@ builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
-// AI assistant (local llama.cpp llama-server, OpenAI-compatible API).
-// It stays inside the compose network; front-end UIs reach it only
-// through the api's endpoints. Set AiProvider=ollama to use the old client.
+// AI assistant — select provider via AiProvider config (gradient|deepseek|ollama|llamacpp).
+// Gradient: Uses DigitalOcean Gradient Agentic Cloud inference endpoint.
+// DeepSeek: Uses cloud API with advanced reasoning.
+// Ollama: Uses local OpenAI-compatible API (requires Ollama container).
+// LlamaCPP: Uses local llama-server (default, inside compose network).
 var aiProvider = (builder.Configuration["AiProvider"] ?? "llamacpp").Trim().ToLowerInvariant();
-if (aiProvider == "ollama")
+if (aiProvider == "gradient")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
+}
+else if (aiProvider == "deepseek")
+{
+    builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
+}
+else if (aiProvider == "ollama")
 {
     builder.Services.AddHttpClient<IOllamaChatService, OllamaChatService>();
 }
@@ -931,6 +1682,7 @@ else
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
+builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
 builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
 builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
@@ -946,16 +1698,24 @@ builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
+builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
+builder.Services.AddScoped<ITwilioService, TwilioService>();
+builder.Services.AddScoped<ICommunicationService, CommunicationService>();
+builder.Services.AddScoped<IEngagementNotificationService, EngagementNotificationService>();
+builder.Services.AddScoped<ICostTrackingService, CostTrackingService>();
 builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 builder.Services.AddScoped<IConsensusService, ConsensusService>();
 // Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IEngagementMultiplierService, Wiseravenshare.Server.Services.Currency.EngagementMultiplierService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
 // Daily ledger anchor + integrity check (hash chain tamper-evidence).
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LedgerAnchorBackgroundService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IBadgeService, Wiseravenshare.Server.Services.Currency.BadgeService>();
-builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService, Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>() as Wiseravenshare.Server.Services.Currency.CurrencyAgentService ?? throw new InvalidOperationException("CurrencyAgentService must be registered as the concrete hosted service"));
+// Register CurrencyAgentService as singleton for hosted service (requires scoped dependencies to be lazy-resolved)
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
 builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
@@ -969,10 +1729,10 @@ builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommunique
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
 builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
 
-var jwtKey = builder.Configuration["Authentication:Jwt:Key"];
+var jwtKey = ResolveJwtKey(builder.Configuration);
 if (string.IsNullOrWhiteSpace(jwtKey))
 {
-    throw new InvalidOperationException("Authentication:Jwt:Key is required.");
+    throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is required.");
 }
 
 if (jwtKey.Length < 32)
@@ -981,6 +1741,30 @@ if (jwtKey.Length < 32)
 }
 
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+
+static string ResolveJwtKey(IConfiguration configuration)
+{
+    var candidates = new[]
+    {
+        configuration["JWT_highentropykey"],
+        configuration["Authentication:Jwt:Key"],
+        configuration["Authentication__Jwt__Key"],
+        Environment.GetEnvironmentVariable("JWT_highentropykey"),
+        Environment.GetEnvironmentVariable("Authentication__Jwt__Key")
+    };
+
+    foreach (var candidate in candidates)
+    {
+        var value = (candidate ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+    }
+
+    return string.Empty;
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -1035,9 +1819,9 @@ builder.Services.AddCors(options =>
     {
         policy.AllowAnyHeader().AllowAnyMethod();
 
-        if (configuredClientOrigins.Length > 0)
+        if (allowedClientOrigins.Length > 0)
         {
-            policy.WithOrigins(configuredClientOrigins)
+            policy.WithOrigins(allowedClientOrigins)
                   .AllowCredentials();
         }
         else if (builder.Environment.IsDevelopment())
@@ -1075,6 +1859,91 @@ if (!string.IsNullOrWhiteSpace(activeDatabaseName)
 if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authentication:AllowSelfRegistration", false))
 {
     app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
+}
+
+string ResolveStripeConfig(string sectionKey, params string[] envKeys)
+{
+    var value = app.Configuration[sectionKey];
+    if (!string.IsNullOrWhiteSpace(value))
+    {
+        return value.Trim();
+    }
+
+    foreach (var envKey in envKeys)
+    {
+        value = app.Configuration[envKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+    }
+
+    return string.Empty;
+}
+
+bool IsStripePriceId(string? value) =>
+    !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+
+var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+
+if (string.IsNullOrWhiteSpace(stripePublishableKey))
+{
+    app.Logger.LogWarning("Stripe publishable key is missing. Set Stripe:PublishableKey or STRIPE_PUBLISHABLE_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeSecretKey))
+{
+    app.Logger.LogWarning("Stripe secret key is missing. Set Stripe:SecretKey or STRIPE_SECRET_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeWebhookSecret))
+{
+    app.Logger.LogWarning("Stripe webhook secret is missing. Set Stripe:WebhookSecret or STRIPE_WEBHOOK_SECRET.");
+}
+
+var stripePlanMappings = new[]
+{
+    new
+    {
+        Plan = "creator_pro",
+        Monthly = ResolveStripeConfig("Stripe:PriceCreatorProMonthlyId", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceCreatorProAnnualId", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "growth_suite",
+        Monthly = ResolveStripeConfig("Stripe:PriceGrowthSuiteMonthlyId", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceGrowthSuiteAnnualId", "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "studio_plus",
+        Monthly = ResolveStripeConfig("Stripe:PriceStudioPlusMonthlyId", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceStudioPlusAnnualId", "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    }
+};
+
+foreach (var mapping in stripePlanMappings)
+{
+    if (string.IsNullOrWhiteSpace(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} monthly.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} monthly must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Monthly[..Math.Min(mapping.Monthly.Length, 5)]);
+    }
+
+    if (string.IsNullOrWhiteSpace(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} annual.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} annual must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Annual[..Math.Min(mapping.Annual.Length, 5)]);
+    }
 }
 
 using (var scope = app.Services.CreateScope())
@@ -1116,6 +1985,15 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "Zernio webhook tables bootstrap failed during startup.");
     }
 
+    try
+    {
+        await EnsureColumnPatchesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Column/table patch bootstrap failed during startup.");
+    }
+
     // Seed default badge catalog (badge-first currency system)
     try
     {
@@ -1129,7 +2007,12 @@ using (var scope = app.Services.CreateScope())
 
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
+    var mediaCatalogStore = scope.ServiceProvider.GetRequiredService<RavensightMediaCatalogStore>();
     var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
+
+    // Bootstrap media catalog schema (photos, music, videos unified table).
+    try { await mediaCatalogStore.EnsureSchemaAsync(); }
+    catch (Exception ex) { app.Logger.LogWarning(ex, "Media catalog schema bootstrap failed at startup; will retry on first use."); }
 
     var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
     var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();

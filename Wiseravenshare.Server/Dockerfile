@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build the Frontend (React + Vite)
 # ==========================================
-FROM node:20-alpine AS client-build
+FROM node:22-alpine AS client-build
 WORKDIR /build/client
 
 # Copy package.json and lock file first to leverage Docker cache

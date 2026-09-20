@@ -20,7 +20,7 @@ const makeStorage = () => {
   };
 };
 
-test('falls back to a cookie-backed auth token when localStorage is empty', () => {
+test('persists the canonical token to both storage layers and keeps legacy keys in sync', () => {
   global.localStorage = makeStorage();
   global.sessionStorage = makeStorage();
   global.document = {
@@ -28,7 +28,28 @@ test('falls back to a cookie-backed auth token when localStorage is empty', () =
   };
 
   clearAuthToken();
-  setAuthToken('cookie-token');
+  setAuthToken('persisted-token');
 
-  assert.equal(getAuthToken(), 'cookie-token');
+  assert.equal(getAuthToken(), 'persisted-token');
+  assert.equal(global.localStorage.getItem('wr_auth_token'), 'persisted-token');
+  assert.equal(global.sessionStorage.getItem('wr_auth_token'), 'persisted-token');
+  assert.equal(global.localStorage.getItem('auth_token'), 'persisted-token');
+  assert.equal(global.sessionStorage.getItem('auth_token'), 'persisted-token');
+});
+
+test('drops the auth token cleanly from every persisted location', () => {
+  global.localStorage = makeStorage();
+  global.sessionStorage = makeStorage();
+  global.document = {
+    cookie: 'wr_auth_token=stale-token; Path=/'
+  };
+
+  setAuthToken('keep-me');
+  clearAuthToken();
+
+  assert.equal(getAuthToken(), '');
+  assert.equal(global.localStorage.getItem('wr_auth_token'), null);
+  assert.equal(global.sessionStorage.getItem('wr_auth_token'), null);
+  assert.equal(global.localStorage.getItem('auth_token'), null);
+  assert.equal(global.sessionStorage.getItem('auth_token'), null);
 });

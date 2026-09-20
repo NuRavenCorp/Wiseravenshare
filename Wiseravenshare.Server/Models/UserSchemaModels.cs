@@ -14,6 +14,40 @@ public sealed class UserRecord
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     public SocialFeedSettings SocialFeeds { get; set; } = new();
+    public UserAiConnectorSettings AiConnector { get; set; } = new();
+}
+
+public sealed class UserAiConnectorSettings
+{
+    public bool Enabled { get; set; }
+    public string Provider { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public string DefaultModel { get; set; } = "";
+    public string ApiKey { get; set; } = "";
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public string ApiKeyMasked
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ApiKey)) return string.Empty;
+            var trimmed = ApiKey.Trim();
+            if (trimmed.Length <= 8) return "********";
+            return $"{trimmed[..4]}...{trimmed[^4..]}";
+        }
+    }
+
+    public bool HasApiKey => !string.IsNullOrWhiteSpace(ApiKey);
+}
+
+public sealed class UpdateUserAiConnectorRequest
+{
+    public bool Enabled { get; set; }
+    public string Provider { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public string DefaultModel { get; set; } = "";
+    public string? ApiKey { get; set; }
+    public bool ClearApiKey { get; set; }
 }
 
 public sealed class SocialFeedSettings

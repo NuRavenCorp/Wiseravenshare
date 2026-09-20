@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { FiGlobe, FiVideo, FiExternalLink } from 'react-icons/fi';
-import { FaTiktok, FaFacebook, FaInstagram, FaTwitter } from 'react-icons/fa';
+import { FaTiktok, FaFacebook, FaInstagram, FaTwitter, FaLinkedin } from 'react-icons/fa';
 import { getPlatformSpecificUrl } from '../../utils/platformDetector.js';
 
 const PLATFORM_CONFIGS = {
@@ -13,6 +13,8 @@ const PLATFORM_CONFIGS = {
     instagram: { Icon: FaInstagram, color: 'linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)', label: 'Instagram' },
     twitter: { Icon: FaTwitter, color: '#1da1f2', label: 'Twitter' },
     youtube: { Icon: FiVideo, color: '#ff0000', label: 'YouTube' },
+    linkedin: { Icon: FaLinkedin, color: '#0a66c2', label: 'LinkedIn' },
+    snapchat: { Icon: FiGlobe, color: '#facc15', label: 'Snapchat' },
     capacitor: { Icon: FiGlobe, color: '#4f8cff', label: 'Mobile App' },
     web: { Icon: FiGlobe, color: 'var(--highlight-color)', label: 'Web' }
 };

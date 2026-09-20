@@ -30,7 +30,7 @@ public class BadgeService : IBadgeService
     private readonly IRepository<Badge> _badgeRepository;
     private readonly IRepository<UserBadge> _userBadgeRepository;
     private readonly IRepository<BadgeEvolution> _evolutionRepository;
-    private readonly IWiseCoinService _wiseCoinService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IMemoryCache _cache;
     private readonly ILogger<BadgeService> _logger;
 
@@ -38,14 +38,14 @@ public class BadgeService : IBadgeService
         IRepository<Badge> badgeRepository,
         IRepository<UserBadge> userBadgeRepository,
         IRepository<BadgeEvolution> evolutionRepository,
-        IWiseCoinService wiseCoinService,
+        IServiceProvider serviceProvider,
         IMemoryCache cache,
         ILogger<BadgeService> logger)
     {
         _badgeRepository = badgeRepository;
         _userBadgeRepository = userBadgeRepository;
         _evolutionRepository = evolutionRepository;
-        _wiseCoinService = wiseCoinService;
+        _serviceProvider = serviceProvider;
         _cache = cache;
         _logger = logger;
     }
@@ -76,7 +76,8 @@ public class BadgeService : IBadgeService
 
         if (badge.MintingCost > 0)
         {
-            var result = await _wiseCoinService.SpendWSCAsync(userId, badge.MintingCost,
+            var coinServiceForMint = _serviceProvider.GetRequiredService<IWiseCoinService>();
+            var result = await coinServiceForMint.SpendWSCAsync(userId, badge.MintingCost,
                 TransactionType.BadgeUpgrade, $"Minting badge: {badge.Name}");
             if (!result.Success)
                 throw new InvalidOperationException("Insufficient WSC to mint badge");
@@ -96,7 +97,8 @@ public class BadgeService : IBadgeService
         await _badgeRepository.UpdateAsync(badge);
 
         // Badges first, currency second: refresh multipliers on the wallet
-        await _wiseCoinService.UpdateBadgeMultipliersAsync(userId);
+        var coinServiceForMultiplier = _serviceProvider.GetRequiredService<IWiseCoinService>();
+        await coinServiceForMultiplier.UpdateBadgeMultipliersAsync(userId);
 
         _cache.Remove($"user_badges_{userId}");
         _logger.LogInformation("Awarded badge {Badge} to user {User}", badge.Name, userId);
@@ -120,7 +122,8 @@ public class BadgeService : IBadgeService
 
         if (evolution.WSCRequired > 0)
         {
-            var result = await _wiseCoinService.SpendWSCAsync(userId, evolution.WSCRequired,
+            var coinServiceForEvolution = _serviceProvider.GetRequiredService<IWiseCoinService>();
+            var result = await coinServiceForEvolution.SpendWSCAsync(userId, evolution.WSCRequired,
                 TransactionType.BadgeUpgrade, $"Badge evolution: {sourceBadge.Name} -> {targetBadge.Name}");
             if (!result.Success)
                 throw new InvalidOperationException("Insufficient WSC for badge evolution");
@@ -130,7 +133,8 @@ public class BadgeService : IBadgeService
         userBadge.MultiplierBonus = targetBadge.ValueMultiplier;
         await _userBadgeRepository.UpdateAsync(userBadge);
 
-        await _wiseCoinService.UpdateBadgeMultipliersAsync(userId);
+        var coinServiceForEvolveMultiplier = _serviceProvider.GetRequiredService<IWiseCoinService>();
+        await coinServiceForEvolveMultiplier.UpdateBadgeMultipliersAsync(userId);
         _cache.Remove($"user_badges_{userId}");
 
         _logger.LogInformation("Evolved badge {Src} to {Tgt} for user {User}", sourceBadge.Name, targetBadge.Name, userId);
@@ -162,7 +166,8 @@ public class BadgeService : IBadgeService
 
         if (badge.MinimumWorkHours > 0)
         {
-            var wallet = await _wiseCoinService.GetOrCreateWalletAsync(userId);
+            var coinServiceForCheck = _serviceProvider.GetRequiredService<IWiseCoinService>();
+            var wallet = await coinServiceForCheck.GetOrCreateWalletAsync(userId);
             if (wallet.WorkHoursContributed < badge.MinimumWorkHours)
                 return false;
         }
@@ -259,7 +264,8 @@ public class BadgeService : IBadgeService
             badge.CurrentSupply++;
             await _badgeRepository.UpdateAsync(badge);
         }
-        await _wiseCoinService.UpdateBadgeMultipliersAsync(userId);
+        var coinServiceForWelcome = _serviceProvider.GetRequiredService<IWiseCoinService>();
+        await coinServiceForWelcome.UpdateBadgeMultipliersAsync(userId);
         _cache.Remove($"user_badges_{userId}");
     }
 

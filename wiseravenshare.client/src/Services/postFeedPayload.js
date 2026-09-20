@@ -52,11 +52,74 @@ const sanitizeMediaUrl = (value) => {
         return null;
     }
 
-    if (text.startsWith('data:video/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
+    if (text.startsWith('data:video/') || text.startsWith('data:audio/') || text.startsWith('data:image/') || /^https?:\/\//i.test(text) || /^blob:/i.test(text) || text.startsWith('/')) {
         return text;
     }
 
     return null;
+};
+
+const resolvePrimaryMediaUrl = (post) => {
+    const directCandidate = sanitizeMediaUrl(
+        post?.mediaUrl
+        || post?.url
+        || post?.imageUrl
+        || post?.photoUrl
+        || post?.thumbnailUrl
+    );
+    if (directCandidate) {
+        return directCandidate;
+    }
+
+    const mediaUrls = post?.mediaUrls;
+    if (Array.isArray(mediaUrls)) {
+        for (const candidate of mediaUrls) {
+            const resolved = sanitizeMediaUrl(candidate);
+            if (resolved) return resolved;
+        }
+    } else if (typeof mediaUrls === 'string') {
+        const trimmed = mediaUrls.trim();
+        if (trimmed) {
+            const parsedAsDirect = sanitizeMediaUrl(trimmed);
+            if (parsedAsDirect) {
+                return parsedAsDirect;
+            }
+
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                    for (const candidate of parsed) {
+                        const resolved = sanitizeMediaUrl(candidate);
+                        if (resolved) return resolved;
+                    }
+                }
+            } catch {
+                // Ignore invalid JSON mediaUrls payloads.
+            }
+        }
+    }
+
+    return null;
+};
+
+const resolveMediaFileNameFromUrl = (value) => {
+    const source = cleanWhitespaceText(value);
+    if (!source) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(source, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+        const fromQuery = String(parsed.searchParams.get('fileName') || '').trim();
+        if (fromQuery) {
+            return fromQuery.toLowerCase();
+        }
+
+        const pathName = String(parsed.pathname || '').trim();
+        return pathName ? pathName.toLowerCase() : '';
+    } catch {
+        return source.toLowerCase();
+    }
 };
 
 const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) => {
@@ -127,13 +190,25 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
     const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
+    const resolvedMediaUrl = resolvePrimaryMediaUrl(post);
+    const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
+    const mediaFileHint = resolveMediaFileNameFromUrl(resolvedMediaUrl);
+    const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
+        ? rawType
+        : mediaFileHint && /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(mediaFileHint)
+            ? 'audio'
+            : mediaFileHint && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(mediaFileHint)
+                ? 'photo'
+                : mediaFileHint && /\.(mp4|webm|mov|avi|mkv)$/i.test(mediaFileHint)
+                    ? 'video'
+                    : null;
 
     return {
         ...post,
         id: post?.id || `local-post-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         userId: resolvedUserId,
-        mediaType: post?.mediaType || (String(post?.type || '').toLowerCase() === 'video' ? 'video' : null),
-        mediaUrl: sanitizeMediaUrl(post?.mediaUrl || (Array.isArray(post?.mediaUrls) ? post.mediaUrls[0] : null)),
+        mediaType: inferredMediaType,
+        mediaUrl: resolvedMediaUrl,
         likes: Number(post?.likes ?? post?.likesCount ?? 0),
         reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
         comments: Array.isArray(post?.comments) ? post.comments : [],

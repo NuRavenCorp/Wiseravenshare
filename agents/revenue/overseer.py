@@ -15,6 +15,7 @@ from typing import Any
 
 from .agents import ContentSEOAgent, MarketIntelligenceAgent, OutreachAgent
 from .core import BaseAgent, GemmaClient, StateStore, Task, utcnow
+from .services_agent import PaymentServicesAgent
 
 
 class OverseerAgent(BaseAgent):
@@ -26,6 +27,7 @@ class OverseerAgent(BaseAgent):
         self.intel = MarketIntelligenceAgent(gemma, store)
         self.content = ContentSEOAgent(gemma, store)
         self.outreach = OutreachAgent(gemma, store)
+        self.services = PaymentServicesAgent(gemma, store)
 
     # The overseer itself does not take specialist tasks.
     def run(self, task: Task) -> dict[str, Any]:

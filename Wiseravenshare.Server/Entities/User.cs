@@ -15,6 +15,7 @@ namespace Wiseravenshare.Server.Entities
         public string? CoverPhotoUrl { get; set; }
         public string? Location { get; set; }
         public string? Website { get; set; }
+        public string? PhoneNumber { get; set; }
         public bool IsVerified { get; set; }
         public bool IsActive { get; set; } = true;
         public bool IsPrivate { get; set; }

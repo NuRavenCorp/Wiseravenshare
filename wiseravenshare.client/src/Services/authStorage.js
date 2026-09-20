@@ -1,17 +1,21 @@
-const AUTH_TOKEN_KEY = 'auth_token';
+const AUTH_TOKEN_KEY = 'wr_auth_token';
 const ADMIN_PASS_TOKEN_KEY = 'admin_pass_token';
-const LEGACY_TOKEN_KEYS = ['ws.accessToken', 'wise-raven-token'];
+const LEGACY_TOKEN_KEYS = ['auth_token', 'ws.accessToken', 'wise-raven-token', 'token'];
 const AUTH_COOKIE_NAME = 'wr_auth_token';
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 const resolveCookieDomainFlag = (host) => {
     const value = String(host || '').toLowerCase();
-    if (value === 'wise-ravens.com' || value === 'www.wise-ravens.com' || value.endsWith('.wise-ravens.com')) {
-        return '; Domain=.wise-ravens.com';
-    }
+    const hostCandidates = [value, value.replace(/^www\./, ''), value.replace(/^app\./, ''), value.replace(/^ravensight\./, ''), value.replace(/^communique\./, '')];
 
-    if (value === 'wiseravenshare.com' || value === 'www.wiseravenshare.com' || value.endsWith('.wiseravenshare.com')) {
-        return '; Domain=.wiseravenshare.com';
+    for (const candidate of hostCandidates) {
+        if (candidate === 'wise-ravens.com' || candidate.endsWith('.wise-ravens.com')) {
+            return '; Domain=.wise-ravens.com';
+        }
+
+        if (candidate === 'wiseravenshare.com' || candidate.endsWith('.wiseravenshare.com')) {
+            return '; Domain=.wiseravenshare.com';
+        }
     }
 
     return '';
@@ -21,7 +25,50 @@ const getWindow = () => (typeof window !== 'undefined' ? window : globalThis);
 
 const getStorage = () => {
     const win = getWindow();
-    return win?.localStorage || null;
+    try {
+        return win?.localStorage || null;
+    } catch {
+        return null;
+    }
+};
+
+const getSessionStorage = () => {
+    const win = getWindow();
+    try {
+        return win?.sessionStorage || null;
+    } catch {
+        return null;
+    }
+};
+
+const getPersistedTokenKeys = () => [AUTH_TOKEN_KEY, ...LEGACY_TOKEN_KEYS];
+
+const readStorageValue = (storage, key) => {
+    if (!storage) {
+        return '';
+    }
+
+    try {
+        return String(storage.getItem(key) || '');
+    } catch {
+        return '';
+    }
+};
+
+const writeStorageValue = (storage, key, value) => {
+    if (!storage) {
+        return;
+    }
+
+    try {
+        if (value) {
+            storage.setItem(key, value);
+        } else {
+            storage.removeItem(key);
+        }
+    } catch {
+        // Ignore storage failures. The cookie remains the durable fallback.
+    }
 };
 
 const readCookie = () => {
@@ -68,17 +115,31 @@ const clearCookie = () => {
     win.document.cookie = `${AUTH_COOKIE_NAME}=; Path=/; Max-Age=0${secureFlag}${domainFlag}`;
 };
 
-export const getAuthToken = () => {
+const syncTokenAcrossStorage = (token) => {
     const storage = getStorage();
-    const storageToken = storage?.getItem(AUTH_TOKEN_KEY);
-    if (storageToken) {
-        return storageToken;
+    const sessionStorage = getSessionStorage();
+    const tokenValue = typeof token === 'string' ? token : token ? String(token) : '';
+
+    for (const key of getPersistedTokenKeys()) {
+        writeStorageValue(storage, key, tokenValue);
+        writeStorageValue(sessionStorage, key, tokenValue);
     }
 
-    for (const key of LEGACY_TOKEN_KEYS) {
-        const legacyToken = storage?.getItem(key);
-        if (legacyToken) {
-            return legacyToken;
+    if (tokenValue) {
+        writeCookie(tokenValue);
+    } else {
+        clearCookie();
+    }
+};
+
+export const getAuthToken = () => {
+    const storage = getStorage();
+    const sessionStorage = getSessionStorage();
+
+    for (const key of getPersistedTokenKeys()) {
+        const value = readStorageValue(storage, key) || readStorageValue(sessionStorage, key);
+        if (value) {
+            return value;
         }
     }
 
@@ -86,31 +147,11 @@ export const getAuthToken = () => {
 };
 
 export const setAuthToken = (token) => {
-    const storage = getStorage();
-    if (storage) {
-        storage.setItem(AUTH_TOKEN_KEY, token);
-        for (const key of LEGACY_TOKEN_KEYS) {
-            storage.setItem(key, token);
-        }
-    }
-
-    if (token) {
-        writeCookie(token);
-    } else {
-        clearCookie();
-    }
+    syncTokenAcrossStorage(token || '');
 };
 
 export const clearAuthToken = () => {
-    const storage = getStorage();
-    if (storage) {
-        storage.removeItem(AUTH_TOKEN_KEY);
-        for (const key of LEGACY_TOKEN_KEYS) {
-            storage.removeItem(key);
-        }
-    }
-
-    clearCookie();
+    syncTokenAcrossStorage('');
 };
 
 export const getAdminPassToken = () => {

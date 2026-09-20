@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="nuravencorpllm.client/nuravencorpllm.client.esproj">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="NuRavenCorpLLM.Server/NuRavenCorpLLM.Server.csproj" />
+</Solution>

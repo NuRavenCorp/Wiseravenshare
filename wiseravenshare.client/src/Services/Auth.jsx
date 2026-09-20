@@ -3,6 +3,7 @@ import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clear
 
 const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 30000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
+const AUTH_V2_PREFIX = '/auth-v2';
 
 class AuthService {
     constructor() {
@@ -72,9 +73,24 @@ class AuthService {
         return response?.data ?? {};
     }
 
+    async postAuthV2(path, payload = {}, options = {}) {
+        const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_AUTH_REQUEST_TIMEOUT_MS;
+        const token = this.getToken();
+        const headers = {
+            ...(options.withAuth && token ? { Authorization: `Bearer ${token}` } : {})
+        };
+
+        const response = await api.post(`${AUTH_V2_PREFIX}${path}`, payload, {
+            timeout: timeoutMs,
+            headers
+        });
+
+        return response?.data ?? {};
+    }
+
     async getStatus() {
         try {
-            const response = await api.get('/auth/status', {
+            const response = await api.get(`${AUTH_V2_PREFIX}/status`, {
                 timeout: DEFAULT_AUTH_REQUEST_TIMEOUT_MS
             });
 
@@ -289,7 +305,7 @@ class AuthService {
 
     async logout() {
         try {
-            await this.postAuth('/logout', {}, { withAuth: true });
+            await this.postAuthV2('/logout', {}, { withAuth: true });
         } finally {
             this.clearToken();
             this.clearRefreshToken();
@@ -299,7 +315,7 @@ class AuthService {
 
     async verifyToken(token) {
         try {
-            const response = this.normalizeAuthResponse(await this.postAuth('/verify', { token }, { withAuth: true }));
+            const response = this.normalizeAuthResponse(await this.postAuthV2('/verify', { token }, { withAuth: true }));
             if (response.valid && response.user) {
                 this.setUser(response.user);
                 return response.user;
@@ -355,7 +371,7 @@ class AuthService {
 
     async legacyLogin(email, password) {
         const normalizedLogin = String(email || '').trim();
-        const response = this.normalizeAuthResponse(await this.postAuth('/login', {
+        const response = this.normalizeAuthResponse(await this.postAuthV2('/login', {
             email: normalizedLogin,
             usernameOrEmail: normalizedLogin,
             password
@@ -374,7 +390,7 @@ class AuthService {
     }
 
     async legacyRegister(userData) {
-        const response = this.normalizeAuthResponse(await this.postAuth('/register', userData));
+        const response = this.normalizeAuthResponse(await this.postAuthV2('/register', userData));
         if (response.token) {
             this.setToken(response.token);
             this.setRefreshToken(response.refreshToken);
