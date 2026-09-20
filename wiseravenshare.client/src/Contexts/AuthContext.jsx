@@ -28,7 +28,11 @@ const normalizeSocialFeeds = (socialFeeds) => {
         tikTok: mapConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: mapConnection(getConnection(feeds, 'facebook', 'Facebook')),
         instagram: mapConnection(getConnection(feeds, 'instagram', 'Instagram')),
-        youtube: mapConnection(getConnection(feeds, 'youtube', 'YouTube'))
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: mapConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: mapConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: mapConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: mapConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
 };
 

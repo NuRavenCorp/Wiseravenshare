@@ -341,20 +341,18 @@ export const writeStoredFeedPosts = (posts) => {
 };
 
 export const mergeFeedPosts = (...collections) => {
-    const seen = new Set();
-    const merged = [];
+    const mergedById = new Map();
 
     collections.flat().forEach((post) => {
         const normalized = normalizeFeedPost(post, null);
-        if (!normalized || !normalized.id || seen.has(normalized.id)) {
+        if (!normalized || !normalized.id) {
             return;
         }
 
-        seen.add(normalized.id);
-        merged.push(normalized);
+        mergedById.set(normalized.id, normalized);
     });
 
-    return merged.sort((left, right) => {
+    return Array.from(mergedById.values()).sort((left, right) => {
         const leftTime = new Date(left.createdAt || 0).getTime();
         const rightTime = new Date(right.createdAt || 0).getTime();
         return rightTime - leftTime;

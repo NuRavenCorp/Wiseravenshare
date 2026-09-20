@@ -752,7 +752,7 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'fm-tuner', label: '📻 FM Radio' },
-        { id: 'music-player', label: '📼 Cassette Music' },
+        { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }

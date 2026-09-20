@@ -135,7 +135,11 @@ const normalizeFeeds = (feeds) => {
         tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         facebook: getConnection(source, 'facebook', 'Facebook'),
         instagram: getConnection(source, 'instagram', 'Instagram'),
-        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube')
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: getConnection(source, 'youtube', 'youTube', 'YouTube', 'Youtube'),
+        twitter: getConnection(source, 'twitter', 'Twitter'),
+        linkedIn: getConnection(source, 'linkedIn', 'linkedin', 'LinkedIn'),
+        bluesky: getConnection(source, 'bluesky', 'Bluesky')
     };
 };
 
@@ -269,7 +273,10 @@ const normalizeFeedConnections = (feeds = {}) => {
         facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
         tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
         instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube'))
+        youtube: normalizeConn(getFeed(feeds, 'youtube', 'youTube', 'YouTube', 'Youtube')),
+        twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConn(getFeed(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky'))
     };
 };
 
@@ -314,7 +321,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         facebook: snapshot.facebook.username || '',
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
-        youtube: snapshot.youtube.username || ''
+        youtube: snapshot.youtube.username || '',
+        twitter: snapshot.twitter?.username || '',
+        linkedIn: snapshot.linkedIn?.username || '',
+        bluesky: snapshot.bluesky?.username || ''
     });
 
     // Demo Guide Expansion
@@ -510,7 +520,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: loadedFeeds.facebook.username,
                     tiktok: loadedFeeds.tikTok.username,
                     instagram: loadedFeeds.instagram.username,
-                    youtube: loadedFeeds.youtube.username
+                    youtube: loadedFeeds.youtube.username,
+                    twitter: loadedFeeds.twitter?.username || '',
+                    linkedIn: loadedFeeds.linkedIn?.username || '',
+                    bluesky: loadedFeeds.bluesky?.username || ''
                 });
             } catch {
                 if (cancelled) return;
@@ -518,7 +531,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: snapshot.facebook.username || '',
                     tiktok: snapshot.tikTok.username || '',
                     instagram: snapshot.instagram.username || '',
-                    youtube: snapshot.youtube.username || ''
+                    youtube: snapshot.youtube.username || '',
+                    twitter: snapshot.twitter?.username || '',
+                    linkedIn: snapshot.linkedIn?.username || '',
+                    bluesky: snapshot.bluesky?.username || ''
                 });
             }
         };
@@ -621,7 +637,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
             tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
             instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
-            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube)
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
+            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter || ''),
+            linkedIn: keepConnectionMetadata(snapshot.linkedIn, handles.linkedIn || ''),
+            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '')
         };
 
         try {

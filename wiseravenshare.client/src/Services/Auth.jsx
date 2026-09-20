@@ -5,6 +5,57 @@ const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 30000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 const AUTH_V2_PREFIX = '/auth-v2';
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
+const normalizeConnection = (connection) => ({
+    enabled: Boolean(connection?.enabled),
+    username: String(connection?.username || '').trim(),
+    profileUrl: String(connection?.profileUrl || '').trim(),
+    feedUrl: String(connection?.feedUrl || '').trim(),
+    designation: String(connection?.designation || '').trim()
+});
+
+const hasMeaningfulFeeds = (socialFeeds) => {
+    if (!socialFeeds || typeof socialFeeds !== 'object') return false;
+    return Object.values(socialFeeds).some(conn =>
+        conn && typeof conn === 'object' &&
+        (Boolean(conn.username) || Boolean(conn.enabled) || Boolean(conn.profileUrl) || Boolean(conn.feedUrl))
+    );
+};
+
+const normalizeSocialFeeds = (socialFeeds) => {
+    const feeds = socialFeeds || {};
+    return {
+        tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
+        facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
+        instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
+    };
+};
+
+const normalizeUser = (user) => {
+    if (!user || typeof user !== 'object') {
+        return user;
+    }
+
+    return {
+        ...user,
+        socialFeeds: normalizeSocialFeeds(user.socialFeeds)
+    };
+};
+
 class AuthService {
     constructor() {
         const token = this.getToken();
@@ -47,7 +98,7 @@ class AuthService {
         const token = source.token || source.accessToken || source.AccessToken || source.jwt || '';
         const refreshToken = source.refreshToken || source.RefreshToken || '';
         const adminPassToken = source.adminPassToken || source.AdminPassToken || '';
-        const user = source.user || source.User || null;
+        const user = normalizeUser(source.user || source.User || null);
 
         return {
             ...source,
@@ -467,8 +518,9 @@ class AuthService {
     async updateProfile(userId, updates) {
         try {
             const response = await api.put(`/users/${userId}`, updates);
-            this.setUser(response.data);
-            return response.data;
+            const normalized = normalizeUser(response.data);
+            this.setUser(normalized);
+            return normalized;
         } catch (error) {
             throw this.handleError(error);
         }
@@ -623,7 +675,14 @@ class AuthService {
             return;
         }
 
-        localStorage.setItem('user_data', JSON.stringify(user));
+        // When the server omits socialFeeds (e.g. verify/refresh endpoints), preserve
+        // whatever was previously cached so we don't wipe saved connections on reload.
+        const existing = this.getUser();
+        const userToStore = (!hasMeaningfulFeeds(user.socialFeeds) && hasMeaningfulFeeds(existing?.socialFeeds))
+            ? { ...user, socialFeeds: existing.socialFeeds }
+            : user;
+
+        localStorage.setItem('user_data', JSON.stringify(normalizeUser(userToStore)));
     }
 
     getUser() {
