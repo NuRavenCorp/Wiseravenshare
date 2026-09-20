@@ -7,13 +7,19 @@ using Microsoft.Extensions.Logging;
 namespace Wiseravenshare.Server.Services;
 
 /// <summary>
-/// Provides information about U.S. Copyright Office music registration forms and pass-through pricing.
+/// Provides information about U.S. Copyright Office music registration forms with 50% markup.
 /// Supports sound recordings, musical compositions, and lyrics registration.
-/// Zero markup: prices pass directly to users as Copyright Office fees with no Wiseravenshare surcharge.
+/// Markup: 50% surcharge applied to Copyright Office fees (e.g., $65 CO form = $97.50 user price).
 /// </summary>
 public class CopyrightRegistrationService
 {
     private readonly ILogger<CopyrightRegistrationService> _logger;
+    
+    /// <summary>
+    /// Markup percentage applied to Copyright Office base fees.
+    /// 0.50 = 50% markup (e.g., $65 Copyright Office fee becomes $97.50 to user)
+    /// </summary>
+    public const decimal MarkupPercentage = 0.50m;
 
     public CopyrightRegistrationService(ILogger<CopyrightRegistrationService> logger)
     {
@@ -28,7 +34,14 @@ public class CopyrightRegistrationService
         public string FormCode { get; set; }
         public string FormName { get; set; }
         public string WorkType { get; set; }
+        /// <summary>
+        /// U.S. Copyright Office base filing fee (no markup)
+        /// </summary>
         public decimal PriceUsd { get; set; }
+        /// <summary>
+        /// Wiseravenshare's user-facing price after 50% markup
+        /// </summary>
+        public decimal PriceWithMarkupUsd { get; set; }
         public string Description { get; set; }
         public string FormUrl { get; set; }
         public string InstructionsUrl { get; set; }
@@ -37,7 +50,7 @@ public class CopyrightRegistrationService
 
     /// <summary>
     /// Returns all applicable Copyright Office forms for music, including descriptions and direct links.
-    /// Prices are pass-through (0% markup) — user pays exact Copyright Office filing fee.
+    /// Prices include 50% Wiseravenshare markup (e.g., $65 Copyright Office fee = $97.50 user price).
     /// </summary>
     public List<CopyrightFormInfo> GetMusicRegistrationForms()
     {
@@ -49,6 +62,7 @@ public class CopyrightRegistrationService
                 FormName = "Form SR: Sound Recording",
                 WorkType = "Sound Recording",
                 PriceUsd = 65m,
+                PriceWithMarkupUsd = 65m * (1 + MarkupPercentage),
                 Description = "Register a sound recording (the fixed audio of your music recording). Covers your specific recording and the performer's rights.",
                 FormUrl = "https://www.copyright.gov/forms/",
                 InstructionsUrl = "https://www.copyright.gov/circs/circ56.pdf",
@@ -67,6 +81,7 @@ public class CopyrightRegistrationService
                 FormName = "Form PA: Work of Performing Arts",
                 WorkType = "Musical or Dramatic Work",
                 PriceUsd = 65m,
+                PriceWithMarkupUsd = 65m * (1 + MarkupPercentage),
                 Description = "Register the underlying musical composition (notes, lyrics, structure). This covers your songwriting — the composition independent of any specific recording.",
                 FormUrl = "https://www.copyright.gov/forms/",
                 InstructionsUrl = "https://www.copyright.gov/circs/circ61.pdf",
@@ -85,6 +100,7 @@ public class CopyrightRegistrationService
                 FormName = "Form TX: Literary Work",
                 WorkType = "Textual Work (Lyrics/Script)",
                 PriceUsd = 65m,
+                PriceWithMarkupUsd = 65m * (1 + MarkupPercentage),
                 Description = "Register lyrics, scripts, or spoken word texts separately from musical composition. Use when lyrics are the primary work or stand independently.",
                 FormUrl = "https://www.copyright.gov/forms/",
                 InstructionsUrl = "https://www.copyright.gov/circs/circ34.pdf",
@@ -103,6 +119,7 @@ public class CopyrightRegistrationService
                 FormName = "Combined SR + PA Bundle",
                 WorkType = "Sound Recording + Composition",
                 PriceUsd = 130m,
+                PriceWithMarkupUsd = 130m * (1 + MarkupPercentage),
                 Description = "Register both the sound recording (SR) and musical composition (PA) in one application for complete protection of your music. Most protective option for original artists.",
                 FormUrl = "https://www.copyright.gov/forms/",
                 InstructionsUrl = "https://www.copyright.gov/circs/",
@@ -299,13 +316,28 @@ public class CopyrightRegistrationService
     }
 
     /// <summary>
-    /// Extracts the total registration cost based on selected forms.
+    /// Calculates the total registration cost based on selected forms (includes 50% markup).
     /// Used for payment system integration.
     /// </summary>
     public decimal CalculateRegistrationCost(List<string> formCodes)
     {
         var allForms = GetMusicRegistrationForms();
         var selectedForms = allForms.Where(f => formCodes.Contains(f.FormCode)).ToList();
-        return selectedForms.Sum(f => f.PriceUsd);
+        return selectedForms.Sum(f => f.PriceWithMarkupUsd);
+    }
+
+    /// <summary>
+    /// Gets cost breakdown (Copyright Office fee + Wiseravenshare markup) for selected forms.
+    /// </summary>
+    public (decimal copyrightOfficeFees, decimal wiseravenMarkup, decimal totalUserPrice) GetCostBreakdown(List<string> formCodes)
+    {
+        var allForms = GetMusicRegistrationForms();
+        var selectedForms = allForms.Where(f => formCodes.Contains(f.FormCode)).ToList();
+        
+        var copyrightOfficeFees = selectedForms.Sum(f => f.PriceUsd);
+        var totalUserPrice = selectedForms.Sum(f => f.PriceWithMarkupUsd);
+        var wiseravenMarkup = totalUserPrice - copyrightOfficeFees;
+        
+        return (copyrightOfficeFees, wiseravenMarkup, totalUserPrice);
     }
 }

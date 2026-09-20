@@ -174,7 +174,11 @@ export const CopyrightRegistrationPage = () => {
                 />
                 <div className="form-content">
                   <h4>{form.formCode}: {form.formName}</h4>
-                  <p className="price">${form.priceUsd.toFixed(2)}</p>
+                  <div className="price-breakdown">
+                    <span className="copyright-fee">${form.priceUsd.toFixed(2)} (Copyright Office)</span>
+                    <span className="markup-fee">+${(form.priceWithMarkupUsd - form.priceUsd).toFixed(2)} (Wiseravenshare)</span>
+                    <span className="total-price">${form.priceWithMarkupUsd.toFixed(2)}</span>
+                  </div>
                   <p>{form.description}</p>
                 </div>
               </div>
@@ -202,7 +206,13 @@ export const CopyrightRegistrationPage = () => {
               </div>
               <h3>{form.formName}</h3>
               <p className="work-type">{form.workType}</p>
-              <p className="price">${form.priceUsd.toFixed(2)}</p>
+              <div className="price-breakdown-grid">
+                <span className="copyright-fee">${form.priceUsd.toFixed(2)} CO</span>
+                <span className="plus">+</span>
+                <span className="markup-fee">${(form.priceWithMarkupUsd - form.priceUsd).toFixed(2)} fee</span>
+                <span className="equals">=</span>
+                <span className="total-price">${form.priceWithMarkupUsd.toFixed(2)}</span>
+              </div>
               <p className="description">{form.description}</p>
               
               <div className="applies-to">
@@ -225,8 +235,9 @@ export const CopyrightRegistrationPage = () => {
       <div className="pricing-section">
         <h2>💰 Pricing & Registration</h2>
         <div className="pricing-info">
-          <p><strong>Zero Markup Pricing:</strong> We charge exactly the U.S. Copyright Office fee with no additional commission or markup.</p>
-          <p><strong>Current Forms:</strong> ${forms.reduce((sum, f) => sum + f.priceUsd, 0).toFixed(2)} total for all forms</p>
+          <p><strong>50% Wiseravenshare Service Fee:</strong> U.S. Copyright Office fees plus 50% service markup covers guidance and processing support.</p>
+          <p><strong>Copyright Office Fees (base):</strong> ${forms.reduce((sum, f) => sum + f.priceUsd, 0).toFixed(2)} total</p>
+          <p><strong>With 50% Markup:</strong> ${forms.reduce((sum, f) => sum + f.priceWithMarkupUsd, 0).toFixed(2)} total</p>
         </div>
 
         {selectedForms.length > 0 && (
@@ -248,9 +259,19 @@ export const CopyrightRegistrationPage = () => {
 
             {totalCost && (
               <div className="cost-result">
-                <div className="cost-box">
-                  <span>Total Registration Cost:</span>
-                  <span className="total">${totalCost.totalCostUsd.toFixed(2)}</span>
+                <div className="cost-breakdown">
+                  <div className="breakdown-row">
+                    <span className="label">Copyright Office Fees:</span>
+                    <span className="amount">${totalCost.copyrightOfficeFees.toFixed(2)}</span>
+                  </div>
+                  <div className="breakdown-row highlight">
+                    <span className="label">Wiseravenshare Service Fee (50%):</span>
+                    <span className="amount">${totalCost.wiseravenMarkup.toFixed(2)}</span>
+                  </div>
+                  <div className="breakdown-row total">
+                    <span className="label">Total Cost:</span>
+                    <span className="amount">${totalCost.totalCostUsd.toFixed(2)}</span>
+                  </div>
                 </div>
                 <p className="note">{totalCost.note}</p>
               </div>
@@ -273,7 +294,7 @@ export const CopyrightRegistrationPage = () => {
             <div className="step-number">2</div>
             <div className="step-content">
               <h4>Review Cost</h4>
-              <p>Calculate the total registration cost (zero markup — exact Copyright Office fee)</p>
+              <p>Calculate the total registration cost (Copyright Office fees plus 50% Wiseravenshare service fee)</p>
             </div>
           </div>
           <div className="step">
