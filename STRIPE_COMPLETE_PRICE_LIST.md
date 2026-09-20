@@ -369,7 +369,204 @@ GET /api/copyright-filing/user/filings
 
 ---
 
-## F — Stripe Shared Infrastructure Keys
+## F — Podcast Trademark Filing Service (50% Markup Model)
+
+**Wiseravenshare is a full USPTO trademark filing service for podcast brands.**  
+**Users pay Wiseravenshare 50% markup on USPTO fees. Wiseravenshare keeps the service revenue.**
+
+### F.1 — Pricing Breakdown
+
+| Form Code | Protection Type | USPTO Fee | Wiseravenshare Service Fee (50%) | User Pays | Wiseravenshare Earns |
+|---|---|---|---|---|---|
+| **TX** | Word/Text Mark (podcast name, tagline, catchphrase) | $250.00 | $125.00 | **$375.00** | **$125.00** |
+| **VI** | Visual Mark (logo, artwork, visual branding) | $350.00 | $175.00 | **$525.00** | **$175.00** |
+| **SR** | Sound Mark (theme song, intro jingle, audio) | $400.00 | $200.00 | **$600.00** | **$200.00** |
+| **COMBINED** | Word + Visual Protection (TX + VI bundled) | $500.00 | $250.00 | **$750.00** | **$250.00** |
+
+### F.2 — What Wiseravenshare Handles
+
+1. **Form Guidance** — Recommend appropriate trademark form based on podcast branding
+2. **File Uploads** — Logo images, audio samples, specimen screenshots
+3. **Metadata Collection** — Exact trademark text, description, goods/services classification
+4. **Payment Processing** — Stripe payment integration (50% markup)
+5. **USPTO Submission** — Actual trademark application filing
+6. **Status Tracking** — Monitor examination progress (typically 12-18 weeks)
+7. **Office Action Response** — If examiner issues office action (refusal/requirement), handle response
+8. **Certificate Management** — Receive and deliver registration certificate to user
+9. **Archive** — Keep copies of all applications and registration certificates
+
+### F.3 — Trademark Filing Workflow
+
+```
+1. User creates trademark filing (selects form type: TX, VI, SR, or COMBINED)
+   ↓
+2. User fills in trademark details (exact text, description, goods/services)
+   ↓
+3. User uploads documents (logo image for VI, audio sample for SR, or both)
+   ↓
+4. Wiseravenshare validates filing is complete
+   ↓
+5. User initiates checkout (Stripe payment)
+   ↓
+6. Payment succeeds
+   ↓
+7. Wiseravenshare submits application to USPTO
+   ↓
+8. USPTO examines application (typically 12-18 weeks)
+   ↓
+9. If approved → Wiseravenshare receives registration certificate → User notified
+   ↓
+10. If office action issued → Wiseravenshare notifies user → User responds
+```
+
+### F.4 — Required Documents by Form
+
+**Form TX (Word/Text Mark) — Podcast Name/Tagline**
+- Exact text to be protected (e.g., "The Daily Raven")
+- Podcast name and description
+- Goods/services description (e.g., "podcasting services, entertainment")
+- Specimen of use (screenshot from podcast app, website, or social media showing the mark)
+- Owner name, address, email
+
+**Form VI (Visual Mark) — Logo/Artwork**
+- High-quality logo image (JPG or PNG, color version)
+- Description of colors (if color protection is important)
+- Podcast name and description
+- Goods/services description
+- Specimen of use (screenshot showing logo on podcast platform, website, or social media)
+- Owner name, address, email
+
+**Form SR (Sound Mark) — Theme Song/Audio**
+- Audio file (MP3 or WAV, max 5 minutes)
+- Detailed description of the audio (e.g., "opening orchestral theme with distinctive rising horn melody")
+- Waveform visual representation (provided by USPTO tools)
+- Podcast name and description
+- Goods/services description
+- Evidence that listeners recognize the sound (examples from reviews, social media)
+- Owner name, address, email
+
+**Form COMBINED (TX + VI Bundle)**
+- Exact text mark
+- Logo image (high-quality)
+- Color description (if applicable)
+- Podcast name and description
+- Two specimens (one showing text, one showing visual)
+- Owner name, address, email
+
+### F.5 — Revenue Model
+
+**Wiseravenshare Economics:**
+- **User pays:** $375 (TX), $525 (VI), $600 (SR), $750 (Combined)
+- **Wiseravenshare passes to USPTO:** $250/$350/$400/$500
+- **Wiseravenshare keeps:** $125-$250 per filing
+- **Margin:** 50% of user payment
+
+**At scale:**
+- 100 filings/month × $175 average = **$17,500/month revenue**
+- 500 filings/month × $175 average = **$87,500/month revenue**
+- 1000 filings/month × $175 average = **$175,000/month revenue**
+
+### F.6 — Application Lifecycle
+
+| Status | Meaning | Timeline |
+|--------|---------|----------|
+| **Draft** | User building form, no payment | Flexible |
+| **ReadyForPayment** | Form complete & validated, awaiting payment | Minutes |
+| **SubmittedToUSPTO** | Payment received, Wiseravenshare submitted to USPTO | Hours |
+| **PendingExamination** | USPTO examiner reviewing (typical: 12-18 weeks) | 12-18 weeks |
+| **ExaminerResponseRequired** | Office action issued (refusal/requirement), user must respond | 6 months to respond |
+| **RegistrationGranted** | Trademark registered, certificate issued | Complete |
+| **Abandoned** | Application abandoned (didn't respond to office action) | Terminal |
+| **Refused** | Application refused by USPTO | Terminal |
+
+### F.7 — API Endpoints
+
+```
+GET /api/podcast-trademark/forms
+  → Get available trademark forms with pricing
+
+POST /api/podcast-trademark/create
+  → Create new trademark filing (Draft status)
+  
+PUT /api/podcast-trademark/{filingId}/update
+  → Update filing with trademark details
+
+POST /api/podcast-trademark/{filingId}/upload?documentType=Logo
+  → Upload file (logo image for VI, audio for SR, specimen screenshot)
+
+POST /api/podcast-trademark/{filingId}/validate
+  → Validate filing completeness before payment
+
+POST /api/podcast-trademark/{filingId}/checkout
+  → Initiate Stripe payment intent
+
+POST /api/podcast-trademark/{filingId}/confirm-payment
+  → Confirm payment, submit to USPTO
+
+GET /api/podcast-trademark/{filingId}/status
+  → Get filing status, office action notices, registration number
+
+GET /api/podcast-trademark/user/filings?podcastId={podcastId}
+  → List all trademark filings for podcast
+```
+
+### F.8 — Environment Variables
+
+```yaml
+# Stripe payment processing (add to Stripe Shared Infrastructure Keys section)
+- key: STRIPE_PRICE_PODCAST_TRADEMARK_TX_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_PODCAST_TRADEMARK_VI_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_PODCAST_TRADEMARK_SR_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_PODCAST_TRADEMARK_COMBINED_ID
+  value: price_XXXX
+  type: SECRET
+```
+
+### F.9 — Stripe Setup
+
+1. Create 4 Products in Stripe Dashboard:
+   - "Podcast Trademark - Word Mark (TX)" → $375.00
+   - "Podcast Trademark - Visual Mark (VI)" → $525.00
+   - "Podcast Trademark - Sound Mark (SR)" → $600.00
+   - "Podcast Trademark - Combined (TX+VI)" → $750.00
+
+2. Paste `price_XXXX` IDs into `.env` (section F.8 above)
+
+3. Optional: Offer "annual trademark protection renewals" ($100/filing/year for renewal fees after 5-10 years)
+
+### F.10 — USPTO Integration (TODO)
+
+- [ ] Set up TEAS+ system account (Trademark Electronic Application System)
+- [ ] Build automated form generation for TX, VI, SR applications
+- [ ] Implement TEAS submission module (XML payload generation)
+- [ ] Set up email parsing to detect USPTO office actions
+- [ ] Build office action response handler
+- [ ] Implement status polling via USPTO search API or email notifications
+- [ ] Create certificate archival system (storage + retrieval)
+
+### F.11 — Key Differences from Copyright Filing
+
+| Aspect | Copyright (CO) | Trademark (USPTO) |
+|--------|---|---|
+| **Base Fee** | $65-$130 | $250-$400 |
+| **User Price (50% markup)** | $97.50-$195 | $375-$600 |
+| **Wiseravenshare Margin** | $32.50-$65 | $125-$200 |
+| **Processing Time** | 4-6 weeks | 12-18 weeks |
+| **Form Types** | SR, PA, TX, Combined | TX, VI, SR, Combined |
+| **Protects** | Creative works (music, lyrics, audio) | Brand identifiers (names, logos, sounds) |
+| **Duration** | Life + 70 years (automatic) | 10 years (renewable) |
+| **Renewal Required** | No | Yes (every 10 years, ~$350/form) |
+| **Likelihood of Refusal** | Low (~5%) | Medium (~30%) |
+
+---
+
+## G — Stripe Shared Infrastructure Keys
 
 Required for all payment flows. Set in both backend and frontend services.
 
@@ -397,7 +594,7 @@ Required for all payment flows. Set in both backend and frontend services.
 
 ---
 
-## F — Full `.env` Template (local dev)
+## G — Full `.env` Template (local dev)
 
 ```env
 # ── Stripe core ──────────────────────────────────────────────────────────
@@ -444,7 +641,7 @@ STRIPE_PRICE_LICENSE_PACK_ID=price_XXXX
 
 ---
 
-## G — Revenue Summary (MRR potential at full saturation)
+## H — Revenue Summary (MRR potential at full saturation)
 
 | Tier | Monthly | Annual |
 |---|---|---|
@@ -464,7 +661,7 @@ STRIPE_PRICE_LICENSE_PACK_ID=price_XXXX
 
 ---
 
-## H — Stripe Products to Create (Quick checklist)
+## I — Stripe Products to Create (Quick checklist)
 
 - [ ] A1 Creator Pro — monthly + annual prices
 - [ ] A2 Growth Suite — monthly + annual prices
@@ -479,6 +676,7 @@ STRIPE_PRICE_LICENSE_PACK_ID=price_XXXX
 - [ ] D2 DMCA Takedown Filing — one-time price
 - [ ] D3 Licensing Template Pack — one-time price
 - [ ] **E: Copyright Registration** — No Stripe products needed (informational only, pass-through to copyright.gov)
+- [ ] **F: Podcast Trademark Filing** — 4 products (TX, VI, SR, Combined)
 - [ ] Configure webhook endpoint
 - [ ] Enable Customer Portal
 - [ ] Paste all `price_` IDs into `.do/app.yaml` and local `.env`

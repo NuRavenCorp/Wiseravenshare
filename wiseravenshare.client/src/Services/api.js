@@ -1499,6 +1499,25 @@ export const apiService = {
         confirmPayment: (filingId, payload) => api.post(`/copyright-filing/${encodeURIComponent(filingId)}/confirm-payment`, payload),
         getFilingStatus: (filingId) => api.get(`/copyright-filing/${encodeURIComponent(filingId)}/status`),
         getUserFilings: () => api.get('/copyright-filing/user/filings')
+    },
+
+    // Podcast Trademark Filing Service (USPTO - Protects podcast names, logos, audio)
+    podcastTrademarkFilingApi: {
+        getAvailableForms: () => api.get('/podcast-trademark/forms'),
+        createFiling: (payload) => api.post('/podcast-trademark/create', payload),
+        updateFiling: (filingId, payload) => api.put(`/podcast-trademark/${encodeURIComponent(filingId)}/update`, payload),
+        uploadDocument: (filingId, file, documentType = 'Specimen') => {
+            const formData = new FormData();
+            formData.append('file', file);
+            return api.post(`/podcast-trademark/${encodeURIComponent(filingId)}/upload?documentType=${encodeURIComponent(documentType)}`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+        },
+        validateFiling: (filingId) => api.post(`/podcast-trademark/${encodeURIComponent(filingId)}/validate`),
+        initiateCheckout: (filingId) => api.post(`/podcast-trademark/${encodeURIComponent(filingId)}/checkout`),
+        confirmPayment: (filingId, payload) => api.post(`/podcast-trademark/${encodeURIComponent(filingId)}/confirm-payment`, payload),
+        getFilingStatus: (filingId) => api.get(`/podcast-trademark/${encodeURIComponent(filingId)}/status`),
+        getUserFilings: (podcastId) => api.get('/podcast-trademark/user/filings', { params: { podcastId } })
     }
 };
 
