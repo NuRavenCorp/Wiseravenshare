@@ -2,10 +2,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
-using Wiseravenshare.Server.Services.AiAssistant;
+using System.Text.Json;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.AiAssistant;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -19,6 +23,8 @@ public class AiAssistantController : ControllerBase
     private readonly ISiteCrawlerService _siteCrawlerService;
     private readonly IContentCrawlerService _contentCrawlerService;
     private readonly IConfiguration _configuration;
+    private readonly UserStore _userStore;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AiAssistantController> _logger;
 
     public AiAssistantController(
@@ -27,6 +33,8 @@ public class AiAssistantController : ControllerBase
         ISiteCrawlerService siteCrawlerService,
         IContentCrawlerService contentCrawlerService,
         IConfiguration configuration,
+        UserStore userStore,
+        IHttpClientFactory httpClientFactory,
         ILogger<AiAssistantController> logger)
     {
         _chatService = chatService;
@@ -34,6 +42,8 @@ public class AiAssistantController : ControllerBase
         _siteCrawlerService = siteCrawlerService;
         _contentCrawlerService = contentCrawlerService;
         _configuration = configuration;
+        _userStore = userStore;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -66,11 +76,26 @@ public class AiAssistantController : ControllerBase
                     });
                 }
 
+                // Platform key not configured — check if this user has their own connector set up.
+                var userConnector = TryGetUserConnector();
+                if (userConnector is { Enabled: true, HasApiKey: true })
+                {
+                    return Ok(new
+                    {
+                        online = true,
+                        message = "Using your personal AI connector.",
+                        provider = userConnector.Provider,
+                        usingUserConnector = true,
+                        modelCount = 1,
+                        models = new[] { userConnector.DefaultModel.Length > 0 ? userConnector.DefaultModel : "custom" }
+                    });
+                }
+
                 _logger.LogWarning("AI provider health check: no models available for provider {Provider}", provider);
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = "AI backend is not configured. Set Gradient:InferenceKey (or DO_GRADIENT_INFERENCE_KEY) and redeploy.",
+                    message = "AI backend is not configured. Add an API key in Settings → AI Connector, or ask your admin to set DO_GRADIENT_INFERENCE_KEY and redeploy.",
                     provider,
                     configured = false
                 });
@@ -158,6 +183,13 @@ public class AiAssistantController : ControllerBase
 
         var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
         var result = await _chatService.ChatAsync(enrichedRequest);
+
+        // If platform AI is not configured, fall back to the user's own connector.
+        if (!result.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+        {
+            result = await UserConnectorChatAsync(connector, enrichedRequest, HttpContext.RequestAborted);
+        }
+
         return Ok(result);
     }
 
@@ -189,28 +221,34 @@ public class AiAssistantController : ControllerBase
             await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
             {
                 if (string.IsNullOrWhiteSpace(token))
-                {
                     continue;
-                }
 
                 emittedAny = true;
-                await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(token)}\n\n", ct);
+                await Response.WriteAsync($"data: {JsonSerializer.Serialize(token)}\n\n", ct);
                 await Response.Body.FlushAsync(ct);
             }
 
             if (!emittedAny)
             {
+                // Try platform non-streaming fallback first.
                 var fallback = await _chatService.ChatAsync(enrichedRequest);
+
+                // If platform has no key, try the user's own connector.
+                if (!fallback.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+                {
+                    fallback = await UserConnectorChatAsync(connector, enrichedRequest, ct);
+                }
+
                 if (!string.IsNullOrWhiteSpace(fallback.Reply))
                 {
                     emittedAny = true;
-                    await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(fallback.Reply)}\n\n", ct);
+                    await Response.WriteAsync($"data: {JsonSerializer.Serialize(fallback.Reply)}\n\n", ct);
                     await Response.Body.FlushAsync(ct);
                 }
                 else if (!string.IsNullOrWhiteSpace(fallback.Error))
                 {
                     emittedAny = true;
-                    await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(fallback.Error)}\n\n", ct);
+                    await Response.WriteAsync($"data: {JsonSerializer.Serialize(fallback.Error)}\n\n", ct);
                     await Response.Body.FlushAsync(ct);
                 }
             }
@@ -228,7 +266,7 @@ public class AiAssistantController : ControllerBase
             }
             else
             {
-                await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize("The AI assistant is unavailable right now.")}\n\n", ct);
+                await Response.WriteAsync($"data: {JsonSerializer.Serialize("The AI assistant is unavailable right now.")}\n\n", ct);
                 await Response.Body.FlushAsync(ct);
             }
         }
@@ -373,5 +411,150 @@ public class AiAssistantController : ControllerBase
             ?? string.Empty;
 
         return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
+    }
+
+    // ---- User AI connector (personal API key support) ----
+
+    /// <summary>Returns the current user's AI connector settings (API key is masked).</summary>
+    [Authorize]
+    [HttpGet("connector")]
+    public IActionResult GetConnector()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(userId))
+            return Unauthorized();
+
+        try
+        {
+            var settings = _userStore.GetAiConnectorSettings(userId);
+            return Ok(new
+            {
+                enabled = settings.Enabled,
+                provider = settings.Provider,
+                baseUrl = settings.BaseUrl,
+                defaultModel = settings.DefaultModel,
+                hasApiKey = settings.HasApiKey,
+                apiKeyMasked = settings.ApiKeyMasked
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Ok(new { enabled = false, provider = "openai", baseUrl = "", defaultModel = "", hasApiKey = false, apiKeyMasked = "" });
+        }
+    }
+
+    /// <summary>Saves the current user's AI connector settings.</summary>
+    [Authorize]
+    [HttpPut("connector")]
+    public IActionResult UpdateConnector([FromBody] UpdateUserAiConnectorRequest request)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(userId))
+            return Unauthorized();
+
+        try
+        {
+            var updated = _userStore.UpdateAiConnectorSettings(userId, request);
+            return Ok(new
+            {
+                enabled = updated.Enabled,
+                provider = updated.Provider,
+                baseUrl = updated.BaseUrl,
+                defaultModel = updated.DefaultModel,
+                hasApiKey = updated.HasApiKey,
+                apiKeyMasked = updated.ApiKeyMasked
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+    }
+
+    /// <summary>Returns the user's AI connector settings if they are configured and enabled.</summary>
+    private UserAiConnectorSettings? TryGetUserConnector()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(userId))
+            return null;
+
+        try
+        {
+            var settings = _userStore.GetAiConnectorSettingsInternal(userId);
+            if (settings is { Enabled: true, HasApiKey: true })
+                return settings;
+        }
+        catch { /* user not found or store unavailable */ }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Makes a single non-streaming chat request to the user's own OpenAI-compatible connector.
+    /// </summary>
+    private async Task<AiChatResponse> UserConnectorChatAsync(
+        UserAiConnectorSettings connector,
+        AiChatRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            var baseUrl = connector.BaseUrl.TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                baseUrl = "https://api.openai.com/v1";
+
+            var model = string.IsNullOrWhiteSpace(request.Model)
+                ? (string.IsNullOrWhiteSpace(connector.DefaultModel) ? "gpt-4o-mini" : connector.DefaultModel)
+                : request.Model;
+
+            var messages = new List<object>
+            {
+                new { role = "system", content = "You are the Wiseravenshare Assistant. Help users with platform questions about posting, feeds, profiles, and features. Be concise and practical." }
+            };
+
+            if (request.History is { Count: > 0 })
+            {
+                foreach (var h in request.History.TakeLast(12))
+                {
+                    var role = h.Role?.ToLowerInvariant() is "assistant" or "ai" ? "assistant" : "user";
+                    messages.Add(new { role, content = h.Content ?? "" });
+                }
+            }
+            messages.Add(new { role = "user", content = request.Message ?? "" });
+
+            var payload = new { model, messages, stream = false, temperature = 0.6, max_tokens = 700 };
+
+            var http = _httpClientFactory.CreateClient();
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.ApiKey);
+            httpRequest.Headers.Add("User-Agent", "Wiseravenshare/1.0");
+
+            using var response = await http.SendAsync(httpRequest, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("User connector chat failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return new AiChatResponse { Success = false, Error = "Your AI connector returned an error. Check your API key and endpoint." };
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var reply = doc.RootElement.TryGetProperty("choices", out var choices)
+                && choices.ValueKind == JsonValueKind.Array
+                && choices.GetArrayLength() > 0
+                && choices[0].TryGetProperty("message", out var msg)
+                && msg.TryGetProperty("content", out var content)
+                ? content.GetString() ?? string.Empty
+                : string.Empty;
+
+            return new AiChatResponse { Success = true, Reply = reply.Trim(), Model = model };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "User connector chat threw unexpectedly.");
+            return new AiChatResponse { Success = false, Error = "User AI connector request failed." };
+        }
     }
 }

@@ -1747,9 +1747,13 @@ builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
 // AI assistant — select provider via AiProvider config (gradient|deepseek|digitalocean|dochatbot|do-chatbot|llamacpp).
 // DigitalOcean chatbot path is the production default.
 var aiProvider = (builder.Configuration["AiProvider"] ?? "digitalocean").Trim().ToLowerInvariant();
-if (aiProvider is "gradient" or "deepseek" or "digitalocean" or "dochatbot" or "do-chatbot")
+if (aiProvider is "gradient" or "digitalocean" or "dochatbot" or "do-chatbot")
 {
     builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
+}
+else if (aiProvider is "deepseek")
+{
+    builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
 else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local")
 {
