@@ -1473,13 +1473,32 @@ export const apiService = {
     printMusicRightsCertificate: (payload) =>
         api.post('/music-rights/certificate/print', payload, { responseType: 'text' }),
 
-    // Copyright Registration (U.S. Copyright Office)
+    // Copyright Registration (U.S. Copyright Office - informational only)
     copyrightRegistrationApi: {
         getForms: () => api.get('/copyright-registration/forms'),
         getFormByCode: (formCode) => api.get(`/copyright-registration/forms/${encodeURIComponent(formCode)}`),
         recommendForms: (payload) => api.post('/copyright-registration/recommend', payload),
         calculateCost: (payload) => api.post('/copyright-registration/calculate-cost', payload),
         getGuide: () => api.get('/copyright-registration/guide', { responseType: 'text' })
+    },
+
+    // Copyright Filing Service (Full form filing with payment processing)
+    copyrightFilingApi: {
+        getAvailableForms: () => api.get('/copyright-filing/forms'),
+        createFiling: (payload) => api.post('/copyright-filing/create', payload),
+        updateFiling: (filingId, payload) => api.put(`/copyright-filing/${encodeURIComponent(filingId)}/update`, payload),
+        uploadDocument: (filingId, file) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            return api.post(`/copyright-filing/${encodeURIComponent(filingId)}/upload`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+        },
+        validateFiling: (filingId) => api.post(`/copyright-filing/${encodeURIComponent(filingId)}/validate`),
+        initiateCheckout: (filingId) => api.post(`/copyright-filing/${encodeURIComponent(filingId)}/checkout`),
+        confirmPayment: (filingId, payload) => api.post(`/copyright-filing/${encodeURIComponent(filingId)}/confirm-payment`, payload),
+        getFilingStatus: (filingId) => api.get(`/copyright-filing/${encodeURIComponent(filingId)}/status`),
+        getUserFilings: () => api.get('/copyright-filing/user/filings')
     }
 };
 

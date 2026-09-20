@@ -1726,6 +1726,7 @@ builder.Services.AddHttpClient("SiteCrawlerClient")
 builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
 builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
 builder.Services.AddScoped<CopyrightRegistrationService>();
+builder.Services.AddScoped<CopyrightFilingService>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();

@@ -194,47 +194,178 @@ These gate **IP registration and protection** features in Music Rights Studio.
 
 ---
 
-## E — Copyright Office Registration Services
+## E — Copyright Office Filing Service (New Revenue Model)
 
-**50% Wiseravenshare service fee on U.S. Copyright Office music forms.**  
-**Wiseravenshare does NOT process registrations** — users register directly with copyright.gov.  
-Service fee covers guidance, form recommendations, cost calculations, and educational materials.
+**Wiseravenshare is now a full Copyright Office filing service — we handle the complete registration process.**  
+**Users pay Wiseravenshare 50% markup on Copyright Office fees. Wiseravenshare keeps the service revenue.**
 
-| Form Code | Work Type | Copyright Office Fee | Wiseravenshare Markup (50%) | User Price | Notes |
+### E.1 — Pricing Breakdown
+
+| Form Code | Work Type | Copyright Office Fee | Wiseravenshare Service Fee (50%) | User Pays | Wiseravenshare Earns |
 |---|---|---|---|---|---|
-| **SR** | Sound Recording | $65.00 | $32.50 | **$97.50** | Fixed audio recording, performer rights |
-| **PA** | Musical/Dramatic Work | $65.00 | $32.50 | **$97.50** | Song composition, melody, structure |
-| **TX** | Literary Work | $65.00 | $32.50 | **$97.50** | Lyrics, scripts, spoken word (standalone) |
-| **SR + PA** | Combined Bundle | $130.00 | $65.00 | **$195.00** | Sound recording + composition (most comprehensive) |
+| **SR** | Sound Recording | $65.00 | $32.50 | **$97.50** | **$32.50** |
+| **PA** | Musical Composition | $65.00 | $32.50 | **$97.50** | **$32.50** |
+| **TX** | Lyrics/Script | $65.00 | $32.50 | **$97.50** | **$32.50** |
+| **SR + PA** | Bundle (Recording + Composition) | $130.00 | $65.00 | **$195.00** | **$65.00** |
 
-### E — Pricing model
+### E.2 — What Wiseravenshare Handles
 
-- **Copyright Office Base Fee:** What the U.S. Copyright Office charges for filing
-- **Wiseravenshare Service Fee (50%):** Markup covers API hosting, platform maintenance, guidance system, and educational materials
-- **User Price:** Total amount user pays through Wiseravenshare
+1. **Form Guidance** — Recommend appropriate forms based on user work type
+2. **File Uploads** — Audio, sheet music, text document storage
+3. **Metadata Collection** — Work title, creator name, description, year of creation
+4. **Payment Processing** — Stripe payment integration (50% markup)
+5. **Copyright Office Submission** — Actual form filing (SR, PA, TX) to U.S. Copyright Office
+6. **Status Tracking** — Monitor registration progress (4-6 weeks typical)
+7. **Certificate Management** — Receive and deliver registration certificate to user
+8. **Archive** — Keep copies of all filings and certificates
 
-### E — How it works
+### E.3 — Filing Workflow
 
-1. **User visits CopyrightRegistrationPage** → Browse available forms, get AI recommendations based on work description
-2. **User selects forms** → Calculate total cost (Copyright Office fee + 50% Wiseravenshare markup)
-3. **User reviews guidance** → View Copyright Office requirements, links to official resources, cost breakdown
-4. **User goes to copyright.gov** → Complete registration directly with U.S. Copyright Office
-5. **Wiseravenshare provides links + educational content** — No payment processing (cost calculation only)
-
-### E — Environment variables (informational only)
-```yaml
-# These are NOT Stripe prices — just references
-- key: VITE_COPYRIGHT_REGISTRATION_API_URL
-  value: /api/copyright-registration
+```
+1. User creates filing (selects form type)
+   ↓
+2. User fills form metadata (title, creator, description)
+   ↓
+3. User uploads required files (audio/sheet music/text)
+   ↓
+4. Wiseravenshare validates filing is complete
+   ↓
+5. User initiates checkout (Stripe payment)
+   ↓
+6. Payment succeeds
+   ↓
+7. Wiseravenshare submits to Copyright Office
+   ↓
+8. Copyright Office processes (4-6 weeks)
+   ↓
+9. Wiseravenshare receives registration certificate
+   ↓
+10. User receives certificate via email + dashboard
 ```
 
-### E — Copyright Office contact info
-- **Website:** https://www.copyright.gov/
-- **Phone:** 1-202-707-3000
-- **Registration portal:** https://www.copyright.gov/registration/
-- **Forms:** https://www.copyright.gov/forms/
-- **Current processing time:** 4-6 weeks
-- **Filing fee** (2024): $65 per form (subject to change)
+### E.4 — Required Documents by Form
+
+**Form SR (Sound Recording)**
+- Audio file (MP3, WAV, FLAC, max 50MB)
+- Work title
+- Artist/creator name
+- Year of creation
+- Work description
+
+**Form PA (Musical Composition)**
+- Sheet music or lead sheet (PDF/image)
+- MIDI file (optional, recommended)
+- Lyric sheet (if applicable)
+- Work title
+- Composer name
+- Year of creation
+- Composition description
+
+**Form TX (Lyrics/Script)**
+- Text document (TXT, PDF, DOCX)
+- Work title
+- Author name
+- Year of creation
+- Work type (lyrics, script, poetry, etc.)
+- Content description
+
+**Combined Bundle (SR + PA)**
+- All files for both SR and PA forms
+
+### E.5 — Revenue Model
+
+**Wiseravenshare Economics:**
+- **User pays:** $97.50 per SR/PA/TX form, $195 for combined
+- **Wiseravenshare passes to Copyright Office:** $65 per form, $130 for combined
+- **Wiseravenshare keeps:** $32.50-$65 per filing
+- **Margin:** 50% of user payment
+
+**At scale:**
+- 100 filings/month × $32.50 average = **$3,250/month revenue**
+- 1000 filings/month × $32.50 average = **$32,500/month revenue**
+
+### E.6 — Registration Lifecycle
+
+| Status | Meaning | Timeline |
+|--------|---------|----------|
+| **Draft** | User building form, no payment | Flexible |
+| **ReadyForPayment** | Form complete, validated, awaiting payment | Minutes |
+| **SubmittedToOffice** | Payment received, Wiseravenshare submitted to Copyright Office | Hours |
+| **Processing** | Copyright Office processing registration | 4-6 weeks typical |
+| **Registered** | Certificate received from Copyright Office | Complete |
+| **Failed** | Registration rejected by Copyright Office | Varies |
+| **Cancelled** | User cancelled (refund processed) | Immediate |
+
+### E.7 — API Endpoints
+
+```
+GET /api/copyright-filing/forms
+  → Get available forms with pricing
+
+POST /api/copyright-filing/create
+  → Create new filing (Draft status)
+  
+PUT /api/copyright-filing/{filingId}/update
+  → Update filing metadata
+
+POST /api/copyright-filing/{filingId}/upload
+  → Upload file (audio/sheet/text)
+
+POST /api/copyright-filing/{filingId}/validate
+  → Validate filing completeness
+
+POST /api/copyright-filing/{filingId}/checkout
+  → Initiate Stripe payment intent
+
+POST /api/copyright-filing/{filingId}/confirm-payment
+  → Confirm payment, submit to Copyright Office
+
+GET /api/copyright-filing/{filingId}/status
+  → Get filing status and registration number
+
+GET /api/copyright-filing/user/filings
+  → List all filings for authenticated user
+```
+
+### E.8 — Environment Variables
+
+```yaml
+# Stripe payment processing (add to section E: Stripe Shared Infrastructure Keys)
+- key: STRIPE_PRICE_COPYRIGHT_FILING_SR_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_COPYRIGHT_FILING_PA_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_COPYRIGHT_FILING_TX_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_COPYRIGHT_FILING_COMBINED_ID
+  value: price_XXXX
+  type: SECRET
+```
+
+### E.9 — Stripe Setup
+
+1. Create 4 Products in Stripe Dashboard:
+   - "Copyright Filing - Sound Recording (SR)" → $97.50
+   - "Copyright Filing - Composition (PA)" → $97.50
+   - "Copyright Filing - Lyrics/Text (TX)" → $97.50
+   - "Copyright Filing - Bundle (SR+PA)" → $195.00
+
+2. Paste `price_XXXX` IDs into `.env` (section E.8 above)
+
+3. Optional: Set up Stripe recurring billing if offering "annual filing credits"
+
+### E.10 — Copyright Office Integration (TODO)
+
+- [ ] Set up Copyright Office account for business filing
+- [ ] Document Copyright Office submission process (forms, formats, deadlines)
+- [ ] Build automated Copyright Office form generation (SR/PA/TX templates)
+- [ ] Implement file conversion/validation (audio → WAV, music → PDF if needed)
+- [ ] Set up email parsing to detect Copyright Office responses
+- [ ] Build certificate OCR/extraction from email PDF attachments
+- [ ] Implement background job for status polling + notifications
 
 ---
 
