@@ -192,9 +192,68 @@ These gate **IP registration and protection** features in Music Rights Studio.
   type: SECRET
 ```
 
+## D — One-Time Purchases (Not yet in Stripe)
+
+| # | Product Name | Price | Env Var | Notes |
+|---|---|---|---|---|
+| D1 | **Track Registration Certificate** | $4.99 one-time | `STRIPE_PRICE_TRACK_REGISTRATION_ID` | Single payment_intent, not subscription |
+| D2 | **DMCA Takedown Filing** | $9.99 one-time | `STRIPE_PRICE_DMCA_FILING_ID` | Per takedown action |
+| D3 | **Licensing Template Pack** | $19.99 one-time | `STRIPE_PRICE_LICENSE_PACK_ID` | Sync, master, performance templates |
+
+### D — DigitalOcean snippet
+```yaml
+- key: STRIPE_PRICE_TRACK_REGISTRATION_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_DMCA_FILING_ID
+  value: price_XXXX
+  type: SECRET
+- key: STRIPE_PRICE_LICENSE_PACK_ID
+  value: price_XXXX
+  type: SECRET
+```
+
 ---
 
-## E — Stripe Shared Infrastructure Keys
+## E — Copyright Office Registration Services
+
+**Pass-through (0% markup) pricing for U.S. Copyright Office music forms.**  
+**Wiseravenshare does NOT process registrations** — users register directly with copyright.gov.  
+These are **informational products** that help users understand copyright registration costs.
+
+| Form Code | Work Type | Price | Notes |
+|---|---|---|---|
+| **SR** | Sound Recording | $65.00 | Fixed audio recording, performer rights |
+| **PA** | Musical/Dramatic Work | $65.00 | Song composition, melody, structure |
+| **TX** | Literary Work | $65.00 | Lyrics, scripts, spoken word (standalone) |
+| **SR + PA** | Combined Bundle | $130.00 | Sound recording + composition (most comprehensive) |
+
+### E — How it works
+
+1. **User visits CopyrightRegistrationPage** → Browse available forms, get recommendations based on work description
+2. **User selects forms** → Calculate total cost (always equals Copyright Office fee, no markup)
+3. **User reviews guidance** → View Copyright Office requirements, links to official resources
+4. **User goes to copyright.gov** → Complete registration directly with U.S. Copyright Office
+5. **Wiseravenshare provides links + educational content only**
+
+### E — Environment variables (informational only)
+```yaml
+# These are NOT Stripe prices — just references
+- key: VITE_COPYRIGHT_REGISTRATION_API_URL
+  value: /api/copyright-registration
+```
+
+### E — Copyright Office contact info
+- **Website:** https://www.copyright.gov/
+- **Phone:** 1-202-707-3000
+- **Registration portal:** https://www.copyright.gov/registration/
+- **Forms:** https://www.copyright.gov/forms/
+- **Current processing time:** 4-6 weeks
+- **Filing fee** (2024): $65 per form (subject to change)
+
+---
+
+## F — Stripe Shared Infrastructure Keys
 
 Required for all payment flows. Set in both backend and frontend services.
 
@@ -303,6 +362,7 @@ STRIPE_PRICE_LICENSE_PACK_ID=price_XXXX
 - [ ] D1 Track Registration Certificate — one-time price
 - [ ] D2 DMCA Takedown Filing — one-time price
 - [ ] D3 Licensing Template Pack — one-time price
+- [ ] **E: Copyright Registration** — No Stripe products needed (informational only, pass-through to copyright.gov)
 - [ ] Configure webhook endpoint
 - [ ] Enable Customer Portal
 - [ ] Paste all `price_` IDs into `.do/app.yaml` and local `.env`
