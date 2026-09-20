@@ -23,6 +23,9 @@ services:
     ports:
       - "11434:11434"
 
+  ollama-init:
+    profiles: []  # Ensure model warmup runs by default in dev
+
   # Enable caching
   redis:
     profiles: []  # Remove from optional, make it default

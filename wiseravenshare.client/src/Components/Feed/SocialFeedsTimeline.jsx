@@ -135,7 +135,11 @@ const normalizeFeeds = (feeds) => {
         tikTok: getConnection(source, 'tikTok', 'tiktok', 'TikTok'),
         facebook: getConnection(source, 'facebook', 'Facebook'),
         instagram: getConnection(source, 'instagram', 'Instagram'),
-        youtube: getConnection(source, 'youtube', 'YouTube', 'Youtube')
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: getConnection(source, 'youtube', 'youTube', 'YouTube', 'Youtube'),
+        twitter: getConnection(source, 'twitter', 'Twitter'),
+        linkedIn: getConnection(source, 'linkedIn', 'linkedin', 'LinkedIn'),
+        bluesky: getConnection(source, 'bluesky', 'Bluesky')
     };
 };
 
@@ -251,19 +255,28 @@ const normalizeFeedConnections = (feeds = {}) => {
         return {};
     };
 
-    const normalizeConn = (conn = {}) => ({
-        enabled: Boolean(conn?.enabled),
-        username: String(conn?.username || '').trim(),
-        profileUrl: String(conn?.profileUrl || '').trim(),
-        feedUrl: String(conn?.feedUrl || '').trim(),
-        designation: String(conn?.designation || '').trim()
-    });
+    const normalizeConn = (conn = {}) => {
+        const username = String(conn?.username || '').trim();
+        const profileUrl = String(conn?.profileUrl || '').trim();
+        const feedUrl = String(conn?.feedUrl || '').trim();
+
+        return {
+            enabled: Boolean(conn?.enabled || username || profileUrl || feedUrl),
+            username,
+            profileUrl,
+            feedUrl,
+            designation: String(conn?.designation || '').trim()
+        };
+    };
 
     return {
         facebook: normalizeConn(getFeed(feeds, 'facebook', 'Facebook')),
         tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
         instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConn(getFeed(feeds, 'youtube', 'YouTube', 'Youtube'))
+        youtube: normalizeConn(getFeed(feeds, 'youtube', 'youTube', 'YouTube', 'Youtube')),
+        twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter')),
+        linkedIn: normalizeConn(getFeed(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky'))
     };
 };
 
@@ -294,7 +307,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
-    const [publishInstagram, setPublishInstagram] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
     const [displayTemplate, setDisplayTemplate] = useState('cards');
@@ -309,7 +321,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         facebook: snapshot.facebook.username || '',
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
-        youtube: snapshot.youtube.username || ''
+        youtube: snapshot.youtube.username || '',
+        twitter: snapshot.twitter?.username || '',
+        linkedIn: snapshot.linkedIn?.username || '',
+        bluesky: snapshot.bluesky?.username || ''
     });
 
     // Demo Guide Expansion
@@ -505,7 +520,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: loadedFeeds.facebook.username,
                     tiktok: loadedFeeds.tikTok.username,
                     instagram: loadedFeeds.instagram.username,
-                    youtube: loadedFeeds.youtube.username
+                    youtube: loadedFeeds.youtube.username,
+                    twitter: loadedFeeds.twitter?.username || '',
+                    linkedIn: loadedFeeds.linkedIn?.username || '',
+                    bluesky: loadedFeeds.bluesky?.username || ''
                 });
             } catch {
                 if (cancelled) return;
@@ -513,7 +531,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     facebook: snapshot.facebook.username || '',
                     tiktok: snapshot.tikTok.username || '',
                     instagram: snapshot.instagram.username || '',
-                    youtube: snapshot.youtube.username || ''
+                    youtube: snapshot.youtube.username || '',
+                    twitter: snapshot.twitter?.username || '',
+                    linkedIn: snapshot.linkedIn?.username || '',
+                    bluesky: snapshot.bluesky?.username || ''
                 });
             }
         };
@@ -616,7 +637,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
             tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
             instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
-            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube)
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
+            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter || ''),
+            linkedIn: keepConnectionMetadata(snapshot.linkedIn, handles.linkedIn || ''),
+            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '')
         };
 
         try {
@@ -662,9 +686,14 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         e?.preventDefault();
         if (!postMessage.trim()) return;
 
-        const noneSelected = !publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram;
-        if (noneSelected) {
-            setPublishResults([{ platform: 'general', success: false, error: 'Select at least one platform before publishing.' }]);
+        if (!publishFacebook && !publishTikTok && !publishYouTube) {
+            setPublishResults([
+                {
+                    platform: 'general',
+                    success: false,
+                    error: 'Select at least one platform before publishing.'
+                }
+            ]);
             return;
         }
 
@@ -673,13 +702,60 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
         try {
             const mediaUrl = mediaUrlInput.trim();
-            const isVideoUrl = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl)
+
+            // Treat URL as video if it has a video extension, a known video platform,
+            // a streaming path, OR if a video-only platform (YouTube/TikTok) is selected.
+            const hasVideoExtension = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl);
+            const isKnownVideoHost = /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts|vimeo\.com\/|dailymotion\.com\/video)/i.test(mediaUrl)
                 || mediaUrl.includes('videostreaming')
                 || /^data:video\//i.test(mediaUrl);
-            const isPhotoUrl = !isVideoUrl && (
+            const forceVideoByPlatform = (publishYouTube || publishTikTok) && mediaUrl.length > 0;
+            const isVideoUrl = hasVideoExtension || isKnownVideoHost || forceVideoByPlatform;
+
+            const isPhotoUrl = !isVideoUrl && mediaUrl.length > 0 && (
                 /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(mediaUrl)
                 || /^data:image\//i.test(mediaUrl)
             );
+
+            // Guard: YouTube/TikTok require a public video URL.
+            if ((publishYouTube || publishTikTok) && !mediaUrl) {
+                const platformName = publishYouTube && publishTikTok
+                    ? 'YouTube/TikTok'
+                    : publishYouTube
+                        ? 'YouTube'
+                        : 'TikTok';
+                setPublishResults([{
+                    platform: publishYouTube ? 'youtube' : 'tiktok',
+                    success: false,
+                    error: `${platformName} requires a public video URL. Paste one in the Video/Photo URL field.`
+                }]);
+                setIsPublishing(false);
+                return;
+            }
+
+            if (publishYouTube && mediaUrl) {
+                if (!isHttpUrl(mediaUrl)) {
+                    setPublishResults([{
+                        platform: 'youtube',
+                        success: false,
+                        error: 'YouTube requires a public http(s) video URL.'
+                    }]);
+                    setIsPublishing(false);
+                    return;
+                }
+
+                const isDirectVideoFile = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl);
+                const isMp4Container = /\.mp4(\?|$)/i.test(mediaUrl);
+                if (isDirectVideoFile && !isMp4Container) {
+                    setPublishResults([{
+                        platform: 'youtube',
+                        success: false,
+                        error: 'YouTube baseline: use .mp4 container (H.264/AVC + AAC-LC, 24/30/60 fps) before publishing.'
+                    }]);
+                    setIsPublishing(false);
+                    return;
+                }
+            }
 
             const response = await socialService.publishContent({
                 message: postMessage.trim(),
@@ -688,9 +764,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 photoUrl: isPhotoUrl ? mediaUrl : undefined,
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
-                publishToTikTok: publishTikTok && isVideoUrl,
-                publishToYouTube: publishYouTube && isVideoUrl,
-                publishToInstagram: publishInstagram
+                publishToTikTok: publishTikTok,
+                publishToYouTube: publishYouTube
             });
 
             setPublishResults(response?.results || []);
@@ -1185,7 +1260,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 <span style={{ fontWeight: 700, color: '#67e8f9' }}>🎵 TikTok</span>
                                 <button
                                     type="button"
-                                    onClick={async () => { launchConnectPlatform('tiktok'); }}
+                                    onClick={async () => {
+                                        launchConnectPlatform('tiktok');
+                                    }}
                                     style={{
                                         border: 'none',
                                         background: 'rgba(103, 232, 249, 0.2)',
@@ -1232,10 +1309,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 type="text"
                                 value={handles.youtube}
                                 onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
-                                placeholder="@MyChannel or UCxxxxxxxx"
-                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid #f8717144', background: '#0b0f14', color: '#fff' }}
+                                placeholder="e.g. MyChannel"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
+
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -1328,30 +1406,48 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
-                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                        <span style={{ color: 'var(--light-color)' }}>Video / Photo URL <span style={{ opacity: 0.7 }}>(required for TikTok & YouTube)</span></span>
-                        <input
-                            type="url"
-                            value={mediaUrlInput}
-                            onChange={(e) => setMediaUrlInput(e.target.value)}
-                            placeholder="https://… (.mp4, .jpg, etc.)"
-                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                        />
-                    </label>
-                    <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
-                        <span style={{ color: 'var(--light-color)' }}>Link URL <span style={{ opacity: 0.7 }}>(optional, for Facebook / Instagram)</span></span>
-                        <input
-                            type="url"
-                            value={linkUrlInput}
-                            onChange={(e) => setLinkUrlInput(e.target.value)}
-                            placeholder="https://…"
-                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
-                        />
-                    </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+                    <input
+                        type="url"
+                        value={mediaUrlInput}
+                        onChange={(e) => setMediaUrlInput(e.target.value)}
+                        placeholder={(publishYouTube || publishTikTok) ? "Required: Public video URL (youtube.com, direct .mp4, etc.)" : "Video / Photo URL (optional for TikTok/YouTube)"}
+                        style={{ padding: '8px 10px', borderRadius: '6px', border: `1px solid ${(publishYouTube || publishTikTok) && !mediaUrlInput ? '#f59e0b' : 'var(--border-color)'}`, background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                    />
+                    <input
+                        type="url"
+                        value={linkUrlInput}
+                        onChange={(e) => setLinkUrlInput(e.target.value)}
+                        placeholder="Link URL (optional for Facebook)"
+                        style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                    />
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                {publishYouTube && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.15)', fontSize: '12px', lineHeight: 1.45, color: '#fecaca' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>YouTube upload baselines</div>
+                        <div>Use <strong>.mp4</strong> container with <strong>H.264/AVC video</strong> and <strong>AAC-LC audio</strong> at <strong>24/30/60 fps</strong>.</div>
+                        <div style={{ marginTop: '4px' }}>Shorts are auto-detected at 9:16 and under 60s; add <strong>#Shorts</strong> in title/description for reliable placement.</div>
+                        <div style={{ marginTop: '4px' }}>Before publish, finalize title, tags, and description in this composer for cleaner channel metadata.</div>
+                    </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={publishFacebook} onChange={(e) => setPublishFacebook(e.target.checked)} />
+                            📘 Facebook
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={publishTikTok} onChange={(e) => setPublishTikTok(e.target.checked)} />
+                            🎵 TikTok
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={publishYouTube} onChange={(e) => setPublishYouTube(e.target.checked)} />
+                            ▶️ YouTube
+                        </label>
+                    </div>
+
                     <button
                         type="submit"
                         disabled={isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)}

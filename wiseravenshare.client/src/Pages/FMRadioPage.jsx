@@ -185,20 +185,30 @@ const resolveTrackSourceCandidates = (track) => {
     : '';
   const fileObjectUrl = track.file ? URL.createObjectURL(track.file) : '';
 
+  // FALLBACK_AUDIO_CANDIDATES are only appropriate for the FM tuner (live radio streams).
+  // Library tracks must only resolve from their own URLs; falling back to a radio stream
+  // would silently play the wrong content and confuse the user.
   return [...new Set([
     normalizedDirect,
     blobStream,
     fileNameStream,
     proxy,
-    fileObjectUrl,
-    ...FALLBACK_AUDIO_CANDIDATES
+    fileObjectUrl
   ].filter(Boolean))];
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const FMRadioPage = () => {
+const FMRadioPage = ({ canAccessCreator = false, initialTab = 'radio' }) => {
+  const resolveInitialTab = () => {
+    const normalized = String(initialTab || 'radio').trim().toLowerCase();
+    if (normalized === 'creator' && !canAccessCreator) {
+      return 'radio';
+    }
+    return ['radio', 'cassette', 'creator', 'caption'].includes(normalized) ? normalized : 'radio';
+  };
+
   // Tabs
-  const [tab, setTab] = useState('radio');
+  const [tab, setTab] = useState(resolveInitialTab);
 
   // FM tuner display
   const [tunedFreq,    setTunedFreq]    = useState(98.5);
@@ -241,6 +251,9 @@ const FMRadioPage = () => {
   const [captionMediaType, setCaptionMediaType] = useState('');
   const [captionMediaFile, setCaptionMediaFile] = useState(null);
   const [captionPlaying,   setCaptionPlaying]   = useState(false);
+  const [captionTrackDuration, setCaptionTrackDuration] = useState(0);
+  const [captionClipStart, setCaptionClipStart] = useState(0);
+  const [captionClipEnd, setCaptionClipEnd] = useState(0);
 
   // Radio Creator
   const [creatorStationForm, setCreatorStationForm] = useState({
@@ -307,6 +320,7 @@ const FMRadioPage = () => {
   const modCanvasRef    = useRef(null);   // modern viz canvas
   const captionAudioRef = useRef(null);
   const captionMediaRef = useRef(null);
+  const captionStopAtRef = useRef(null);
   const containerRef    = useRef(null);
   const vizRafRef       = useRef(null);
   const tickRef         = useRef(null);   // time-update interval
@@ -403,6 +417,20 @@ const FMRadioPage = () => {
   }, [creatorRegionIso]);
 
   useEffect(() => {
+    const normalized = String(initialTab || 'radio').trim().toLowerCase();
+    const nextTab = normalized === 'creator' && !canAccessCreator
+      ? 'radio'
+      : (['radio', 'cassette', 'creator', 'caption'].includes(normalized) ? normalized : 'radio');
+    setTab((current) => (current === nextTab ? current : nextTab));
+  }, [initialTab, canAccessCreator]);
+
+  useEffect(() => {
+    if (!canAccessCreator && tab === 'creator') {
+      setTab('radio');
+    }
+  }, [canAccessCreator, tab]);
+
+  useEffect(() => {
     try {
       const handoff = localStorage.getItem(INSTRUMENT_HANDOFF_KEY);
       if (!handoff) return;
@@ -410,8 +438,13 @@ const FMRadioPage = () => {
       const parsed = JSON.parse(handoff);
       if (!parsed || typeof parsed !== 'object') return;
 
-      setTab('creator');
-      setCreatorStatus(`Instrument handoff active: ${parsed.sourceName || 'Unknown Source'}`);
+      if (canAccessCreator) {
+        setTab('creator');
+        setCreatorStatus(`Instrument handoff active: ${parsed.sourceName || 'Unknown Source'}`);
+      } else {
+        setTab('cassette');
+        setCreatorStatus('Instrument handoff loaded into Cassette mode. Radio Creator access requires an administrator.');
+      }
       setCreatorUseInstrumentInput(true);
       setCreatorTrackForm((prev) => ({
         ...prev,
@@ -421,7 +454,7 @@ const FMRadioPage = () => {
     } catch {
       // Ignore malformed handoff payloads.
     }
-  }, []);
+  }, [canAccessCreator]);
 
   useEffect(() => () => {
     if (creatorRecordedUrl) {
@@ -1248,6 +1281,95 @@ const FMRadioPage = () => {
     setCaptionMediaType(file.type.startsWith('video/') ? 'video' : 'image');
     e.target.value = '';
   };
+
+  useEffect(() => {
+    if (!captionTrack) {
+      setCaptionTrackDuration(0);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(0);
+      return;
+    }
+
+    const candidates = resolveTrackSourceCandidates(captionTrack);
+    if (!candidates.length) {
+      setCaptionTrackDuration(0);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(0);
+      return;
+    }
+
+    let canceled = false;
+    const probeAudio = new Audio();
+    let sourceIndex = 0;
+
+    const cleanupProbe = () => {
+      probeAudio.onloadedmetadata = null;
+      probeAudio.onerror = null;
+      probeAudio.src = '';
+    };
+
+    const tryLoad = () => {
+      if (canceled || sourceIndex >= candidates.length) {
+        setCaptionTrackDuration(0);
+        setCaptionClipStart(0);
+        setCaptionClipEnd(0);
+        cleanupProbe();
+        return;
+      }
+
+      probeAudio.src = candidates[sourceIndex];
+      probeAudio.load();
+    };
+
+    probeAudio.preload = 'metadata';
+    probeAudio.onloadedmetadata = () => {
+      if (canceled) {
+        cleanupProbe();
+        return;
+      }
+
+      const trackDuration = Number(probeAudio.duration);
+      if (!Number.isFinite(trackDuration) || trackDuration <= 0) {
+        sourceIndex += 1;
+        tryLoad();
+        return;
+      }
+
+      setCaptionTrackDuration(trackDuration);
+      setCaptionClipStart(0);
+      setCaptionClipEnd(trackDuration);
+      cleanupProbe();
+    };
+
+    probeAudio.onerror = () => {
+      sourceIndex += 1;
+      tryLoad();
+    };
+
+    tryLoad();
+
+    return () => {
+      canceled = true;
+      cleanupProbe();
+    };
+  }, [captionTrack]);
+
+  const handleCaptionClipStartChange = (nextStart) => {
+    const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+    const clampedStart = Math.max(0, Math.min(Number(nextStart) || 0, safeDuration));
+    const clampedEnd = Math.max(clampedStart, captionClipEnd || 0);
+    setCaptionClipStart(clampedStart);
+    setCaptionClipEnd(Math.min(clampedEnd, safeDuration));
+  };
+
+  const handleCaptionClipEndChange = (nextEnd) => {
+    const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+    const clampedEnd = Math.max(0, Math.min(Number(nextEnd) || 0, safeDuration));
+    const clampedStart = Math.min(captionClipStart || 0, clampedEnd);
+    setCaptionClipStart(Math.max(0, clampedStart));
+    setCaptionClipEnd(clampedEnd);
+  };
+
   const captionPlay = () => {
     if (!captionTrack || !captionAudioRef.current || !captionMediaUrl) return;
 
@@ -1258,7 +1380,23 @@ const FMRadioPage = () => {
     let sourceIndex = 0;
     const tryPlay = () => {
       audio.src = candidates[sourceIndex];
-      audio.currentTime = 0;
+      const safeDuration = Number.isFinite(captionTrackDuration) ? captionTrackDuration : 0;
+      const startAt = Math.max(0, Math.min(captionClipStart || 0, safeDuration || Number.MAX_SAFE_INTEGER));
+      const stopAt = Math.max(startAt, Math.min(captionClipEnd || safeDuration || 0, safeDuration || Number.MAX_SAFE_INTEGER));
+      captionStopAtRef.current = stopAt > 0 ? stopAt : null;
+      audio.currentTime = startAt;
+
+      audio.ontimeupdate = () => {
+        const clipStopAt = Number(captionStopAtRef.current);
+        if (!Number.isFinite(clipStopAt) || clipStopAt <= 0) {
+          return;
+        }
+
+        if (audio.currentTime >= clipStopAt) {
+          captionStop();
+        }
+      };
+
       audio.play().then(() => {
         setCaptionPlaying(true);
         if (captionMediaType === 'video') {
@@ -1281,8 +1419,10 @@ const FMRadioPage = () => {
   const captionStop = () => {
     captionAudioRef.current?.pause();
     if (captionAudioRef.current) {
+      captionAudioRef.current.ontimeupdate = null;
       captionAudioRef.current.currentTime = 0;
     }
+    captionStopAtRef.current = null;
     captionMediaRef.current?.pause();
     if (captionMediaRef.current) {
       captionMediaRef.current.currentTime = 0;
@@ -1632,7 +1772,9 @@ const FMRadioPage = () => {
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
         <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 TRACK PLAYER</button>
-        <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
+        {canAccessCreator && (
+          <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
+        )}
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
@@ -1793,7 +1935,7 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(false)}
+      {canAccessCreator && tab === 'creator' && renderCreatorStudio(false)}
       {tab === 'caption' && (
         <div className="wr-caption-wrap">
           <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
@@ -1820,6 +1962,33 @@ const FMRadioPage = () => {
                 <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
               </label>
               {captionTrack && <div className="wr-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              {captionTrack && captionTrackDuration > 0 && (
+                <div style={{ marginTop: 10, marginBottom: 10, display: 'grid', gap: 8 }}>
+                  <div className="wr-section-label">3. Select track portion</div>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>Start: {fmt(captionClipStart)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(captionClipStart, captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipStartChange(event.target.value)}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>End: {fmt(captionClipEnd)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(Math.max(captionClipEnd, captionClipStart), captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipEndChange(event.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="wr-caption-preview-wrap">
                 {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
                 {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}
@@ -1843,7 +2012,9 @@ const FMRadioPage = () => {
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
           <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Track Player</button>
-          <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
+          {canAccessCreator && (
+            <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
+          )}
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>
       </div>
@@ -2031,6 +2202,33 @@ const FMRadioPage = () => {
                 <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCaptionMediaPick} />
               </label>
               {captionTrack && <div className="mod-caption-track">🎵 {captionTrack.title || captionTrack.name}</div>}
+              {captionTrack && captionTrackDuration > 0 && (
+                <div style={{ marginTop: 10, marginBottom: 10, display: 'grid', gap: 8 }}>
+                  <div className="mod-section-label">3. Select track portion</div>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>Start: {fmt(captionClipStart)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(captionClipStart, captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipStartChange(event.target.value)}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span style={{ fontSize: 12 }}>End: {fmt(captionClipEnd)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={captionTrackDuration}
+                      step={0.1}
+                      value={Math.min(Math.max(captionClipEnd, captionClipStart), captionTrackDuration)}
+                      onChange={(event) => handleCaptionClipEndChange(event.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="mod-caption-preview-wrap">
                 {captionMediaUrl && captionMediaType === 'image' && <img src={captionMediaUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 8 }} />}
                 {captionMediaUrl && captionMediaType === 'video' && <video ref={captionMediaRef} src={captionMediaUrl} controls style={{ maxWidth: '100%', borderRadius: 8 }} />}
@@ -2045,7 +2243,7 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(true)}
+      {canAccessCreator && tab === 'creator' && renderCreatorStudio(true)}
 
       {showGlobalTransport && (
         <div className="mod-mini-transport" role="region" aria-label="Track player quick controls">

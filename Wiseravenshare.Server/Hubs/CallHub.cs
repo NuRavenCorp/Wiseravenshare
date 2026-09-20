@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Wiseravenshare.Server.Entities.Communique;
 using Wiseravenshare.Server.Services.Communique;
+using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Hubs;
 
@@ -132,15 +133,16 @@ public class CallHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var userId = Context.UserIdentifier;
-        if (!string.IsNullOrWhiteSpace(userId))
+        var userId = Context.User?.GetUserId();
+        if (userId is Guid resolvedUserId && resolvedUserId != Guid.Empty)
         {
+            var userIdValue = resolvedUserId.ToString();
             var activeCalls = _stateManager.GetAllActiveCalls()
-                .Where(c => c.CallerId == userId || c.CalleeId == userId);
+                .Where(c => c.CallerId == userIdValue || c.CalleeId == userIdValue);
 
             foreach (var call in activeCalls)
             {
-                await _callService.EndCall(call.CallId, userId);
+                await _callService.EndCall(call.CallId, userIdValue);
             }
         }
 
@@ -149,9 +151,18 @@ public class CallHub : Hub
 
     private string RequireUserId()
     {
-        var userId = Context.UserIdentifier;
-        if (string.IsNullOrWhiteSpace(userId))
-            throw new HubException("Authenticated user identifier is required.");
-        return userId;
+        var claimUserId = Context.User?.GetUserId();
+        if (claimUserId is Guid parsedUserId && parsedUserId != Guid.Empty)
+        {
+            return parsedUserId.ToString();
+        }
+
+        var fallbackUserId = Context.UserIdentifier;
+        if (!string.IsNullOrWhiteSpace(fallbackUserId))
+        {
+            return fallbackUserId;
+        }
+
+        throw new HubException("Authenticated user identifier is required.");
     }
 }

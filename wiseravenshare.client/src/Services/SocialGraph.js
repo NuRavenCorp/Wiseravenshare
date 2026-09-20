@@ -38,15 +38,77 @@ const toTimestamp = (value) => {
     return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
+const isPlaceholderIdentity = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === '' || text === 'user' || text === '@user' || text === 'unknown' || text === 'local user';
+};
+
+const hasMeaningfulIdentity = (user) => {
+    if (!user) {
+        return false;
+    }
+
+    const name = String(user?.name || user?.displayName || '').trim();
+    const handle = String(user?.handle || user?.username || '').trim().replace(/^@+/, '');
+    const email = String(user?.email || '').trim();
+
+    return (!isPlaceholderIdentity(name) && name.length > 0)
+        || (!isPlaceholderIdentity(handle) && handle.length > 0)
+        || email.includes('@');
+};
+
+const fallbackHandleFromUser = (user) => {
+    const explicit = String(user?.handle || user?.username || '').trim().replace(/^@+/, '');
+    if (explicit && !isPlaceholderIdentity(explicit)) {
+        return explicit.toLowerCase();
+    }
+
+    const email = String(user?.email || '').trim();
+    if (email.includes('@')) {
+        const local = email.split('@')[0].trim().replace(/[^a-zA-Z0-9_]+/g, '');
+        if (local) {
+            return local.toLowerCase();
+        }
+    }
+
+    const id = String(user?.id || '').trim().replace(/[^a-zA-Z0-9_]+/g, '').toLowerCase();
+    if (id) {
+        return id.slice(0, 16);
+    }
+
+    return 'member';
+};
+
+const fallbackNameFromUser = (user, handle) => {
+    const explicit = String(user?.name || user?.displayName || '').trim();
+    if (explicit && !isPlaceholderIdentity(explicit)) {
+        return explicit;
+    }
+
+    const normalizedHandle = String(handle || '').replace(/^@+/, '').trim();
+    if (!normalizedHandle) {
+        return 'Community Member';
+    }
+
+    return normalizedHandle;
+};
+
 const profileFromUser = (user) => {
+    const handle = fallbackHandleFromUser(user);
+    const name = fallbackNameFromUser(user, handle);
     let avatarVal = user.avatar || user.avatarUrl || ((user.name || user.displayName)?.[0] || 'U').toUpperCase();
     if (typeof avatarVal === 'string' && avatarVal.length > 80000 && avatarVal.startsWith('data:image/')) {
         avatarVal = avatarVal.slice(0, 60000);
     }
+
+    if (!avatarVal || String(avatarVal).trim().length === 0) {
+        avatarVal = (name[0] || 'U').toUpperCase();
+    }
+
     return {
         id: user.id,
-        name: user.name || user.displayName || 'User',
-        handle: user.handle || user.username || 'user',
+        name,
+        handle,
         avatar: avatarVal
     };
 };
@@ -185,6 +247,7 @@ const getRecentPostsForUser = (posts = [], userId, days = 14) => {
 export const socialGraphService = {
     registerUserProfile(user) {
         if (!user?.id) return;
+        if (!hasMeaningfulIdentity(user)) return;
 
         const canonicalId = getCanonicalUserId(user);
         if (!canonicalId) {
@@ -205,6 +268,7 @@ export const socialGraphService = {
 
     syncProfileAcrossStorage(user) {
         if (!user?.id) return;
+        if (!hasMeaningfulIdentity(user)) return;
 
         const canonicalId = getCanonicalUserId(user);
         if (!canonicalId) {

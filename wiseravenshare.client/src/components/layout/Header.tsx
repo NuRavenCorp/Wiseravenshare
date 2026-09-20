@@ -20,6 +20,13 @@ import {
     FiSearch
 } from 'react-icons/fi';
 
+const getProfileRoute = (userRecord: any) => {
+    const rawUsername = String(userRecord?.username || userRecord?.handle || userRecord?.id || 'profile').trim();
+    const cleanedUsername = rawUsername.replace(/^@+/, '').trim();
+    const slug = encodeURIComponent(cleanedUsername || 'profile');
+    return `/profile/${slug}`;
+};
+
 export const Header: React.FC = () => {
     const { user, logout } = useAuth();
     const { unreadCount } = useNotifications();
@@ -110,7 +117,7 @@ export const Header: React.FC = () => {
                                     </div>
                                     <div className="py-1">
                                         <Link
-                                            to={`/profile/${user?.id}`}
+                                            to={getProfileRoute(user)}
                                             className="flex items-center gap-3 px-4 py-2 hover:bg-white/5"
                                         >
                                             <FiUser className="w-4 h-4" />

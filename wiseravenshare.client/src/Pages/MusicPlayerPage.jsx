@@ -49,12 +49,13 @@ const buildTrackSourceCandidates = (track) => {
     ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(direct)}`
     : '';
 
+  // Never fall back to internet radio streams when playing library tracks — that silently
+  // plays the wrong audio when the uploaded track URL is unavailable.
   return [...new Set([
     direct,
     blobStream,
     fileNameStream,
-    proxied,
-    ...FALLBACK_MUSIC_STREAMS
+    proxied
   ].filter(Boolean))];
 };
 

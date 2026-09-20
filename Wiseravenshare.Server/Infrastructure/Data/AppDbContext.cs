@@ -7,6 +7,9 @@ using Wiseravenshare.Server.Entities.FM;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
 using Wiseravenshare.Server.Entities.CrossPlatform;
+using Wiseravenshare.Server.Entities.Crawler;
+using WiseRavenShare.Server.Core.Entities.Craft;
+using WiseRavenShare.Server.Infrastructure.Data;
 using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
 
 namespace Wiseravenshare.Server.Infrastructure.Data;
@@ -58,6 +61,42 @@ public class AppDbContext : DbContext
     public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();
     public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
     public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
+    public DbSet<CrawlJob> CrawlJobs => Set<CrawlJob>();
+    public DbSet<CrawledPage> CrawledPages => Set<CrawledPage>();
+    public DbSet<CrawlIssue> CrawlIssues => Set<CrawlIssue>();
+    public DbSet<CrawlLink> CrawlLinks => Set<CrawlLink>();
+    public DbSet<CrawlMetric> CrawlMetrics => Set<CrawlMetric>();
+    public DbSet<CrawlReportRecord> CrawlReports => Set<CrawlReportRecord>();
+
+    // Craft Intelligence
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftDomain> CraftDomains => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftDomain>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftSkill> CraftSkills => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftSkill>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPrinciple> CraftPrinciples => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPrinciple>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile> UserCraftProfiles => Set<WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.UserCraftSkillScore> UserCraftSkillScores => Set<WiseRavenShare.Server.Core.Entities.Craft.UserCraftSkillScore>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftObservation> CraftObservations => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftObservation>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftDraftReview> CraftDraftReviews => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftDraftReview>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftFeedback> CraftFeedbacks => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftFeedback>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftLesson> CraftLessons => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftLesson>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftLessonCompletion> CraftLessonCompletions => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftLessonCompletion>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPerformanceMetric> CraftPerformanceMetrics => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPerformanceMetric>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPattern> CraftPatterns => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPattern>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPrincipleRefinement> CraftPrincipleRefinements => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPrincipleRefinement>();
+
+    // FM Tuner
+    public DbSet<FMStation> FMStations => Set<FMStation>();
+    public DbSet<FMStationLike> FMStationLikes => Set<FMStationLike>();
+    public DbSet<FMStationBookmark> FMStationBookmarks => Set<FMStationBookmark>();
+    public DbSet<FMStationHistory> FMStationHistories => Set<FMStationHistory>();
+    public DbSet<FMUserPreference> FMUserPreferences => Set<FMUserPreference>();
+    public DbSet<CreatorRadioStation> CreatorRadioStations => Set<CreatorRadioStation>();
+    public DbSet<RadioStationSchedule> RadioStationSchedules => Set<RadioStationSchedule>();
+    public DbSet<RadioStationEpisode> RadioStationEpisodes => Set<RadioStationEpisode>();
+    public DbSet<RadioStationFollow> RadioStationFollows => Set<RadioStationFollow>();
+    public DbSet<RadioStationListen> RadioStationListens => Set<RadioStationListen>();
+    public DbSet<RadioStationRequest> RadioStationRequests => Set<RadioStationRequest>();
+    public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
+    public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
 
     // FM Tuner
     public DbSet<FMStation> FMStations => Set<FMStation>();
@@ -109,11 +148,20 @@ public class AppDbContext : DbContext
     public DbSet<PersonalizationTagMapping>  PersonalizationTagMappings   => Set<PersonalizationTagMapping>();
     public DbSet<RegionalTrendSnapshot>      RegionalTrendSnapshots       => Set<RegionalTrendSnapshot>();
 
+    // AI Assistant
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantConversation> AssistantConversations => Set<WiseRavenShare.Server.Entities.Assistant.AssistantConversation>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>      AssistantMessages      => Set<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>     AssistantFeedbacks     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>    AssistantKnowledge     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample> AssistantLearningSamples => Set<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.ConfigureCurrency();
+        modelBuilder.ConfigureCrawler();
+        modelBuilder.ConfigureCraft();
 
         modelBuilder.HasDefaultSchema("app_data");
 

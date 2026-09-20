@@ -156,8 +156,11 @@ public sealed class TeamAccessServiceTests
             null!,
             null!,
             null!,
+            null!,
             NullLogger<AuthController>.Instance,
-            null!);
+            new RefreshTokenStore(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build(),
+                NullLogger<RefreshTokenStore>.Instance));
 
         var method = typeof(AuthController).GetMethod("IsSelfRegistrationAllowed", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
@@ -176,8 +179,11 @@ public sealed class TeamAccessServiceTests
             null!,
             new TeamAccessService(new FakeWebHostEnvironment(CreateTempRoot()), NullLogger<TeamAccessService>.Instance),
             null!,
+            null!,
             NullLogger<AuthController>.Instance,
-            null!);
+            new RefreshTokenStore(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build(),
+                NullLogger<RefreshTokenStore>.Instance));
 
         var method = typeof(AuthController).GetMethod("IsAuthenticationAllowed", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);

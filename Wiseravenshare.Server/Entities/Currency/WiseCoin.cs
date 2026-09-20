@@ -14,6 +14,11 @@ public class WiseCoin : BaseEntity
     public decimal TotalSpent { get; set; }
     public decimal WorkHoursContributed { get; set; }
     public decimal CurrentValuePerHour { get; set; } = 10m;
+    
+    // Rollout tracking
+    public bool HasReceivedInitialAllocation { get; set; } = false;
+    public DateTime? InitialAllocationDate { get; set; }
+    public decimal InitialAllocationAmount { get; set; } = 0m;
 
     // Badge multipliers (like Voter-Alliance badge-first approach)
     public decimal BadgeMultiplier { get; set; } = 1.0m;
@@ -68,7 +73,8 @@ public enum TransactionType
 {
     Mining, ContentCreation, Verification, BadgeReward, Staking, Tip,
     Purchase, Transfer, Burn, Fee, Governance, BadgeUpgrade,
-    SkillValidation, Referral, CommunityBonus, CreativityWork
+    SkillValidation, Referral, CommunityBonus, CreativityWork,
+    EngagementReward  // Earned when your content receives likes, reposts, or comments
 }
 
 public enum TransactionStatus

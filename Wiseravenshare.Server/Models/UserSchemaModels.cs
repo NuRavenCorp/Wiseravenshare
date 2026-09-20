@@ -5,6 +5,7 @@ public sealed class UserRecord
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; } = true;
     public string Handle { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
     public string Bio { get; set; } = string.Empty;
@@ -79,6 +80,7 @@ public sealed class UserResponse
     public string Name { get; set; } = string.Empty;
     public string DisplayName => Name;
     public string Email { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; } = true;
     public string Handle { get; set; } = string.Empty;
     public string Bio { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;

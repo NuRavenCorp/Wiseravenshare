@@ -20,6 +20,10 @@ public class PostServiceFallbackTests
             new StubTruthService(),
             null!,
             null!,
+            null!,
+            null!,
+            null!,
+            null!,
             NullLogger<PostService>.Instance);
 
         var result = await service.CreatePostAsync(
@@ -47,10 +51,15 @@ public class PostServiceFallbackTests
             new StubTruthService(),
             null!,
             null!,
+            null!,
+            null!,
+            null!,
+            null!,
             NullLogger<PostService>.Instance);
 
+        var userId = Guid.NewGuid();
         var result = await service.CreatePostAsync(
-            Guid.NewGuid(),
+            userId,
             new CreatePostDto
             {
                 Content = "hello world",
@@ -63,6 +72,9 @@ public class PostServiceFallbackTests
         Assert.Equal("hello world", result.Content);
         Assert.Equal("Image", result.Type);
         Assert.Equal("https://example.com/photo.jpg", result.MediaUrl);
+        Assert.Equal($"user{userId:N}"[..Math.Min(12, $"user{userId:N}".Length)], result.User.Username);
+        Assert.Equal(result.User.Username, result.User.DisplayName);
+        Assert.NotEqual("Local User", result.User.DisplayName);
     }
 
     private sealed class ThrowingPostRepository : IPostRepository
@@ -83,6 +95,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetTrendingPostsAsync(int count) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetRepliesAsync(Guid postId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<int> GetPostCountAsync(Guid userId) => System.Threading.Tasks.Task.FromResult(0);
+        public System.Threading.Tasks.Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<Comment>>(Array.Empty<Comment>());
+        public System.Threading.Tasks.Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null) => throw new NotImplementedException();
         public System.Threading.Tasks.Task LikePostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task UnlikePostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task RepostPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
@@ -90,7 +104,7 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
-            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, 0, false, false, false));
     }
 
     private sealed class StubPostRepository : IPostRepository
@@ -111,6 +125,8 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetTrendingPostsAsync(int count) => System.Threading.Tasks.Task.FromResult<IEnumerable<Post>>(Array.Empty<Post>());
         public System.Threading.Tasks.Task<IEnumerable<Post>> GetRepliesAsync(Guid postId) => System.Threading.Tasks.Task.FromResult<IEnumerable<Post>>(Array.Empty<Post>());
         public System.Threading.Tasks.Task<int> GetPostCountAsync(Guid userId) => System.Threading.Tasks.Task.FromResult(0);
+        public System.Threading.Tasks.Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<Comment>>(Array.Empty<Comment>());
+        public System.Threading.Tasks.Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null) => System.Threading.Tasks.Task.FromResult(new Comment { Id = Guid.NewGuid(), PostId = postId, UserId = userId, Content = content, ParentCommentId = parentCommentId, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
         public System.Threading.Tasks.Task LikePostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task UnlikePostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task RepostPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
@@ -118,7 +134,7 @@ public class PostServiceFallbackTests
         public System.Threading.Tasks.Task BookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task UnbookmarkPostAsync(Guid postId, Guid userId) => System.Threading.Tasks.Task.CompletedTask;
         public System.Threading.Tasks.Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
-            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, false, false, false));
+            => System.Threading.Tasks.Task.FromResult(new PostInteractionState(0, 0, 0, 0, false, false, false));
     }
 
     private sealed class StubUserRepository : IUserRepository

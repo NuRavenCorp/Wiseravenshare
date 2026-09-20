@@ -25,7 +25,7 @@ const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(String(value || '').t
 
 const isDigitalOceanAppHost = (host = '') => /\.ondigitalocean\.app$/i.test(String(host || '').trim());
 
-const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'wiseravenshare.com'];
+const FIRST_PARTY_HOSTS = ['wise-ravens.com', 'cdn.wise-ravens.com', 'wiseravenshare.com'];
 
 const isFirstPartyHost = (host = '') => {
     const normalized = String(host || '').trim().toLowerCase();
@@ -498,6 +498,53 @@ const setStoredNotifications = (items) => {
     safeWriteJson('wiseNotifications', Array.isArray(items) ? items : []);
 };
 
+const readNumericField = (source, ...keys) => {
+    for (const key of keys) {
+        if (source?.[key] !== undefined && source?.[key] !== null) {
+            const value = Number(source[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+    }
+
+    return undefined;
+};
+
+const readBooleanField = (source, ...keys) => {
+    for (const key of keys) {
+        const value = source?.[key];
+        if (value !== undefined && value !== null) {
+            if (typeof value === 'boolean') {
+                return value;
+            }
+            if (typeof value === 'string') {
+                return value.toLowerCase() === 'true' || value === '1';
+            }
+            if (typeof value === 'number') {
+                return value !== 0;
+            }
+        }
+    }
+    return false;
+};
+
+const normalizeInteractionState = (payload) => {
+    const source = payload && typeof payload === 'object' ? payload : {};
+
+    return {
+        ...source,
+        postId: source.postId ?? source.PostId,
+        likesCount: readNumericField(source, 'likesCount', 'LikesCount', 'likes', 'Likes') ?? 0,
+        repostsCount: readNumericField(source, 'repostsCount', 'RepostsCount', 'reposts', 'Reposts') ?? 0,
+        commentsCount: readNumericField(source, 'commentsCount', 'CommentsCount', 'comments', 'Comments') ?? 0,
+        bookmarksCount: readNumericField(source, 'bookmarksCount', 'BookmarksCount', 'bookmarks', 'Bookmarks') ?? 0,
+        isLiked: readBooleanField(source, 'isLiked', 'IsLiked'),
+        isReposted: readBooleanField(source, 'isReposted', 'IsReposted'),
+        isBookmarked: readBooleanField(source, 'isBookmarked', 'IsBookmarked')
+    };
+};
+
 const getStoredPosts = () => {
     const data = safeReadJson('wiseLocalPosts', []);
     return Array.isArray(data) ? data : [];
@@ -758,7 +805,7 @@ export const apiService = {
     likePost: async (postId) => {
         try {
             const response = await api.post(`/posts/${postId}/like`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update like. Please try again.');
         }
@@ -766,7 +813,7 @@ export const apiService = {
     unlikePost: async (postId) => {
         try {
             const response = await api.delete(`/posts/${postId}/like`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update like. Please try again.');
         }
@@ -774,7 +821,7 @@ export const apiService = {
     repostPost: async (postId) => {
         try {
             const response = await api.post(`/posts/${postId}/repost`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update repost. Please try again.');
         }
@@ -782,7 +829,7 @@ export const apiService = {
     unrepostPost: async (postId) => {
         try {
             const response = await api.delete(`/posts/${postId}/repost`);
-            return response.data;
+            return normalizeInteractionState(response?.data);
         } catch (error) {
             throw normalizeApiError(error, 'Failed to update repost. Please try again.');
         }
@@ -1411,7 +1458,20 @@ export const apiService = {
     voteTruthClaim: (claimId, vote, confidence = 5) => api.post('/truthengine/vote', { claimId, vote, confidence }),
     detectTruthContradictions: (claim) => api.post('/truthengine/contradictions', { claim }),
     analyzeTruthTemporal: (claim) => api.post('/truthengine/temporal', { claim }),
-    getTruthEngineStats: () => api.get('/truthengine/stats')
+    getTruthEngineStats: () => api.get('/truthengine/stats'),
+
+    // Feature Release (Admin + User access)
+    getFeatureReleaseCatalog: () => api.get('/admin/feature-release/catalog'),
+    releaseFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/release`, { reason }),
+    gateFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/gate`, { reason }),
+    releaseAllFeatures: (reason = '') => api.post('/admin/feature-release/release-all', { reason }),
+    gateAllFeatures: (reason = '') => api.post('/admin/feature-release/gate-all', { reason }),
+    getMyFeatureAccess: () => api.get('/features/my-access'),
+
+    // Music Rights Registration
+    registerOriginalTrack: (payload) => api.post('/music-rights/register', payload),
+    printMusicRightsCertificate: (payload) =>
+        api.post('/music-rights/certificate/print', payload, { responseType: 'text' })
 };
 
 export default api;

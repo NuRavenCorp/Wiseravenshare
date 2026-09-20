@@ -102,6 +102,43 @@ const resolvePrimaryMediaUrl = (post) => {
     return null;
 };
 
+const resolveAllMediaUrls = (post) => {
+    const values = [];
+    const pushIfValid = (candidate) => {
+        const resolved = sanitizeMediaUrl(candidate);
+        if (resolved && !values.includes(resolved)) {
+            values.push(resolved);
+        }
+    };
+
+    pushIfValid(post?.mediaUrl || post?.url || post?.imageUrl || post?.photoUrl || post?.thumbnailUrl);
+
+    const mediaUrls = post?.mediaUrls;
+    if (Array.isArray(mediaUrls)) {
+        mediaUrls.forEach((candidate) => pushIfValid(candidate));
+    } else if (typeof mediaUrls === 'string') {
+        const trimmed = mediaUrls.trim();
+        if (trimmed) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach((candidate) => pushIfValid(candidate));
+                } else {
+                    pushIfValid(trimmed);
+                }
+            } catch {
+                trimmed
+                    .split(',')
+                    .map((value) => value.trim())
+                    .filter(Boolean)
+                    .forEach((candidate) => pushIfValid(candidate));
+            }
+        }
+    }
+
+    return values;
+};
+
 const resolveMediaFileNameFromUrl = (value) => {
     const source = cleanWhitespaceText(value);
     if (!source) {
@@ -133,6 +170,20 @@ const sanitizeTextValue = (value, fallback = '', maxLength = MAX_TEXT_LENGTH) =>
     }
 
     return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
+};
+
+const isPlaceholderDisplayName = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local user' || text === 'local-user' || text === 'localuser' || text === 'user' || text === 'you';
+};
+
+const isPlaceholderUsername = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local-user'
+        || text === 'localuser'
+        || text === 'user'
+        || text === 'you'
+        || /^user[0-9a-f]{8,}$/i.test(text);
 };
 
 export const normalizePostsPayload = (payload) => {
@@ -168,12 +219,40 @@ export const normalizePostsPayload = (payload) => {
 const normalizeUser = (post, fallbackUser = null) => {
     const rawUser = post?.user || fallbackUser || {};
     const resolvedUserId = post?.userId || rawUser?.id || fallbackUser?.id || null;
+    const fallbackName = String(fallbackUser?.name || fallbackUser?.displayName || fallbackUser?.username || '').trim();
+    const fallbackUsername = String(fallbackUser?.username || '').trim();
+    const fallbackHandle = String(fallbackUser?.handle || (fallbackUsername ? `@${fallbackUsername}` : '') || '').trim();
+    const rawName = rawUser?.displayName || rawUser?.name || rawUser?.username || '';
+    const rawUsername = String(rawUser?.username || '').trim();
+    const rawHandle = String(rawUser?.handle || '').trim();
+    const resolvedName = isPlaceholderDisplayName(rawName)
+        ? (fallbackName || fallbackUsername || rawUsername || '')
+        : rawName;
+    const resolvedUsername = isPlaceholderUsername(rawUsername)
+        ? (fallbackUsername || rawUsername)
+        : rawUsername;
+    const resolvedHandle = (() => {
+        if (rawHandle && !isPlaceholderUsername(rawUsername) && !isPlaceholderDisplayName(rawName)) {
+            return rawHandle.startsWith('@') ? rawHandle : `@${rawHandle}`;
+        }
+
+        if (fallbackHandle) {
+            return fallbackHandle.startsWith('@') ? fallbackHandle : `@${fallbackHandle}`;
+        }
+
+        if (resolvedUsername) {
+            return `@${resolvedUsername}`;
+        }
+
+        return '@user';
+    })();
 
     return {
         ...(rawUser || {}),
         id: resolvedUserId,
-        name: rawUser?.displayName || rawUser?.name || rawUser?.username || fallbackUser?.name || 'User',
-        handle: rawUser?.handle || (rawUser?.username ? `@${rawUser.username}` : fallbackUser?.handle || '@user'),
+        username: resolvedUsername || fallbackUsername || rawUsername,
+        name: resolvedName || fallbackName || fallbackUsername || 'User',
+        handle: resolvedHandle,
         avatar: sanitizeImageValue(rawUser?.avatar || rawUser?.avatarUrl || fallbackUser?.avatar, 'U')
     };
 };
@@ -190,7 +269,8 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
     const caption = sanitizeTextValue(post?.caption, 'Original audio • viral loop', 120);
     const name = sanitizeTextValue(resolvedUser?.name, 'Raven User', 60);
     const handle = sanitizeTextValue(resolvedUser?.handle, '@ravenuser', 32);
-    const resolvedMediaUrl = resolvePrimaryMediaUrl(post);
+    const normalizedMediaUrls = resolveAllMediaUrls(post);
+    const resolvedMediaUrl = normalizedMediaUrls[0] || resolvePrimaryMediaUrl(post);
     const rawType = String(post?.mediaType || post?.type || '').toLowerCase();
     const mediaFileHint = resolveMediaFileNameFromUrl(resolvedMediaUrl);
     const inferredMediaType = rawType === 'video' || rawType === 'photo' || rawType === 'image' || rawType === 'audio' || rawType === 'music'
@@ -209,8 +289,18 @@ export const normalizeFeedPost = (post, fallbackUser = null) => {
         userId: resolvedUserId,
         mediaType: inferredMediaType,
         mediaUrl: resolvedMediaUrl,
-        likes: Number(post?.likes ?? post?.likesCount ?? 0),
-        reposts: Number(post?.reposts ?? post?.repostsCount ?? 0),
+        mediaUrls: normalizedMediaUrls,
+        likesCount: Number(post?.likesCount ?? post?.LikesCount ?? post?.likes ?? 0),
+        likes: Number(post?.likesCount ?? post?.LikesCount ?? post?.likes ?? 0),
+        repostsCount: Number(post?.repostsCount ?? post?.RepostsCount ?? post?.reposts ?? 0),
+        reposts: Number(post?.repostsCount ?? post?.RepostsCount ?? post?.reposts ?? 0),
+        commentsCount: Number(post?.commentsCount ?? post?.CommentsCount ?? post?.comments?.length ?? 0),
+        bookmarksCount: Number(post?.bookmarksCount ?? post?.BookmarksCount ?? post?.bookmarks ?? 0),
+        sharesCount: Number(post?.sharesCount ?? post?.SharesCount ?? 0),
+        viewsCount: Number(post?.viewsCount ?? post?.ViewsCount ?? 0),
+        isLiked: Boolean(post?.isLiked ?? post?.IsLiked),
+        isReposted: Boolean(post?.isReposted ?? post?.IsReposted),
+        isBookmarked: Boolean(post?.isBookmarked ?? post?.IsBookmarked),
         comments: Array.isArray(post?.comments) ? post.comments : [],
         content,
         caption,
@@ -251,20 +341,18 @@ export const writeStoredFeedPosts = (posts) => {
 };
 
 export const mergeFeedPosts = (...collections) => {
-    const seen = new Set();
-    const merged = [];
+    const mergedById = new Map();
 
     collections.flat().forEach((post) => {
         const normalized = normalizeFeedPost(post, null);
-        if (!normalized || !normalized.id || seen.has(normalized.id)) {
+        if (!normalized || !normalized.id) {
             return;
         }
 
-        seen.add(normalized.id);
-        merged.push(normalized);
+        mergedById.set(normalized.id, normalized);
     });
 
-    return merged.sort((left, right) => {
+    return Array.from(mergedById.values()).sort((left, right) => {
         const leftTime = new Date(left.createdAt || 0).getTime();
         const rightTime = new Date(right.createdAt || 0).getTime();
         return rightTime - leftTime;

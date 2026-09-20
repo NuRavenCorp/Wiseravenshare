@@ -30,6 +30,8 @@ function Invoke-Checked {
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 $specPath = $null
+$originalDockerConfig = $env:DOCKER_CONFIG
+$tempDockerConfig = $null
 Push-Location $repoRoot
 
 try {
@@ -56,6 +58,11 @@ try {
         Write-Host "Registry '$Registry' not found. Creating in nyc3 starter tier..." -ForegroundColor Yellow
         Invoke-Checked -Command "doctl registry create $Registry --region nyc3 --subscription-tier starter"
     }
+
+    # Use an isolated docker config folder to prevent config.json rename/lock errors on Windows.
+    $tempDockerConfig = Join-Path $env:TEMP ("docker-config-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tempDockerConfig -Force | Out-Null
+    $env:DOCKER_CONFIG = $tempDockerConfig
 
     Invoke-Checked -Command "doctl registry login"
 
@@ -97,6 +104,17 @@ try {
     Write-Host "API image: $apiImage"
 }
 finally {
+    if ($null -ne $originalDockerConfig) {
+        $env:DOCKER_CONFIG = $originalDockerConfig
+    }
+    else {
+        Remove-Item Env:\DOCKER_CONFIG -ErrorAction SilentlyContinue
+    }
+
+    if ($tempDockerConfig -and (Test-Path $tempDockerConfig)) {
+        Remove-Item -Path $tempDockerConfig -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     if ($specPath -and (Test-Path $specPath)) {
         Remove-Item -Path $specPath -Force
     }

@@ -18,18 +18,30 @@ public class MediaController : ControllerBase
     private readonly ISocialPlatformService _socialPlatformService;
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly IBlobStorageService _blobStorage;
     private readonly ILogger<MediaController> _logger;
     private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
+    private readonly string _projectFolder;
 
-    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, RavensightMediaCatalogStore mediaCatalogStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
+    public MediaController(
+        IWebHostEnvironment environment,
+        IConfiguration configuration,
+        IYouTubeService youTubeService,
+        VideoLibraryStore videoLibraryStore,
+        RavensightMediaCatalogStore mediaCatalogStore,
+        IBlobStorageService blobStorage,
+        ILogger<MediaController> logger,
+        OutputCacheInvalidationService cacheInvalidation,
+        ISocialPlatformService socialPlatformService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _socialPlatformService = socialPlatformService;
         _videoLibraryStore = videoLibraryStore;
         _mediaCatalogStore = mediaCatalogStore;
+        _blobStorage = blobStorage;
         _logger = logger;
         _cacheInvalidation = cacheInvalidation;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
@@ -39,6 +51,11 @@ public class MediaController : ControllerBase
         }
 
         _defaultVideoDestination = StoragePathResolver.ResolveDefaultVideoDestination(
+            configuration,
+            environment.ContentRootPath,
+            "wiseravenshare");
+
+        _projectFolder = StoragePathResolver.ResolveProjectFolder(
             configuration,
             environment.ContentRootPath,
             "wiseravenshare");
@@ -67,9 +84,10 @@ public class MediaController : ControllerBase
         }
 
         string uniqueFileName;
+        string persistedMediaUrl;
         try
         {
-            uniqueFileName = await SaveMediaFileAsync(upload.File, extension, upload.DestinationFolder, cancellationToken);
+            (uniqueFileName, persistedMediaUrl) = await SaveMediaFileAsync(upload.File, extension, upload.DestinationFolder, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -124,7 +142,7 @@ public class MediaController : ControllerBase
 
         if (wantsSocialCrossPost)
         {
-            var mediaUrlForShare = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+            var mediaUrlForShare = persistedMediaUrl;
             var shareUserId = Guid.TryParse(
                 User.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? User.FindFirstValue("sub")
@@ -182,7 +200,7 @@ public class MediaController : ControllerBase
                 return Unauthorized("Unable to determine current user for video library save.");
             }
 
-            var absoluteVideoUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+            var absoluteVideoUrl = persistedMediaUrl;
             try
             {
                 video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
@@ -210,7 +228,7 @@ public class MediaController : ControllerBase
             }
         }
 
-        var mediaUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+        var mediaUrl = persistedMediaUrl;
 
         // Register photos and music in the user catalog so they appear in My Library.
         if (isPhoto || isAudio)
@@ -269,19 +287,60 @@ public class MediaController : ControllerBase
         });
     }
 
-    private async Task<string> SaveMediaFileAsync(IFormFile file, string extension, string? requestedDestinationFolder, CancellationToken cancellationToken)
+    /// <summary>
+    /// Persists uploaded media. When DigitalOcean Spaces (or S3-compatible) blob storage is
+    /// configured the file is streamed directly to the bucket and the persistent public URL is
+    /// returned. This survives container restarts and redeployments.
+    /// Local disk is used only as a development fallback.
+    /// Returns (uniqueFileName, persistentMediaUrl).
+    /// </summary>
+    private async Task<(string FileName, string MediaUrl)> SaveMediaFileAsync(
+        IFormFile file,
+        string extension,
+        string? requestedDestinationFolder,
+        CancellationToken cancellationToken)
     {
         var uniqueFileName = $"{Guid.NewGuid():N}{extension}";
         var normalizedDestination = NormalizeDestinationFolder(requestedDestinationFolder, _defaultVideoDestination);
-        var destinationParts = normalizedDestination.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
+        // ── Blob storage (persistent) ──────────────────────────────────────────
+        if (_blobStorage.IsConfigured)
+        {
+            var objectKey = $"{_projectFolder}/{normalizedDestination}/{uniqueFileName}".Replace('\\', '/').Trim('/');
+            try
+            {
+                await using var blobStream = file.OpenReadStream();
+                var result = await _blobStorage.UploadAsync(
+                    objectKey,
+                    blobStream,
+                    string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "Uploaded media to blob storage: key={ObjectKey} url={PublicUrl}",
+                    result.ObjectKey, result.PublicUrl);
+
+                // Prefer the blob proxy URL so credentials and ACL are handled server-side
+                var blobStreamUrl = StreamingUrlHelper.StreamByBlobPath(result.ObjectKey);
+                var mediaUrl = string.IsNullOrWhiteSpace(blobStreamUrl)
+                    ? result.PublicUrl
+                    : blobStreamUrl;
+
+                return (uniqueFileName, mediaUrl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Blob storage upload failed for {FileName}; falling back to local disk.", uniqueFileName);
+            }
+        }
+
+        // ── Local disk fallback (dev / unconfigured) ───────────────────────────
+        var destinationParts = normalizedDestination.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var candidateFolders = new List<string>
         {
             Path.Combine(new[] { _environment.ContentRootPath, _videoStorageFolderName }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { AppContext.BaseDirectory, _videoStorageFolderName }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", _videoStorageFolderName }.Concat(destinationParts).ToArray()),
-
-            // Backward-compatible fallback.
             Path.Combine(_environment.ContentRootPath, "MediaStorage"),
             Path.Combine(AppContext.BaseDirectory, "MediaStorage"),
             Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage")
@@ -294,9 +353,10 @@ public class MediaController : ControllerBase
             {
                 Directory.CreateDirectory(folder);
                 var filePath = Path.Combine(folder, uniqueFileName);
-                await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await file.CopyToAsync(stream, cancellationToken);
-                return uniqueFileName;
+                await using var diskStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await file.CopyToAsync(diskStream, cancellationToken);
+                var localUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+                return (uniqueFileName, localUrl);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {

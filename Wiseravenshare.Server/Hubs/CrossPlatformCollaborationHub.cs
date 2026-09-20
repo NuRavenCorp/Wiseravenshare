@@ -14,6 +14,8 @@ using Wiseravenshare.Server.Entities.CrossPlatform;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Interfaces.Services;
 using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
+using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Hubs;
@@ -27,15 +29,27 @@ public class CrossPlatformCollaborationHub : Hub
 
     private readonly AppDbContext _dbContext;
     private readonly IPlatformBridgeService _bridgeService;
+    private readonly PodcastVideoBridgeStateService _podcastBridgeStateService;
+    private readonly IEmailService _emailService;
+    private readonly ICommunicationService _communicationService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CrossPlatformCollaborationHub> _logger;
 
     public CrossPlatformCollaborationHub(
         AppDbContext dbContext,
         IPlatformBridgeService bridgeService,
+        PodcastVideoBridgeStateService podcastBridgeStateService,
+        IEmailService emailService,
+        ICommunicationService communicationService,
+        IConfiguration configuration,
         ILogger<CrossPlatformCollaborationHub> logger)
     {
         _dbContext = dbContext;
         _bridgeService = bridgeService;
+        _podcastBridgeStateService = podcastBridgeStateService;
+        _emailService = emailService;
+        _communicationService = communicationService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -542,6 +556,208 @@ public class CrossPlatformCollaborationHub : Hub
             userId, safeTarget, platform);
     }
 
+    public async Task<object> SendRoomInvite(string roomId, string channel, string recipient, string? recipientName = null)
+    {
+        var userId = UserId;
+        var parsedRoomId = ParseRoomId(roomId);
+        await EnsureMembershipAsync(parsedRoomId, userId);
+
+        var safeRecipient = (recipient ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(safeRecipient))
+        {
+            throw new HubException("An email address or phone number is required.");
+        }
+
+        var normalizedChannel = (channel ?? "email").Trim().ToLowerInvariant();
+        if (normalizedChannel is "text" or "sms")
+        {
+            normalizedChannel = "sms";
+        }
+        else if (normalizedChannel is "email" or "mail")
+        {
+            normalizedChannel = "email";
+        }
+        else
+        {
+            throw new HubException("Invite channel must be email or sms.");
+        }
+
+        var room = await _dbContext.Conversations
+            .AsNoTracking()
+            .Where(c => c.Id == parsedRoomId && c.IsGroup && !c.IsDeleted)
+            .Select(c => new { c.GroupName })
+            .FirstOrDefaultAsync();
+
+        if (room is null)
+        {
+            throw new HubException("Room does not exist.");
+        }
+
+        var roomName = string.IsNullOrWhiteSpace(room.GroupName)
+            ? $"Room {roomId}"
+            : room.GroupName.Trim();
+        var inviteUrl = BuildRoomInviteUrl(parsedRoomId);
+        var inviterEmail = await ResolveCurrentUserEmailAsync(userId);
+
+        var sent = false;
+        if (normalizedChannel == "email")
+        {
+            sent = await _emailService.SendCollaborationInviteEmailAsync(new CollaborationInviteEmailMessage
+            {
+                ToEmail = safeRecipient,
+                ToName = recipientName ?? string.Empty,
+                InviterEmail = inviterEmail,
+                RoomName = roomName,
+                RoomId = parsedRoomId.ToString(),
+                InviteLink = inviteUrl
+            });
+        }
+        else
+        {
+            var smsBody = $"Wise Ravens collaboration invite from {inviterEmail}: {roomName}. Join now: {inviteUrl}";
+            sent = await _communicationService.SendNotificationAsync(userId.ToString(), smsBody, safeRecipient, "sms");
+        }
+
+        if (!sent)
+        {
+            throw new HubException($"Failed to send {normalizedChannel} invite. Verify your {normalizedChannel} configuration and recipient details.");
+        }
+
+        await Clients.Caller.SendAsync("CollaborationInviteSent", new
+        {
+            roomId = parsedRoomId.ToString(),
+            channel = normalizedChannel,
+            recipient = safeRecipient,
+            sentAtUtc = DateTime.UtcNow
+        });
+
+        return new
+        {
+            success = true,
+            roomId = parsedRoomId.ToString(),
+            roomName,
+            channel = normalizedChannel,
+            recipient = safeRecipient,
+            inviteUrl
+        };
+    }
+
+    public async Task JoinPodcastBridge(string roomKey = "main")
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId.ToString();
+
+        AddActiveUser(groupName, userId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+        var snapshot = _podcastBridgeStateService.GetSnapshot(normalizedRoomKey);
+        await Clients.Caller.SendAsync("PodcastBridgeSnapshot", snapshot);
+        await Clients.Group(groupName).SendAsync("PodcastBridgePresence", new
+        {
+            roomKey = normalizedRoomKey,
+            userId,
+            action = "joined",
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public async Task LeavePodcastBridge(string roomKey = "main")
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId.ToString();
+
+        RemoveActiveUser(groupName, userId);
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+        await Clients.Group(groupName).SendAsync("PodcastBridgePresence", new
+        {
+            roomKey = normalizedRoomKey,
+            userId,
+            action = "left",
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public async Task PublishPodcastFootageSelection(string roomKey, PodcastBridgeFootageSelection selection)
+    {
+        if (selection is null || string.IsNullOrWhiteSpace(selection.MediaUrl))
+        {
+            throw new HubException("A playable media URL is required for podcast footage selection.");
+        }
+
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        selection.SourceUserId = userId.ToString();
+        if (string.IsNullOrWhiteSpace(selection.SourceUserName))
+        {
+            selection.SourceUserName = Context.User?.Identity?.Name ?? "Videographer";
+        }
+
+        var snapshot = _podcastBridgeStateService.UpsertFootage(normalizedRoomKey, selection);
+        await Clients.Group(groupName).SendAsync("PodcastFootageSelected", new
+        {
+            roomKey = normalizedRoomKey,
+            footage = snapshot.ActiveFootage,
+            updatedAtUtc = snapshot.UpdatedAtUtc
+        });
+    }
+
+    public async Task IssuePodcastCommand(string roomKey, string command, string? note = null, string? targetUserId = null)
+    {
+        var safeCommand = (command ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(safeCommand))
+        {
+            throw new HubException("A command is required.");
+        }
+
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        var created = _podcastBridgeStateService.AddCommand(normalizedRoomKey, new PodcastBridgeCommandRecord
+        {
+            Command = safeCommand,
+            Note = note ?? string.Empty,
+            IssuedByUserId = userId.ToString(),
+            IssuedByUserName = Context.User?.Identity?.Name ?? "Podcast Team",
+            TargetUserId = targetUserId ?? string.Empty
+        });
+
+        await Clients.Group(groupName).SendAsync("PodcastCommandIssued", new
+        {
+            roomKey = normalizedRoomKey,
+            command = created
+        });
+    }
+
+    public async Task AcknowledgePodcastCommand(string roomKey, string commandId, string responseMessage)
+    {
+        var normalizedRoomKey = NormalizePodcastRoomKey(roomKey);
+        var groupName = BuildPodcastGroupName(normalizedRoomKey);
+        var userId = UserId;
+
+        var updatedCommand = _podcastBridgeStateService.AddCommandResponse(normalizedRoomKey, commandId, new PodcastBridgeCommandResponse
+        {
+            ResponderUserId = userId.ToString(),
+            ResponderUserName = Context.User?.Identity?.Name ?? "Operator",
+            Message = responseMessage ?? string.Empty
+        });
+
+        if (updatedCommand is null)
+        {
+            throw new HubException("Command not found.");
+        }
+
+        await Clients.Group(groupName).SendAsync("PodcastCommandResponse", new
+        {
+            roomKey = normalizedRoomKey,
+            command = updatedCommand
+        });
+    }
+
     private static Guid ParseRoomId(string roomId)
     {
         if (!Guid.TryParse(roomId, out var parsedRoomId) || parsedRoomId == Guid.Empty)
@@ -551,6 +767,20 @@ public class CrossPlatformCollaborationHub : Hub
 
         return parsedRoomId;
     }
+
+    private static string NormalizePodcastRoomKey(string? roomKey)
+    {
+        var normalized = (roomKey ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "main";
+        }
+
+        var safe = new string(normalized.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "main" : safe;
+    }
+
+    private static string BuildPodcastGroupName(string roomKey) => $"podcast:{roomKey}";
 
     private async Task EnsureMembershipAsync(Guid roomId, Guid userId)
     {
@@ -625,6 +855,77 @@ public class CrossPlatformCollaborationHub : Hub
         {
             return users.Contains(userId);
         }
+    }
+
+    private string BuildRoomInviteUrl(Guid roomId)
+    {
+        var configuredOrigin = ResolveClientOrigin();
+        if (!string.IsNullOrWhiteSpace(configuredOrigin))
+        {
+            return $"{configuredOrigin}?room={Uri.EscapeDataString(roomId.ToString())}";
+        }
+
+        var request = Context.GetHttpContext()?.Request;
+        if (request is not null && request.Host.HasValue)
+        {
+            var fallbackOrigin = $"{request.Scheme}://{request.Host.Value}";
+            return $"{fallbackOrigin}?room={Uri.EscapeDataString(roomId.ToString())}";
+        }
+
+        return $"/?room={Uri.EscapeDataString(roomId.ToString())}";
+    }
+
+    private string ResolveClientOrigin()
+    {
+        var candidates = new[]
+        {
+            _configuration["CLIENT_ORIGIN"],
+            _configuration["ClientOrigin"],
+            _configuration["Authentication:ClientOrigin"]
+        };
+
+        foreach (var candidate in candidates)
+        {
+            var first = (candidate ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(first))
+            {
+                continue;
+            }
+
+            if (Uri.TryCreate(first, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                return uri.GetLeftPart(UriPartial.Authority);
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private async Task<string> ResolveCurrentUserEmailAsync(Guid userId)
+    {
+        var claimEmail = Context.User?.Claims
+            .FirstOrDefault(claim =>
+                string.Equals(claim.Type, "email", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, "preferred_username", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, "upn", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+
+        if (!string.IsNullOrWhiteSpace(claimEmail))
+        {
+            return claimEmail.Trim();
+        }
+
+        var email = await _dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.Email)
+            .FirstOrDefaultAsync();
+
+        return string.IsNullOrWhiteSpace(email) ? "unknown@wiseravenshare.com" : email.Trim();
     }
 
     private async Task UpsertRoomParticipantAsync(string roomId, Guid userId, DateTime joinedAtUtc, string platform)

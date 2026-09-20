@@ -22,6 +22,10 @@ import GrowthPage from './Pages/GrowthPage';
 import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
+import FeatureReleaseAdminPage from './Pages/FeatureReleaseAdminPage';
+import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
+import CrawlerMetricsInsightsPage from './Pages/CrawlerMetricsInsightsPage';
+import AssistantPage from './Pages/AssistantPage';
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
@@ -34,6 +38,7 @@ import FMRadioPage from './Pages/FMRadioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
+import WiseCoinPage from './Pages/WiseCoinPage';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
@@ -75,6 +80,12 @@ const hasPrivilegedAggregatorRole = (user) => {
     return roleCandidates.includes('privileged') || roleCandidates.includes('priveledged');
 };
 
+const getProfileSlug = (userRecord) => {
+    const rawUsername = String(userRecord?.username || userRecord?.handle || userRecord?.id || 'profile').trim();
+    const cleaned = rawUsername.replace(/^@+/, '').trim();
+    return encodeURIComponent(cleaned || 'profile');
+};
+
 const resolveInitialPublicPage = () => {
     if (typeof window === 'undefined') {
         return 'public-home';
@@ -97,6 +108,10 @@ const resolveInitialPublicPage = () => {
 
     if (normalizedPath === '/login' || normalizedPath === '/social/access' || normalizedPath === '/oauth') {
         return 'login';
+    }
+
+    if (normalizedPath === '/profile' || normalizedPath.startsWith('/profile/')) {
+        return 'profile';
     }
 
     return 'public-home';
@@ -123,13 +138,27 @@ const App = () => {
     const { addToast } = useNotification();
     const { submitCrawledContent, submitCrawledBatch } = usePersonalization();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const profileSlug = useMemo(() => getProfileSlug(user), [user]);
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.has(email);
     }, [adminEmails, user?.email]);
     const canAccessPlatformAggregator = useMemo(() => {
-        return isAdminUser || hasPrivilegedAggregatorRole(user);
-    }, [isAdminUser, user]);
+        return Boolean(user);
+    }, [user]);
+
+    useEffect(() => {
+        if (currentPage !== 'profile') {
+            return;
+        }
+
+        const path = window.location.pathname || '/';
+        const nextPath = `/profile/${profileSlug}`;
+        const isProfilePagePath = /^\/profile(?:\/.*)?$/.test(path);
+        if (!isProfilePagePath || path !== nextPath) {
+            window.history.replaceState({}, '', nextPath);
+        }
+    }, [currentPage, profileSlug]);
 
     useEffect(() => {
         const migrationKey = 'wiseContentCleanupV1';
@@ -507,6 +536,22 @@ const App = () => {
                 return isAdminUser
                     ? <TeamAccessAdminPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'feature-release':
+                return isAdminUser
+                    ? <FeatureReleaseAdminPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'site-crawler-audit':
+                return isAdminUser
+                    ? <SiteCrawlerDashboardPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'crawler-metrics':
+                return isAdminUser
+                    ? <CrawlerMetricsInsightsPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'assistant':
+                return isAdminUser
+                    ? <AssistantPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'facebook-feed':
             case 'tiktok-feed':
             case 'instagram-feed':
@@ -534,16 +579,21 @@ const App = () => {
             case 'music-rights-studio':
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <MusicPlayerPage onNavigate={setCurrentPage} />;
+                return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="cassette" />;
             case 'fm-tuner':
+                return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="radio" />;
             case 'radio-creator':
-                return <FMRadioPage onNavigate={setCurrentPage} />;
+                return isAdminUser
+                    ? <FMRadioPage onNavigate={setCurrentPage} canAccessCreator initialTab="creator" />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'my-library':
                 return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':
                 return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
+            case 'wisecoin':
+                return <WiseCoinPage />;
             case 'privacy':
                 return <PrivacyPolicyPage onBack={() => setCurrentPage('feed')} />;
             case 'terms':
@@ -706,8 +756,8 @@ const App = () => {
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
-        { id: 'fm-tuner', label: '📻 FM Radio & Cassette' },
-        { id: 'radio-creator', label: '🎙️ Radio Creator' },
+        { id: 'fm-tuner', label: '📻 FM Radio' },
+        { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }
@@ -722,7 +772,11 @@ const App = () => {
             { id: 'growth', label: 'Growth' },
             { id: 'revenue', label: 'Revenue' },
             { id: 'team-access-admin', label: 'Team Access' },
-            { id: 'music-rights-studio', label: 'Music Rights' }
+            { id: 'feature-release', label: 'Feature Release' },
+            { id: 'site-crawler-audit', label: 'Site Crawler Audit' },
+            { id: 'crawler-metrics', label: 'Crawler Metrics' },
+            { id: 'music-rights-studio', label: 'Music Rights' },
+            { id: 'radio-creator', label: '🎙️ Radio Creator' }
         );
     }
 

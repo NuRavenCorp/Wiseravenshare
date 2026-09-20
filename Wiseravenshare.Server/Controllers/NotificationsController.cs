@@ -127,14 +127,8 @@ public class NotificationsController : ControllerBase
             return false;
         }
 
-        var configured = (_configuration["Admin:Emails"] ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select((value) => value.Trim().ToLowerInvariant())
-            .Where((value) => !string.IsNullOrWhiteSpace(value))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        configured.Add("admin@wise-ravens.com");
-        return configured.Contains(email);
+        return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email)
+            || string.Equals(email, "admin@wise-ravens.com", StringComparison.OrdinalIgnoreCase);
     }
 
     public sealed class ReminderRequest

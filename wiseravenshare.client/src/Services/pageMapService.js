@@ -21,10 +21,12 @@ const PAGE_NODES = [
   { id: 'ainews', label: 'AI News', category: 'news', icon: 'fas fa-newspaper', tags: ['news', 'articles', 'trends'], related: ['breakingnews', 'truthseeker'] },
   { id: 'ravensight', label: 'Ravensight', category: 'studio', icon: 'fas fa-video', tags: ['studio', 'video', 'media'], related: ['newsroom-video', 'canvas'] },
   { id: 'profile', label: 'Profile', category: 'account', icon: 'fas fa-user', tags: ['user', 'settings'], related: ['team-launchpad', 'messages'] },
+  { id: 'wisecoin', label: 'WiseCoin', category: 'currency', icon: 'fas fa-coins', tags: ['currency', 'wallet', 'rewards'], related: ['feed', 'profile'] },
   { id: 'privacy', label: 'Privacy Policy', category: 'legal', icon: 'fas fa-user-shield', tags: ['legal', 'compliance'] },
   { id: 'terms', label: 'Terms of Service', category: 'legal', icon: 'fas fa-file-contract', tags: ['legal', 'compliance'] },
   { id: 'revenue', label: 'Revenue', category: 'admin', icon: 'fas fa-chart-line', tags: ['admin', 'growth'], adminOnly: true, related: ['team-access-admin'] },
-  { id: 'team-access-admin', label: 'Team Access', category: 'admin', icon: 'fas fa-user-shield', tags: ['admin', 'permissions'], adminOnly: true, related: ['team-launchpad'] }
+  { id: 'team-access-admin', label: 'Team Access', category: 'admin', icon: 'fas fa-user-shield', tags: ['admin', 'permissions'], adminOnly: true, related: ['team-launchpad'] },
+  { id: 'crawler-metrics', label: 'Crawler Metrics', category: 'admin', icon: 'fas fa-chart-pie', tags: ['admin', 'crawler', 'analytics'], adminOnly: true, related: ['site-crawler-audit', 'growth'] }
 ];
 
 const DEFAULT_NAV_ORDER = [
@@ -44,15 +46,17 @@ const DEFAULT_NAV_ORDER = [
   'music-rights-studio',
   'podcast-rights-studio',
   'team-launchpad',
+  'collaboration',
   'truthseeker',
   'ai-assistant',
   'ainews',
   'ravensight',
+  'wisecoin',
   'profile'
 ];
 
 const ADMIN_INSERT_AFTER = 'canvas';
-const ADMIN_NODES = ['revenue', 'team-access-admin'];
+const ADMIN_NODES = ['revenue', 'team-access-admin', 'crawler-metrics'];
 
 const PAGE_INDEX = new Map(PAGE_NODES.map((node) => [node.id, node]));
 

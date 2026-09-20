@@ -28,8 +28,17 @@ const normalizeSocialFeeds = (socialFeeds) => {
         tikTok: mapConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: mapConnection(getConnection(feeds, 'facebook', 'Facebook')),
         instagram: mapConnection(getConnection(feeds, 'instagram', 'Instagram')),
-        youtube: mapConnection(getConnection(feeds, 'youtube', 'YouTube'))
+        // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
+        youtube: mapConnection(getConnection(feeds, 'youtube', 'youTube', 'YouTube')),
+        twitter: mapConnection(getConnection(feeds, 'twitter', 'Twitter')),
+        linkedIn: mapConnection(getConnection(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        bluesky: mapConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
     };
+};
+
+const isPlaceholderDisplayName = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === 'local user' || text === 'local-user' || text === 'localuser' || text === 'user' || text === 'you';
 };
 
 const normalizeUser = (user) => {
@@ -39,8 +48,11 @@ const normalizeUser = (user) => {
 
     const avatar = user.avatar || user.avatarUrl || user.photoURL || '';
     const avatarUrl = user.avatarUrl || user.avatar || user.photoURL || '';
-    const name = user.name || user.displayName || user.username || '';
-    const displayName = user.displayName || user.name || user.username || '';
+    const username = String(user.username || '').trim();
+    const nameCandidate = user.name || user.displayName || username || '';
+    const displayNameCandidate = user.displayName || user.name || username || '';
+    const name = isPlaceholderDisplayName(nameCandidate) ? (username || '') : nameCandidate;
+    const displayName = isPlaceholderDisplayName(displayNameCandidate) ? (username || name || '') : displayNameCandidate;
 
     return {
         ...user,
@@ -102,16 +114,26 @@ export const AuthProvider = ({ children }) => {
 
     const checkAuth = async () => {
         try {
-            const token = authService.getToken();
-            if (token) {
-                const userData = normalizeUser(await authService.verifyToken(token));
-                setUser(userData);
-                localStorage.setItem('user_data', JSON.stringify(userData));
-                localStorage.setItem('wiseSocialFeeds', JSON.stringify(userData?.socialFeeds || {}));
-                window.dispatchEvent(new Event('wiseraven:social-updated'));
-            } else {
-                clearAuthState();
+            let token = authService.getToken();
+            if (!token) {
+                try {
+                    const refreshed = await authService.refreshSession();
+                    token = refreshed?.token || authService.getToken();
+                } catch {
+                    token = '';
+                }
             }
+
+            if (!token) {
+                clearAuthState();
+                return;
+            }
+
+            const userData = normalizeUser(await authService.verifyToken(token));
+            setUser(userData);
+            localStorage.setItem('user_data', JSON.stringify(userData));
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(userData?.socialFeeds || {}));
+            window.dispatchEvent(new Event('wiseraven:social-updated'));
         } catch (err) {
             console.error('Auth check failed:', err);
             const status = err?.status || err?.response?.status || 0;

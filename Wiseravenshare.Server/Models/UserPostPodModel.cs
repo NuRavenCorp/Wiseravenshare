@@ -7,7 +7,7 @@ public sealed class User
     public string AvatarUrl { get; set; } = string.Empty;
 }
 
-public enum MediaType
+public enum UserPostMediaType
 {
     Unknown = 0,
     Image = 1,
@@ -20,7 +20,7 @@ public sealed class Post
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Content { get; set; } = string.Empty;
     public string MediaUrl { get; set; } = string.Empty;
-    public MediaType MediaType { get; set; } = MediaType.Unknown;
+    public UserPostMediaType MediaType { get; set; } = UserPostMediaType.Unknown;
     public bool IsLiveEvent { get; set; }
     public string Location { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

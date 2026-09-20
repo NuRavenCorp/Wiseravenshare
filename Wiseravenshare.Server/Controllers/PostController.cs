@@ -2,11 +2,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers
@@ -140,10 +142,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> LikePost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.LikePostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.LikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error liking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to like post. Please try again." });
+            }
         }
 
         /// <summary>
@@ -154,10 +168,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnlikePost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.UnlikePostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnlikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unliking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to unlike post. Please try again." });
+            }
         }
 
         /// <summary>
@@ -168,10 +194,22 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> RepostPost(Guid id)
         {
-            var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.RepostPostAsync(userId, id);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.RepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
         }
 
         /// <summary>
@@ -182,10 +220,50 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnrepostPost(Guid id)
         {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnrepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unreposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
+        }
+
+        /// <summary>
+        /// Get comments for a post
+        /// </summary>
+        [HttpGet("{id}/comments")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostCommentDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetComments(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var comments = await _postService.GetCommentsAsync(id, page, pageSize);
+            return Ok(comments);
+        }
+
+        /// <summary>
+        /// Add a comment to a post
+        /// </summary>
+        [HttpPost("{id}/comments")]
+        [ProducesResponseType(typeof(PostCommentDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> AddComment(Guid id, [FromBody] AddPostCommentDto dto)
+        {
             var userId = await ResolveEffectiveUserIdAsync();
-            var state = await _postService.UnrepostPostAsync(userId, id);
+            var comment = await _postService.AddCommentAsync(userId, id, dto);
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return Ok(state);
+            return Ok(comment);
         }
 
         /// <summary>
@@ -272,6 +350,35 @@ namespace Wiseravenshare.Server.Controllers
                 ?? User.FindFirstValue("email")
                 ?? string.Empty).Trim();
 
+            var username = (User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue(ClaimTypes.Upn)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.UniqueName)
+                ?? User.FindFirstValue("preferred_username")
+                ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                try
+                {
+                    var byUsername = await _userRepository.GetByUsernameAsync(username);
+                    if (byUsername is not null)
+                    {
+                        if (!byUsername.IsActive)
+                        {
+                            byUsername.IsActive = true;
+                            await _userRepository.UpdateAsync(byUsername);
+                        }
+
+                        _logger.LogInformation("Recovered domain user mapping by username {Username}: token user {TokenUserId} -> domain user {DomainUserId}", username, claimUserId, byUsername.Id);
+                        return byUsername.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "User lookup by username failed for {Username}; continuing identity resolution.", username);
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(email))
             {
                 _logger.LogWarning("Unable to resolve missing domain user {UserId} because token email claim is missing.", claimUserId);
@@ -299,8 +406,8 @@ namespace Wiseravenshare.Server.Controllers
                 return claimUserId;
             }
 
-            var displayName = (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
-            var usernameSeed = displayName.Length > 0 ? displayName : email.Split('@')[0];
+            var displayName = username.Length > 0 ? username : (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
+            var usernameSeed = username.Length > 0 ? username : (displayName.Length > 0 ? displayName : email.Split('@')[0]);
             var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(sanitizedUsername))
             {

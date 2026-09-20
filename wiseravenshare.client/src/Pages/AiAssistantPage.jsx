@@ -2,29 +2,20 @@ import React, { useState, useRef, useEffect } from 'react';
 import aiAssistantService from '../Services/aiAssistantService';
 
 const AI_OFFLINE_ALERT_SESSION_KEY = 'wiseraven-ai-offline-alerted';
-const DEFAULT_CONNECTOR = {
-    enabled: false,
-    provider: 'openai',
-    baseUrl: '',
-    defaultModel: '',
-    apiKey: '',
-    clearApiKey: false,
-    hasApiKey: false,
-    apiKeyMasked: ''
-};
 
 const SUGGESTIONS = [
     'How do I cross-post to all platforms?',
     'Why did my TikTok share fail?',
     'How do I connect my Instagram account?',
-    'What is the Truth Engine?'
+    'What is the Truth Engine?',
+    'What pages are trending in the crawler map right now?'
 ];
 
 const AiAssistantPage = ({ addTruthAlert }) => {
     const [messages, setMessages] = useState([
         {
             role: 'assistant',
-            content: "Hi! I'm the Wiseravenshare Assistant. Ask me anything about posting, cross-sharing, or using the platform."
+            content: "Hi! I'm the AI Assistant. I can answer platform questions and use crawler insights about site pathways and trending content."
         }
     ]);
     const [input, setInput] = useState('');
@@ -32,84 +23,49 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const [streaming, setStreaming] = useState(false);
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState('');
-    const [ollmaInitializing, setOllamaInitializing] = useState(true);
-    const [ollmaError, setOllamaError] = useState(null);
-    const [healthProvider, setHealthProvider] = useState('platform-default');
-    const [usingUserConnector, setUsingUserConnector] = useState(false);
-    const [connectorSettings, setConnectorSettings] = useState(DEFAULT_CONNECTOR);
-    const [connectorSaving, setConnectorSaving] = useState(false);
-    const [connectorMessage, setConnectorMessage] = useState('');
+    const [useCrawlerContext, setUseCrawlerContext] = useState(true);
+    const [aiInitializing, setAiInitializing] = useState(true);
+    const [aiError, setAiError] = useState(null);
     const scrollRef = useRef(null);
     const abortRef = useRef(null);
 
-    const normalizeConnector = (value) => {
-        const source = value || {};
-        return {
-            ...DEFAULT_CONNECTOR,
-            enabled: Boolean(source.enabled),
-            provider: String(source.provider || 'openai').toLowerCase(),
-            baseUrl: String(source.baseUrl || ''),
-            defaultModel: String(source.defaultModel || ''),
-            apiKey: '',
-            clearApiKey: false,
-            hasApiKey: Boolean(source.hasApiKey),
-            apiKeyMasked: String(source.apiKeyMasked || '')
-        };
-    };
-
-    const refreshHealth = async ({ raiseAlert = true } = {}) => {
-        setOllamaInitializing(true);
-        setOllamaError(null);
-
-        const health = await aiAssistantService.healthCheck(5, 1000);
-
-        setHealthProvider(health.provider || 'platform-default');
-        setUsingUserConnector(Boolean(health.usingUserConnector));
-
-        if (health.online) {
-            setOllamaError(null);
-            setModels(health.models || []);
-            if (health.models && health.models.length > 0) {
-                setSelectedModel((previous) => {
-                    if (previous && health.models.includes(previous)) {
-                        return previous;
-                    }
-                    return health.models[0];
-                });
-            }
-        } else {
-            setOllamaError(health.message);
-            const alreadyAlerted = sessionStorage.getItem(AI_OFFLINE_ALERT_SESSION_KEY) === '1';
-            if (addTruthAlert && raiseAlert && !alreadyAlerted) {
-                sessionStorage.setItem(AI_OFFLINE_ALERT_SESSION_KEY, '1');
-                addTruthAlert('error', 'AI Backend Offline', health.message);
-            }
-        }
-
-        setOllamaInitializing(false);
-    };
-
-    // Initialize active AI backend and load BYO connector settings.
+    // Initialize provider health check on page load (once only)
     useEffect(() => {
         let cancelled = false;
-
-        const initAssistant = async () => {
-            const connector = await aiAssistantService.getConnectorSettings();
-            if (!cancelled && connector) {
-                setConnectorSettings(normalizeConnector(connector));
+        
+        const initAi = async () => {
+            setAiInitializing(true);
+            setAiError(null);
+            
+            const health = await aiAssistantService.healthCheck(5, 1000);
+            
+            if (cancelled) return;
+            
+            if (health.online) {
+                setAiError(null);
+                setModels(health.models || []);
+                if (health.models && health.models.length > 0) {
+                    setSelectedModel(health.models[0]);
+                }
+            } else {
+                setAiError(health.message);
+                // Alert once per browser session to avoid duplicate offline noise.
+                const alreadyAlerted = sessionStorage.getItem(AI_OFFLINE_ALERT_SESSION_KEY) === '1';
+                if (addTruthAlert && !alreadyAlerted) {
+                    sessionStorage.setItem(AI_OFFLINE_ALERT_SESSION_KEY, '1');
+                    addTruthAlert('error', 'AI Assistant Offline', health.message);
+                }
             }
-
-            if (!cancelled) {
-                await refreshHealth({ raiseAlert: true });
-            }
+            
+            setAiInitializing(false);
         };
-
-        initAssistant();
+        
+        initAi();
         
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, []); // Empty dependency array - run only on mount
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -149,14 +105,24 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         return next;
                     });
                 },
-                controller.signal
+                controller.signal,
+                useCrawlerContext
             );
             if (!acc.trim()) {
+                const fallback = await aiAssistantService.chat(
+                    message,
+                    history,
+                    selectedModel || null,
+                    useCrawlerContext
+                );
+
                 setMessages((prev) => {
                     const next = [...prev];
                     next[next.length - 1] = {
                         role: 'assistant',
-                        content: 'Sorry, the assistant returned an empty reply. Please try again.'
+                        content: fallback?.success && fallback?.reply
+                            ? String(fallback.reply).trim()
+                            : (fallback?.error || 'Sorry, the assistant returned an empty reply. Please try again.')
                     };
                     return next;
                 });
@@ -191,7 +157,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
         setMessages([
             {
                 role: 'assistant',
-                content: "Hi! I'm the Wiseravenshare Assistant. Ask me anything about posting, cross-sharing, or using the platform."
+                content: "Hi! I'm the AI Assistant. I can answer platform questions and use crawler insights about site pathways and trending content."
             }
         ]);
     };
@@ -244,8 +210,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '480px' }}>
-            {/* AI Backend Initialization Status */}
-            {ollmaInitializing && (
+            {/* AI Initialization Status */}
+            {aiInitializing && (
                 <div style={{
                     background: 'rgba(59, 130, 246, 0.15)',
                     border: '1px solid rgba(59, 130, 246, 0.5)',
@@ -259,11 +225,11 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     gap: '10px'
                 }}>
                     <span style={{ animation: 'spin 1s linear infinite' }}>⟳</span>
-                    <span>Initializing AI backend... This may take a moment.</span>
+                    <span>Initializing the AI assistant...</span>
                 </div>
             )}
             
-            {ollmaError && !ollmaInitializing && (
+            {aiError && !aiInitializing && (
                 <div style={{
                     background: 'rgba(239, 68, 68, 0.15)',
                     border: '1px solid rgba(239, 68, 68, 0.5)',
@@ -273,28 +239,29 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     fontSize: '14px',
                     color: '#f87171'
                 }}>
-                    <strong>⚠️ AI Backend Offline</strong>
+                    <strong>⚠️ AI Assistant Offline</strong>
                     <div style={{ marginTop: '6px', fontSize: '13px', opacity: 0.9 }}>
-                        {ollmaError}
-                    </div>
-                    <div style={{ marginTop: '6px', fontSize: '12px', opacity: 0.8 }}>
-                        Configure your connector below or use the platform default AI provider.
+                        {aiError}
                     </div>
                 </div>
             )}
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '10px', flexWrap: 'wrap' }}>
                 <div>
-                    <h2 style={{ margin: 0, fontSize: '20px' }}>🦉 Raven Assistant</h2>
+                    <h2 style={{ margin: 0, fontSize: '20px' }}>🦉 AI Assistant</h2>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Your in-app AI helper for platform questions and support.
-                        {' '}
-                        {usingUserConnector
-                            ? `Connected to your AI (${healthProvider}).`
-                            : `Using platform AI (${healthProvider}).`}
+                        DigitalOcean AI assistant with crawler-aware platform guidance.
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--light-color)' }}>
+                        <input
+                            type="checkbox"
+                            checked={useCrawlerContext}
+                            onChange={(e) => setUseCrawlerContext(e.target.checked)}
+                        />
+                        Crawler context
+                    </label>
                     {models.length > 0 && (
                         <select
                             value={selectedModel}
@@ -536,7 +503,7 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                             key={s}
                             type="button"
                             onClick={() => send(s)}
-                            disabled={ollmaInitializing || Boolean(ollmaError)}
+                            disabled={aiInitializing || aiError}
                             style={{
                                 border: '1px solid var(--border-color)',
                                 background: 'rgba(17,24,39,0.7)',
@@ -544,8 +511,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                                 borderRadius: '999px',
                                 padding: '6px 12px',
                                 fontSize: '12px',
-                                cursor: (ollmaInitializing || Boolean(ollmaError)) ? 'not-allowed' : 'pointer',
-                                opacity: (ollmaInitializing || Boolean(ollmaError)) ? 0.5 : 1
+                                cursor: (aiInitializing || aiError) ? 'not-allowed' : 'pointer',
+                                opacity: (aiInitializing || aiError) ? 0.5 : 1
                             }}
                         >
                             {s}
@@ -559,9 +526,9 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={ollmaInitializing ? "Waiting for AI backend to initialize..." : ollmaError ? "AI backend is offline. Check connector settings." : "Ask the Raven Assistant..."}
+                    placeholder={aiInitializing ? "Waiting for the AI assistant..." : aiError ? "The AI assistant is offline right now." : "Ask the AI Assistant..."}
                     rows={2}
-                    disabled={loading || ollmaInitializing || ollmaError}
+                    disabled={loading || aiInitializing || aiError}
                     style={{
                         flex: 1,
                         resize: 'none',
@@ -572,14 +539,14 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         color: 'var(--text-color)',
                         fontSize: '14px',
                         fontFamily: 'inherit',
-                        opacity: (loading || ollmaInitializing || ollmaError) ? 0.6 : 1,
-                        cursor: (loading || ollmaInitializing || ollmaError) ? 'not-allowed' : 'text'
+                        opacity: (loading || aiInitializing || aiError) ? 0.6 : 1,
+                        cursor: (loading || aiInitializing || aiError) ? 'not-allowed' : 'text'
                     }}
                 />
                 <button
                     type="button"
                     onClick={() => send(input)}
-                    disabled={loading || !input.trim() || ollmaInitializing || ollmaError}
+                    disabled={loading || !input.trim() || aiInitializing || aiError}
                     style={{
                         border: 'none',
                         borderRadius: '12px',
@@ -587,8 +554,8 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                         background: 'var(--highlight-color)',
                         color: '#10151f',
                         fontWeight: 700,
-                        cursor: (loading || !input.trim() || ollmaInitializing || ollmaError) ? 'not-allowed' : 'pointer',
-                        opacity: (loading || !input.trim() || ollmaInitializing || ollmaError) ? 0.5 : 1
+                        cursor: (loading || !input.trim() || aiInitializing || aiError) ? 'not-allowed' : 'pointer',
+                        opacity: (loading || !input.trim() || aiInitializing || aiError) ? 0.5 : 1
                     }}
                 >
                     Send

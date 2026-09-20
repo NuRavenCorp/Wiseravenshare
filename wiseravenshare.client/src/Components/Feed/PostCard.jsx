@@ -4,12 +4,13 @@ import { truthEngine } from '../../Services/truthEngine';
 import { apiService } from '../../Services/api';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { classifyPostMedia } from './postMediaClassifier';
-import '@flaticon/flaticon-uicons/css/all/all.css';
 
 const PostCard = ({
     post,
     onLike,
     onRepost,
+    onLoadComments,
+    onAddComment,
     onDispute,
     onVerify,
     integrityReport,
@@ -22,58 +23,9 @@ const PostCard = ({
 }) => {
     const [showComments, setShowComments] = useState(false);
     const [commentText, setCommentText] = useState('');
-    const [comments, setComments] = useState(Array.isArray(post.comments) ? post.comments : []);
-    const [isCommentsLoading, setIsCommentsLoading] = useState(false);
-    const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-
-    const commentsCount = useMemo(() => {
-        if (Number.isFinite(Number(post.commentsCount))) {
-            return Number(post.commentsCount);
-        }
-
-        if (Array.isArray(comments)) {
-            return comments.length;
-        }
-
-        return 0;
-    }, [comments, post.commentsCount]);
-
-    const likesCount = Number(post.likes ?? post.likesCount ?? 0);
-    const repostsCount = Number(post.reposts ?? post.repostsCount ?? 0);
-
-    useEffect(() => {
-        setComments(Array.isArray(post.comments) ? post.comments : []);
-    }, [post.id, post.comments]);
-
-    useEffect(() => {
-        if (!showComments || !post?.id) {
-            return;
-        }
-
-        let cancelled = false;
-        const loadComments = async () => {
-            setIsCommentsLoading(true);
-            try {
-                const response = await apiService.getComments(post.id);
-                const nextComments = Array.isArray(response?.data) ? response.data : [];
-                if (!cancelled) {
-                    setComments(nextComments);
-                    onCommentCountChange?.(post.id, nextComments.length);
-                }
-            } catch {
-                // Keep local comments as fallback.
-            } finally {
-                if (!cancelled) {
-                    setIsCommentsLoading(false);
-                }
-            }
-        };
-
-        void loadComments();
-        return () => {
-            cancelled = true;
-        };
-    }, [showComments, post?.id, onCommentCountChange]);
+    const [comments, setComments] = useState(post.comments || []);
+    const [isLoadingComments, setIsLoadingComments] = useState(false);
+    const [isSavingComment, setIsSavingComment] = useState(false);
 
     const displayUser = useMemo(() => {
         const postUser = post.user || {};
@@ -90,6 +42,29 @@ const PostCard = ({
             avatar: currentUser.avatar || currentUser.avatarUrl || postUser.avatar || postUser.avatarUrl
         };
     }, [post.user, post.userId, currentUser]);
+
+    const displayHandle = useMemo(() => {
+        const raw = String(
+            displayUser?.handle
+            || displayUser?.username
+            || displayUser?.name
+            || ''
+        ).trim();
+
+        if (raw) {
+            return raw.startsWith('@') ? raw : `@${raw.replace(/^@+/, '')}`;
+        }
+
+        const email = String(displayUser?.email || '').trim();
+        if (email.includes('@')) {
+            const prefix = email.split('@')[0].trim();
+            if (prefix) {
+                return `@${prefix}`;
+            }
+        }
+
+        return '@user';
+    }, [displayUser]);
 
     const truthBadge = useMemo(() => {
         const content = String(post.content || '').trim();
@@ -117,61 +92,149 @@ const PostCard = ({
         };
     }, [post.predictedEngagementScore, post.confidence]);
 
+    const provenance = useMemo(() => {
+        const raw = post.provenance && typeof post.provenance === 'object' ? post.provenance : null;
+        if (!raw) {
+            return null;
+        }
+
+        const sourceUrl = typeof raw.sourceUrl === 'string' ? raw.sourceUrl.trim() : '';
+        const evidenceSummary = typeof raw.evidenceSummary === 'string' ? raw.evidenceSummary.trim() : '';
+        const verificationStatus = typeof raw.verificationStatus === 'string' ? raw.verificationStatus.trim().toLowerCase() : '';
+        const correctionReferenceUrl = typeof raw.correctionReferenceUrl === 'string' ? raw.correctionReferenceUrl.trim() : '';
+
+        if (!sourceUrl && !evidenceSummary && !verificationStatus && !correctionReferenceUrl) {
+            return null;
+        }
+
+        const labelByStatus = {
+            unverified: 'Unverified',
+            'community-reviewed': 'Community Reviewed',
+            verified: 'Verified',
+            contested: 'Contested'
+        };
+
+        const statusLabel = labelByStatus[verificationStatus] || (verificationStatus ? verificationStatus : 'Unverified');
+        const statusStyleByStatus = {
+            unverified: { border: '1px solid rgba(250, 204, 21, 0.6)', background: 'rgba(250, 204, 21, 0.12)', color: '#fde68a' },
+            'community-reviewed': { border: '1px solid rgba(56, 189, 248, 0.6)', background: 'rgba(56, 189, 248, 0.12)', color: '#bae6fd' },
+            verified: { border: '1px solid rgba(74, 222, 128, 0.6)', background: 'rgba(74, 222, 128, 0.12)', color: '#bbf7d0' },
+            contested: { border: '1px solid rgba(248, 113, 113, 0.6)', background: 'rgba(248, 113, 113, 0.12)', color: '#fecaca' }
+        };
+
+        return {
+            sourceUrl,
+            evidenceSummary,
+            verificationStatus,
+            correctionReferenceUrl,
+            statusLabel,
+            statusStyle: statusStyleByStatus[verificationStatus] || statusStyleByStatus.unverified
+        };
+    }, [post.provenance]);
+
     const platformLinks = [
         post.youtubeUrl && { href: post.youtubeUrl, label: 'YouTube', color: '#ff0000' },
         post.tiktokUrl && { href: post.tiktokUrl, label: 'TikTok', color: '#ffffff' },
         post.facebookUrl && { href: post.facebookUrl, label: 'Facebook', color: '#1877f2' }
     ].filter(Boolean);
 
-    const addComment = async () => {
-        const nextContent = commentText.trim();
-        if (!nextContent || isSubmittingComment) {
+    const mediaItems = useMemo(() => {
+        const items = [];
+        const pushIfValid = (candidate) => {
+            const resolved = resolveMediaUrl(String(candidate || '').trim());
+            if (!resolved) {
+                return;
+            }
+            if (!items.includes(resolved)) {
+                items.push(resolved);
+            }
+        };
+
+        pushIfValid(post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '');
+
+        if (Array.isArray(post.mediaUrls)) {
+            post.mediaUrls.forEach((candidate) => pushIfValid(candidate));
+        } else if (typeof post.mediaUrls === 'string') {
+            const trimmed = post.mediaUrls.trim();
+            if (trimmed) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) {
+                        parsed.forEach((candidate) => pushIfValid(candidate));
+                    } else {
+                        pushIfValid(trimmed);
+                    }
+                } catch {
+                    trimmed
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean)
+                        .forEach((candidate) => pushIfValid(candidate));
+                }
+            }
+        }
+
+        return items;
+    }, [post.mediaUrl, post.url, post.videoUrl, post.imageUrl, post.mediaUrls]);
+
+    const likesCount = Number(post.likesCount ?? post.likes ?? 0);
+    const repostsCount = Number(post.repostsCount ?? post.reposts ?? 0);
+    const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
+
+    const handleToggleComments = async () => {
+        const shouldOpen = !showComments;
+        setShowComments(shouldOpen);
+
+        if (!shouldOpen || typeof onLoadComments !== 'function') {
             return;
         }
 
-        setIsSubmittingComment(true);
+        setIsLoadingComments(true);
         try {
-            const response = await apiService.addComment(post.id, nextContent);
-            const payload = response?.data;
-            const nextComment = payload && typeof payload === 'object'
-                ? payload
-                : {
-                    id: `local-comment-${Date.now()}`,
-                    user: currentUser,
-                    content: nextContent,
-                    createdAt: new Date().toISOString()
-                };
-
-            setComments((prev) => {
-                const merged = [nextComment, ...prev];
-                onCommentCountChange?.(post.id, merged.length);
-                return merged;
-            });
-            setCommentText('');
+            const loaded = await onLoadComments(post.id);
+            setComments(Array.isArray(loaded) ? loaded : []);
+        } catch {
+            // Keep existing comments on transient load failures.
         } finally {
-            setIsSubmittingComment(false);
+            setIsLoadingComments(false);
         }
     };
 
-    const actionButtonStyle = {
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '6px 10px',
-        borderRadius: '999px',
-        border: '1px solid var(--border-color)',
-        background: 'rgba(255,255,255,0.03)',
-        color: 'var(--text-color)',
-        cursor: 'pointer',
-        fontSize: '12px',
-        fontWeight: 600
-    };
+    const addComment = async () => {
+        if (!commentText.trim()) {
+            return;
+        }
 
-    const iconStyle = {
-        fontSize: '16px',
-        lineHeight: 1,
-        width: '16px',
-        textAlign: 'center'
+        const content = commentText.trim();
+
+        if (typeof onAddComment === 'function') {
+            setIsSavingComment(true);
+            try {
+                const saved = await onAddComment(post.id, content);
+                if (saved?.id) {
+                    setComments((prev) => {
+                        const exists = prev.some((item) => item?.id === saved.id);
+                        return exists ? prev : [saved, ...prev];
+                    });
+                }
+                setCommentText('');
+            } catch {
+                // Preserve text when save fails so user can retry.
+            } finally {
+                setIsSavingComment(false);
+            }
+            return;
+        }
+
+        const comment = {
+            id: Date.now(),
+            user: currentUser,
+            content,
+            createdAt: new Date()
+        };
+
+        setComments((prev) => [comment, ...prev]);
+        setCommentText('');
     };
 
     return (
@@ -188,7 +251,7 @@ const PostCard = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <strong>{displayUser?.name || 'Unknown'}</strong>
-                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayUser?.handle || ''}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayHandle}</div>
                 </div>
                 {onFollow && post.userId && post.userId !== currentUser?.id && (
                     <button
@@ -211,49 +274,131 @@ const PostCard = ({
                 )}
             </div>
 
-            {/* Media block renders first so photos are never buried under text */}
-            {(() => {
-                const rawMediaUrl = post.mediaUrl || post.url || post.videoUrl || post.imageUrl || '';
-                const resolvedMedia = resolveMediaUrl(rawMediaUrl);
-                if (!resolvedMedia) return null;
-                const { isVideoPost, isImagePost, isAudioPost } = classifyPostMedia(post, resolvedMedia);
-
-                return (
-                    <div style={{ marginTop: '12px', borderRadius: '12px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', zIndex: 1 }}>
-                        {isVideoPost ? (
-                            <video
-                                src={resolvedMedia}
-                                controls
-                                playsInline
-                                preload="metadata"
-                                style={{ width: '100%', maxHeight: '420px', display: 'block', borderRadius: '12px', background: '#000' }}
-                            />
-                        ) : isImagePost ? (
-                            <img
-                                src={resolvedMedia}
-                                alt="Story media"
-                                style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
-                            />
-                        ) : isAudioPost ? (
-                            <div style={{ padding: '14px', background: 'rgba(255,255,255,0.04)' }}>
-                                <audio
+            {/* Media block renders first so montage items are visible before text */}
+            {mediaItems.length > 0 && (
+                <div
+                    style={{
+                        marginTop: '12px',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: 'rgba(0,0,0,0.4)',
+                        position: 'relative',
+                        zIndex: 1,
+                        padding: mediaItems.length > 1 ? '6px' : 0,
+                        display: 'grid',
+                        gridTemplateColumns: mediaItems.length > 1 ? 'repeat(auto-fit, minmax(220px, 1fr))' : '1fr',
+                        gap: mediaItems.length > 1 ? '6px' : 0
+                    }}
+                >
+                    {mediaItems.map((resolvedMedia, index) => {
+                        const mediaClass = classifyPostMedia({ type: 'Text', mediaType: '' }, resolvedMedia);
+                        if (mediaClass.isVideoPost) {
+                            return (
+                                <video
+                                    key={`${post.id || 'post'}-media-${index}`}
                                     src={resolvedMedia}
                                     controls
+                                    playsInline
                                     preload="metadata"
-                                    style={{ width: '100%' }}
+                                    style={{ width: '100%', maxHeight: '420px', display: 'block', borderRadius: '12px', background: '#000' }}
                                 />
-                            </div>
-                        ) : (
-                            <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            );
+                        }
+
+                        if (mediaClass.isImagePost) {
+                            return (
+                                <img
+                                    key={`${post.id || 'post'}-media-${index}`}
+                                    src={resolvedMedia}
+                                    alt={`Story media ${index + 1}`}
+                                    style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
+                                />
+                            );
+                        }
+
+                        if (mediaClass.isAudioPost) {
+                            return (
+                                <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '14px', background: 'rgba(255,255,255,0.04)', borderRadius: '12px' }}>
+                                    <audio
+                                        src={resolvedMedia}
+                                        controls
+                                        preload="metadata"
+                                        style={{ width: '100%' }}
+                                    />
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <span style={{ fontSize: '13px', color: 'var(--light-color)' }}>📄 Attached Story File</span>
                                 <a href={resolvedMedia} target="_blank" rel="noreferrer" style={{ color: 'var(--highlight-color)', fontWeight: 'bold', fontSize: '13px' }}>
                                     View / Download File
                                 </a>
                             </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <p
+                style={{
+                    marginTop: '12px',
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word'
+                }}
+            >
+                {post.content}
+            </p>
+
+            {provenance && (
+                <div
+                    style={{
+                        marginTop: '10px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '10px',
+                        padding: '10px',
+                        background: 'rgba(255,255,255,0.03)',
+                        display: 'grid',
+                        gap: '8px'
+                    }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>Provenance</strong>
+                        <span
+                            style={{
+                                ...provenance.statusStyle,
+                                borderRadius: '999px',
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                fontWeight: 700
+                            }}
+                        >
+                            {provenance.statusLabel}
+                        </span>
+                    </div>
+
+                    {provenance.evidenceSummary && (
+                        <div style={{ fontSize: '12px', color: 'var(--text-color)', whiteSpace: 'pre-wrap' }}>
+                            {provenance.evidenceSummary}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {provenance.sourceUrl && (
+                            <a href={provenance.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                Source Reference
+                            </a>
+                        )}
+                        {provenance.correctionReferenceUrl && (
+                            <a href={provenance.correctionReferenceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                                Correction Reference
+                            </a>
                         )}
                     </div>
-                );
-            })()}
+                </div>
+            )}
 
             <p
                 style={{
@@ -315,33 +460,14 @@ const PostCard = ({
                 )}
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                <button style={actionButtonStyle} onClick={() => onLike?.(post.id)} aria-label="Heart this post">
-                    <i className="fi fi-br-heart" aria-hidden="true" style={iconStyle} />
-                    Like ({likesCount})
-                </button>
-                <button style={actionButtonStyle} onClick={() => onRepost?.(post.id)} aria-label="Repost this post">
-                    <i className="fi fi-br-stamp" aria-hidden="true" style={iconStyle} />
-                    Repost ({repostsCount})
-                </button>
-                <button style={actionButtonStyle} onClick={() => onBookmark?.(post)} aria-label="Bookmark this post">
-                    <i className="fi fi-br-bookmark" aria-hidden="true" style={iconStyle} />
-                    {bookmarkLabel || 'Bookmark'}
-                </button>
-                <button style={actionButtonStyle} onClick={() => onVerify?.(post)} aria-label="Verify this post">
-                    <i className="fi fi-br-shield-check" aria-hidden="true" style={iconStyle} />
-                    Verify
-                </button>
-                <button style={actionButtonStyle} onClick={() => onDispute?.(post)} aria-label="Dispute this post">
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="fi fi-br-handshake" aria-hidden="true" style={iconStyle} />
-                        <i className="fi fi-br-scale" aria-hidden="true" style={iconStyle} />
-                    </span>
-                    Dispute
-                </button>
-                <button style={actionButtonStyle} onClick={() => setShowComments((prev) => !prev)} aria-label="Toggle comments">
-                    <i className="fi fi-br-comment-dots" aria-hidden="true" style={iconStyle} />
-                    Comments ({commentsCount})
+            <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                <button onClick={() => onLike?.(post.id)}>{post.isLiked ? 'Liked' : 'Like'} ({likesCount})</button>
+                <button onClick={() => onRepost?.(post.id)}>{post.isReposted ? 'Reposted' : 'Repost'} ({repostsCount})</button>
+                <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
+                <button onClick={() => onVerify?.(post)}>Verify</button>
+                <button onClick={() => onDispute?.(post)}>Dispute</button>
+                <button onClick={handleToggleComments}>
+                    Comments ({commentCount})
                 </button>
             </div>
 
@@ -406,7 +532,7 @@ const PostCard = ({
                             {isSubmittingComment ? 'Sending...' : 'Send'}
                         </button>
                     </div>
-                    {isCommentsLoading && (
+                    {isLoadingComments && (
                         <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
                             Loading comments...
                         </div>
@@ -424,6 +550,11 @@ const PostCard = ({
                             <strong>{comment.user?.name || 'User'}:</strong> {comment.content}
                         </div>
                     ))}
+                    {isSavingComment && (
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
+                            Saving comment...
+                        </div>
+                    )}
                 </div>
             )}
         </article>

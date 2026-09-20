@@ -34,6 +34,7 @@ namespace Wiseravenshare.Server.DTOs
         public bool? IsVisibleInFeed { get; set; }
         public string[]? Tags { get; set; }
         public DateTime? ScheduledPublishAt { get; set; }
+        public JsonDocument? MediaMetadata { get; set; }
     }
 
     /// <summary>

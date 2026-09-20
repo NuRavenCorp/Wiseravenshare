@@ -1,6 +1,7 @@
 // wiseravenshare.client/src/Components/MediaLibrary/MediaUpload.jsx
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSavedMedia } from '../../hooks/useSavedMedia';
+import { apiService } from '../../Services/api';
 import './MediaUpload.css';
 
 /**
@@ -10,6 +11,8 @@ const MediaUpload = ({ onMediaUploaded }) => {
   const { saveMedia, loading, error } = useSavedMedia();
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -51,17 +54,31 @@ const MediaUpload = ({ onMediaUploaded }) => {
   };
 
   const handleFileUpload = async (file) => {
-    // TODO: Implement file upload to cloud storage (DigitalOcean Spaces, etc.)
-    // For now, we'll create a local URL
+    setSelectedFile(file);
+    setUploadProgress(0);
     const url = URL.createObjectURL(file);
+    setPreviewUrl((previous) => {
+      if (previous && previous.startsWith('blob:')) {
+        URL.revokeObjectURL(previous);
+      }
+      return url;
+    });
+
     const inferredType = inferMediaType(file);
     setFormData(prev => ({
       ...prev,
-      mediaUrl: url,
       title: file.name,
       mediaType: inferredType
     }));
   };
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl && previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -73,21 +90,59 @@ const MediaUpload = ({ onMediaUploaded }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const manualMediaUrl = String(formData.mediaUrl || '').trim();
 
-    if (!formData.title.trim() || !formData.mediaUrl.trim()) {
-      alert('Please fill in title and media URL');
+    if (!formData.title.trim() || (!selectedFile && !manualMediaUrl)) {
+      alert('Please fill in title and provide a file or media URL');
+      return;
+    }
+
+    if (!selectedFile && /^(blob:|file:)/i.test(manualMediaUrl)) {
+      alert('Temporary local URLs cannot be saved. Upload the file first or use a hosted URL.');
       return;
     }
 
     try {
+      let persistedMediaUrl = manualMediaUrl;
+
+      if (selectedFile) {
+        const mediaType = inferMediaType(selectedFile);
+        const uploadType = mediaType === 'Video'
+          ? 'video'
+          : mediaType === 'Music' || mediaType === 'Audio' || mediaType === 'Podcast'
+            ? 'audio'
+            : 'photo';
+
+        const uploadResult = await apiService.uploadMedia(selectedFile, uploadType, {
+          title: formData.title,
+          description: formData.description,
+          onProgress: setUploadProgress
+        });
+
+        persistedMediaUrl = String(
+          uploadResult?.data?.mediaUrl
+          || uploadResult?.data?.filePath
+          || uploadResult?.data?.url
+          || ''
+        ).trim();
+
+        if (!persistedMediaUrl) {
+          throw new Error('Upload completed but no media URL was returned.');
+        }
+      }
+
       await saveMedia({
         ...formData,
+        mediaUrl: persistedMediaUrl,
         tags: formData.tags.split(',').filter(t => t.trim()),
         fileSizeBytes: null,
         mediaMetadata: null
       });
 
       // Reset form
+      if (previewUrl && previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previewUrl);
+      }
       setFormData({
         title: '',
         description: '',
@@ -96,6 +151,9 @@ const MediaUpload = ({ onMediaUploaded }) => {
         tags: '',
         isVisibleInFeed: false
       });
+      setSelectedFile(null);
+      setPreviewUrl('');
+      setUploadProgress(0);
 
       onMediaUploaded?.();
     } catch (err) {
@@ -142,9 +200,15 @@ const MediaUpload = ({ onMediaUploaded }) => {
           </label>
         </div>
 
-        {formData.mediaUrl && (
+        {(previewUrl || formData.mediaUrl) && (
           <div className="preview-thumbnail">
-            <img src={formData.mediaUrl} alt="Preview" />
+            <img src={previewUrl || formData.mediaUrl} alt="Preview" />
+          </div>
+        )}
+
+        {selectedFile && uploadProgress > 0 && uploadProgress < 100 && (
+          <div className="upload-progress" role="status" aria-live="polite">
+            Uploading {uploadProgress}%
           </div>
         )}
 
@@ -201,7 +265,7 @@ const MediaUpload = ({ onMediaUploaded }) => {
             value={formData.mediaUrl}
             onChange={handleInputChange}
             placeholder="https://example.com/media.jpg"
-            required
+            required={!selectedFile}
           />
         </div>
 

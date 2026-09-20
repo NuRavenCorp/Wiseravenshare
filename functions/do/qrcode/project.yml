@@ -1,0 +1,5 @@
+packages:
+  - name: qr
+    actions:
+      - name: qr 
+        runtime: nodejs:default
