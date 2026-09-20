@@ -3,6 +3,7 @@ import { useState, useCallback } from 'react';
 import axios from 'axios';
 
 const API_BASE_URL = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') || '/api';
+const MEDIA_LIBRARY_BASE = `${API_BASE_URL}/media-library`;
 
 /**
  * Custom hook for managing saved media operations
@@ -11,15 +12,22 @@ export const useSavedMedia = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const getAuthToken = useCallback(() => {
+    const accessToken = localStorage.getItem('accessToken');
+    const legacyToken = localStorage.getItem('token');
+    return accessToken || legacyToken || '';
+  }, []);
+
   const apiCall = useCallback(async (method, endpoint, data = null) => {
     setLoading(true);
     setError(null);
     try {
+      const token = getAuthToken();
       const config = {
         method,
-        url: `${API_BASE_URL}/SavedMedia${endpoint}`,
+        url: `${MEDIA_LIBRARY_BASE}${endpoint}`,
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'Content-Type': 'application/json'
         }
       };
@@ -37,7 +45,7 @@ export const useSavedMedia = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getAuthToken]);
 
   const saveMedia = useCallback(async (mediaData) => {
     const mediaUrl = String(mediaData?.mediaUrl || '').trim().toLowerCase();
@@ -55,28 +63,37 @@ export const useSavedMedia = () => {
   }, [apiCall]);
 
   const getLibrary = useCallback(async (page = 1, pageSize = 20, filters = {}) => {
-    const params = new URLSearchParams({
-      page,
-      pageSize,
-      ...filters
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize)
     });
-    return apiCall('GET', `/library?${params.toString()}`);
+
+    // The server owns filtering through the search endpoint; apply it when requested.
+    if (filters && Object.keys(filters).length > 0) {
+      return apiCall('POST', '/search', {
+        ...filters,
+        page,
+        pageSize
+      });
+    }
+
+    return apiCall('GET', `/mine?${query.toString()}`);
   }, [apiCall]);
 
   const getHiddenMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('GET', `/library/hidden?page=${page}&pageSize=${pageSize}`);
+    return apiCall('POST', '/search', { isVisibleInFeed: false, page, pageSize });
   }, [apiCall]);
 
   const getVisibleMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('GET', `/library/visible?page=${page}&pageSize=${pageSize}`);
+    return apiCall('POST', '/search', { isVisibleInFeed: true, page, pageSize });
   }, [apiCall]);
 
   const getTaggedMedia = useCallback(async (tag, page = 1, pageSize = 20) => {
-    return apiCall('GET', `/library/tag/${encodeURIComponent(tag)}?page=${page}&pageSize=${pageSize}`);
+    return apiCall('POST', '/search', { tag, page, pageSize });
   }, [apiCall]);
 
   const getScheduledMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('GET', `/library/scheduled?page=${page}&pageSize=${pageSize}`);
+    return apiCall('POST', '/search', { scheduledOnly: true, page, pageSize });
   }, [apiCall]);
 
   const updateMedia = useCallback(async (mediaId, updateData) => {
@@ -84,17 +101,12 @@ export const useSavedMedia = () => {
   }, [apiCall]);
 
   const toggleVisibility = useCallback(async (mediaId, isVisible) => {
-    return apiCall('PATCH', `/${mediaId}/toggle-visibility`, {
-      mediaId,
-      isVisibleInFeed: isVisible
-    });
+    return apiCall('PUT', `/${mediaId}`, { isVisibleInFeed: isVisible });
   }, [apiCall]);
 
   const bulkToggleVisibility = useCallback(async (mediaIds, isVisible) => {
-    return apiCall('PATCH', '/bulk/toggle-visibility', {
-      mediaIds,
-      isVisibleInFeed: isVisible
-    });
+    const ids = Array.isArray(mediaIds) ? mediaIds : [];
+    return Promise.all(ids.map((id) => apiCall('PUT', `/${id}`, { isVisibleInFeed: isVisible })));
   }, [apiCall]);
 
   const deleteMedia = useCallback(async (mediaId) => {
@@ -102,19 +114,25 @@ export const useSavedMedia = () => {
   }, [apiCall]);
 
   const publishMedia = useCallback(async (publishData) => {
-    return apiCall('POST', '/publish', publishData);
+    return apiCall('POST', '/search', { ...publishData, publishedOnly: true });
   }, [apiCall]);
 
   const getLibraryStats = useCallback(async () => {
-    return apiCall('GET', '/library/stats');
-  }, [apiCall]);
+    const items = await getLibrary(1, 1000);
+    const list = Array.isArray(items) ? items : (items?.items || items?.data || []);
+    return {
+      total: list.length,
+      visible: list.filter((item) => item?.isVisibleInFeed === true).length,
+      hidden: list.filter((item) => item?.isVisibleInFeed === false).length
+    };
+  }, [getLibrary]);
 
   const addTag = useCallback(async (mediaId, tag) => {
-    return apiCall('POST', `/${mediaId}/tags/${encodeURIComponent(tag)}`);
+    return apiCall('PUT', `/${mediaId}`, { addTag: tag });
   }, [apiCall]);
 
   const removeTag = useCallback(async (mediaId, tag) => {
-    return apiCall('DELETE', `/${mediaId}/tags/${encodeURIComponent(tag)}`);
+    return apiCall('PUT', `/${mediaId}`, { removeTag: tag });
   }, [apiCall]);
 
   return {

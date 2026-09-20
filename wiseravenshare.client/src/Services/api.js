@@ -1220,8 +1220,16 @@ export const apiService = {
         }
 
         try {
-            return await api.delete(`/SavedMedia/${encodeURIComponent(normalizedMediaId)}`);
+            return await api.delete(`/media-library/${encodeURIComponent(normalizedMediaId)}`);
         } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (status === 404 || status === 405) {
+                try {
+                    return await api.delete(`/SavedMedia/${encodeURIComponent(normalizedMediaId)}`);
+                } catch (fallbackError) {
+                    throw normalizeApiError(fallbackError, 'Failed to remove saved media item.');
+                }
+            }
             throw normalizeApiError(error, 'Failed to remove saved media item.');
         }
     },
@@ -1518,6 +1526,18 @@ export const apiService = {
         confirmPayment: (filingId, payload) => api.post(`/podcast-trademark/${encodeURIComponent(filingId)}/confirm-payment`, payload),
         getFilingStatus: (filingId) => api.get(`/podcast-trademark/${encodeURIComponent(filingId)}/status`),
         getUserFilings: (podcastId) => api.get('/podcast-trademark/user/filings', { params: { podcastId } })
+    },
+
+    // IP Publishing Agent & Form Automation Bot
+    ipPublishingAgentApi: {
+        submitCopyright: (payload) => api.post('/ip-publishing-agent/copyright/submit', payload),
+        submitTrademark: (payload) => api.post('/ip-publishing-agent/trademark/submit', payload),
+        getTaskStatus: (taskId) => api.get(`/ip-publishing-agent/task/${encodeURIComponent(taskId)}/status`),
+        getFilingTasks: (filingId) => api.get(`/ip-publishing-agent/filing/${encodeURIComponent(filingId)}/tasks`),
+        submitOfficeActionResponse: (taskId, payload) => api.post(`/ip-publishing-agent/task/${encodeURIComponent(taskId)}/office-action-response`, payload),
+        checkStatusNow: (taskId) => api.post(`/ip-publishing-agent/task/${encodeURIComponent(taskId)}/check-status-now`),
+        getDiagnostics: () => api.get('/ip-publishing-agent/diagnostics'),
+        getBotLogs: (limit = 50) => api.get('/ip-publishing-agent/bot/logs', { params: { limit } })
     }
 };
 
