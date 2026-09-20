@@ -92,6 +92,7 @@ public sealed class MusicRightsController : ControllerBase
             createdAtUtc,
             message    = $"Track '{request.Title}' successfully registered.",
             document,
+            printUrl   = $"/api/music-rights/certificate/{registrationId}/print",
             metadata   = new
             {
                 title           = request.Title,
@@ -103,6 +104,77 @@ public sealed class MusicRightsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// POST /api/music-rights/certificate/print
+    /// Verifies active subscription then regenerates and returns the full HTML
+    /// certificate ready for browser printing.  Called by the client after
+    /// Stripe payment succeeds.
+    /// </summary>
+    [HttpPost("certificate/print")]
+    public async Task<IActionResult> PrintCertificate(
+        [FromBody] PrintCertificateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        var email  = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? "unknown";
+        var name   = User.FindFirstValue(ClaimTypes.Name)  ?? User.FindFirstValue("name")  ?? email;
+
+        var isAdmin = AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
+        if (!isAdmin)
+        {
+            try
+            {
+                var sub = await _subscriptionService.GetSubscriptionStatusAsync(userId);
+                if (!sub.HasActiveSubscription)
+                {
+                    return StatusCode(StatusCodes.Status402PaymentRequired, new
+                    {
+                        message = "An active Music Rights plan is required to print your certificate.",
+                        requiresPayment = true
+                    });
+                }
+            }
+            catch
+            {
+                return StatusCode(StatusCodes.Status402PaymentRequired, new
+                {
+                    message = "Unable to verify subscription for certificate printing.",
+                    requiresPayment = true
+                });
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.ArtistName))
+            return BadRequest(new { message = "Title and artist are required to regenerate certificate." });
+
+        var regReq = new TrackRegistrationRequest
+        {
+            Title                = request.Title,
+            ArtistName           = request.ArtistName,
+            Album                = request.Album,
+            Genre                = request.Genre,
+            YearOfCreation       = request.YearOfCreation,
+            Bpm                  = request.Bpm,
+            MusicalKey           = request.MusicalKey,
+            Isrc                 = request.Isrc,
+            Label                = request.Label,
+            CoWriters            = request.CoWriters,
+            Description          = request.Description,
+            LyricsExcerpt        = request.LyricsExcerpt,
+            MusicCharacterization = request.MusicCharacterization,
+            Sha256Fingerprint    = request.Sha256Fingerprint,
+        };
+        var registrationId  = request.RegistrationId ?? Guid.NewGuid().ToString("N").ToUpperInvariant()[..12];
+        var createdAtUtc    = request.CreatedAtUtc ?? DateTime.UtcNow;
+        var createdAtLocal  = createdAtUtc.ToString("dddd, MMMM dd, yyyy 'at' HH:mm:ss 'UTC'");
+        var document        = BuildOwnershipDocument(
+            registrationId, createdAtUtc, createdAtLocal,
+            regReq, userId.ToString(), email, name,
+            paymentVerified: true);
+
+        return Content(document, "text/html; charset=utf-8");
+    }
+
     // ── Document builder ──────────────────────────────────────────────────────
 
     private static string BuildOwnershipDocument(
@@ -112,7 +184,8 @@ public sealed class MusicRightsController : ControllerBase
         TrackRegistrationRequest req,
         string userId,
         string email,
-        string displayName)
+        string displayName,
+        bool paymentVerified = false)
     {
         var sb = new StringBuilder();
 
@@ -140,7 +213,15 @@ public sealed class MusicRightsController : ControllerBase
         sb.AppendLine("  .footer{text-align:center;font-size:11px;color:#718096;margin-top:40px;border-top:1px solid #e2e8f0;padding-top:16px;}");
         sb.AppendLine("  @media print{body{padding:20px;}.footer{position:fixed;bottom:0;width:100%;}}");
         sb.AppendLine("</style>");
-        sb.AppendLine("</head><body>");
+        sb.AppendLine("<script>window.onload=function(){if(document.body.dataset.autoPrint==='1'){window.print();}};</script>");
+        sb.AppendLine("</head>");
+        sb.AppendLine($"<body data-auto-print=\"{(paymentVerified ? "1" : "0")}\">");
+
+        // Payment verified seal
+        if (paymentVerified)
+        {
+            sb.AppendLine("<div style=\"text-align:center;background:#e6fffa;border:1px solid #38a169;border-radius:8px;padding:10px;margin-bottom:20px;font-size:13px;font-weight:700;color:#276749;\">✅ PAYMENT VERIFIED — ACTIVE SUBSCRIPTION CONFIRMED</div>");
+        }
 
         // Header
         sb.AppendLine("<div class=\"header\">");
@@ -256,4 +337,24 @@ public sealed class TrackRegistrationRequest
     public string? LyricsExcerpt       { get; set; }
     public string? MusicCharacterization { get; set; }
     public string? Sha256Fingerprint   { get; set; }
+}
+
+public sealed class PrintCertificateRequest
+{
+    public string?   RegistrationId       { get; set; }
+    public DateTime? CreatedAtUtc         { get; set; }
+    public string    Title                { get; set; } = string.Empty;
+    public string    ArtistName           { get; set; } = string.Empty;
+    public string?   Album                { get; set; }
+    public string?   Genre                { get; set; }
+    public int?      YearOfCreation       { get; set; }
+    public double?   Bpm                  { get; set; }
+    public string?   MusicalKey           { get; set; }
+    public string?   Isrc                 { get; set; }
+    public string?   Label                { get; set; }
+    public string?   CoWriters            { get; set; }
+    public string?   Description          { get; set; }
+    public string?   LyricsExcerpt        { get; set; }
+    public string?   MusicCharacterization { get; set; }
+    public string?   Sha256Fingerprint    { get; set; }
 }

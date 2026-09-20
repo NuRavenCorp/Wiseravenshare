@@ -1458,7 +1458,12 @@ export const apiService = {
     gateFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/gate`, { reason }),
     releaseAllFeatures: (reason = '') => api.post('/admin/feature-release/release-all', { reason }),
     gateAllFeatures: (reason = '') => api.post('/admin/feature-release/gate-all', { reason }),
-    getMyFeatureAccess: () => api.get('/features/my-access')
+    getMyFeatureAccess: () => api.get('/features/my-access'),
+
+    // Music Rights Registration
+    registerOriginalTrack: (payload) => api.post('/music-rights/register', payload),
+    printMusicRightsCertificate: (payload) =>
+        api.post('/music-rights/certificate/print', payload, { responseType: 'text' })
 };
 
 export default api;
