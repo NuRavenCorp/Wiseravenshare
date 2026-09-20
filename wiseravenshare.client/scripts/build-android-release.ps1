@@ -96,9 +96,9 @@ if (-not $SkipSync) {
     Invoke-Step -Command "npm run android:sync" -Description "Building web assets and syncing Android"
 }
 
-Invoke-Step -Command "cd android && gradlew.bat bundleRelease" -Description "Building signed release AAB"
+Invoke-Step -Command "cd ../android && gradlew.bat bundleRelease" -Description "Building signed release AAB"
 
-$sourceAab = Join-Path $projectRoot "android\app\build\outputs\bundle\release\app-release.aab"
+$sourceAab = Join-Path $projectRoot "..\android\app\build\outputs\bundle\release\app-release.aab"
 if (-not (Test-Path $sourceAab)) {
     throw "Expected AAB not found: $sourceAab"
 }

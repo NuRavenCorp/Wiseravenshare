@@ -32,10 +32,7 @@ const normalizeSocialFeeds = (socialFeeds) => {
         tikTok: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok')),
         facebook: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook')),
         instagram: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram')),
-        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube')),
-        twitter: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter')),
-        linkedin: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn')),
-        bluesky: normalizeConnection(getConnection(feeds, 'bluesky', 'Bluesky'))
+        youtube: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'))
     };
 };
 
@@ -100,10 +97,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         tikTok: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         facebook: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
         instagram: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        twitter: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        linkedin: { enabled: false, username: '', profileUrl: '', feedUrl: '' },
-        bluesky: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
+        youtube: { enabled: false, username: '', profileUrl: '', feedUrl: '' }
     };
     const [posts, setPosts] = useState([]);
     const [likedPosts, setLikedPosts] = useState([]);
@@ -123,6 +117,9 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         following: 0
     });
     const [activeTab, setActiveTab] = useState('posts');
+    const [photoLightbox, setPhotoLightbox] = useState(null);
+    const [profileVideoIdx, setProfileVideoIdx] = useState(0);
+    const [profileVideoAutoPlay, setProfileVideoAutoPlay] = useState(true);
     const [followerProfiles, setFollowerProfiles] = useState([]);
     const [followingProfiles, setFollowingProfiles] = useState([]);
     const [associationView, setAssociationView] = useState('followers');
@@ -485,6 +482,16 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     });
 
     const mediaPosts = posts.filter((p) => p.mediaUrl || p.youtubeUrl || p.tiktokUrl || p.facebookUrl || p.podcastUrl);
+    const isPhotoMediaUrl = (url) => /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(String(url || ''));
+    const isVideoMediaUrl = (url) => /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(String(url || ''));
+    const photoProfilePosts = mediaPosts.filter((p) => {
+        const t = String(p.mediaType || p.type || '').toLowerCase();
+        return t === 'photo' || t === 'image' || isPhotoMediaUrl(p.mediaUrl);
+    });
+    const videoProfilePosts = mediaPosts.filter((p) => {
+        const t = String(p.mediaType || p.type || '').toLowerCase();
+        return t === 'video' || isVideoMediaUrl(p.mediaUrl || p.videoUrl);
+    });
 
     const tabCounts = {
         posts: derivedStats.posts,
@@ -712,36 +719,6 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             style={{ color: '#f87171', fontSize: '13px' }}
                                         >
                                             YouTube Feed
-                                        </a>
-                                    )}
-                                    {user.socialFeeds?.twitter?.enabled && (
-                                        <a
-                                            href={user.socialFeeds?.twitter?.profileUrl || user.socialFeeds?.twitter?.feedUrl || `https://twitter.com/${user.socialFeeds?.twitter?.username || ''}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            style={{ color: '#38bdf8', fontSize: '13px' }}
-                                        >
-                                            Twitter / X Feed
-                                        </a>
-                                    )}
-                                    {user.socialFeeds?.linkedin?.enabled && (
-                                        <a
-                                            href={user.socialFeeds?.linkedin?.profileUrl || user.socialFeeds?.linkedin?.feedUrl || `https://www.linkedin.com/in/${user.socialFeeds?.linkedin?.username || ''}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            style={{ color: '#60a5fa', fontSize: '13px' }}
-                                        >
-                                            LinkedIn Feed
-                                        </a>
-                                    )}
-                                    {user.socialFeeds?.bluesky?.enabled && (
-                                        <a
-                                            href={user.socialFeeds?.bluesky?.profileUrl || user.socialFeeds?.bluesky?.feedUrl || `https://bsky.app/profile/${user.socialFeeds?.bluesky?.username || ''}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            style={{ color: '#60a5fa', fontSize: '13px' }}
-                                        >
-                                            Bluesky Feed
                                         </a>
                                     )}
                                 </div>
@@ -1137,170 +1114,6 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             Use your channel handle (example: MyChannel) or a channel URL (example: https://www.youtube.com/@MyChannel).
                                         </div>
                                     </div>
-                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Twitter / X feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.twitter?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        twitter: { ...prev.socialFeeds.twitter, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable Twitter / X feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="Twitter / X handle"
-                                            value={editForm.socialFeeds?.twitter?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    twitter: { ...prev.socialFeeds.twitter, username: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Twitter / X profile URL"
-                                            value={editForm.socialFeeds?.twitter?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    twitter: { ...prev.socialFeeds.twitter, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Twitter / X feed URL (optional override)"
-                                            value={editForm.socialFeeds?.twitter?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    twitter: { ...prev.socialFeeds.twitter, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            Use your handle without the @ (example: twitterhandle) or a profile URL (example: https://twitter.com/handle).
-                                        </div>
-                                    </div>
-                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>LinkedIn feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.linkedin?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        linkedin: { ...prev.socialFeeds.linkedin, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable LinkedIn feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="LinkedIn profile/company ID"
-                                            value={editForm.socialFeeds?.linkedin?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    linkedin: { ...prev.socialFeeds.linkedin, username: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="LinkedIn profile/company URL"
-                                            value={editForm.socialFeeds?.linkedin?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    linkedin: { ...prev.socialFeeds.linkedin, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="LinkedIn feed URL (optional override)"
-                                            value={editForm.socialFeeds?.linkedin?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    linkedin: { ...prev.socialFeeds.linkedin, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            Use your profile/company ID (example: company-name) or a URL (example: https://www.linkedin.com/company-name/).
-                                        </div>
-                                    </div>
                                     <label style={{ display: 'block', margin: '10px 0 8px', color: 'var(--highlight-color)' }}>
                                         Profile photo
                                     </label>
@@ -1673,6 +1486,91 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                     likes: likedPosts
                 };
                 const visible = tabData[activeTab] || [];
+
+                // Dedicated photo gallery + video player for the Media tab.
+                if (activeTab === 'media') {
+                    const currentVideo = videoProfilePosts[profileVideoIdx];
+                    const currentVideoUrl = currentVideo?.mediaUrl || currentVideo?.videoUrl || '';
+                    return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                            {/* Photo Gallery */}
+                            <section>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>📷 Photos ({photoProfilePosts.length})</h3>
+                                </div>
+                                {photoProfilePosts.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No photos yet.</div>
+                                ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px' }}>
+                                        {photoProfilePosts.map((post) => (
+                                            <button key={post.id} type="button"
+                                                onClick={() => setPhotoLightbox(post.mediaUrl)}
+                                                style={{ padding: 0, border: 'none', borderRadius: '10px', overflow: 'hidden', aspectRatio: '1', cursor: 'zoom-in', background: 'rgba(255,255,255,0.06)' }}>
+                                                <img src={post.mediaUrl} alt={post.content?.slice(0, 40) || 'Photo'}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+
+                            {/* Video Player */}
+                            <section>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>🎬 Videos ({videoProfilePosts.length})</h3>
+                                    <button type="button"
+                                        onClick={() => setProfileVideoAutoPlay((v) => !v)}
+                                        style={{ fontSize: '12px', padding: '4px 12px', borderRadius: '999px', border: '1px solid var(--border-color)', background: profileVideoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
+                                        {profileVideoAutoPlay ? '▶▶ Auto-play on' : '⏸ Auto-play off'}
+                                    </button>
+                                </div>
+                                {videoProfilePosts.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--light-color)', fontSize: '13px' }}>No videos yet.</div>
+                                ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '14px' }}>
+                                        {/* Active player */}
+                                        <div style={{ borderRadius: '14px', overflow: 'hidden', background: '#000', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            {currentVideoUrl ? (
+                                                <video key={currentVideoUrl} src={currentVideoUrl} controls autoPlay={profileVideoAutoPlay}
+                                                    style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
+                                                    onEnded={() => {
+                                                        if (profileVideoAutoPlay && profileVideoIdx < videoProfilePosts.length - 1) {
+                                                            setProfileVideoIdx((i) => i + 1);
+                                                        }
+                                                    }} />
+                                            ) : (
+                                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>Select a video</span>
+                                            )}
+                                        </div>
+                                        {/* Playlist */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '420px', overflowY: 'auto' }}>
+                                            {videoProfilePosts.map((post, idx) => (
+                                                <button key={post.id} type="button"
+                                                    onClick={() => setProfileVideoIdx(idx)}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '10px', border: `1px solid ${profileVideoIdx === idx ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: profileVideoIdx === idx ? 'rgba(255,255,255,0.08)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', textAlign: 'left' }}>
+                                                    <span style={{ fontSize: '16px', flexShrink: 0 }}>{profileVideoIdx === idx ? '▶' : '○'}</span>
+                                                    <span style={{ fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                        {post.content?.slice(0, 36) || `Video ${idx + 1}`}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+
+                            {/* Lightbox */}
+                            {photoLightbox && (
+                                <div onClick={() => setPhotoLightbox(null)}
+                                    style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+                                    <img src={photoLightbox} alt="Full view"
+                                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)' }} />
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
 
                 if (visible.length === 0) {
                     const emptyMessages = {

@@ -65,7 +65,27 @@ const resolveHubBaseUrl = () => {
     return 'http://localhost:5242';
 };
 
+const createNoopHubConnection = () => {
+    const noop = () => Promise.resolve();
+    return {
+        state: 'Disconnected',
+        on: () => undefined,
+        onreconnected: () => undefined,
+        onclose: () => undefined,
+        onreconnecting: () => undefined,
+        invoke: async () => { throw new Error('Authentication required for realtime hub access.'); },
+        start: noop,
+        stop: noop,
+        send: noop
+    };
+};
+
 export const createHubConnection = (hubPath) => {
+    const token = getAuthToken();
+    if (!token) {
+        return createNoopHubConnection();
+    }
+
     const base = resolveHubBaseUrl();
     const path = String(hubPath || '').startsWith('/') ? hubPath : `/${hubPath}`;
 

@@ -320,6 +320,31 @@ public sealed class UserStore
         return user is not null;
     }
 
+    public bool TryAlignUserId(string email, string userId)
+    {
+        var normalizedEmail = (email ?? string.Empty).Trim();
+        var normalizedUserId = (userId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedEmail) || string.IsNullOrWhiteSpace(normalizedUserId))
+        {
+            return false;
+        }
+
+        if (!_usersByEmail.TryGetValue(normalizedEmail, out var user) || user is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(user.Id, normalizedUserId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        user.Id = normalizedUserId;
+        user.UpdatedAtUtc = DateTime.UtcNow;
+        PersistUsers(user);
+        return true;
+    }
+
     public IReadOnlyList<UserRecord> GetAllUsersSnapshot()
     {
         return _usersByEmail.Values
@@ -448,6 +473,92 @@ public sealed class UserStore
             CreatedAt = user.CreatedAtUtc,
             UpdatedAt = user.UpdatedAtUtc,
             SocialFeeds = user.SocialFeeds ?? new SocialFeedSettings()
+        };
+    }
+
+    private static UserAiConnectorSettings SanitizeAiConnector(UserAiConnectorSettings? value)
+    {
+        var source = value ?? new UserAiConnectorSettings();
+        return new UserAiConnectorSettings
+        {
+            Enabled = source.Enabled,
+            Provider = source.Provider ?? string.Empty,
+            BaseUrl = source.BaseUrl ?? string.Empty,
+            DefaultModel = source.DefaultModel ?? string.Empty,
+            ApiKey = source.ApiKey ?? string.Empty,
+            UpdatedAtUtc = source.UpdatedAtUtc
+        };
+    }
+
+    public UserAiConnectorSettings GetAiConnectorSettings(string id)
+    {
+        if (!TryGetById(id, out var user) || user is null)
+        {
+            throw new KeyNotFoundException("User not found.");
+        }
+
+        return SanitizeAiConnector(user.AiConnector);
+    }
+
+    public UserAiConnectorSettings? GetAiConnectorSettingsInternal(string id)
+    {
+        if (!TryGetById(id, out var user) || user is null)
+        {
+            return null;
+        }
+
+        user.AiConnector ??= new UserAiConnectorSettings();
+        return user.AiConnector;
+    }
+
+    public UserAiConnectorSettings UpdateAiConnectorSettings(string id, UpdateUserAiConnectorRequest request)
+    {
+        if (!TryGetById(id, out var user) || user is null)
+        {
+            throw new KeyNotFoundException("User not found.");
+        }
+
+        var existing = user.AiConnector ?? new UserAiConnectorSettings();
+        var provider = NormalizeAiProvider(request.Provider);
+        var baseUrl = (request.BaseUrl ?? string.Empty).Trim();
+        var defaultModel = (request.DefaultModel ?? string.Empty).Trim();
+
+        var nextApiKey = existing.ApiKey;
+        if (request.ClearApiKey)
+        {
+            nextApiKey = string.Empty;
+        }
+        else if (!string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            nextApiKey = request.ApiKey.Trim();
+        }
+
+        user.AiConnector = new UserAiConnectorSettings
+        {
+            Enabled = request.Enabled,
+            Provider = provider,
+            BaseUrl = baseUrl,
+            DefaultModel = defaultModel,
+            ApiKey = nextApiKey,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        user.UpdatedAtUtc = DateTime.UtcNow;
+        PersistUsers(user);
+        return SanitizeAiConnector(user.AiConnector);
+    }
+
+    private static string NormalizeAiProvider(string? provider)
+    {
+        var value = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "openai" => "openai",
+            "deepseek" => "deepseek",
+            "gradient" => "gradient",
+            "ollama" => "ollama",
+            "llamacpp" or "llama.cpp" or "llama-cpp" => "llamacpp",
+            _ => "openai"
         };
     }
 
@@ -804,6 +915,7 @@ public sealed class UserStore
                 }
 
                 persistedUser.SocialFeeds ??= new SocialFeedSettings();
+                persistedUser.AiConnector ??= new UserAiConnectorSettings();
                 persistedUser.CreatedAtUtc = persistedUser.CreatedAtUtc == default ? DateTime.UtcNow : persistedUser.CreatedAtUtc;
                 persistedUser.UpdatedAtUtc = persistedUser.UpdatedAtUtc == default ? DateTime.UtcNow : persistedUser.UpdatedAtUtc;
 
@@ -858,7 +970,7 @@ public sealed class UserStore
             connection.Open();
 
             var sql = $@"
-SELECT id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, created_at_utc, updated_at_utc
+SELECT id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, ai_settings, created_at_utc, updated_at_utc
 FROM {_usersTable}
 ORDER BY email;";
 
@@ -868,7 +980,9 @@ ORDER BY email;";
             while (reader.Read())
             {
                 var socialFeedsJson = reader.IsDBNull(9) ? "{}" : reader.GetString(9);
+                var aiSettingsJson = reader.IsDBNull(10) ? "{}" : reader.GetString(10);
                 var socialFeeds = ParseSocialFeeds(socialFeedsJson);
+                var aiConnector = ParseAiConnectorSettings(aiSettingsJson);
 
                 var user = new UserRecord
                 {
@@ -882,8 +996,9 @@ ORDER BY email;";
                     Website = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
                     Avatar = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
                     SocialFeeds = NormalizeSocialFeeds(socialFeeds),
-                    CreatedAtUtc = reader.GetFieldValue<DateTime>(10),
-                    UpdatedAtUtc = reader.GetFieldValue<DateTime>(11)
+                    AiConnector = aiConnector,
+                    CreatedAtUtc = reader.GetFieldValue<DateTime>(11),
+                    UpdatedAtUtc = reader.GetFieldValue<DateTime>(12)
                 };
 
                 _usersByEmail[user.Email] = user;
@@ -967,9 +1082,9 @@ ORDER BY email;";
 
                     var insertSql = $@"
 INSERT INTO {_usersTable} (
-    id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, created_at_utc, updated_at_utc
+    id, email, name, handle, password_hash, bio, location, website, avatar, social_feeds, ai_settings, created_at_utc, updated_at_utc
 ) VALUES (
-    @id, @email, @name, @handle, @password_hash, @bio, @location, @website, @avatar, CAST(@social_feeds AS jsonb), @created_at_utc, @updated_at_utc
+    @id, @email, @name, @handle, @password_hash, @bio, @location, @website, @avatar, CAST(@social_feeds AS jsonb), CAST(@ai_settings AS jsonb), @created_at_utc, @updated_at_utc
 ) ON CONFLICT (email) DO NOTHING;";
 
                     var updateSql = $@"
@@ -982,6 +1097,7 @@ SET name = @name,
     website = @website,
     avatar = @avatar,
     social_feeds = CAST(@social_feeds AS jsonb),
+    ai_settings = CAST(@ai_settings AS jsonb),
     updated_at_utc = @updated_at_utc
 WHERE email = @email;";
 
@@ -998,6 +1114,7 @@ WHERE email = @email;";
                         insert.Parameters.AddWithValue("website", user.Website ?? string.Empty);
                         insert.Parameters.AddWithValue("avatar", user.Avatar ?? string.Empty);
                         insert.Parameters.AddWithValue("social_feeds", JsonSerializer.Serialize(user.SocialFeeds ?? new SocialFeedSettings()));
+                        insert.Parameters.AddWithValue("ai_settings", JsonSerializer.Serialize(user.AiConnector ?? new UserAiConnectorSettings()));
                         insert.Parameters.AddWithValue("created_at_utc", user.CreatedAtUtc);
                         insert.Parameters.AddWithValue("updated_at_utc", user.UpdatedAtUtc);
                         var inserted = insert.ExecuteNonQuery();
@@ -1014,6 +1131,7 @@ WHERE email = @email;";
                             update.Parameters.AddWithValue("website", user.Website ?? string.Empty);
                             update.Parameters.AddWithValue("avatar", user.Avatar ?? string.Empty);
                             update.Parameters.AddWithValue("social_feeds", JsonSerializer.Serialize(user.SocialFeeds ?? new SocialFeedSettings()));
+                            update.Parameters.AddWithValue("ai_settings", JsonSerializer.Serialize(user.AiConnector ?? new UserAiConnectorSettings()));
                             update.Parameters.AddWithValue("updated_at_utc", user.UpdatedAtUtc);
                             update.ExecuteNonQuery();
                         }
@@ -1091,6 +1209,7 @@ WHERE email = @email;";
         if (TryBindExistingUsersTable(connection, "app_data"))
         {
             _usersTable = "app_data.app_users";
+            EnsureUsersTableColumns(connection, "app_data");
             _dbSchemaEnsured = true;
             return;
         }
@@ -1098,6 +1217,7 @@ WHERE email = @email;";
         if (TryBindExistingUsersTable(connection, "public"))
         {
             _usersTable = "public.app_users";
+            EnsureUsersTableColumns(connection, "public");
             _dbSchemaEnsured = true;
             return;
         }
@@ -1105,6 +1225,7 @@ WHERE email = @email;";
         if (TryEnsureUsersTable(connection, "app_data", ensureSchema: true))
         {
             _usersTable = "app_data.app_users";
+            EnsureUsersTableColumns(connection, "app_data");
             _dbSchemaEnsured = true;
             return;
         }
@@ -1112,6 +1233,7 @@ WHERE email = @email;";
         if (TryEnsureUsersTable(connection, "public", ensureSchema: false))
         {
             _usersTable = "public.app_users";
+            EnsureUsersTableColumns(connection, "public");
             _dbSchemaEnsured = true;
             return;
         }
@@ -1155,6 +1277,7 @@ CREATE TABLE IF NOT EXISTS {prefix} (
     website TEXT NOT NULL DEFAULT '',
     avatar TEXT NOT NULL DEFAULT '',
     social_feeds JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    ai_settings JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     created_at_utc TIMESTAMPTZ NOT NULL,
     updated_at_utc TIMESTAMPTZ NOT NULL
 );
@@ -1169,6 +1292,34 @@ CREATE INDEX IF NOT EXISTS idx_app_users_handle ON {prefix}(handle);
         {
             Console.WriteLine($"TryEnsureUsersTable failed for {schemaName}: {ex.Message}");
             return false;
+        }
+    }
+
+    private static void EnsureUsersTableColumns(NpgsqlConnection connection, string schemaName)
+    {
+        var sql = $@"
+ALTER TABLE IF EXISTS {schemaName}.app_users
+ADD COLUMN IF NOT EXISTS ai_settings JSONB NOT NULL DEFAULT '{{}}'::jsonb;";
+
+        using var command = new NpgsqlCommand(sql, connection);
+        command.ExecuteNonQuery();
+    }
+
+    private static UserAiConnectorSettings ParseAiConnectorSettings(string aiSettingsJson)
+    {
+        if (string.IsNullOrWhiteSpace(aiSettingsJson))
+        {
+            return new UserAiConnectorSettings();
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<UserAiConnectorSettings>(aiSettingsJson, JsonCaseInsensitive);
+            return parsed ?? new UserAiConnectorSettings();
+        }
+        catch
+        {
+            return new UserAiConnectorSettings();
         }
     }
 

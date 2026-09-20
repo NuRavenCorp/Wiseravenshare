@@ -3,12 +3,15 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.DTOs.User;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Services.Currency;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -37,6 +40,10 @@ public class PostService : IPostService
     private readonly ITruthService _truthService;
     private readonly ISocialPublishDispatcher _socialPublishDispatcher;
     private readonly ICrossPlatformPublishService _crossPlatformPublishService;
+    private readonly IEngagementNotificationService _engagementNotificationService;
+    private readonly IWiseCoinService _wiseCoinService;
+    private readonly IEngagementMultiplierService _engagementMultiplierService;
+    private readonly IContentCrawlerService _contentCrawler;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -45,6 +52,10 @@ public class PostService : IPostService
         ITruthService truthService,
         ISocialPublishDispatcher socialPublishDispatcher,
         ICrossPlatformPublishService crossPlatformPublishService,
+        IEngagementNotificationService engagementNotificationService,
+        IWiseCoinService wiseCoinService,
+        IEngagementMultiplierService engagementMultiplierService,
+        IContentCrawlerService contentCrawler,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -52,6 +63,10 @@ public class PostService : IPostService
         _truthService = truthService;
         _socialPublishDispatcher = socialPublishDispatcher;
         _crossPlatformPublishService = crossPlatformPublishService;
+        _engagementNotificationService = engagementNotificationService;
+        _wiseCoinService = wiseCoinService;
+        _engagementMultiplierService = engagementMultiplierService;
+        _contentCrawler = contentCrawler;
         _logger = logger;
     }
 
@@ -183,6 +198,35 @@ public class PostService : IPostService
             }
         }
 
+        try
+        {
+            await AwardCreationRewardAsync(post, user);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
+        }
+
+        // Ingest into content crawler for trending detection (fire-and-forget)
+        try
+        {
+            // Extract tags/hashtags from content
+            var tags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
+            _ = _contentCrawler.IngestUserContentAsync(
+                post.Id,
+                "Post",
+                post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "",
+                userId,
+                user.DisplayName ?? user.Username ?? "Unknown",
+                tags,
+                "GLOBAL"
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ingest post {PostId} into content crawler", post.Id);
+        }
+
         if (!persisted)
         {
             return BuildPostDto(post, user);
@@ -211,6 +255,7 @@ public class PostService : IPostService
         {
             PostType.Video => "video",
             PostType.Image => "photo",
+            PostType.Audio => "music",
             _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
         };
 
@@ -234,6 +279,62 @@ public class PostService : IPostService
         });
     }
 
+    private async Task AwardCreationRewardAsync(Post post, User user)
+    {
+        if (post == null || user == null)
+        {
+            return;
+        }
+
+        if ((user.Email ?? string.Empty).StartsWith("local-", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var baseReward = post.Type switch
+        {
+            PostType.Video => 1.5m,
+            PostType.Audio => 1.4m,
+            PostType.Image => 1.2m,
+            PostType.Podcast => 1.35m,
+            PostType.TruthClaim => 1.25m,
+            _ => 1.0m
+        };
+
+        if (post.IsTruthDispatch)
+        {
+            baseReward += 0.25m;
+        }
+
+        var engagementMultiplier = await _engagementMultiplierService.GetPostEngagementMultiplierAsync(post.Id, user.Id);
+        var rewardAmount = decimal.Round(baseReward * engagementMultiplier, 2);
+
+        if (rewardAmount <= 0)
+        {
+            return;
+        }
+
+        var result = await _wiseCoinService.EarnWSCAsync(
+            user.Id,
+            rewardAmount,
+            TransactionType.ContentCreation,
+            $"Post reward for {post.Type} post",
+            applyMultipliers: true);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning("WiseCoin reward declined for post {PostId}: {Error}", post.Id, result.ErrorMessage);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Awarded {Amount} WSC for post {PostId} (base={BaseReward}, engagementMultiplier={Multiplier})",
+            result.Amount,
+            post.Id,
+            baseReward,
+            engagementMultiplier);
+    }
+
     private void DispatchSocialPublish(Post post)
     {
         // Trigger (checklist step 1): notify the middleware asynchronously so
@@ -243,6 +344,7 @@ public class PostService : IPostService
         {
             PostType.Video => "video",
             PostType.Image => "photo",
+            PostType.Audio => "music",
             _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
         };
 
@@ -372,6 +474,35 @@ public class PostService : IPostService
 
         await _postRepository.LikePostAsync(postId, userId);
         _logger.LogInformation("User {UserId} liked post {PostId}", userId, postId);
+
+        // Send notification to post author (fire-and-forget)
+        if (post.UserId != userId)
+        {
+            var liker = await _userRepository.GetByIdAsync(userId);
+            var likerName = liker?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostLikedAsync(
+                post.UserId,
+                postId,
+                likerName,
+                post.Content ?? "your post"
+            );
+        }
+
+        // Update engagement in content crawler (fire-and-forget)
+        try
+        {
+            _ = _contentCrawler.UpdateEngagementAsync(
+                postId,
+                post.ViewsCount,
+                post.LikesCount + 1,  // Include this new like
+                post.RepostsCount
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
+        }
+
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
@@ -398,6 +529,35 @@ public class PostService : IPostService
 
         await _postRepository.RepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
+
+        // Send notification to post author (fire-and-forget)
+        if (post.UserId != userId)
+        {
+            var sharedBy = await _userRepository.GetByIdAsync(userId);
+            var sharedByName = sharedBy?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostSharedAsync(
+                post.UserId,
+                postId,
+                sharedByName,
+                post.Content ?? "your post"
+            );
+        }
+
+        // Update engagement in content crawler (fire-and-forget)
+        try
+        {
+            _ = _contentCrawler.UpdateEngagementAsync(
+                postId,
+                post.ViewsCount,
+                post.LikesCount,
+                post.RepostsCount + 1  // Include this new repost
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
+        }
+
         return await BuildPostInteractionDtoAsync(postId, userId);
     }
 
@@ -656,6 +816,27 @@ public class PostService : IPostService
             LastActiveAt = user.LastActiveAt
         };
     }
+
+    private static List<string> ExtractHashtags(string content)
+    {
+        var hashtags = new List<string>();
+        if (string.IsNullOrWhiteSpace(content)) return hashtags;
+
+        // Find all words starting with # or patterns like #trending
+        var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var word in words)
+        {
+            if (word.StartsWith('#') && word.Length > 1)
+            {
+                // Remove trailing punctuation
+                var tag = word.Trim('#', '.', ',', '!', '?', ':', ';', '"', '\'');
+                if (!string.IsNullOrWhiteSpace(tag) && tag.Length > 2)
+                {
+                    hashtags.Add(tag);
+                }
+            }
+        }
+
+        return hashtags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
 }
-
-

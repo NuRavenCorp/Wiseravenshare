@@ -1,0 +1,110 @@
+/* wiseravenshare.client/src/Components/MediaLibrary/MediaPagination.css */
+
+.media-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.pagination-info {
+  font-size: 0.95em;
+  color: #2c3e50;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.page-size-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-size-selector label {
+  font-size: 0.9em;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.page-size-selector select {
+  padding: 6px 10px;
+  border: 1px solid #bdc3c7;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.9em;
+  color: #2c3e50;
+  transition: all 0.2s ease;
+}
+
+.page-size-selector select:hover,
+.page-size-selector select:focus {
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1);
+}
+
+.page-numbers {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  padding: 8px 12px;
+  border: 1px solid #bdc3c7;
+  background: white;
+  color: #2c3e50;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: #3498db;
+  color: #3498db;
+  background: #ecf7ff;
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-btn.number.active {
+  background: #3498db;
+  color: white;
+  border-color: #3498db;
+}
+
+.page-dots {
+  color: #7f8c8d;
+  padding: 0 4px;
+}
+
+@media (max-width: 768px) {
+  .media-pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pagination-info {
+    text-align: center;
+  }
+
+  .page-size-selector {
+    justify-content: center;
+  }
+
+  .page-numbers {
+    justify-content: center;
+  }
+}

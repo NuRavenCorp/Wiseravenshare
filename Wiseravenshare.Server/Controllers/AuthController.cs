@@ -400,7 +400,7 @@ public class AuthController : ControllerBase
     {
         var jwtIssuerConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Issuer"]);
         var jwtAudienceConfigured = !string.IsNullOrWhiteSpace(_configuration["Authentication:Jwt:Audience"]);
-        var jwtKey = _configuration["Authentication:Jwt:Key"];
+        var jwtKey = ResolveJwtKeyFromConfiguration();
         var jwtKeyConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
 
         var allowSelfRegistration = IsSelfRegistrationAllowed();
@@ -434,13 +434,20 @@ public class AuthController : ControllerBase
         var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
         if (!providerConfig.IsEnabled)
         {
+            _logger.LogWarning(
+                "OAuth provider {Provider} is disabled at runtime. clientIdSet={ClientIdSet}, clientSecretSet={ClientSecretSet}, redirectSet={RedirectSet}.",
+                normalizedProvider,
+                !string.IsNullOrWhiteSpace(providerConfig.ClientId),
+                !string.IsNullOrWhiteSpace(providerConfig.ClientSecret),
+                !string.IsNullOrWhiteSpace(providerConfig.RedirectUri));
+
             return Redirect(BuildOAuthErrorRedirect(
                 normalizedReturnUrl,
                 normalizedProvider,
                 $"{normalizedProvider} sign-in is not configured. Add OAuth credentials in Authentication:OAuthProviders."));
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             return Redirect(BuildOAuthErrorRedirect(normalizedReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL."));
@@ -480,8 +487,39 @@ public class AuthController : ControllerBase
         var providerConfig = ReadOAuthProviderConfig(normalizedProvider);
         if (!providerConfig.IsEnabled)
         {
+            _logger.LogWarning(
+                "OAuth callback rejected because provider {Provider} is disabled at runtime. clientIdSet={ClientIdSet}, clientSecretSet={ClientSecretSet}, redirectSet={RedirectSet}.",
+                normalizedProvider,
+                !string.IsNullOrWhiteSpace(providerConfig.ClientId),
+                !string.IsNullOrWhiteSpace(providerConfig.ClientSecret),
+                !string.IsNullOrWhiteSpace(providerConfig.RedirectUri));
+
             var unavailableUrl = BuildOAuthErrorRedirect(ResolveOAuthReturnUrl(null), normalizedProvider, $"{normalizedProvider} sign-in is not configured.");
             return Redirect(unavailableUrl);
+        }
+
+        if (string.Equals(normalizedProvider, "google", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(state)
+            && string.IsNullOrWhiteSpace(code)
+            && string.IsNullOrWhiteSpace(error))
+        {
+            return Content(
+                """
+                <!doctype html>
+                <html lang="en">
+                <head><meta charset="utf-8"><title>Google OAuth Callback</title></head>
+                <body>
+                  <h1>Google OAuth callback is active</h1>
+                  <p>This endpoint is used by Google Sign-In and must be opened by the OAuth flow.</p>
+                  <p>Supported callback URLs:</p>
+                  <ul>
+                    <li>https://wise-ravens.com/api/auth/oauth/google/callback</li>
+                    <li>https://wiseravenshare.com/api/auth/oauth/google/callback</li>
+                  </ul>
+                </body>
+                </html>
+                """,
+                "text/html");
         }
 
         if (string.IsNullOrWhiteSpace(state) || !OAuthStatesByToken.TryRemove(state, out var stateRecord))
@@ -509,7 +547,7 @@ public class AuthController : ControllerBase
             return Redirect(missingCodeUrl);
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider);
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             var callbackErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL.");
@@ -1122,13 +1160,23 @@ public class AuthController : ControllerBase
 
     private string GetJwtKey()
     {
-        var key = _configuration["Authentication:Jwt:Key"];
+        var key = ResolveJwtKeyFromConfiguration();
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new InvalidOperationException("Authentication:Jwt:Key is not configured.");
+            throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
         }
 
         return key;
+    }
+
+    private string ResolveJwtKeyFromConfiguration()
+    {
+        return ResolveOAuthSettingValue(
+            _configuration["JWT_highentropykey"],
+            _configuration["Authentication:Jwt:Key"],
+            _configuration["Authentication__Jwt__Key"],
+            Environment.GetEnvironmentVariable("JWT_highentropykey"),
+            Environment.GetEnvironmentVariable("Authentication__Jwt__Key"));
     }
 
     private static bool IsValidEmail(string email)
@@ -1138,12 +1186,8 @@ public class AuthController : ControllerBase
 
     private bool IsSelfRegistrationAllowed()
     {
-        var raw = _configuration["Authentication:AllowSelfRegistration"];
-        if (string.IsNullOrWhiteSpace(raw)) return true;
-        if (bool.TryParse(raw, out var parsedBool)) return parsedBool;
-        if (string.Equals(raw, "1", StringComparison.Ordinal)) return true;
-        if (string.Equals(raw, "0", StringComparison.Ordinal)) return false;
-        return !string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase);
+        // Self-registration is intentionally always enabled for growth mode.
+        return true;
     }
 
     private bool TryAuthenticateConfiguredCredential(string emailOrIdentifier, string password, out AppUserRecord? user)
@@ -1244,9 +1288,22 @@ public class AuthController : ControllerBase
             return false;
         }
 
-        return IsConfiguredAdminUser(email)
-            || _teamAccessService.IsTeamMemberAllowed(email)
-            || IsSelfRegistrationAllowed();
+        // Admins and team members are always allowed.
+        if (IsConfiguredAdminUser(email) || (_teamAccessService?.IsTeamMemberAllowed(email) ?? false))
+        {
+            return true;
+        }
+
+        // Existing users (already registered) are always allowed to log in,
+        // regardless of whether self-registration is currently enabled.
+        // AllowSelfRegistration only gates creation of NEW accounts.
+        if (_userStore?.EmailExists(email) == true)
+        {
+            return true;
+        }
+
+        // New users can only authenticate if self-registration is open.
+        return IsSelfRegistrationAllowed();
     }
 
     private string ResolveAccessScope(string? email)
@@ -1502,21 +1559,158 @@ public class AuthController : ControllerBase
         };
 
         var section = _configuration.GetSection($"Authentication:OAuthProviders:{sectionName}");
+        var providerPrefix = provider.ToUpperInvariant();
+        var rawClientIdEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__ClientId");
+        var rawClientSecretEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__ClientSecret");
+        var rawTenantEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__TenantId");
+        var rawRedirectUriEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__RedirectUri");
+
+        var clientId = ResolveOAuthSettingValue(
+            section["ClientId"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientId"],
+            rawClientIdEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientId"),
+            _configuration[$"{providerPrefix}_OAUTH_CLIENT_ID"],
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTID"]);
+        var clientSecret = ResolveOAuthSettingValue(
+            section["ClientSecret"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientSecret"],
+            rawClientSecretEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientSecret"),
+            _configuration[$"{providerPrefix}_OAUTH_CLIENT_SECRET"],
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"]);
+        var tenantId = ResolveOAuthSettingValue(
+            section["TenantId"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:TenantId"],
+            rawTenantEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "TenantId"),
+            _configuration[$"{providerPrefix}_OAUTH_TENANT_ID"],
+            _configuration[$"{providerPrefix}_OAUTH_TENANT"]);
+        var redirectUri = ResolveOAuthSettingValue(
+            section["RedirectUri"],
+            _configuration[$"Authentication:OAuthProviders:{sectionName}:RedirectUri"],
+            rawRedirectUriEnv,
+            ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "RedirectUri"),
+            _configuration[$"{providerPrefix}_OAUTH_REDIRECT_URI"],
+            _configuration[$"{providerPrefix}_OAUTH_CALLBACK"],
+            _configuration[$"{providerPrefix}_OAUTH_CALLBACK_URL"]);
+
         return new OAuthProviderConfig
         {
-            ClientId = (section["ClientId"] ?? string.Empty).Trim(),
-            ClientSecret = (section["ClientSecret"] ?? string.Empty).Trim(),
-            TenantId = (section["TenantId"] ?? string.Empty).Trim()
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            TenantId = tenantId,
+            RedirectUri = redirectUri,
+            IsEnabled = !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret)
         };
     }
 
-    private string BuildOAuthCallbackUrl(string provider)
+    private static string ResolveOAuthSettingValue(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var normalized = NormalizeConfiguredValue(candidate);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string NormalizeConfiguredValue(string? raw)
+    {
+        var value = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        // Some deployments accidentally keep template placeholders verbatim.
+        if (value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith("}", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        return value;
+    }
+
+    private static string ReadRawEnvironmentOAuthSetting(string key)
+    {
+        return Environment.GetEnvironmentVariable(key) ?? string.Empty;
+    }
+
+    private string ResolveOAuthSettingBySuffix(string providerPrefix, string sectionName, string fieldName)
+    {
+        var normalizedSection = sectionName.Trim();
+        var normalizedField = fieldName.Trim();
+
+        var configSuffix = $":oauthproviders:{normalizedSection.ToLowerInvariant()}:{normalizedField.ToLowerInvariant()}";
+        foreach (var pair in _configuration.AsEnumerable())
+        {
+            var key = pair.Key ?? string.Empty;
+            if (!key.EndsWith(configSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var resolved = NormalizeConfiguredValue(pair.Value);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        var envSuffix = $"__OAUTHPROVIDERS__{normalizedSection.ToUpperInvariant()}__{normalizedField.ToUpperInvariant()}";
+        var envPrefix = $"{providerPrefix}_OAUTH_{normalizedField.ToUpperInvariant()}";
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            var key = (entry.Key?.ToString() ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (!key.EndsWith(envSuffix, StringComparison.OrdinalIgnoreCase)
+                && !key.StartsWith(envPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var resolved = NormalizeConfiguredValue(entry.Value?.ToString());
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
     {
         var callbackPath = $"/api/auth/oauth/{provider}/callback";
-        var apiOrigin = Request.Host.HasValue
+
+        var configuredRedirectUri = providerConfig?.RedirectUri ?? string.Empty;
+        if (Uri.TryCreate(configuredRedirectUri, UriKind.Absolute, out var explicitRedirectUri)
+            && (string.Equals(explicitRedirectUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(explicitRedirectUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)))
+        {
+            return explicitRedirectUri.ToString();
+        }
+
+        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
+        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var publicBaseUri))
+        {
+            var configuredOrigin = publicBaseUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+            return $"{configuredOrigin}{callbackPath}";
+        }
+
+        var requestOrigin = Request.Host.HasValue
             ? $"{Request.Scheme}://{Request.Host}".TrimEnd('/')
             : ResolvePublicAppOrigin();
-        return $"{apiOrigin}{callbackPath}";
+        return $"{requestOrigin}{callbackPath}";
     }
 
     private string ResolveOAuthReturnUrl(string? returnUrl)
@@ -2128,6 +2322,7 @@ public class AuthController : ControllerBase
 
         if (!_userStore.IsDatabasePersistenceAvailable())
         {
+            _userStore.TryAlignUserId(authUser.Email, parsedId.ToString("N"));
             _logger.LogWarning("Skipping domain-user repository operations for {Email} because database persistence is unavailable.", authUser.Email);
             return parsedId;
         }
@@ -2137,6 +2332,7 @@ public class AuthController : ControllerBase
             var existingById = await _userRepository.GetByIdAsync(parsedId);
             if (existingById is not null)
             {
+                _userStore.TryAlignUserId(authUser.Email, existingById.Id.ToString("N"));
                 return existingById.Id;
             }
 
@@ -2149,6 +2345,7 @@ public class AuthController : ControllerBase
                     await _userRepository.UpdateAsync(existingByEmail);
                 }
 
+                _userStore.TryAlignUserId(authUser.Email, existingByEmail.Id.ToString("N"));
                 return existingByEmail.Id;
             }
 
@@ -2181,6 +2378,7 @@ public class AuthController : ControllerBase
             };
 
             await _userRepository.AddAsync(newUser);
+            _userStore.TryAlignUserId(authUser.Email, newUser.Id.ToString("N"));
             _logger.LogInformation("Provisioned EF user record for auth user {Email} ({UserId}).", newUser.Email, newUser.Id);
             return newUser.Id;
         }
@@ -2233,7 +2431,8 @@ public class AuthController : ControllerBase
         public string ClientId { get; set; } = string.Empty;
         public string ClientSecret { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
-        public bool IsEnabled => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+        public string RedirectUri { get; set; } = string.Empty;
+        public bool IsEnabled { get; set; }
     }
 
     private sealed class TokenExchangePayload

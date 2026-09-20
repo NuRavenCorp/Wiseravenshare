@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Compartment from '../Components/Common/Compartment';
-import { consumePodcastHandoffDraft } from '../Services/podcastStudioBridge';
+import { consumePodcastHandoffDraft, queueRavensightTab } from '../Services/podcastStudioBridge';
 import { queueCollaborationHandoff } from '../Services/collaborationBridge';
 import { authService } from '../Services/Auth.jsx';
 import { apiService } from '../Services/api';
@@ -8,11 +8,10 @@ import { useAuth } from '../Contexts/AuthContext';
 import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensightVideoStore';
 import { ravensightAPI } from '../Services/RavensightAPI';
 
-const initialTeamMembers = [
-    { name: 'Maya', role: 'Host', locale: 'New York, USA', device: 'Laptop', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Luis', role: 'Guest', locale: 'Madrid, Spain', device: 'Tablet', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Nia', role: 'Producer', locale: 'Nairobi, Kenya', device: 'Phone', status: 'Synced in Tandem', syncedAt: 'Active' },
-    { name: 'Ari', role: 'Script Lead', locale: 'Toronto, Canada', device: 'Camera rig', status: 'Synced in Tandem', syncedAt: 'Active' }
+const initialTeamMembers = [];
+
+const defaultWorkspacePages = [
+    { id: 'script-main', type: 'Script', title: '', content: '' }
 ];
 
 const scriptBlocks = [
@@ -162,20 +161,80 @@ const inferIdentifierType = (identifier) => {
     return 'username';
 };
 
+const resolveMemberKey = (member) => normalizeLoginIdentifier(
+    member?.identifier || member?.email || member?.handle || member?.username || member?.name || ''
+);
+
+const createWorkspacePage = (type, title = '') => {
+    const normalizedType = String(type || 'Script').trim() || 'Script';
+    const label = String(title || '').trim() || `${normalizedType} ${new Date().toLocaleTimeString()}`;
+    return {
+        id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: normalizedType,
+        title: label,
+        content: ''
+    };
+};
+
+const resolveUploadedMediaUrl = (payload, fallback = '') => {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const direct = String(
+        source.mediaUrl
+        || source.filePath
+        || source.file?.mediaUrl
+        || source.file?.MediaUrl
+        || source.file?.publicUrl
+        || source.file?.PublicUrl
+        || source.video?.videoUrl
+        || source.video?.VideoUrl
+        || source.video?.mediaUrl
+        || source.video?.MediaUrl
+        || source.video?.filePath
+        || ''
+    ).trim();
+    if (direct) {
+        return direct;
+    }
+
+    const relativePath = String(source.file?.relativePath || source.file?.RelativePath || '').trim();
+    if (relativePath) {
+        const encoded = relativePath
+            .replace(/\\/g, '/')
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+        if (encoded) {
+            return `/api/videostreaming/blob/${encoded}`;
+        }
+    }
+
+    const fileName = String(source.fileName || source.file?.fileName || source.video?.fileName || '').trim();
+    if (fileName) {
+        return `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`;
+    }
+
+    return fallback;
+};
+
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
-    const [title, setTitle] = useState('The Social Creator Teams Brief');
+    const [title, setTitle] = useState('');
     const [format, setFormat] = useState('Interview');
     const [status, setStatus] = useState('Ready to record');
     const [selectedMode, setSelectedMode] = useState('Desktop');
-    const [scriptText, setScriptText] = useState(
-        'Welcome to today\'s episode. We are building a creator operating system that helps teams produce, publish, and grow from anywhere.'
-    );
+    const [scriptText, setScriptText] = useState('');
     const [controlRole, setControlRole] = useState('Owner');
-    const [storyAngle, setStoryAngle] = useState('Community impact and verified eyewitness accounts');
+    const [storyAngle, setStoryAngle] = useState('');
     const [urgency, setUrgency] = useState('Standard');
     const [syncSource, setSyncSource] = useState('local');
     const [syncError, setSyncError] = useState('');
+    const [workflowStage, setWorkflowStage] = useState('Plan');
+    const [teamCreatorId, setTeamCreatorId] = useState('');
+    const [teamCreatorLabel, setTeamCreatorLabel] = useState('');
+    const [designeeKeys, setDesigneeKeys] = useState([]);
+    const [workspacePages, setWorkspacePages] = useState(defaultWorkspacePages);
+    const [activeWorkspacePageId, setActiveWorkspacePageId] = useState('script-main');
     const [quickJoinInput, setQuickJoinInput] = useState('');
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
@@ -193,6 +252,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [videoTitle, setVideoTitle] = useState('');
     const [isSavingRecording, setIsSavingRecording] = useState(false);
     const [hasSavedRecording, setHasSavedRecording] = useState(false);
+    const [savedRecordingMediaUrl, setSavedRecordingMediaUrl] = useState('');
+    const [isPublishingEpisodePost, setIsPublishingEpisodePost] = useState(false);
 
     // Guest & Remote Controls State
     const [guestCamOn, setGuestCamOn] = useState(true);
@@ -209,6 +270,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [tandemSyncedAt, setTandemSyncedAt] = useState(null);
     const [syncMessage, setSyncMessage] = useState('');
     const [guestNameInput, setGuestNameInput] = useState('');
+    const [newPageType, setNewPageType] = useState('Script');
+    const [newPageTitle, setNewPageTitle] = useState('');
 
     // Refs
     const videoRef = useRef(null);
@@ -218,6 +281,57 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const timerRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const broadcastChannelRef = useRef(null);
+
+    const actorKeys = useMemo(() => {
+        const keys = [
+            normalizeLoginIdentifier(user?.id),
+            normalizeLoginIdentifier(user?.email),
+            normalizeLoginIdentifier(user?.handle),
+            normalizeLoginIdentifier(user?.username),
+            normalizeLoginIdentifier(user?.displayName),
+            normalizeLoginIdentifier(user?.name)
+        ].filter(Boolean);
+        return Array.from(new Set(keys));
+    }, [user]);
+
+    const creatorKey = normalizeLoginIdentifier(teamCreatorId);
+    const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
+    const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
+    const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
+
+    const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
+
+    useEffect(() => {
+        if (teamCreatorId || !user?.id) {
+            return;
+        }
+
+        const creatorId = String(user.id);
+        const creatorName = String(user?.name || user?.displayName || user?.username || user?.email || 'Team Creator');
+        setTeamCreatorId(creatorId);
+        setTeamCreatorLabel(creatorName);
+    }, [teamCreatorId, user]);
+
+    useEffect(() => {
+        if (!activeWorkspacePageId && workspacePages[0]?.id) {
+            setActiveWorkspacePageId(workspacePages[0].id);
+        }
+
+        if (activeWorkspacePageId && !workspacePages.some((page) => page.id === activeWorkspacePageId)) {
+            setActiveWorkspacePageId(workspacePages[0]?.id || '');
+        }
+    }, [activeWorkspacePageId, workspacePages]);
+
+    useEffect(() => {
+        if (activeWorkspacePage?.type !== 'Script') {
+            return;
+        }
+
+        const pageContent = String(activeWorkspacePage?.content || '');
+        if (pageContent !== scriptText) {
+            setScriptText(pageContent);
+        }
+    }, [activeWorkspacePage, scriptText]);
 
     const normalizePermissions = (value) => ({
         canGoLive: Boolean(value?.canGoLive),
@@ -281,8 +395,28 @@ const PodcastStudioPage = ({ onNavigate }) => {
             identifier: identifier || '',
             identifierType: inferIdentifierType(identifier),
             loginState,
-            loginStatus
+            loginStatus,
+            coupled: true
         }, ...deduped];
+    };
+
+    const matchDirectoryMember = (identifier) => {
+        const normalizedIdentifier = normalizeLoginIdentifier(identifier);
+        if (!normalizedIdentifier) {
+            return null;
+        }
+
+        return teamDirectory.find((member) => {
+            const directoryIdentifiers = [
+                normalizeLoginIdentifier(member?.email),
+                normalizeLoginIdentifier(member?.handle),
+                normalizeLoginIdentifier(member?.username),
+                normalizeLoginIdentifier(member?.name),
+                normalizeLoginIdentifier(member?.displayName)
+            ].filter(Boolean);
+
+            return directoryIdentifiers.includes(normalizedIdentifier);
+        }) || null;
     };
 
     const applyPolicyState = (state) => {
@@ -349,10 +483,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
         const payload = {
             type: 'PODCAST_TANDEM_SYNC',
             title: overrides.title ?? title,
+            format: overrides.format ?? format,
             scriptText: overrides.scriptText ?? scriptText,
             storyAngle: overrides.storyAngle ?? storyAngle,
             urgency: overrides.urgency ?? urgency,
+            selectedMode: overrides.selectedMode ?? selectedMode,
+            runOrderApproved: overrides.runOrderApproved ?? runOrderApproved,
+            hasSavedRecording: overrides.hasSavedRecording ?? hasSavedRecording,
             teamMembersList: overrides.teamMembersList ?? teamMembersList,
+            teamCreatorId: overrides.teamCreatorId ?? teamCreatorId,
+            teamCreatorLabel: overrides.teamCreatorLabel ?? teamCreatorLabel,
+            designeeKeys: overrides.designeeKeys ?? designeeKeys,
+            workspacePages: overrides.workspacePages ?? workspacePages,
+            activeWorkspacePageId: overrides.activeWorkspacePageId ?? activeWorkspacePageId,
+            workflowStage: overrides.workflowStage ?? workflowStage,
             senderRole: controlRole,
             timestamp: new Date().toISOString()
         };
@@ -375,6 +519,14 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     useEffect(() => {
+        if (!teamCreatorId || !teamCreatorLabel) {
+            return;
+        }
+
+        broadcastTandemState({ teamCreatorId, teamCreatorLabel });
+    }, [teamCreatorId, teamCreatorLabel]);
+
+    useEffect(() => {
         loadPodcastControlPolicy();
 
         try {
@@ -385,10 +537,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 const data = event.data;
                 if (data?.type === 'PODCAST_TANDEM_SYNC') {
                     if (data.title) setTitle(data.title);
+                    if (data.format && formatDefinitions[data.format]) setFormat(data.format);
                     if (data.scriptText) setScriptText(data.scriptText);
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
+                    if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                    if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                    if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                    if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                    if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                    if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                    if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                    if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 }
             };
@@ -401,16 +563,50 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 try {
                     const data = JSON.parse(e.newValue);
                     if (data.title) setTitle(data.title);
+                    if (data.format && formatDefinitions[data.format]) setFormat(data.format);
                     if (data.scriptText) setScriptText(data.scriptText);
                     if (data.storyAngle) setStoryAngle(data.storyAngle);
                     if (data.urgency) setUrgency(data.urgency);
+                    if (data.selectedMode) setSelectedMode(data.selectedMode);
+                    if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                    if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
                     if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                    if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                    if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                    if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                    if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                    if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                    if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
                     setTandemSyncedAt(new Date().toLocaleTimeString());
                 } catch {
                     // Ignore parse error
                 }
             }
         };
+
+        try {
+            const savedState = localStorage.getItem('wisePodcastTandemState');
+            if (savedState) {
+                const data = JSON.parse(savedState);
+                if (data.title) setTitle(data.title);
+                if (data.format && formatDefinitions[data.format]) setFormat(data.format);
+                if (data.scriptText) setScriptText(data.scriptText);
+                if (data.storyAngle) setStoryAngle(data.storyAngle);
+                if (data.urgency) setUrgency(data.urgency);
+                if (data.selectedMode) setSelectedMode(data.selectedMode);
+                if (typeof data.runOrderApproved === 'boolean') setRunOrderApproved(data.runOrderApproved);
+                if (typeof data.hasSavedRecording === 'boolean') setHasSavedRecording(data.hasSavedRecording);
+                if (Array.isArray(data.teamMembersList)) setTeamMembersList(data.teamMembersList);
+                if (data.teamCreatorId) setTeamCreatorId(String(data.teamCreatorId));
+                if (data.teamCreatorLabel) setTeamCreatorLabel(String(data.teamCreatorLabel));
+                if (Array.isArray(data.designeeKeys)) setDesigneeKeys(data.designeeKeys.map((item) => normalizeLoginIdentifier(item)).filter(Boolean));
+                if (Array.isArray(data.workspacePages) && data.workspacePages.length > 0) setWorkspacePages(data.workspacePages);
+                if (data.activeWorkspacePageId) setActiveWorkspacePageId(String(data.activeWorkspacePageId));
+                if (data.workflowStage) setWorkflowStage(String(data.workflowStage));
+            }
+        } catch {
+            // Ignore restore parse error.
+        }
 
         window.addEventListener('storage', handleStorage);
         return () => {
@@ -505,6 +701,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setStatus(`Dispatch handoff received (${handoff.urgency || 'Standard'})`);
     }, []);
 
+    useEffect(() => {
+        try {
+            const savedDraft = String(localStorage.getItem('wisePodcastScriptDraft') || '').trim();
+            if (!savedDraft) {
+                return;
+            }
+
+            setScriptText(savedDraft);
+            setStatus('Recovered saved podcast script draft.');
+        } catch {
+            // Ignore local storage restore failures.
+        }
+    }, []);
+
     // Recording Functions
     const startRecording = async () => {
         // Only presenting roles (Owner / Producer / Host) may go live.
@@ -582,6 +792,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             setRecordedVideoUrl(null);
             setRecordedBlob(null);
             setHasSavedRecording(false);
+            setSavedRecordingMediaUrl('');
 
             let mimeType = 'video/webm';
             if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported('video/webm')) {
@@ -686,18 +897,22 @@ const PodcastStudioPage = ({ onNavigate }) => {
             formData.append('storageMode', 'permanent');
 
             const response = await ravensightAPI.uploadVideo(formData);
+            const uploadedMediaUrl = resolveUploadedMediaUrl(response, recordedVideoUrl || '');
             if (response?.video) {
                 upsertLocalVideo({
                     ...response.video,
                     userId: user?.id,
                     channelName: user?.name || 'WiseRaven Podcast Host',
                     channelAvatar: user?.avatar,
-                    videoUrl: response.video.videoUrl || recordedVideoUrl
+                    videoUrl: response.video.videoUrl || response.video.mediaUrl || uploadedMediaUrl,
+                    mediaUrl: response.video.mediaUrl || response.video.videoUrl || uploadedMediaUrl
                 });
             } else {
                 throw new Error('Local store fallback');
             }
+            setSavedRecordingMediaUrl(uploadedMediaUrl || recordedVideoUrl || '');
             setHasSavedRecording(true);
+            broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording successfully saved to Ravensight Library!');
         } catch {
             const fallback = buildLocalFallbackVideo({
@@ -709,16 +924,61 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 storageMode: 'permanent'
             });
             upsertLocalVideo(fallback);
+            setSavedRecordingMediaUrl(fallback?.mediaUrl || fallback?.videoUrl || recordedVideoUrl || '');
             setHasSavedRecording(true);
+            broadcastTandemState({ hasSavedRecording: true });
             setStatus('Podcast recording saved locally to Ravensight Library.');
         } finally {
             setIsSavingRecording(false);
         }
     };
 
+    const openRavensightTab = (tabId, message) => {
+        queueRavensightTab(tabId);
+        if (typeof onNavigate === 'function') {
+            onNavigate('ravensight');
+        }
+        if (message) {
+            setStatus(message);
+        }
+    };
+
+    const navigateToFeaturePage = (pageId, message) => {
+        if (typeof onNavigate === 'function') {
+            onNavigate(pageId);
+        }
+        if (message) {
+            setStatus(message);
+        }
+    };
+
+    const publishEpisodeToFeed = async () => {
+        const mediaUrl = String(savedRecordingMediaUrl || recordedVideoUrl || '').trim();
+        if (!mediaUrl) {
+            setStatus('Save a recording first so there is a media URL to publish to Feed.');
+            return;
+        }
+
+        setIsPublishingEpisodePost(true);
+        try {
+            await apiService.createPost({
+                content: `🎙 ${videoTitle || title || 'Podcast Episode'}\n\n${storyAngle || 'New episode from Podcast Control Room.'}`.trim(),
+                type: 'Video',
+                mediaUrl,
+                truthDispatch: true
+            });
+            setStatus('Podcast episode published to Feed. Opening Feed now.');
+            navigateToFeaturePage('feed');
+        } catch (error) {
+            setStatus(error?.message || 'Unable to publish podcast episode to Feed right now.');
+        } finally {
+            setIsPublishingEpisodePost(false);
+        }
+    };
+
     const handleApproveRunOrder = () => {
-        if (!permissions.canApproveSegments) {
-            setStatus(`${controlRole} cannot approve segment order. Switch to Owner, Producer or Editor.`);
+        if (!canApproveWorkflow) {
+            setStatus('Only the team creator or an assigned designee with approval permission can approve this workflow.');
             return;
         }
 
@@ -730,24 +990,29 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const handleStartRecordingFromFlow = () => {
         if (!String(title || '').trim()) {
             setStatus('Add a podcast title before starting recording.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!String(storyAngle || '').trim()) {
             setStatus('Add a story angle before starting recording.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!String(scriptText || '').trim()) {
             setStatus('Prepare a live script before starting recording.');
+            setWorkflowStage('Script');
             return;
         }
 
         if (!runOrderApproved) {
             setStatus('Approve run order before going live.');
+            setWorkflowStage('Script');
             return;
         }
 
+        setWorkflowStage('Record');
         startRecording();
     };
 
@@ -760,15 +1025,31 @@ const PodcastStudioPage = ({ onNavigate }) => {
             return;
         }
 
-        const nameFromEmail = identifier.includes('@') ? identifier.split('@')[0] : identifier.replace(/^@/, '');
-        const formattedName = nameFromEmail.charAt(0).toUpperCase() + nameFromEmail.slice(1);
+        const matchedProfile = matchDirectoryMember(identifier) || {
+            name: user?.name || user?.displayName || user?.username || 'Remote User',
+            email: user?.email || '',
+            handle: user?.handle || user?.username || '',
+            username: user?.username || user?.handle || '',
+            displayName: user?.displayName || user?.name || ''
+        };
+
+        const resolvedName = String(
+            matchedProfile?.displayName
+            || matchedProfile?.name
+            || matchedProfile?.username
+            || matchedProfile?.handle
+            || (identifier.includes('@') ? identifier.split('@')[0] : identifier.replace(/^@/, ''))
+        ).trim();
+
+        const candidateName = resolvedName || 'Remote User';
+        const displayName = candidateName.charAt(0).toUpperCase() + candidateName.slice(1);
         const login = resolveLoginStatus(identifier);
 
         const updatedList = upsertTeamMember({
-            name: formattedName,
+            name: displayName,
             role: syncRole,
-            locale: 'Remote Tandem',
-            device: 'Paired Sync',
+            locale: matchedProfile?.location || 'Remote Tandem',
+            device: matchedProfile?.device || 'Paired Sync',
             status: 'Synced in Tandem',
             identifier,
             loginState: login.loginState,
@@ -780,7 +1061,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
         setSyncMessage(`Synced ${identifier} as ${syncRole}. Login status: ${login.loginStatus}.`);
 
         broadcastTandemState({ teamMembersList: updatedList });
-        setStatus(`Team member ${formattedName} synced in tandem as ${syncRole}.`);
+        setStatus(`Team member ${displayName} synced in tandem as ${syncRole}.`);
 
         setTimeout(() => setSyncMessage(''), 4500);
     };
@@ -811,6 +1092,100 @@ const PodcastStudioPage = ({ onNavigate }) => {
         });
     };
 
+    const toggleDesignee = (member) => {
+        if (!isCreator) {
+            setStatus('Only the team creator can assign or remove a workflow designee.');
+            return;
+        }
+
+        const key = resolveMemberKey(member);
+        if (!key) {
+            setStatus('This team member must have a username or email before designation.');
+            return;
+        }
+
+        const next = designeeKeys.includes(key)
+            ? designeeKeys.filter((entry) => entry !== key)
+            : [...designeeKeys, key];
+
+        setDesigneeKeys(next);
+        broadcastTandemState({ designeeKeys: next });
+        setStatus(next.includes(key)
+            ? `${member.name} is now a workflow designee.`
+            : `${member.name} is no longer a workflow designee.`);
+    };
+
+    const decoupleTeamMember = (member) => {
+        if (!isCreator && !isDesignee) {
+            setStatus('Only the team creator or a workflow designee can break podcast sync connections.');
+            return;
+        }
+
+        const targetKey = resolveMemberKey(member);
+        const updatedList = teamMembersList.map((entry) => {
+            if (resolveMemberKey(entry) !== targetKey) {
+                return entry;
+            }
+
+            return {
+                ...entry,
+                coupled: false,
+                status: 'Decoupled from tandem',
+                loginState: 'offline',
+                loginStatus: 'Decoupled',
+                syncedAt: new Date().toLocaleTimeString()
+            };
+        });
+
+        setTeamMembersList(updatedList);
+        broadcastTandemState({ teamMembersList: updatedList });
+        setStatus(`Connection broken for ${member?.name || 'team member'}.`);
+    };
+
+    const addWorkspacePage = () => {
+        const page = createWorkspacePage(newPageType, newPageTitle);
+        const nextPages = [page, ...workspacePages];
+        setWorkspacePages(nextPages);
+        setActiveWorkspacePageId(page.id);
+        setNewPageTitle('');
+        broadcastTandemState({ workspacePages: nextPages, activeWorkspacePageId: page.id });
+        setStatus(`${page.type} page created and synced.`);
+    };
+
+    const updateWorkspacePage = (pageId, updates) => {
+        const nextPages = workspacePages.map((page) => (
+            page.id === pageId ? { ...page, ...updates } : page
+        ));
+        setWorkspacePages(nextPages);
+
+        const current = nextPages.find((page) => page.id === pageId);
+        if (current?.type === 'Script' && typeof updates.content === 'string') {
+            setScriptText(updates.content);
+            setRunOrderApproved(false);
+            broadcastTandemState({ workspacePages: nextPages, scriptText: updates.content, runOrderApproved: false });
+            return;
+        }
+
+        broadcastTandemState({ workspacePages: nextPages });
+    };
+
+    const removeWorkspacePage = (pageId) => {
+        if (workspacePages.length <= 1) {
+            setStatus('Keep at least one workspace page active.');
+            return;
+        }
+
+        const nextPages = workspacePages.filter((page) => page.id !== pageId);
+        const nextActiveId = pageId === activeWorkspacePageId
+            ? (nextPages[0]?.id || '')
+            : activeWorkspacePageId;
+
+        setWorkspacePages(nextPages);
+        setActiveWorkspacePageId(nextActiveId);
+        broadcastTandemState({ workspacePages: nextPages, activeWorkspacePageId: nextActiveId });
+        setStatus('Workspace page removed and team sync updated.');
+    };
+
     const handleShareScript = () => {
         try {
             localStorage.setItem('wiseSharedPodcastScript', scriptText);
@@ -830,6 +1205,50 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
     const runWorkflowNavigator = () => {
         void runNextStudioAction();
+    };
+
+    const handleClearForms = () => {
+        if (isRecording) {
+            setStatus('Stop recording before clearing podcast forms.');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            'Are you sure you want to clear podcast forms? This will erase title, story angle, script, workspace page content, and current run-order approval.'
+        );
+
+        if (!confirmed) {
+            setStatus('Clear forms canceled.');
+            return;
+        }
+
+        const clearedPages = workspacePages.map((page) => ({
+            ...page,
+            content: ''
+        }));
+
+        setTitle('');
+        setStoryAngle('');
+        setScriptText('');
+        setRunOrderApproved(false);
+        setWorkspacePages(clearedPages);
+        setWorkflowStage('Plan');
+        setVideoTitle('');
+        setQuickJoinInput('');
+        setSyncInput('');
+        setGuestNameInput('');
+        setNewPageTitle('');
+
+        broadcastTandemState({
+            title: '',
+            storyAngle: '',
+            scriptText: '',
+            runOrderApproved: false,
+            workspacePages: clearedPages,
+            workflowStage: 'Plan'
+        });
+
+        setStatus('Podcast forms cleared and synced.');
     };
 
     const handleQuickJoin = () => {
@@ -858,6 +1277,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     ...member,
                     loginState: 'online',
                     loginStatus: 'Joined room',
+                    coupled: true,
                     syncedAt: new Date().toLocaleTimeString()
                 };
             }));
@@ -874,9 +1294,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
         if (!definition) return;
 
         setFormat(nextFormat);
-        setScriptText(definition.segments.join('\n'));
-        setStatus(`${definition.icon} ${definition.label} format: ${definition.description}`);
-        broadcastTandemState({ format: nextFormat, scriptText: definition.segments.join('\n') });
+        setRunOrderApproved(false);
+        setStatus(`${definition.icon} ${definition.label} format selected. Use your own script and structure for this episode.`);
+        broadcastTandemState({ format: nextFormat, runOrderApproved: false });
     };
 
     // Urgency buttons set their namesake dispatch posture:
@@ -901,15 +1321,15 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const hasCoreBrief = Boolean(String(title || '').trim()) && Boolean(String(storyAngle || '').trim());
-    const hasScript = String(scriptText || '').trim().length >= 40;
-    const hasTeamReady = teamMembersList.length > 0;
+    const hasScript = Boolean(String(scriptText || '').trim());
+    const hasTeamReady = teamMembersList.some((member) => member?.coupled !== false);
     const hasRecording = Boolean(recordedVideoUrl);
 
     const flowSteps = [
         { id: 'brief', label: 'Episode brief ready', done: hasCoreBrief, hint: 'Set title and story angle' },
         { id: 'format', label: 'Format and urgency selected', done: Boolean(format && urgency), hint: 'Pick show structure and dispatch priority' },
         { id: 'team', label: 'Tandem team synced', done: hasTeamReady, hint: 'Pair at least one teammate or guest' },
-        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Use format template, then tailor the script' },
+        { id: 'script', label: 'Script prepared', done: hasScript, hint: 'Write your own script using the helper prompts' },
         { id: 'approval', label: 'Run order approved', done: runOrderApproved, hint: 'Lock segment order before recording' },
         { id: 'publish', label: 'Recording saved to library', done: hasSavedRecording, hint: 'Record, review, then save to Ravensight Library' }
     ];
@@ -917,38 +1337,53 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const completedFlowCount = flowSteps.filter((step) => step.done).length;
     const flowProgressPercent = Math.round((completedFlowCount / flowSteps.length) * 100);
 
+    const workflowStages = [
+        { id: 'Plan', hint: 'Brief, format, and urgency' },
+        { id: 'Script', hint: 'Script and approvals' },
+        { id: 'Team', hint: 'Guests and tandem sync' },
+        { id: 'Record', hint: 'Live monitor and recording' },
+        { id: 'Review', hint: 'Playback and library save' },
+        { id: 'Ship', hint: 'Publish and handoff' }
+    ];
+
     const runNextStudioAction = async () => {
         if (!hasCoreBrief) {
             setStatus('Complete episode title and story angle to lock your recording brief.');
+            setWorkflowStage('Plan');
             return;
         }
 
         if (!hasScript) {
-            handleFormatChange(format);
+            setWorkflowStage('Script');
+            setStatus('Add your own script content before continuing. Helpers are shown, but no script is prefilled.');
             return;
         }
 
         if (!runOrderApproved) {
+            setWorkflowStage('Script');
             handleApproveRunOrder();
             return;
         }
 
         if (!isRecording && !hasRecording) {
+            setWorkflowStage('Record');
             handleStartRecordingFromFlow();
             return;
         }
 
         if (hasRecording && !hasSavedRecording) {
+            setWorkflowStage('Review');
             await saveRecordingToLibrary();
             return;
         }
 
+        setWorkflowStage('Ship');
         setStatus('Podcast flow complete. Recording is saved and ready for Ravensight publishing.');
     };
 
     const nextFlowActionLabel = (() => {
         if (!hasCoreBrief) return 'Complete episode brief';
-        if (!hasScript) return 'Load script template';
+        if (!hasScript) return 'Write your script';
         if (!runOrderApproved) return 'Approve run order';
         if (!isRecording && !hasRecording) return 'Start recording';
         if (hasRecording && !hasSavedRecording) return 'Save recording';
@@ -1023,7 +1458,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     </span>
                                 )}
                             </div>
-                            <h2 style={{ margin: '8px 0 0', fontSize: '28px' }}>Social Creator Teams & Live Production</h2>
+                            <h2 style={{ margin: '8px 0 0', fontSize: '28px' }}>Ravensight Podcast Studio & Live Production</h2>
                         </div>
 
                         {/* Top Action Buttons */}
@@ -1031,7 +1466,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             {!isRecording ? (
                                 <button
                                     type="button"
-                                    onClick={handleStartRecordingFromFlow}
+                                    onClick={() => {
+                                        setWorkflowStage('Record');
+                                        handleStartRecordingFromFlow();
+                                    }}
                                     style={{
                                         border: 'none',
                                         background: 'linear-gradient(135deg, #ef4444, #dc2626)',
@@ -1124,11 +1562,58 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 </div>
 
                 <div style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '12px',
+                    padding: '10px 12px',
+                    background: 'rgba(15, 23, 42, 0.55)',
+                    display: 'grid',
+                    gap: '6px'
+                }}>
+                    <div style={{ fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
+                        Live Workflow Status
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 700 }}>
+                        {status}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        Creator: {teamCreatorLabel || 'Pending'} · Designees: {designeeKeys.length} · Current stage: {workflowStage}
+                    </div>
+                </div>
+
+                <div style={{
                     background: 'linear-gradient(160deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85))',
                     border: '1px solid rgba(16, 185, 129, 0.35)',
                     borderRadius: '18px',
                     padding: '20px'
                 }}>
+                    <div style={{ marginBottom: '14px', display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#99f6e4', fontWeight: 700 }}>
+                            Guided Studio Flow
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {workflowStages.map((stage) => (
+                                <button
+                                    key={stage.id}
+                                    type="button"
+                                    onClick={() => setWorkflowStage(stage.id)}
+                                    style={{
+                                        border: workflowStage === stage.id ? '1px solid #34d399' : '1px solid var(--border-color)',
+                                        background: workflowStage === stage.id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '7px 12px',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: workflowStage === stage.id ? 700 : 500
+                                    }}
+                                    title={stage.hint}
+                                >
+                                    {stage.id}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <div>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#34d399', fontWeight: 700 }}>
@@ -1174,27 +1659,84 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     </div>
 
                     <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                            type="button"
-                            onClick={runNextStudioAction}
-                            disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
-                            style={{
-                                border: 'none',
-                                background: 'linear-gradient(135deg, #10b981, #059669)',
-                                color: '#fff',
-                                borderRadius: '10px',
-                                padding: '11px 16px',
-                                fontWeight: 700,
-                                cursor: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 'not-allowed' : 'pointer',
-                                opacity: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 0.65 : 1
-                            }}
-                        >
-                            {isSavingRecording ? 'Saving...' : `Next: ${nextFlowActionLabel}`}
-                        </button>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={handleClearForms}
+                                disabled={isRecording || isSavingRecording}
+                                style={{
+                                    border: '1px solid rgba(248, 113, 113, 0.55)',
+                                    background: 'rgba(127, 29, 29, 0.35)',
+                                    color: '#fecaca',
+                                    borderRadius: '10px',
+                                    padding: '11px 16px',
+                                    fontWeight: 700,
+                                    cursor: (isRecording || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                    opacity: (isRecording || isSavingRecording) ? 0.55 : 1
+                                }}
+                                title="Clear podcast forms with confirmation"
+                            >
+                                Clear Forms
+                            </button>
+                            <button
+                                type="button"
+                                onClick={runNextStudioAction}
+                                disabled={nextFlowActionLabel === 'Flow complete' || isSavingRecording}
+                                style={{
+                                    border: 'none',
+                                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                                    color: '#fff',
+                                    borderRadius: '10px',
+                                    padding: '11px 16px',
+                                    fontWeight: 700,
+                                    cursor: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                    opacity: (nextFlowActionLabel === 'Flow complete' || isSavingRecording) ? 0.65 : 1
+                                }}
+                            >
+                                {isSavingRecording ? 'Saving...' : `Next: ${nextFlowActionLabel}`}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
+                {(workflowStage === 'Ship') && (
+                <div style={{
+                    background: 'linear-gradient(160deg, rgba(79, 70, 229, 0.14), rgba(15, 23, 42, 0.85))',
+                    border: '1px solid rgba(129, 140, 248, 0.35)',
+                    borderRadius: '18px',
+                    padding: '20px'
+                }}>
+                    <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#c4b5fd', fontWeight: 700 }}>
+                        Site Feature Connections
+                    </div>
+                    <div style={{ fontSize: '14px', color: 'var(--light-color)', marginTop: '6px' }}>
+                        Move this episode through the rest of WiseRavenShare without breaking workflow context.
+                    </div>
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
+                        <button type="button" onClick={() => openRavensightTab('library', 'Opening Ravensight Library for saved podcast review...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(129, 140, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            📚 Open Ravensight Library
+                        </button>
+                        <button type="button" onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload for external distribution...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            📤 Open Ravensight Upload
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('newsroom-video', 'Opening Newsroom Video handoff desk...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🎥 Open Newsroom Video
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('collaboration', 'Opening Collaboration room...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(147, 51, 234, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🤝 Open Collaboration
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(234, 179, 8, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🗂 Open Planner
+                        </button>
+                        <button type="button" onClick={() => navigateToFeaturePage('my-library', 'Opening My Library for related assets...')} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', background: 'rgba(14, 165, 233, 0.16)', color: 'var(--text-color)', padding: '10px 12px', cursor: 'pointer' }}>
+                            🎵 Open Music Library
+                        </button>
+                    </div>
+                </div>
+                )}
+
                 {/* Tandem Sync Connection Panel (Pairing by Username or Email) */}
+                {(workflowStage === 'Team') && (
                 <div style={{
                     background: 'linear-gradient(160deg, rgba(14, 116, 144, 0.15), rgba(15, 23, 42, 0.8))',
                     border: '1px solid rgba(56, 189, 248, 0.3)',
@@ -1213,6 +1755,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         <button
                             type="button"
                             onClick={() => {
+                                if (syncInput.trim()) {
+                                    handleSyncConnection();
+                                    return;
+                                }
+
                                 broadcastTandemState();
                                 setSyncMessage('Tandem sync forced across all paired connections.');
                                 setTimeout(() => setSyncMessage(''), 3000);
@@ -1309,8 +1856,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </button>
                     </div>
                 </div>
+                )}
 
                 {/* Video Monitor Grid & Remote Feeds */}
+                {(workflowStage === 'Record' || workflowStage === 'Review') && (
                 <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                     <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                         Multi-monitor vision wall & live preview
@@ -1376,7 +1925,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             <div style={{ marginTop: '12px', textAlign: 'center', padding: '16px 0' }}>
                                 <div style={{ fontSize: '32px' }}>👤</div>
                                 <div style={{ fontWeight: 700, marginTop: '6px' }}>
-                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'Luis (Madrid)'}
+                                    {teamMembersList.find(m => m.role === 'Guest')?.name || 'No guest paired'}
                                 </div>
                                 <div style={{ fontSize: '12px', color: guestCamOn ? '#4ade80' : '#f87171', marginTop: '4px' }}>
                                     {guestCamOn ? 'Connected · Audio Active' : 'Camera Muted'}
@@ -1448,9 +1997,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </div>
                     </div>
                 </div>
+                )}
 
                 {/* Recorded Session Preview & Library Export */}
-                {recordedVideoUrl && (
+                {(workflowStage === 'Review' || workflowStage === 'Ship') && recordedVideoUrl && (
                     <div style={{
                         background: 'var(--card-bg)',
                         border: '1px solid var(--highlight-color)',
@@ -1503,6 +2053,23 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     >
                                         {isSavingRecording ? 'Saving...' : '💾 Save to Ravensight Library'}
                                     </button>
+                                    <button
+                                        type="button"
+                                        onClick={publishEpisodeToFeed}
+                                        disabled={isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()}
+                                        style={{
+                                            border: '1px solid rgba(16, 185, 129, 0.55)',
+                                            background: 'rgba(16, 185, 129, 0.18)',
+                                            color: 'var(--text-color)',
+                                            padding: '12px 14px',
+                                            borderRadius: '10px',
+                                            fontWeight: 700,
+                                            cursor: (isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()) ? 'not-allowed' : 'pointer',
+                                            opacity: (isPublishingEpisodePost || isSavingRecording || !String(savedRecordingMediaUrl || recordedVideoUrl || '').trim()) ? 0.65 : 1
+                                        }}
+                                    >
+                                        {isPublishingEpisodePost ? 'Publishing...' : '📰 Publish to Feed'}
+                                    </button>
                                     <a
                                         href={recordedVideoUrl}
                                         download={`podcast_recording_${Date.now()}.webm`}
@@ -1527,6 +2094,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 )}
 
                 {/* Main Control Controls & Session Form */}
+                {(workflowStage === 'Plan' || workflowStage === 'Script' || workflowStage === 'Team') && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
                     <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                         <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
@@ -1572,15 +2140,20 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         {permissions.canApproveSegments ? '✓ Can approve segments' : '✗ Cannot approve'}
                                     </span>
                                 </div>
+                                <div style={{ marginTop: '6px', fontSize: '12px', color: '#bfdbfe' }}>
+                                    Workflow approval gate: Creator ({teamCreatorLabel || 'unassigned'}) or creator designee only.
+                                </div>
                             </div>
 
                             <label style={{ display: 'grid', gap: '6px' }}>
                                 <span style={{ color: 'var(--light-color)' }}>Podcast Title</span>
                                 <input
                                     value={title}
+                                    placeholder="Enter your episode title"
                                     onChange={(event) => {
                                         setTitle(event.target.value);
-                                        broadcastTandemState({ title: event.target.value });
+                                        setRunOrderApproved(false);
+                                        broadcastTandemState({ title: event.target.value, runOrderApproved: false });
                                     }}
                                     style={{
                                         padding: '12px',
@@ -1652,9 +2225,11 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <span style={{ color: 'var(--light-color)' }}>Story Angle</span>
                                 <input
                                     value={storyAngle}
+                                    placeholder="Describe your own angle, goal, or audience impact"
                                     onChange={(event) => {
                                         setStoryAngle(event.target.value);
-                                        broadcastTandemState({ storyAngle: event.target.value });
+                                        setRunOrderApproved(false);
+                                        broadcastTandemState({ storyAngle: event.target.value, runOrderApproved: false });
                                     }}
                                     style={{
                                         padding: '12px',
@@ -1694,9 +2269,22 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <span style={{ color: 'var(--light-color)' }}>Live Script (Synced across paired team)</span>
                                 <textarea
                                     value={scriptText}
+                                    placeholder="Write your own script, producer notes, direction cues, and optional music loop plan"
                                     onChange={(event) => {
                                         setScriptText(event.target.value);
-                                        broadcastTandemState({ scriptText: event.target.value });
+                                        setRunOrderApproved(false);
+                                        if (activeWorkspacePage) {
+                                            const updatedPages = workspacePages.map((page) => (
+                                                page.id === activeWorkspacePage.id
+                                                    ? { ...page, content: event.target.value }
+                                                    : page
+                                            ));
+                                            setWorkspacePages(updatedPages);
+                                            broadcastTandemState({ scriptText: event.target.value, workspacePages: updatedPages, runOrderApproved: false });
+                                            return;
+                                        }
+
+                                        broadcastTandemState({ scriptText: event.target.value, runOrderApproved: false });
                                     }}
                                     rows={8}
                                     disabled={!permissions.canEditScript}
@@ -1710,9 +2298,30 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         opacity: permissions.canEditScript ? 1 : 0.6
                                     }}
                                 />
+                                <div style={{ fontSize: '12px', color: '#93c5fd' }}>
+                                    Helper only: define your own producer, director, scriptwriter, background music, and prerecorded startup loop details here.
+                                </div>
                             </label>
 
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    onClick={handleClearForms}
+                                    disabled={isRecording || isSavingRecording}
+                                    style={{
+                                        border: '1px solid rgba(248, 113, 113, 0.55)',
+                                        background: 'rgba(127, 29, 29, 0.35)',
+                                        color: '#fecaca',
+                                        borderRadius: '10px',
+                                        padding: '10px 14px',
+                                        fontWeight: 700,
+                                        cursor: (isRecording || isSavingRecording) ? 'not-allowed' : 'pointer',
+                                        opacity: (isRecording || isSavingRecording) ? 0.55 : 1
+                                    }}
+                                    title="Clear podcast forms with confirmation"
+                                >
+                                    Clear Forms
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -1751,7 +2360,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <button
                                     type="button"
                                     onClick={handleApproveRunOrder}
-                                    disabled={!permissions.canApproveSegments}
+                                    disabled={!canApproveWorkflow}
                                     style={{
                                         border: runOrderApproved ? '1px solid #22c55e' : '1px solid var(--border-color)',
                                         background: runOrderApproved ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.03)',
@@ -1759,8 +2368,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         borderRadius: '10px',
                                         padding: '10px 14px',
                                         fontWeight: runOrderApproved ? 700 : 400,
-                                        cursor: permissions.canApproveSegments ? 'pointer' : 'not-allowed',
-                                        opacity: permissions.canApproveSegments ? 1 : 0.65
+                                        cursor: canApproveWorkflow ? 'pointer' : 'not-allowed',
+                                        opacity: canApproveWorkflow ? 1 : 0.65
                                     }}
                                 >
                                     {runOrderApproved ? '✓ Run order approved' : 'Approve run order'}
@@ -1772,6 +2381,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                     {/* Team Room & Guest Management */}
                     <div style={{ display: 'grid', gap: '20px' }}>
                         {/* Guest Quick Connect Box */}
+                        {(workflowStage === 'Team') && (
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                                 Guest Room & Quick Join
@@ -1835,11 +2445,16 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 </button>
                             </div>
                         </div>
+                        )}
 
                         {/* Synced Tandem Team Roster */}
+                        {(workflowStage === 'Team') && (
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                             <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
                                 Synced Tandem Team ({teamMembersList.length})
+                            </div>
+                            <div style={{ marginTop: '8px', fontSize: '12px', color: '#bfdbfe' }}>
+                                Creator can designate approvers and decouple persistent links.
                             </div>
                             <div style={{ display: 'grid', gap: '10px', marginTop: '14px' }}>
                                 {teamMembersList.map((member, i) => (
@@ -1858,6 +2473,26 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         <div>
                                             <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 {member.name}
+                                                <span style={{
+                                                    fontSize: '10px',
+                                                    borderRadius: '4px',
+                                                    padding: '2px 6px',
+                                                    background: member.coupled === false ? 'rgba(248, 113, 113, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                                                    color: member.coupled === false ? '#fca5a5' : '#86efac'
+                                                }}>
+                                                    {member.coupled === false ? 'Decoupled' : 'Coupled'}
+                                                </span>
+                                                {designeeKeys.includes(resolveMemberKey(member)) && (
+                                                    <span style={{
+                                                        fontSize: '10px',
+                                                        borderRadius: '4px',
+                                                        padding: '2px 6px',
+                                                        background: 'rgba(59, 130, 246, 0.25)',
+                                                        color: '#bfdbfe'
+                                                    }}>
+                                                        Designee
+                                                    </span>
+                                                )}
                                                 <span style={{
                                                     fontSize: '10px',
                                                     background: member.loginState === 'online'
@@ -1886,11 +2521,48 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         <div style={{ textAlign: 'right', color: 'var(--light-color)', fontSize: '12px' }}>
                                             <div>{member.locale}</div>
                                             <div>{member.device}</div>
+                                            <div style={{ display: 'flex', gap: '6px', marginTop: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleDesignee(member)}
+                                                    disabled={!isCreator}
+                                                    style={{
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: '6px',
+                                                        background: designeeKeys.includes(resolveMemberKey(member)) ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.03)',
+                                                        color: 'var(--text-color)',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: isCreator ? 'pointer' : 'not-allowed',
+                                                        opacity: isCreator ? 1 : 0.65
+                                                    }}
+                                                >
+                                                    {designeeKeys.includes(resolveMemberKey(member)) ? 'Remove designee' : 'Assign designee'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => decoupleTeamMember(member)}
+                                                    disabled={!isCreator && !isDesignee}
+                                                    style={{
+                                                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                                                        borderRadius: '6px',
+                                                        background: 'rgba(239, 68, 68, 0.16)',
+                                                        color: '#fecaca',
+                                                        fontSize: '11px',
+                                                        padding: '4px 8px',
+                                                        cursor: (isCreator || isDesignee) ? 'pointer' : 'not-allowed',
+                                                        opacity: (isCreator || isDesignee) ? 1 : 0.65
+                                                    }}
+                                                >
+                                                    Decouple
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
+                        )}
 
                         {/* Session Status */}
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
@@ -1910,29 +2582,144 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </div>
                     </div>
                 </div>
+                )}
 
-                {/* Script Pipeline */}
+                {(workflowStage === 'Plan' || workflowStage === 'Script' || workflowStage === 'Team' || workflowStage === 'Ship') && (
                 <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
                     <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                        Script Pipeline
+                        Persistent Workspace Pages
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '14px' }}>
-                        {scriptBlocks.map((segment, index) => (
-                            <div
-                                key={segment}
+                    <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--light-color)' }}>
+                        Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px' }}>
+                        <input
+                            type="text"
+                            value={newPageTitle}
+                            onChange={(event) => setNewPageTitle(event.target.value)}
+                            placeholder="Page title (optional: Producer Notes, Director Plan, Music Bed, Intro Loop)"
+                            style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)'
+                            }}
+                        />
+                        <select
+                            value={newPageType}
+                            onChange={(event) => setNewPageType(event.target.value)}
+                            style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                background: 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-color)'
+                            }}
+                        >
+                            <option value="Script">Script</option>
+                            <option value="Subject">Subject</option>
+                            <option value="Props">Props</option>
+                            <option value="Reference">Reference</option>
+                        </select>
+                        <button
+                            type="button"
+                            onClick={addWorkspacePage}
+                            style={{
+                                border: 'none',
+                                borderRadius: '8px',
+                                background: 'linear-gradient(135deg, #0ea5e9, #0369a1)',
+                                color: '#fff',
+                                padding: '10px 12px',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Add page
+                        </button>
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {workspacePages.map((page) => (
+                            <button
+                                key={page.id}
+                                type="button"
+                                onClick={() => {
+                                    setActiveWorkspacePageId(page.id);
+                                    if (page.type === 'Script') {
+                                        setScriptText(page.content || '');
+                                    }
+                                    broadcastTandemState({ activeWorkspacePageId: page.id });
+                                }}
                                 style={{
-                                    background: 'rgba(255,255,255,0.03)',
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '12px',
-                                    padding: '12px'
+                                    border: page.id === activeWorkspacePageId ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                                    borderRadius: '999px',
+                                    background: page.id === activeWorkspacePageId ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.03)',
+                                    color: 'var(--text-color)',
+                                    padding: '6px 10px',
+                                    fontSize: '12px',
+                                    cursor: 'pointer'
                                 }}
                             >
-                                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>Segment {index + 1}</div>
-                                <div>{segment}</div>
-                            </div>
+                                {page.type}: {String(page.title || '').trim() || 'Untitled'}
+                            </button>
                         ))}
                     </div>
+
+                    {activeWorkspacePage && (
+                        <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                            <input
+                                type="text"
+                                value={activeWorkspacePage.title}
+                                onChange={(event) => updateWorkspacePage(activeWorkspacePage.id, { title: event.target.value })}
+                                placeholder="Page title"
+                                style={{
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    color: 'var(--text-color)'
+                                }}
+                            />
+                            <textarea
+                                value={activeWorkspacePage.content || ''}
+                                onChange={(event) => updateWorkspacePage(activeWorkspacePage.id, { content: event.target.value })}
+                                rows={8}
+                                placeholder="Add your own page content"
+                                style={{
+                                    padding: '12px',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    color: 'var(--text-color)',
+                                    resize: 'vertical'
+                                }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                                    Type: {activeWorkspacePage.type}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => removeWorkspacePage(activeWorkspacePage.id)}
+                                    style={{
+                                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                                        borderRadius: '8px',
+                                        background: 'rgba(239, 68, 68, 0.16)',
+                                        color: '#fecaca',
+                                        padding: '8px 10px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Remove page
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
+                )}
             </div>
         </Compartment>
     );

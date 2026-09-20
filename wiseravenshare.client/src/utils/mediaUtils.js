@@ -3,7 +3,27 @@ export const resolveMediaUrl = (url) => {
     const trimmed = url.trim();
     if (!trimmed) return '';
 
-    if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || /^https?:\/\//i.test(trimmed)) {
+    if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+        return trimmed;
+    }
+
+    // Older records may contain internal localhost stream URLs that are unreachable
+    // from public deployments. Rewrite them to same-origin relative paths.
+    if (/^https?:\/\//i.test(trimmed)) {
+        try {
+            const parsed = new URL(trimmed);
+            const isLocalHost = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname);
+            if (isLocalHost && typeof window !== 'undefined') {
+                const currentHost = window.location.hostname || '';
+                const currentIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(currentHost);
+                if (!currentIsLocal) {
+                    return `${parsed.pathname}${parsed.search}`;
+                }
+            }
+        } catch {
+            // If URL parsing fails, return the original value.
+        }
+
         return trimmed;
     }
 

@@ -29,7 +29,8 @@ import CanvasPage from './Pages/CanvasPage';
 import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
-import MusicStudioPage from './Pages/MusicStudioPage';
+import MusicPlayerPage from './Pages/MusicPlayerPage';
+import FMRadioPage from './Pages/FMRadioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
@@ -38,7 +39,11 @@ import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
 import { useAuth } from './Contexts/AuthContext';
 import { useNotification } from './Contexts/NotificationContext';
+import { usePersonalization } from './hooks/usePersonalization';
 import { apiService } from './Services/api';
+import { pageMapService } from './Services/pageMapService';
+import aiAssistantService from './Services/aiAssistantService';
+import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
 
 const SPONSOR_PAYMENT_LINK = String(
@@ -90,7 +95,7 @@ const resolveInitialPublicPage = () => {
         return 'terms';
     }
 
-    if (normalizedPath === '/login' || normalizedPath === '/social/access') {
+    if (normalizedPath === '/login' || normalizedPath === '/social/access' || normalizedPath === '/oauth') {
         return 'login';
     }
 
@@ -98,6 +103,7 @@ const resolveInitialPublicPage = () => {
 };
 
 const App = () => {
+    useScreenSize();
     const [currentPage, setCurrentPage] = useState(() =>
         resolveInitialPublicPage()
     );
@@ -115,6 +121,7 @@ const App = () => {
     const [articleBackPage, setArticleBackPage] = useState('ainews');
     const { user, isAuthenticated, loading, login, register, acceptTeamInvite, logout } = useAuth();
     const { addToast } = useNotification();
+    const { submitCrawledContent, submitCrawledBatch } = usePersonalization();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
@@ -224,6 +231,71 @@ const App = () => {
             engine.destroy();
         };
     }, [isAuthenticated, addToast]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        aiAssistantService.healthCheck(1, 750).catch(() => {
+            // Warm-up is best-effort; AI page handles user-visible errors.
+        });
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        const crawlKey = 'wisePageMapCrawlV1';
+        const currentSignature = pageMapService
+            .getPageMap()
+            .map((node) => `${node.id}:${node.category}`)
+            .join('|');
+
+        if (localStorage.getItem(crawlKey) === currentSignature) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const countryCode = (() => {
+            try {
+                const locale = Intl.DateTimeFormat().resolvedOptions().locale || '';
+                const parts = locale.split('-');
+                if (parts.length > 1 && parts[1]) {
+                    return String(parts[1]).toUpperCase();
+                }
+            } catch {
+                // Ignore locale detection failures.
+            }
+            return 'GLOBAL';
+        })();
+
+        const payload = pageMapService.toCrawlerPayload({ countryCode });
+
+        (async () => {
+            try {
+                await submitCrawledBatch(payload, countryCode);
+            } catch {
+                for (const item of payload) {
+                    if (cancelled) {
+                        return;
+                    }
+
+                    await submitCrawledContent(item.contentType, item.contentId, item.content, item.tags);
+                }
+            }
+
+            if (!cancelled) {
+                localStorage.setItem(crawlKey, currentSignature);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isAuthenticated, submitCrawledBatch, submitCrawledContent]);
 
     useEffect(() => {
         const perfTrimKey = 'wisePerfTrimV2';
@@ -439,9 +511,6 @@ const App = () => {
             case 'tiktok-feed':
             case 'instagram-feed':
             case 'youtube-feed':
-            case 'twitter-feed':
-            case 'linkedin-feed':
-            case 'bluesky-feed':
             case 'social-feeds':
                 return canAccessPlatformAggregator
                     ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
@@ -463,11 +532,12 @@ const App = () => {
             case 'team-launchpad':
                 return <TeamLaunchpadPage user={user} onNavigate={setCurrentPage} isAdminUser={isAdminUser} />;
             case 'music-rights-studio':
-                return isAdminUser
-                    ? <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />
-                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+                return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <MusicStudioPage onNavigate={setCurrentPage} />;
+                return <MusicPlayerPage onNavigate={setCurrentPage} />;
+            case 'fm-tuner':
+            case 'radio-creator':
+                return <FMRadioPage onNavigate={setCurrentPage} />;
             case 'my-library':
                 return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'instrument-connector':
@@ -589,7 +659,7 @@ const App = () => {
                     <div>
                         <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', color: 'var(--highlight-color)' }}>Can I connect social media accounts?</h3>
                         <p style={{ margin: 0, color: 'var(--light-color)', fontSize: '14px', lineHeight: 1.6 }}>
-                            Yes. Authenticated users can connect and manage accounts on Facebook, TikTok, Instagram, YouTube, Twitter, LinkedIn, and Bluesky to directly distribute content from WiseRavenShare to those platforms.
+                            Yes. Authenticated users can connect and manage accounts on Facebook, TikTok, Instagram, and YouTube to directly distribute content from WiseRavenShare to those platforms.
                         </p>
                     </div>
                 </div>
@@ -636,7 +706,8 @@ const App = () => {
         { id: 'truthseeker', label: 'Truth Seeker' },
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
-        { id: 'music-player', label: '🎚️ Music Studio' },
+        { id: 'fm-tuner', label: '📻 FM Radio & Cassette' },
+        { id: 'radio-creator', label: '🎙️ Radio Creator' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'profile', label: 'Profile' }
@@ -669,7 +740,8 @@ const App = () => {
                             padding: '8px 14px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px'
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)'
                         }}
                     >
                         Back To Main App
@@ -699,7 +771,8 @@ const App = () => {
                                 padding: '8px 12px',
                                 borderRadius: '999px',
                                 cursor: 'pointer',
-                                fontSize: '12px'
+                                fontSize: 'var(--app-nav-font-size)',
+                                minHeight: 'var(--app-touch-target-min-height)'
                             }}
                         >
                             {item.label}
@@ -714,7 +787,8 @@ const App = () => {
                             padding: '8px 12px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px',
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)',
                             fontWeight: 'bold'
                         }}
                     >
@@ -729,7 +803,8 @@ const App = () => {
                             padding: '8px 12px',
                             borderRadius: '999px',
                             cursor: 'pointer',
-                            fontSize: '12px',
+                            fontSize: 'var(--app-nav-font-size)',
+                            minHeight: 'var(--app-touch-target-min-height)',
                             fontWeight: 'bold'
                         }}
                     >
@@ -747,17 +822,17 @@ const App = () => {
                 </div>
             </div>
             <RavenCommuniqueModal isOpen={communiqueOpen} onClose={() => setCommuniqueOpen(false)} />
-            <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: '12px', color: 'var(--light-color)' }}>
+            <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: 'var(--app-nav-font-size)', color: 'var(--light-color)' }}>
                 <button
                     onClick={() => setCurrentPage('privacy')}
-                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: 'var(--app-nav-font-size)' }}
                 >
                     Privacy Policy
                 </button>
                 &nbsp;·&nbsp;
                 <button
                     onClick={() => setCurrentPage('terms')}
-                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--light-color)', cursor: 'pointer', textDecoration: 'underline', fontSize: 'var(--app-nav-font-size)' }}
                 >
                     Terms of Service
                 </button>

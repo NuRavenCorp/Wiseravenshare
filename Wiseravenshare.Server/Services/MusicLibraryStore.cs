@@ -13,7 +13,26 @@ public interface IMusicLibraryStore
         Guid userId,
         IFormFile file,
         SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default);
+
+    Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class MusicLibraryDeleteResult
+{
+    public string TrackId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ObjectKey { get; init; } = string.Empty;
+    public string PublicUrl { get; init; } = string.Empty;
 }
 
 public sealed class BucketMusicLibraryStore : IMusicLibraryStore
@@ -71,7 +90,7 @@ ORDER BY created_at DESC;";
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var objectKey = reader.GetString(1);
+            var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             var originalFileName = reader.GetString(2);
             var metadata = ParseMetadata(reader.IsDBNull(6) ? null : reader.GetString(6));
             var storedFileName = ReadMetadataString(metadata, "storedFileName", originalFileName);
@@ -99,6 +118,7 @@ ORDER BY created_at DESC;";
         Guid userId,
         IFormFile file,
         SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
         CancellationToken cancellationToken = default)
     {
         if (file is null || file.Length == 0)
@@ -106,7 +126,7 @@ ORDER BY created_at DESC;";
             throw new InvalidOperationException("No music file uploaded.");
         }
 
-        var saved = await _musicService.SaveMusicAsync(file, dto.DestinationFolder, cancellationToken);
+        var saved = await _musicService.SaveMusicAsync(file, dto.DestinationFolder, userStorageIdentity, cancellationToken);
         var bucketObjectId = Guid.NewGuid().ToString("N");
         var metadata = new Dictionary<string, object?>
         {
@@ -137,6 +157,146 @@ ORDER BY created_at DESC;";
             UploadedAt = saved.SavedAtUtc.ToString("O"),
             SizeBytes = saved.SizeBytes
         };
+    }
+
+    public async Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+        {
+            return null;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE owner_user_id = @user_id
+  AND id = @track_id
+  AND deleted_at IS NULL
+LIMIT 1;";
+
+        await using var read = new NpgsqlCommand(readSql, connection);
+        read.Parameters.AddWithValue("user_id", userId);
+        read.Parameters.AddWithValue("track_id", trackId.Trim());
+
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+        var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+        var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+        var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+        var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+        await reader.CloseAsync();
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE owner_user_id = @user_id
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("track_id", trackId.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return new MusicLibraryDeleteResult
+        {
+            TrackId = id,
+            FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+            ObjectKey = objectKey,
+            PublicUrl = publicUrl
+        };
+    }
+
+    public async Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE owner_user_id = @user_id
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  )
+ORDER BY created_at DESC;";
+
+        var results = new List<MusicLibraryDeleteResult>();
+        await using (var read = new NpgsqlCommand(readSql, connection))
+        {
+            read.Parameters.AddWithValue("user_id", userId);
+            read.Parameters.AddWithValue("file_name", fileName.Trim());
+
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+                var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+                results.Add(new MusicLibraryDeleteResult
+                {
+                    TrackId = id,
+                    FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+                    ObjectKey = objectKey,
+                    PublicUrl = publicUrl
+                });
+            }
+        }
+
+        if (results.Count == 0)
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE owner_user_id = @user_id
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  );";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("file_name", fileName.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return results;
     }
 
     private async Task InsertBucketObjectAsync(
@@ -191,18 +351,86 @@ INSERT INTO app_data.bucket_objects (
 
     private string ResolveMediaUrl(string? publicUrl, string objectKey, string fileName)
     {
+        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey)
+            ? TryExtractObjectKeyFromUrl(publicUrl)
+            : objectKey.Replace('\\', '/').Trim('/');
+
+        if (string.IsNullOrWhiteSpace(normalizedObjectKey) && !string.IsNullOrWhiteSpace(fileName))
+        {
+            normalizedObjectKey = fileName;
+        }
+
+        // Bucket objects are typically private and should be streamed through the API when blob
+        // credentials are configured. If blob storage is unavailable, fall back to the stored
+        // public URL so playback can continue for objects that are publicly readable.
+        if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
+        {
+            if (_blobStorageService.IsConfigured)
+            {
+                return BuildBlobFallbackUrl(normalizedObjectKey);
+            }
+
+            if (!string.IsNullOrWhiteSpace(publicUrl))
+            {
+                return publicUrl;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(publicUrl))
         {
             return publicUrl;
         }
 
-        var resolved = _blobStorageService.ResolvePublicUrl(objectKey);
+        var resolved = _blobStorageService.ResolvePublicUrl(normalizedObjectKey);
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             return resolved;
         }
 
         return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
+    }
+
+    private string TryExtractObjectKeyFromUrl(string? publicUrl)
+    {
+        var raw = publicUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        {
+            return string.Empty;
+        }
+
+        var path = uri.AbsolutePath.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_bucketName)
+            && path.StartsWith(_bucketName + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[(_bucketName.Length + 1)..];
+        }
+
+        return path.Trim('/');
+    }
+
+    private static string BuildBlobFallbackUrl(string objectKey)
+    {
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "/api/videostreaming/stream";
+        }
+
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Uri.EscapeDataString);
+
+        return $"/api/videostreaming/blob/{string.Join("/", segments)}";
     }
 
     private static JsonElement? ParseMetadata(string? metadataJson)
@@ -255,7 +483,11 @@ INSERT INTO app_data.bucket_objects (
             return NormalizeConnectionString(databaseUrl);
         }
 
-        return NormalizeConnectionString(configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+        var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+            ?? configuration.GetConnectionString("DatabaseConnection")
+            ?? string.Empty;
+
+        return NormalizeConnectionString(defaultConnection);
     }
 
     private static string NormalizeConnectionString(string value)

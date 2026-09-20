@@ -292,11 +292,12 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_v2_video_id_created_at
             UpdatedAt = DateTime.UtcNow
         };
 
-        var storageMode = VideoRetentionPolicy.NormalizeStorageMode(request.StorageMode, request.IsPermanent);
-        var expiresAt = VideoRetentionPolicy.GetExpiresAt(entity.CreatedAt, request.IsPermanent);
+        // User-owned library videos are permanent — they persist until the user deletes them.
+        var storageMode = VideoRetentionPolicy.NormalizeStorageMode(request.StorageMode, isPermanent: true);
+        var expiresAt = VideoRetentionPolicy.GetExpiresAt(entity.CreatedAt, isPermanent: true);
         entity.StorageMode = storageMode;
-        entity.RetentionStatus = VideoRetentionPolicy.GetStorageStatus(entity.CreatedAt, request.IsPermanent);
-        entity.ExpiresAt = request.IsPermanent ? null : expiresAt;
+        entity.RetentionStatus = VideoRetentionPolicy.GetStorageStatus(entity.CreatedAt, isPermanent: true);
+        entity.ExpiresAt = null;
 
         try
         {

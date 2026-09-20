@@ -22,16 +22,16 @@ def releaseKeyPassword = envOrProp('ANDROID_KEY_PASSWORD', 'keyPassword')
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 def resolveVersionCode = {
-    def raw = System.getenv('ANDROID_VERSION_CODE') ?: (project.hasProperty('ANDROID_VERSION_CODE') ? project.property('ANDROID_VERSION_CODE') : null) ?: '1'
+    def raw = System.getenv('ANDROID_VERSION_CODE') ?: (project.hasProperty('ANDROID_VERSION_CODE') ? project.property('ANDROID_VERSION_CODE') : null) ?: '26090621'
     try {
         return Integer.parseInt(raw.toString().trim())
     } catch (Exception ignored) {
-        return 1
+        return 26090621
     }
 }
 
 def resolveVersionName = {
-    def raw = System.getenv('ANDROID_VERSION_NAME') ?: (project.hasProperty('ANDROID_VERSION_NAME') ? project.property('ANDROID_VERSION_NAME') : null) ?: '1.0'
+    def raw = System.getenv('ANDROID_VERSION_NAME') ?: (project.hasProperty('ANDROID_VERSION_NAME') ? project.property('ANDROID_VERSION_NAME') : null) ?: '1.0.7'
     return raw.toString().trim()
 }
 
@@ -73,7 +73,8 @@ android {
             } else {
                 signingConfig signingConfigs.debug
             }
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

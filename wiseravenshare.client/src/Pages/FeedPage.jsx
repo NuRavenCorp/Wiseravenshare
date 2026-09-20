@@ -12,13 +12,39 @@ import OnboardingCard from '../Components/Common/OnboardingCard';
 import ShortFormFeed from '../Components/Feed/ShortFormFeed';
 import { apiService } from '../Services/api';
 import { mergeFeedPosts, normalizeFeedPost, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../Services/postFeedPayload';
+import { usePersonalization } from '../hooks/usePersonalization';
+import { crawlerService } from '../Services/crawlerService';
+import { personalizationService } from '../Services/personalizationService';
+import { contentCrawlerService } from '../Services/contentCrawlerService';
+
+const parseAdminEmails = () => {
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+};
 
 const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
+    const { track } = usePersonalization();
     const [posts, setPosts] = useState([]);
     const [following, setFollowing] = useState([]);
     const [integrityReports, setIntegrityReports] = useState({});
     const [feedScope, setFeedScope] = useState('local');
+    // Photo posts render inline in the main feed — no day-group tiles.
+    const [crawlerTrending, setCrawlerTrending] = useState(null);
+    const [isCrawlerLoading, setIsCrawlerLoading] = useState(false);
+    const [personalizedTrending, setPersonalizedTrending] = useState(null);
+    const [isPersonalizedLoading, setIsPersonalizedLoading] = useState(false);
+    const [contentTrending, setContentTrending] = useState(null);
+    const [isContentTrendingLoading, setIsContentTrendingLoading] = useState(false);
     const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
 
@@ -48,6 +74,23 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const isQuestionPost = (post) => {
         const content = String(post?.content || '').trim();
         return Boolean(content) && truthEngine.isQuestion(content);
+    };
+
+    const isPhotoPost = (post) => {
+        const type = String(post?.mediaType || post?.type || '').toLowerCase();
+        if (type === 'photo' || type === 'image') {
+            return true;
+        }
+
+        const mediaUrl = String(post?.mediaUrl || post?.imageUrl || '').toLowerCase();
+        return /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(mediaUrl);
+    };
+
+    // Extract hashtag tokens from a post for personalization tracking.
+    const extractPostTags = (post) => {
+        const content = String(post?.content || '');
+        const matches = content.match(/#[a-zA-Z0-9_]+/g) || [];
+        return matches.map((t) => t.slice(1).toLowerCase()).slice(0, 10);
     };
 
     const buildIntegrityReport = (post, mode = 'manual') => {
@@ -146,21 +189,124 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         window.dispatchEvent(new Event('wiseraven:posts-updated'));
     }, [posts]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCrawlerTrending = async () => {
+            if (!isAdminUser) {
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+                return;
+            }
+
+            try {
+                setIsCrawlerLoading(true);
+                const summary = await crawlerService.getSummary(null, 'core');
+                if (!cancelled) {
+                    setCrawlerTrending(summary);
+                }
+            } catch (err) {
+                console.error('Failed to load crawler trending:', err);
+                if (!cancelled) {
+                    setCrawlerTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsCrawlerLoading(false);
+                }
+            }
+        };
+
+        const loadPersonalizedTrending = async () => {
+            try {
+                setIsPersonalizedLoading(true);
+                const personalized = await personalizationService.getPersonalizedTrending(null, 'core', 8);
+                if (!cancelled) {
+                    setPersonalizedTrending(personalized);
+                }
+            } catch (err) {
+                console.error('Failed to load personalized trending:', err);
+                if (!cancelled) {
+                    setPersonalizedTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsPersonalizedLoading(false);
+                }
+            }
+        };
+
+        const loadContentTrending = async () => {
+            try {
+                setIsContentTrendingLoading(true);
+                const result = await contentCrawlerService.getTrendingContent({
+                    contentType: 'Post',  // Focus on user-generated posts
+                    topN: 6
+                });
+                if (!cancelled && result?.trendingContent?.length > 0) {
+                    setContentTrending(result);
+                }
+            } catch (err) {
+                console.error('Failed to load content trending:', err);
+                if (!cancelled) {
+                    setContentTrending(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsContentTrendingLoading(false);
+                }
+            }
+        };
+
+        void loadCrawlerTrending();
+        void loadPersonalizedTrending();
+        void loadContentTrending();
+        return () => {
+            cancelled = true;
+        };
+    }, [isAdminUser]);
+
     const handlePostCreate = (newPost) => {
         setPosts(prev => mergeFeedPosts([normalizePost(newPost)], prev));
     };
 
     const handleLike = async (postId) => {
         try {
-            const updated = await apiService.likePost(postId);
+            const currentPost = posts.find((item) => item.id === postId);
+            const updated = currentPost?.isLiked
+                ? await apiService.unlikePost(postId)
+                : await apiService.likePost(postId);
+
+            const nextLikesCount = Number(
+                updated?.likesCount
+                ?? updated?.LikesCount
+                ?? currentPost?.likes
+                ?? currentPost?.likesCount
+                ?? 0
+            );
+            const nextIsLiked = Boolean(
+                updated?.isLiked
+                ?? updated?.IsLiked
+                ?? !currentPost?.isLiked
+            );
+
+            // Track the like interaction for personalization.
+            const post = posts.find((p) => p.id === postId);
+            if (post) {
+                track('Like', 'Post', postId, {
+                    title: post.content?.slice(0, 100) || '',
+                    tags: extractPostTags(post),
+                });
+            }
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
                         ? {
                             ...post,
-                            likes: Number(updated?.likesCount ?? post.likes ?? 0),
-                            likesCount: Number(updated?.likesCount ?? post.likesCount ?? 0),
-                            isLiked: Boolean(updated?.isLiked)
+                            likes: nextLikesCount,
+                            likesCount: nextLikesCount,
+                            isLiked: nextIsLiked
                         }
                         : post
                 );
@@ -185,18 +331,35 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
     const handleRepost = async (postId) => {
         try {
-            const updated = await apiService.repostPost(postId);
+            const currentPost = posts.find((item) => item.id === postId);
+            const updated = currentPost?.isReposted
+                ? await apiService.unrepostPost(postId)
+                : await apiService.repostPost(postId);
+
+            const nextRepostsCount = Number(
+                updated?.repostsCount
+                ?? updated?.RepostsCount
+                ?? currentPost?.reposts
+                ?? currentPost?.repostsCount
+                ?? 0
+            );
+            const nextIsReposted = Boolean(
+                updated?.isReposted
+                ?? updated?.IsReposted
+                ?? !currentPost?.isReposted
+            );
+
             setPosts((prev) => prev.map((post) =>
                 post.id === postId
                     ? {
                         ...post,
-                        reposts: Number(updated?.repostsCount ?? post.reposts ?? 0),
-                        repostsCount: Number(updated?.repostsCount ?? post.repostsCount ?? 0),
-                        isReposted: Boolean(updated?.isReposted)
+                        reposts: nextRepostsCount,
+                        repostsCount: nextRepostsCount,
+                        isReposted: nextIsReposted
                     }
                     : post
             ));
-            addTruthAlert('success', 'Repost saved.', null);
+            addTruthAlert('success', nextIsReposted ? 'Repost saved.' : 'Repost removed.', null);
         } catch (error) {
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
@@ -219,17 +382,52 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
         setFollowing(socialGraphService.getFollowingIds(currentUser.id));
     };
 
-    const handleBookmark = (post) => {
-        const existing = JSON.parse(localStorage.getItem('wiseBookmarks') || '[]');
-        const alreadySaved = existing.some((item) => item.id === post.id);
+    const handleBookmark = async (post) => {
+        try {
+            const updated = post?.isBookmarked
+                ? await apiService.removeBookmark(post.id)
+                : await apiService.addBookmark(post.id);
 
-        if (alreadySaved) {
-            addTruthAlert('info', 'Post is already in bookmarks.', null);
-            return;
+            const nextBookmarksCount = Number(
+                updated?.data?.bookmarksCount
+                ?? updated?.data?.BookmarksCount
+                ?? post?.bookmarksCount
+                ?? 0
+            );
+            const nextIsBookmarked = Boolean(
+                updated?.data?.isBookmarked
+                ?? updated?.data?.IsBookmarked
+                ?? !post?.isBookmarked
+            );
+
+            setPosts((prev) => prev.map((item) => (
+                item.id === post.id
+                    ? {
+                        ...item,
+                        isBookmarked: nextIsBookmarked,
+                        bookmarksCount: nextBookmarksCount
+                    }
+                    : item
+            )));
+
+            addTruthAlert('success', nextIsBookmarked ? 'Post saved to bookmarks.' : 'Bookmark removed.', null);
+        } catch (error) {
+            const message = typeof error?.message === 'string' && error.message.trim().length > 0
+                ? error.message.trim()
+                : 'Failed to update bookmark.';
+            addTruthAlert('error', message, null);
         }
+    };
 
-        localStorage.setItem('wiseBookmarks', JSON.stringify([post, ...existing]));
-        addTruthAlert('success', 'Post saved to bookmarks.', null);
+    const handleCommentCountChange = (postId, commentsCount) => {
+        setPosts((prev) => prev.map((post) => (
+            post.id === postId
+                ? {
+                    ...post,
+                    commentsCount: Number(commentsCount || 0)
+                }
+                : post
+        )));
     };
 
     const handleVerifyPost = (post) => {
@@ -302,6 +500,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             return leftLocal ? -1 : 1;
         });
     }, [posts, feedScope, localRegion]);
+
 
     useEffect(() => {
         setIntegrityReports((prev) => {
@@ -402,7 +601,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         : 'Local feed is active, but no signup location is available yet.')
                     : 'National feed is active.'}
             </div>
-            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} />
+
+            <PostCreator onPostCreate={handlePostCreate} addTruthAlert={addTruthAlert} currentUser={currentUser} hideMultiPlatformPublish={true} />
             <div style={{ marginTop: '20px' }}>
                 {rankedFeedPosts.map(post => (
                     <PostCard
@@ -417,6 +617,8 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         isFollowing={following.includes(post.userId)}
                         onFollow={handleFollow}
                         onBookmark={handleBookmark}
+                        bookmarkLabel={post.isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                        onCommentCountChange={handleCommentCountChange}
                     />
                 ))}
             </div>
@@ -430,6 +632,164 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                 <div style={{ marginBottom: '12px', fontSize: '12px', fontWeight: 700, color: 'var(--highlight-color)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                     Explore More
                 </div>
+
+                {crawlerTrending?.topConnectedPages && crawlerTrending.topConnectedPages.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                        background: 'rgba(34, 197, 94, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(34, 197, 94, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            🎯 Trending Features
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {crawlerTrending.topConnectedPages.slice(0, 6).map((page) => (
+                                <button
+                                    key={page.pageId}
+                                    onClick={() => onNavigate?.(page.pageId)}
+                                    style={{
+                                        padding: '10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(34, 197, 94, 0.4)',
+                                        background: 'rgba(34, 197, 94, 0.08)',
+                                        color: 'var(--text-color)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        textAlign: 'left',
+                                        fontSize: '12px'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.15)';
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.08)';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                    }}
+                                >
+                                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{page.label}</div>
+                                    <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                        {page.score} connections
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {personalizedTrending && personalizedTrending.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                        background: 'rgba(168, 85, 247, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(168, 85, 247, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            ⭐ For You (Personalized)
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {personalizedTrending.slice(0, 6).map((item, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => onNavigate?.(item.contentId)}
+                                    title={item.reason}
+                                    style={{
+                                        padding: '10px',
+                                        borderRadius: '8px',
+                                        border: '1px solid rgba(168, 85, 247, 0.4)',
+                                        background: 'rgba(168, 85, 247, 0.08)',
+                                        color: 'var(--text-color)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        textAlign: 'left',
+                                        fontSize: '12px'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)';
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.08)';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                    }}
+                                >
+                                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{item.title}</div>
+                                    <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                        Score: {(item.score * 100).toFixed(0)}%
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {contentTrending?.trendingContent && contentTrending.trendingContent.length > 0 && (
+                    <div style={{
+                        marginBottom: '20px',
+                        padding: '14px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(244, 63, 94, 0.3)',
+                        background: 'rgba(244, 63, 94, 0.05)'
+                    }}>
+                        <div style={{ marginBottom: '12px', fontSize: '11px', fontWeight: 700, color: 'rgba(244, 63, 94, 1)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            🔥 Viral Now
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                            gap: '10px'
+                        }}>
+                            {contentTrending.trendingContent.slice(0, 6).map((content, idx) => {
+                                const viralBadge = content.viralCoefficient >= 10 ? '🔥🔥🔥' :
+                                                   content.viralCoefficient >= 5 ? '🔥🔥' :
+                                                   content.viralCoefficient >= 2 ? '🔥' : '⬆️';
+                                return (
+                                    <button
+                                        key={idx}
+                                        style={{
+                                            padding: '10px',
+                                            borderRadius: '8px',
+                                            border: '1px solid rgba(244, 63, 94, 0.4)',
+                                            background: 'rgba(244, 63, 94, 0.08)',
+                                            color: 'var(--text-color)',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease',
+                                            textAlign: 'left',
+                                            fontSize: '12px'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = 'rgba(244, 63, 94, 0.15)';
+                                            e.currentTarget.style.transform = 'translateY(-2px)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'rgba(244, 63, 94, 0.08)';
+                                            e.currentTarget.style.transform = 'translateY(0)';
+                                        }}
+                                    >
+                                        <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                                            {viralBadge} {content.title?.substring(0, 20)}...
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'rgba(226, 232, 240, 0.7)' }}>
+                                            {content.likeCount} ❤️ • {content.viewCount} 👁️
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 <OnboardingCard onNavigate={onNavigate} />
                 <ShortFormFeed posts={rankedFeedPosts} />
                 <VideoFeedMini posts={rankedFeedPosts} />

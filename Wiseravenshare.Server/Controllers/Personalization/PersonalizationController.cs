@@ -1,0 +1,165 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.Services.Personalization;
+using Wiseravenshare.Server.Shared;
+
+namespace Wiseravenshare.Server.Controllers.Personalization;
+
+[ApiController]
+[Route("api/personalization")]
+[Authorize]
+[Produces("application/json")]
+public sealed class PersonalizationController : ControllerBase
+{
+    private readonly IPersonalizationService _svc;
+    private readonly ILogger<PersonalizationController> _log;
+
+    public PersonalizationController(IPersonalizationService svc, ILogger<PersonalizationController> log)
+    {
+        _svc = svc;
+        _log = log;
+    }
+
+    // ── POST /api/personalization/track ───────────────────────────────────────
+    /// <summary>Record a user interaction event (view, like, play, skip, etc.).</summary>
+    [HttpPost("track")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> Track([FromBody] TrackInteractionRequest req, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+        await _svc.TrackInteractionAsync(userId, req, ct);
+        return NoContent();
+    }
+
+    // ── GET /api/personalization/recommendations ───────────────────────────────
+    /// <summary>Get personalized content recommendations for the authenticated user.</summary>
+    [HttpGet("recommendations")]
+    [ProducesResponseType(typeof(IReadOnlyList<PersonalizedRecommendation>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Recommendations([FromQuery] int count = 20, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+        var reco = await _svc.GetRecommendationsAsync(userId, count, ct);
+        return Ok(reco);
+    }
+
+    // ── GET /api/personalization/trending/personalized ─────────────────────────
+    /// <summary>
+    /// Get crawler-based trending features personalized to the authenticated user.
+    /// Blends platform-wide trending with user interaction history and preferences.
+    /// </summary>
+    [HttpGet("trending/personalized")]
+    [ProducesResponseType(typeof(IReadOnlyList<PersonalizedRecommendation>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PersonalizedTrending(
+        [FromQuery] string? countryCode = null,
+        [FromQuery] string? userCategory = null,
+        [FromQuery] int count = 12,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+        
+        var trending = await _svc.GetPersonalizedTrendingAsync(userId, countryCode, userCategory, count, ct);
+        return Ok(trending);
+    }
+
+    // ── GET /api/personalization/trending ─────────────────────────────────────
+    /// <summary>
+    /// Get trending topics for a country/region.
+    /// Pass countryCode=GLOBAL (default) for worldwide trending.
+    /// Pass a valid ISO-3166-1 alpha-2 code (e.g. US, GB, NG) for regional trends.
+    /// </summary>
+    [HttpGet("trending")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<RegionalTrendItem>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Trending(
+        [FromQuery] string countryCode = "GLOBAL",
+        [FromQuery] string category    = "General",
+        CancellationToken ct = default)
+    {
+        var trends = await _svc.GetRegionalTrendsAsync(countryCode, category, ct);
+        return Ok(trends);
+    }
+
+    // ── POST /api/personalization/auto-tag ────────────────────────────────────
+    /// <summary>AI-tag a piece of content using Gemini Flash (server-side, free tier).</summary>
+    [HttpPost("auto-tag")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> AutoTag([FromBody] AutoTagRequest req, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        await _svc.AutoTagContentAsync(req.TargetType, req.TargetId, req.Content, ct);
+        return NoContent();
+    }
+
+    // ── POST /api/personalization/crawled ─────────────────────────────────────
+    /// <summary>Feed crawler-discovered content into the personalization engine.</summary>
+    [HttpPost("crawled")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> CrawledContent([FromBody] CrawledContentRequest req, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        await _svc.ProcessCrawledContentAsync(
+            req.ContentType, req.ContentId, req.Content,
+            req.Tags ?? Array.Empty<string>(), req.CountryCode ?? "GLOBAL", ct);
+        return NoContent();
+    }
+
+    [HttpPost("crawled/batch")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> CrawledContentBatch([FromBody] CrawledContentBatchRequest req, CancellationToken ct)
+    {
+        if (req?.Items is null || req.Items.Count == 0)
+        {
+            return NoContent();
+        }
+
+        var items = req.Items
+            .Where(item => item is not null)
+            .Select(item => new CrawledContentIngestItem(
+                item!.ContentType,
+                item.ContentId,
+                item.Content,
+                item.Tags,
+                item.CountryCode))
+            .ToList();
+
+        await _svc.ProcessCrawledContentBatchAsync(items, req.CountryCode, ct);
+        return NoContent();
+    }
+
+    // ── GET /api/personalization/embedding ────────────────────────────────────
+    /// <summary>Return the current user's interest embedding vector (tag → weight map).</summary>
+    [HttpGet("embedding")]
+    [ProducesResponseType(typeof(Dictionary<string, float>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Embedding(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+        var vector = await _svc.GetUserEmbeddingAsync(userId, ct);
+        return Ok(vector);
+    }
+}
+
+// ─── Request models ───────────────────────────────────────────────────────────
+// NOTE: [Required] must be placed on constructor parameters (not properties) for
+// record primary constructors — placing it on properties throws at model binding.
+public record AutoTagRequest(
+    [System.ComponentModel.DataAnnotations.Required] string TargetType,
+    [System.ComponentModel.DataAnnotations.Required] Guid   TargetId,
+    [System.ComponentModel.DataAnnotations.Required] string Content
+);
+
+public record CrawledContentRequest(
+    [System.ComponentModel.DataAnnotations.Required] string ContentType,
+    [System.ComponentModel.DataAnnotations.Required] Guid   ContentId,
+    [System.ComponentModel.DataAnnotations.Required] string Content,
+    string[]? Tags,
+    string?   CountryCode
+);
+
+public record CrawledContentBatchRequest(
+    List<CrawledContentRequest> Items,
+    string? CountryCode
+);

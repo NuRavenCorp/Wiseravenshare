@@ -20,7 +20,7 @@ const STICKERS = [
 
 const CanvasPage = ({ onNavigate }) => {
     const { user } = useAuth();
-    const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
+    const currentUser = user || { id: 'user1', name: 'Raven Blackbeak', handle: '@Ravenblackbeak', avatar: 'RB' };
 
     const canvasRef = useRef(null);
     const [tool, setTool] = useState('brush'); // brush, eraser, rectangle, circle, line, arrow, text, sticker

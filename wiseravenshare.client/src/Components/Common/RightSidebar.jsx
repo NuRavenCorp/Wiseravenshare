@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { computeTrendingTopics } from '../../Services/EngagementAlgorithms';
+import React, { useState, useEffect, useMemo } from 'react';
+import { extractHashtags } from '../../Services/EngagementAlgorithms';
 import { apiService } from '../../Services/api';
+import { ravensightAPI } from '../../Services/RavensightAPI';
 import { useAuth } from '../../Contexts/AuthContext';
 import { socialGraphService } from '../../Services/SocialGraph';
 import { mergeFeedPosts, normalizePostsPayload, readStoredFeedPosts, writeStoredFeedPosts } from '../../Services/postFeedPayload';
@@ -52,9 +53,13 @@ const seedUsers = [
 ];
 
 const readPosts = () => {
-    const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
-    const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
-    return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
+    try {
+        const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
+        const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
+        return [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
+    } catch {
+        return [];
+    }
 };
 
 const looksLikeCorruptBlob = (value) => {
@@ -77,6 +82,65 @@ const sanitizeSidebarPreview = (value, fallback = 'Trending post update', maxLen
     }
 
     return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}…` : text;
+};
+
+const isLikelyFileSystemPath = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    return /^[a-z]:[\\/]/i.test(text) || text.startsWith('\\\\') || text.startsWith('file:');
+};
+
+const toBlobStreamRoute = (pathValue) => {
+    const normalized = String(pathValue || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) {
+        return '';
+    }
+
+    const encoded = normalized
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+
+    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+};
+
+const normalizePlayableMediaUrl = (value) => {
+    const text = String(value || '').trim();
+    if (!text || isLikelyFileSystemPath(text)) {
+        return '';
+    }
+
+    if (text.startsWith('data:') || text.startsWith('blob:') || /^https?:\/\//i.test(text)) {
+        return text;
+    }
+
+    if (text.startsWith('/')) {
+        return text;
+    }
+
+    if (text.startsWith('api/')) {
+        return `/${text}`;
+    }
+
+    return toBlobStreamRoute(text);
+};
+
+const resolvePlayableMediaUrl = ({ directCandidates = [], relativePath = '', fileName = '' } = {}) => {
+    const direct = directCandidates.map(normalizePlayableMediaUrl).find(Boolean);
+    if (direct) {
+        return direct;
+    }
+
+    const blobUrl = toBlobStreamRoute(relativePath);
+    if (blobUrl) {
+        return blobUrl;
+    }
+
+    const safeFileName = String(fileName || '').trim();
+    return safeFileName
+        ? `/api/videostreaming/stream?fileName=${encodeURIComponent(safeFileName)}`
+        : '';
 };
 
 const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
@@ -103,6 +167,74 @@ const buildTrendingPostAnnouncements = (posts = [], limit = 4) => {
         })
         .sort((left, right) => right.momentum - left.momentum)
         .slice(0, limit);
+};
+
+const buildHashtagFeed = (posts = [], limit = 6) => {
+    if (!Array.isArray(posts) || posts.length === 0) {
+        return [];
+    }
+
+    const buckets = new Map();
+
+    // Photo uploads belong in the dedicated gallery, not the hashtag column.
+    const textPosts = posts.filter((post) => {
+        const mediaType = String(post?.mediaType || post?.type || '').toLowerCase();
+        if (mediaType === 'photo' || mediaType === 'image') return false;
+        const mediaUrl = String(post?.mediaUrl || '').toLowerCase();
+        return !/\.(jpg|jpeg|png|gif|webp|svg)(\?|#|$)/i.test(mediaUrl);
+    });
+
+    textPosts.forEach((post) => {
+        const tags = extractHashtags(post?.content || '');
+        if (tags.length === 0) {
+            return;
+        }
+
+        const likes = Number(post?.likes) || 0;
+        const reposts = Number(post?.reposts) || 0;
+        const comments = Array.isArray(post?.comments) ? post.comments.length : (Number(post?.comments) || 0);
+        const score = (likes * 1.6) + (reposts * 2.4) + (comments * 1.2);
+        const createdAt = new Date(post?.createdAt || 0).getTime() || 0;
+
+        tags.forEach((tag) => {
+            const topic = tag.startsWith('#') ? tag : `#${normalizeTopicValue(tag)}`;
+            if (!topic || topic === '#') {
+                return;
+            }
+
+            const current = buckets.get(topic) || {
+                topic,
+                score: 0,
+                mentions: 0,
+                sourcePost: null,
+                sourceAt: 0
+            };
+
+            current.score += score;
+            current.mentions += 1;
+
+            if (!current.sourcePost || createdAt >= current.sourceAt) {
+                current.sourceAt = createdAt;
+                current.sourcePost = {
+                    id: String(post?.id || ''),
+                    userId: String(post?.userId || ''),
+                    userName: String(post?.user?.name || 'Community voice').trim() || 'Community voice',
+                    userHandle: String(post?.user?.handle || '').trim(),
+                    preview: sanitizeSidebarPreview(post?.content, 'Source post unavailable', 96)
+                };
+            }
+
+            buckets.set(topic, current);
+        });
+    });
+
+    return [...buckets.values()]
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit)
+        .map((item) => ({
+            ...item,
+            posts: formatFollowers(Math.round(item.score + (item.mentions * 12)))
+        }));
 };
 
 const isDispatchReportPost = (post) => {
@@ -373,7 +505,13 @@ const AvatarBadge = ({ profile, size = 40, fontSize = 12 }) => {
 };
 
 const RightSidebar = ({ onNavigate }) => {
-    const [trendingTopics, setTrendingTopics] = useState([]);
+    const { user } = useAuth();
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
+    const [hashtagFeed, setHashtagFeed] = useState([]);
     const [trendingPostAnnouncements, setTrendingPostAnnouncements] = useState([]);
     const [suggestedUsers, setSuggestedUsers] = useState([]);
     const [followingIds, setFollowingIds] = useState([]);
@@ -383,10 +521,13 @@ const RightSidebar = ({ onNavigate }) => {
     const [stockData, setStockData] = useState([]);
     const [marketLoading, setMarketLoading] = useState(true);
     const [marketError, setMarketError] = useState('');
+    const [recentMediaItems, setRecentMediaItems] = useState([]);
+    const [recentMediaLoading, setRecentMediaLoading] = useState(true);
+    const [mediaExpanded, setMediaExpanded] = useState(false);
     const [dispatchReports, setDispatchReports] = useState([]);
     const [activeDispatchReport, setActiveDispatchReport] = useState(null);
-    const { user } = useAuth();
-    const isAdminUser = parseAdminEmails().has(String(user?.email || '').trim().toLowerCase());
+    const [playingVideoId, setPlayingVideoId] = useState(null);
+    const [videoAutoPlay, setVideoAutoPlay] = useState(true);
 
     useEffect(() => {
         let refreshTimer;
@@ -470,7 +611,7 @@ const RightSidebar = ({ onNavigate }) => {
                 const feedPosts = JSON.parse(localStorage.getItem('wiseRecentPosts') || '[]');
                 const discoverPosts = JSON.parse(localStorage.getItem('wiseDiscoverPosts') || '[]');
                 const mergedPosts = [...feedPosts, ...discoverPosts].slice(0, MAX_POSTS_FOR_SIDEBAR);
-                setTrendingTopics(computeTrendingTopics(mergedPosts, 6));
+                setHashtagFeed(buildHashtagFeed(mergedPosts, 6));
                 const announcements = buildTrendingPostAnnouncements(mergedPosts, 4);
                 setTrendingPostAnnouncements(announcements.length > 0 ? announcements : FALLBACK_ANNOUNCEMENTS);
                 const dispatches = mergedPosts
@@ -480,7 +621,7 @@ const RightSidebar = ({ onNavigate }) => {
                     .map(toDispatchReportPreview);
                 setDispatchReports(dispatches.length > 0 ? dispatches : FALLBACK_DISPATCHES);
             } catch (error) {
-                setTrendingTopics(computeTrendingTopics([], 6));
+                setHashtagFeed([]);
                 setTrendingPostAnnouncements(FALLBACK_ANNOUNCEMENTS);
                 setDispatchReports(FALLBACK_DISPATCHES);
             }
@@ -581,6 +722,269 @@ const RightSidebar = ({ onNavigate }) => {
     }, []);
 
     useEffect(() => {
+        let isMounted = true;
+
+        const loadRecentMedia = async () => {
+            setRecentMediaLoading(true);
+
+            try {
+                const [musicResult, videoResult, postResult] = await Promise.allSettled([
+                    apiService.getMusicLibrary(),
+                    ravensightAPI.getUserVideos(user?.id || null),
+                    apiService.getPosts({ page: 1, pageSize: 40 })
+                ]);
+
+                if (!isMounted) {
+                    return;
+                }
+
+                const normalizePhoto = (post) => {
+                    const mediaUrls = Array.isArray(post?.mediaUrls)
+                        ? post.mediaUrls
+                        : (Array.isArray(post?.MediaUrls) ? post.MediaUrls : []);
+                    const url = resolvePlayableMediaUrl({
+                        directCandidates: [post?.mediaUrl, post?.MediaUrl, post?.imageUrl, post?.ImageUrl, mediaUrls[0]],
+                        relativePath: post?.relativePath || post?.objectKey || '',
+                        fileName: post?.fileName || ''
+                    });
+                    const mediaType = String(post?.mediaType || post?.type || '').toLowerCase();
+                    const isImageByType = mediaType === 'photo' || mediaType === 'image';
+                    const isImageByExt = /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(url);
+                    if (!url || (!isImageByType && !isImageByExt)) {
+                        return null;
+                    }
+
+                    return {
+                        id: `photo-${post?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'photo',
+                        title: sanitizeSidebarPreview(post?.content, 'Recent photo', 64),
+                        url,
+                        createdAt: post?.createdAt || new Date().toISOString()
+                    };
+                };
+
+                const normalizeVideo = (video) => {
+                    const url = resolvePlayableMediaUrl({
+                        directCandidates: [video?.videoUrl, video?.mediaUrl, video?.url],
+                        relativePath: video?.relativePath || video?.objectKey || '',
+                        fileName: video?.fileName || ''
+                    });
+                    if (!url) {
+                        return null;
+                    }
+
+                    return {
+                        id: `video-${video?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'video',
+                        title: sanitizeSidebarPreview(video?.title, 'Recent video', 64),
+                        url,
+                        createdAt: video?.createdAt || video?.uploadedAt || new Date().toISOString()
+                    };
+                };
+
+                const normalizeMusic = (track) => {
+                    const mediaLibraryStreamUrl = track?.id || track?.Id
+                        ? `/api/media-library/${encodeURIComponent(String(track?.id || track?.Id))}/stream`
+                        : '';
+                    const url = resolvePlayableMediaUrl({
+                        directCandidates: [mediaLibraryStreamUrl, track?.mediaUrl, track?.url, track?.fileUrl, track?.publicUrl],
+                        relativePath: track?.relativePath || track?.objectKey || track?.filePath || '',
+                        fileName: track?.fileName || ''
+                    });
+                    if (!url) {
+                        return null;
+                    }
+
+                    return {
+                        id: `music-${track?.id || Math.random().toString(16).slice(2)}`,
+                        type: 'music',
+                        title: sanitizeSidebarPreview(track?.title, 'Recent music', 64),
+                        url,
+                        createdAt: track?.createdAt || track?.uploadedAt || new Date().toISOString()
+                    };
+                };
+
+                const musicItems = musicResult.status === 'fulfilled'
+                    ? (Array.isArray(musicResult.value?.data) ? musicResult.value.data : []).map(normalizeMusic).filter(Boolean)
+                    : [];
+                const videoItems = videoResult.status === 'fulfilled'
+                    ? (Array.isArray(videoResult.value?.videos) ? videoResult.value.videos : []).map(normalizeVideo).filter(Boolean)
+                    : [];
+                const photoItems = postResult.status === 'fulfilled'
+                    ? normalizePostsPayload(postResult.value?.data ?? postResult.value).map(normalizePhoto).filter(Boolean)
+                    : [];
+
+                const merged = [...photoItems, ...videoItems, ...musicItems]
+                    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+                    .slice(0, 24);
+
+                setRecentMediaItems(merged);
+            } catch {
+                if (isMounted) {
+                    setRecentMediaItems([]);
+                }
+            } finally {
+                if (isMounted) {
+                    setRecentMediaLoading(false);
+                }
+            }
+        };
+
+        loadRecentMedia();
+        const refresh = () => loadRecentMedia();
+        window.addEventListener('wiseraven:posts-updated', refresh);
+
+        return () => {
+            isMounted = false;
+            window.removeEventListener('wiseraven:posts-updated', refresh);
+        };
+    }, [user?.id]);
+
+    const photoMediaItems = recentMediaItems.filter((item) => item.type === 'photo');
+    const videoMediaItems = recentMediaItems.filter((item) => item.type === 'video');
+    const musicMediaItems = recentMediaItems.filter((item) => item.type === 'music');
+
+    const handleVideoEnded = (item, allVideoItems) => {
+        if (!videoAutoPlay) return;
+        const idx = allVideoItems.findIndex((v) => v.id === item.id);
+        const next = allVideoItems[idx + 1];
+        if (next) setPlayingVideoId(next.id);
+    };
+
+    const renderPhotoContainer = (label, items) => (
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>{label}</strong>
+                <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>{items.length}</span>
+            </div>
+            {recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading...</div>}
+            {!recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>No photos yet.</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                {items.slice(0, 9).map((item) => (
+                    <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.title}
+                        style={{ display: 'block', borderRadius: '6px', overflow: 'hidden', aspectRatio: '1', background: 'rgba(255,255,255,0.06)' }}>
+                        <img src={item.url} alt={item.title}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    </a>
+                ))}
+            </div>
+        </div>
+    );
+
+    const renderVideoContainer = (label, items) => (
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>{label}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>{items.length}</span>
+                    <button type="button"
+                        onClick={() => setVideoAutoPlay((v) => !v)}
+                        style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '999px', border: '1px solid var(--border-color)', background: videoAutoPlay ? 'var(--highlight-color)' : 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontWeight: 700 }}>
+                        {videoAutoPlay ? '▶▶ Auto' : '⏸ Manual'}
+                    </button>
+                </div>
+            </div>
+            {recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading...</div>}
+            {!recentMediaLoading && items.length === 0 && <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>No videos yet.</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {items.slice(0, 5).map((item) => {
+                    const isActive = playingVideoId === item.id;
+                    return (
+                        <div key={item.id} style={{ borderRadius: '8px', overflow: 'hidden', border: `1px solid ${isActive ? 'var(--highlight-color)' : 'var(--border-color)'}`, background: 'rgba(0,0,0,0.4)' }}>
+                            {isActive ? (
+                                <video src={item.url} controls autoPlay
+                                    style={{ width: '100%', maxHeight: '180px', display: 'block', background: '#000' }}
+                                    onEnded={() => handleVideoEnded(item, items)} />
+                            ) : (
+                                <button type="button" onClick={() => setPlayingVideoId(item.id)}
+                                    style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', color: 'var(--text-color)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}>
+                                    <span style={{ fontSize: '20px', flexShrink: 0 }}>▶</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                                </button>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+
+    const renderMediaContainer = (label, items, type) => (
+        <div
+            style={{
+                border: '1px solid var(--border-color)',
+                borderRadius: '10px',
+                padding: '8px',
+                background: 'rgba(255,255,255,0.02)'
+            }}
+        >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>{label}</strong>
+                <span style={{ fontSize: '11px', color: 'var(--highlight-color)' }}>{items.length}</span>
+            </div>
+
+            {recentMediaLoading && items.length === 0 && (
+                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>Loading...</div>
+            )}
+
+            {!recentMediaLoading && items.length === 0 && (
+                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>No recent {type} yet.</div>
+            )}
+
+            <div style={{ display: 'grid', gap: '8px', maxHeight: '220px', overflowY: 'auto', paddingRight: '2px' }}>
+                {items.slice(0, 8).map((item) => (
+                    <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: '56px 1fr',
+                            gap: '10px',
+                            alignItems: 'center',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '10px',
+                            padding: '6px',
+                            color: 'var(--text-color)',
+                            textDecoration: 'none',
+                            background: 'rgba(255,255,255,0.02)'
+                        }}
+                    >
+                        <div
+                            style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                background: item.type === 'video'
+                                    ? 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(34,197,94,0.16))'
+                                    : 'linear-gradient(135deg, rgba(251,146,60,0.2), rgba(244,63,94,0.16))'
+                            }}
+                        >
+                            {item.type === 'video' ? 'Video' : 'Music'}
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '10px', color: 'var(--highlight-color)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>
+                                {item.type}
+                            </div>
+                            <div style={{ fontSize: '12px', fontWeight: 700, lineHeight: 1.35, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                {item.title}
+                            </div>
+                        </div>
+                    </a>
+                ))}
+            </div>
+        </div>
+    );
+
+    useEffect(() => {
         const query = normalizeSearchValue(searchQuery);
         if (!query) {
             setSearchResults([]);
@@ -652,7 +1056,7 @@ const RightSidebar = ({ onNavigate }) => {
         window.dispatchEvent(new Event('wiseraven:social-updated'));
     };
 
-    const handleTrendingClick = (topicLabel) => {
+    const handleTrendingClick = (topicLabel, sourcePost = null) => {
         const normalized = normalizeTopicValue(topicLabel);
         if (!normalized) {
             return;
@@ -663,6 +1067,11 @@ const RightSidebar = ({ onNavigate }) => {
                 section: 'topics',
                 topic: normalized,
                 source: 'sidebar-trending',
+                sourcePostId: sourcePost?.id || '',
+                sourceUserId: sourcePost?.userId || '',
+                sourceUserName: sourcePost?.userName || '',
+                sourceUserHandle: sourcePost?.userHandle || '',
+                sourcePreview: sourcePost?.preview || '',
                 updatedAt: Date.now()
             }));
         } catch {
@@ -675,6 +1084,10 @@ const RightSidebar = ({ onNavigate }) => {
         }
 
         onNavigate?.('discover');
+    };
+
+    const openHashtagSource = (topic, sourcePost) => {
+        handleTrendingClick(topic, sourcePost);
     };
 
     return (
@@ -768,6 +1181,54 @@ const RightSidebar = ({ onNavigate }) => {
                 </div>
             )}
 
+            <div style={{
+                background: 'var(--card-bg)',
+                borderRadius: '12px',
+                padding: '16px',
+                marginBottom: '20px',
+                border: '1px solid var(--border-color)'
+            }}>
+                <button
+                    type="button"
+                    onClick={() => setMediaExpanded((open) => !open)}
+                    aria-expanded={mediaExpanded}
+                    style={{
+                        width: '100%',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: mediaExpanded ? '10px' : 0,
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'inherit',
+                        cursor: 'pointer',
+                        padding: 0,
+                        textAlign: 'left'
+                    }}
+                >
+                    <h3 style={{ margin: 0, color: 'var(--light-color)' }}>
+                        <i className="fas fa-photo-video"></i> Media
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'var(--highlight-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {mediaExpanded
+                            ? (recentMediaLoading ? 'Loading...' : `${recentMediaItems.length} total`)
+                            : 'Expand'}
+                        <i className={`fas ${mediaExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true"></i>
+                    </span>
+                </button>
+
+                {mediaExpanded && (
+                    <>
+                        <div style={{ display: 'grid', gap: '10px' }}>
+                            {renderPhotoContainer('Photos', photoMediaItems)}
+                            {renderVideoContainer('Videos', videoMediaItems)}
+                            {renderMediaContainer('Recent Music', musicMediaItems, 'music')}
+                        </div>
+                    </>
+                )}
+            </div>
+
             {/* Trending Section */}
             <div style={{
                 background: 'var(--card-bg)',
@@ -777,10 +1238,10 @@ const RightSidebar = ({ onNavigate }) => {
                 border: '1px solid var(--border-color)'
             }}>
                 <h3 style={{ marginBottom: '12px', color: 'var(--light-color)' }}>
-                    <i className="fas fa-bullhorn"></i> Trending Announcements
+                    <i className="fas fa-hashtag"></i> Hashtag Feed
                 </h3>
                 <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '12px' }}>
-                    Live callouts for trending posts and topics.
+                    Live hashtags with the source post attached for more context.
                 </div>
 
                 {trendingPostAnnouncements.length > 0 && (
@@ -813,12 +1274,17 @@ const RightSidebar = ({ onNavigate }) => {
                 )}
 
                 <div style={{ fontSize: '11px', color: 'var(--highlight-color)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Topic Signals
+                    Trending Tags
                 </div>
-                {trendingTopics.map(topic => (
+                {hashtagFeed.length === 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
+                        No hashtags detected yet. Source-linked tags will appear here as posts are added.
+                    </div>
+                )}
+                {hashtagFeed.map((topic) => (
                     <div
                         key={topic.topic}
-                        onClick={() => handleTrendingClick(topic.topic)}
+                        onClick={() => handleTrendingClick(topic.topic, topic.sourcePost)}
                         style={{
                             padding: '10px 0',
                             borderBottom: '1px solid var(--border-color)',
@@ -828,8 +1294,41 @@ const RightSidebar = ({ onNavigate }) => {
                         onMouseEnter={(e) => e.currentTarget.style.paddingLeft = '10px'}
                         onMouseLeave={(e) => e.currentTarget.style.paddingLeft = '0'}
                     >
-                        <div style={{ fontWeight: 'bold' }}>{topic.topic}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>{topic.posts} posts</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                            <div style={{ fontWeight: 'bold' }}>{topic.topic}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--highlight-color)', whiteSpace: 'nowrap' }}>{topic.posts} posts</div>
+                        </div>
+                        {topic.sourcePost ? (
+                            <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--light-color)', lineHeight: 1.45, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                Source: {topic.sourcePost.userName}
+                                {topic.sourcePost.userHandle ? ` ${topic.sourcePost.userHandle}` : ''}
+                                <div style={{ color: 'var(--text-color)', marginTop: '3px' }}>{topic.sourcePost.preview}</div>
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        openHashtagSource(topic.topic, topic.sourcePost);
+                                    }}
+                                    style={{
+                                        marginTop: '6px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'var(--text-color)',
+                                        borderRadius: '999px',
+                                        padding: '4px 10px',
+                                        cursor: 'pointer',
+                                        fontSize: '11px',
+                                        fontWeight: 700
+                                    }}
+                                >
+                                    Open source
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
+                                Tap to view related source context.
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>

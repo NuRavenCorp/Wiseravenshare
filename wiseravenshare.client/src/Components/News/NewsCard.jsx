@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { FaShare, FaBookmark, FaThumbsUp, FaComment, FaChartLine, FaShieldAlt, FaRobot } from 'react-icons/fa';
+import { FaChartLine, FaShieldAlt, FaRobot } from 'react-icons/fa';
+import '@flaticon/flaticon-uicons/css/all/all.css';
 import { newsAPI } from '../../services/newsAPI';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveArticleImage } from '../../utils/newsImageUtils';
@@ -61,6 +62,12 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
 
     const truthBadge = getTruthBadge(factCheck);
     const storyImage = resolveArticleImage(article || {});
+    const actionIconStyle = {
+        fontSize: '16px',
+        lineHeight: 1,
+        width: '16px',
+        textAlign: 'center'
+    };
 
     return (
         <div style={{
@@ -122,7 +129,7 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
                             color: isSaved ? '#667eea' : 'var(--highlight-color)',
                             cursor: 'pointer'
                         }}>
-                            <FaBookmark />
+                            <i className="fi fi-br-bookmark" aria-hidden="true" style={actionIconStyle} />
                         </button>
                         <button onClick={handleLike} style={{
                             background: 'none',
@@ -130,7 +137,7 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
                             color: isLiked ? '#f44336' : 'var(--highlight-color)',
                             cursor: 'pointer'
                         }}>
-                            <FaThumbsUp />
+                            <i className="fi fi-br-heart" aria-hidden="true" style={actionIconStyle} />
                         </button>
                     </div>
                 </div>
@@ -283,7 +290,7 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
                         color: 'var(--highlight-color)',
                         cursor: 'pointer'
                     }}>
-                        <FaComment /> {article.comments || 0}
+                        <i className="fi fi-br-comment-dots" aria-hidden="true" style={actionIconStyle} /> {article.comments || 0}
                     </button>
                     <button style={{
                         display: 'flex',
@@ -294,7 +301,7 @@ const NewsCard = ({ article, sentiment, factCheck, personalized = false }) => {
                         color: 'var(--highlight-color)',
                         cursor: 'pointer'
                     }}>
-                        <FaShare /> Share
+                        <i className="fi fi-br-stamp" aria-hidden="true" style={actionIconStyle} /> Share
                     </button>
                     <a
                         href={article.url}

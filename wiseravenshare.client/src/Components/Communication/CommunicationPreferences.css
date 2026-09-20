@@ -1,0 +1,371 @@
+/* wiseravenshare.client/src/Components/Communication/CommunicationPreferences.css */
+
+.preferences-container {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.preferences-container.loading,
+.preferences-container.error {
+    text-align: center;
+    padding: 60px 24px;
+    color: #666;
+}
+
+.preferences-section {
+    background: white;
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.preferences-section h2 {
+    margin: 0 0 24px 0;
+    font-size: 24px;
+    font-weight: 700;
+    color: #1a1a1a;
+}
+
+.preferences-group {
+    margin-bottom: 32px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.preferences-group:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.preferences-group h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.group-description {
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    color: #666;
+}
+
+/* Preference Items */
+.preference-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-radius: 8px;
+    background: #f9f9f9;
+    margin-bottom: 12px;
+    transition: all 0.2s ease;
+}
+
+.preference-item:hover {
+    background: #f0f0f0;
+}
+
+.preference-info {
+    flex: 1;
+}
+
+.preference-info label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 500;
+    color: #1a1a1a;
+    cursor: pointer;
+    margin: 0;
+}
+
+.preference-info .icon {
+    font-size: 18px;
+}
+
+.preference-info .description {
+    margin: 4px 0 0 30px;
+    font-size: 13px;
+    color: #999;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    width: 50px;
+}
+
+.toggle-switch input {
+    display: none;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 50px;
+    height: 28px;
+    background: #ccc;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    padding: 0;
+}
+
+.toggle-label::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border-radius: 50%;
+    left: 2px;
+    transition: all 0.3s ease;
+}
+
+.toggle-switch input:checked + .toggle-label {
+    background: #007AFF;
+}
+
+.toggle-switch input:checked + .toggle-label::after {
+    left: 24px;
+}
+
+.toggle-switch input:disabled + .toggle-label {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Channel Options */
+.channel-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.channel-card {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: white;
+}
+
+.channel-card input {
+    margin-right: 12px;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+}
+
+.channel-card:hover {
+    border-color: #007AFF;
+    background: #f0f8ff;
+}
+
+.channel-card.selected {
+    border-color: #007AFF;
+    background: #e7f2ff;
+}
+
+.channel-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
+.channel-icon {
+    font-size: 24px;
+}
+
+.channel-name {
+    display: block;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 4px;
+}
+
+.channel-card p {
+    margin: 0;
+    font-size: 12px;
+    color: #666;
+}
+
+/* Verification Status */
+.verification-status {
+    margin-bottom: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #f9f9f9;
+}
+
+.verified-badge,
+.unverified-badge {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.status-icon {
+    font-size: 24px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.verified-badge .status-icon {
+    background: #d4edda;
+    color: #28a745;
+}
+
+.unverified-badge .status-icon {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-label {
+    margin: 0 0 4px 0;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.verified-badge .status-label {
+    color: #28a745;
+}
+
+.unverified-badge .status-label {
+    color: #856404;
+}
+
+.phone-number {
+    margin: 0;
+    font-size: 13px;
+    color: #666;
+    font-family: monospace;
+}
+
+/* Info Box */
+.info-box {
+    padding: 12px 16px;
+    border-radius: 8px;
+    border-left: 4px solid;
+}
+
+.info-box p {
+    margin: 0;
+    font-size: 14px;
+}
+
+.info-box.success {
+    background: #d4edda;
+    border-left-color: #28a745;
+    color: #155724;
+}
+
+.info-box.warning {
+    background: #fff3cd;
+    border-left-color: #856404;
+    color: #856404;
+}
+
+/* Buttons */
+.btn {
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: #007AFF;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #0051D5;
+}
+
+.btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+/* Messages */
+.success-banner,
+.error-banner {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    animation: slideDown 0.3s ease-in-out;
+}
+
+.success-banner {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.error-banner {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .preferences-container {
+        padding: 16px;
+    }
+
+    .preferences-section {
+        padding: 16px;
+    }
+
+    .preference-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .toggle-switch {
+        align-self: flex-end;
+    }
+
+    .channel-options {
+        grid-template-columns: 1fr;
+    }
+
+    .channel-card {
+        padding: 12px;
+    }
+}

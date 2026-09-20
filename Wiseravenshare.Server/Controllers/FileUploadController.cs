@@ -17,17 +17,19 @@ public class MediaController : ControllerBase
     private readonly IYouTubeService _youTubeService;
     private readonly ISocialPlatformService _socialPlatformService;
     private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly ILogger<MediaController> _logger;
     private readonly OutputCacheInvalidationService _cacheInvalidation;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
 
-    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
+    public MediaController(IWebHostEnvironment environment, IConfiguration configuration, IYouTubeService youTubeService, VideoLibraryStore videoLibraryStore, RavensightMediaCatalogStore mediaCatalogStore, ILogger<MediaController> logger, OutputCacheInvalidationService cacheInvalidation, ISocialPlatformService socialPlatformService)
     {
         _environment = environment;
         _youTubeService = youTubeService;
         _socialPlatformService = socialPlatformService;
         _videoLibraryStore = videoLibraryStore;
+        _mediaCatalogStore = mediaCatalogStore;
         _logger = logger;
         _cacheInvalidation = cacheInvalidation;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
@@ -51,7 +53,12 @@ public class MediaController : ControllerBase
             return BadRequest("No file uploaded.");
         }
 
-            var allowedTypes = new[] { ".mp4", ".mov", ".webm", ".avi", ".jpg", ".png", ".mp3" };
+        var allowedTypes = new[]
+        {
+            ".mp4", ".mov", ".webm", ".avi", ".mkv",
+            ".jpg", ".jpeg", ".png", ".webp", ".gif",
+            ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"
+        };
         var extension = Path.GetExtension(upload.File.FileName).ToLowerInvariant();
 
         if (!allowedTypes.Contains(extension))
@@ -70,7 +77,8 @@ public class MediaController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
-        var isVideo = extension is ".mp4" or ".mov" or ".webm";
+        var isVideo = extension is ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv";
+        var isAudio = extension is ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".flac";
         if (upload.PublishToYouTube && string.IsNullOrWhiteSpace(upload.YouTubeChannelOrEmail))
         {
             return BadRequest("YouTube details are required when publishing to YouTube.");
@@ -106,13 +114,17 @@ public class MediaController : ControllerBase
         string? facebookUrl = null;
         PublishSocialContentResponse? socialShare = null;
 
-        var isPhoto = extension is ".jpg" or ".png";
-        var mediaType = isPhoto ? SocialMediaType.Photo : SocialMediaType.Video;
+        var isPhoto = extension is ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif";
+        var mediaType = isPhoto
+            ? SocialMediaType.Photo
+            : isAudio
+                ? SocialMediaType.Music
+                : SocialMediaType.Video;
         var wantsSocialCrossPost = upload.PublishToYouTube || upload.PublishToTikTok || upload.PublishToFacebook;
 
         if (wantsSocialCrossPost)
         {
-            var mediaUrlForShare = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+            var mediaUrlForShare = StreamingUrlHelper.StreamByFileName(uniqueFileName);
             var shareUserId = Guid.TryParse(
                 User.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? User.FindFirstValue("sub")
@@ -170,7 +182,7 @@ public class MediaController : ControllerBase
                 return Unauthorized("Unable to determine current user for video library save.");
             }
 
-            var absoluteVideoUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+            var absoluteVideoUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
             try
             {
                 video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
@@ -198,7 +210,50 @@ public class MediaController : ControllerBase
             }
         }
 
-        var mediaUrl = $"{Request.Scheme}://{Request.Host}/api/videostreaming/stream?fileName={Uri.EscapeDataString(uniqueFileName)}";
+        var mediaUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
+
+        // Register photos and music in the user catalog so they appear in My Library.
+        if (isPhoto || isAudio)
+        {
+            var catalogUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? User.FindFirstValue("id");
+            if (Guid.TryParse(catalogUserId, out var catalogUserGuid) && catalogUserGuid != Guid.Empty)
+            {
+                var displayName = User.FindFirstValue(ClaimTypes.Name);
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+                var userIdentity = StoragePathResolver.ResolveUserStorageIdentity(displayName, email, catalogUserId);
+                var mediaFolder = isPhoto ? $"users/{userIdentity}/media/photos" : $"users/{userIdentity}/media/music";
+
+                try
+                {
+                    await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+                    {
+                        UserId = catalogUserGuid,
+                        MediaType = isPhoto ? RavensightMediaType.Photo : RavensightMediaType.Music,
+                        FileName = uniqueFileName,
+                        RelativePath = $"{mediaFolder}/{uniqueFileName}",
+                        PublicUrl = null,
+                        AbsolutePath = string.Empty,
+                        DestinationFolder = mediaFolder,
+                        ContentType = upload.File.ContentType ?? "application/octet-stream",
+                        SizeBytes = upload.File.Length,
+                        SavedAtUtc = DateTime.UtcNow,
+                        MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            title = upload.Title ?? Path.GetFileNameWithoutExtension(upload.File.FileName),
+                            originalFileName = upload.File.FileName,
+                            mediaType = isPhoto ? "photo" : "music"
+                        })
+                    }, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to register {MediaType} upload in catalog for user {UserId}.", isPhoto ? "photo" : "music", catalogUserGuid);
+                }
+            }
+        }
+
         await _cacheInvalidation.InvalidateFeedAsync(cancellationToken);
 
         return Ok(new

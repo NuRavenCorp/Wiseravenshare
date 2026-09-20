@@ -1,11 +1,67 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  FiMic, FiMicOff, FiRefreshCw, FiLink2, FiX, FiPlay,
-  FiStopCircle, FiArrowRight, FiWifi, FiVolume2
+  FiMic, FiMicOff, FiRefreshCw, FiX, FiPlay,
+  FiStopCircle, FiArrowRight
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
+import { apiService } from '../Services/api';
+import ConnectionIndicator from '../Components/Common/ConnectionIndicator';
 import '../Styles/InstrumentConnector.css';
+
+const INSTRUMENT_CODE_CACHE_KEY = 'wr_instrument_code_map';
+
+const safeParseJson = (value, fallback = {}) => {
+  try {
+    const parsed = JSON.parse(String(value || '').trim());
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const loadInstrumentCodeCache = () => {
+  try {
+    return safeParseJson(localStorage.getItem(INSTRUMENT_CODE_CACHE_KEY), {});
+  } catch {
+    return {};
+  }
+};
+
+const saveInstrumentCodeCache = (value) => {
+  try {
+    localStorage.setItem(INSTRUMENT_CODE_CACHE_KEY, JSON.stringify(value || {}));
+  } catch {
+    // Best effort local cache write.
+  }
+};
+
+const buildInstrumentCode = (seed) => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const text = String(seed || 'instrument').trim().toUpperCase();
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  let next = hash >>> 0;
+  let out = '';
+  for (let i = 0; i < 4; i += 1) {
+    out += alphabet[next % alphabet.length];
+    next = Math.imul(next ^ (next >>> 13), 2246822519) >>> 0;
+  }
+  return out;
+};
+
+const detectHostClass = () => {
+  const ua = String(navigator.userAgent || '').toLowerCase();
+  if (/iphone|android|mobile/.test(ua)) return 'phone';
+  if (/ipad|tablet/.test(ua)) return 'tablet';
+  if (/macintosh|mac os x/.test(ua)) return 'macbook';
+  if (/windows|linux|x11|cros/.test(ua)) return 'computer';
+  return 'computer';
+};
 
 /**
  * InstrumentConnectorPage
@@ -23,7 +79,7 @@ import '../Styles/InstrumentConnector.css';
  * 5. Export recording to Music Studio for processing/effects
  */
 
-function InstrumentConnectorPage() {
+function InstrumentConnectorPage({ onNavigate }) {
   const { currentUser } = useAuth();
   const { showNotification } = useNotification();
   
@@ -34,11 +90,37 @@ function InstrumentConnectorPage() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingRecording, setIsStartingRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordings, setRecordings] = useState([]);
-  const [connectionType, setConnectionType] = useState(null); // 'usb', 'bluetooth', 'network'
+  const [connectionType, setConnectionType] = useState(null); // 'usb', 'usb-c', 'micro-usb', 'bluetooth', 'network'
+  const [connectionSignal, setConnectionSignal] = useState(false);
+  const [activeInstrumentCode, setActiveInstrumentCode] = useState('');
   const [midiDevices, setMidiDevices] = useState([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState(null);
+  const [instrumentCodeMap, setInstrumentCodeMap] = useState(() => loadInstrumentCodeCache());
+  const [registeredConnections, setRegisteredConnections] = useState([]);
+  const [studioRigProfile, setStudioRigProfile] = useState({
+    id: null,
+    rigName: 'WiseRaven Capture Rig',
+    analogInputChannels: 2,
+    hasAnalogPreamps: true,
+    hasUsbCConnectivity: true,
+    hasBluetoothPairing: true,
+    hasMidiInOut: true,
+    hasWifi6Streaming: true,
+    enableIpProtection: true,
+    notes: '',
+  });
+  const [sourceCaptures, setSourceCaptures] = useState([]);
+  const [isSavingRigProfile, setIsSavingRigProfile] = useState(false);
+  const [autoOpenMusicCreator, setAutoOpenMusicCreator] = useState(() => {
+    try {
+      return localStorage.getItem('wr_auto_open_music_creator') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   
   // Refs
   const audioContextRef = useRef(null);
@@ -50,6 +132,115 @@ function InstrumentConnectorPage() {
   const animationFrameRef = useRef(null);
   const recordingStartTimeRef = useRef(null);
   const midiAccessRef = useRef(null);
+  const autoConnectInFlightRef = useRef(false);
+
+  useEffect(() => {
+    saveInstrumentCodeCache(instrumentCodeMap);
+  }, [instrumentCodeMap]);
+
+  const resolveSupportedRecorderMimeType = () => {
+    const MediaRecorderCtor = window.MediaRecorder;
+    if (!MediaRecorderCtor || typeof MediaRecorderCtor.isTypeSupported !== 'function') {
+      return '';
+    }
+
+    const preferredTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg'
+    ];
+
+    return preferredTypes.find((type) => MediaRecorderCtor.isTypeSupported(type)) || '';
+  };
+
+  const detectConnectionType = (deviceLabel) => {
+    const label = String(deviceLabel || '').toLowerCase();
+    if (label.includes('bluetooth') || label.includes('airpods') || label.includes('wireless')) {
+      return 'bluetooth';
+    }
+    if (label.includes('usb-c') || label.includes('type-c') || label.includes('usbc')) {
+      return 'usb-c';
+    }
+    if (label.includes('micro-usb') || label.includes('microusb') || label.includes('usb micro')) {
+      return 'micro-usb';
+    }
+    if (label.includes('network') || label.includes('stream')) {
+      return 'network';
+    }
+    if (label.includes('usb') || label.includes('interface') || label.includes('adapter')) {
+      return 'usb';
+    }
+    return 'wired';
+  };
+
+  const getInstrumentCode = (deviceIdentifier, deviceName = '') => {
+    const key = String(deviceIdentifier || '').trim();
+    if (!key) {
+      return buildInstrumentCode(deviceName || `anon-${Date.now()}`);
+    }
+
+    const existing = String(instrumentCodeMap[key] || '').trim();
+    if (existing.length === 4) {
+      return existing;
+    }
+
+    return buildInstrumentCode(`${key}|${deviceName}`);
+  };
+
+  const ensureInstrumentCode = (deviceIdentifier, deviceName = '') => {
+    const key = String(deviceIdentifier || '').trim();
+    const generated = getInstrumentCode(key, deviceName);
+    if (key) {
+      setInstrumentCodeMap((previous) => ({
+        ...previous,
+        [key]: generated,
+      }));
+    }
+
+    return generated;
+  };
+
+  const mergeConnectionMetadata = (metadataJson, nextFields = {}) => {
+    const base = safeParseJson(metadataJson, {});
+    return JSON.stringify({
+      ...base,
+      ...nextFields,
+    });
+  };
+
+  const registerConnection = async ({ deviceIdentifier, deviceName, transport, hardwareAddress, metadataJson, instrumentCode }) => {
+    try {
+      const response = await apiService.upsertInstrumentConnection({
+        deviceIdentifier,
+        deviceName,
+        transport,
+        hardwareAddress,
+        isPaired: true,
+        isTrusted: true,
+        metadataJson: mergeConnectionMetadata(metadataJson, {
+          instrumentCode,
+          hostClass: detectHostClass(),
+          instrumentOrigin: 'live-device-detected'
+        }),
+      });
+      const saved = response?.data;
+      if (saved) {
+        setRegisteredConnections((previous) => {
+          const next = Array.isArray(previous) ? [...previous] : [];
+          const idx = next.findIndex((item) => String(item?.deviceIdentifier || '').trim() === String(saved.deviceIdentifier || '').trim());
+          if (idx >= 0) {
+            next[idx] = saved;
+            return next;
+          }
+          return [saved, ...next];
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to register instrument connection:', err?.message || err);
+    }
+  };
 
   // ─── Device Enumeration ────────────────────────────────────────────
   useEffect(() => {
@@ -58,16 +249,6 @@ function InstrumentConnectorPage() {
         const audioDevices = await navigator.mediaDevices.enumerateDevices();
         const inputs = audioDevices.filter(d => d.kind === 'audioinput');
         setDevices(inputs);
-        
-        // Try to detect connection type from device label
-        inputs.forEach(device => {
-          const label = device.label.toLowerCase();
-          if (label.includes('bluetooth') || label.includes('airpods')) {
-            console.log('Detected Bluetooth device:', device.label);
-          } else if (label.includes('usb') || label.includes('interface')) {
-            console.log('Detected USB device:', device.label);
-          }
-        });
 
         showNotification(`Found ${inputs.length} audio input devices`, 'info');
       } catch (err) {
@@ -99,6 +280,115 @@ function InstrumentConnectorPage() {
     };
   }, [showNotification]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('wr_auto_open_music_creator', autoOpenMusicCreator ? 'true' : 'false');
+    } catch {
+      // Ignore storage failures and keep runtime state only.
+    }
+  }, [autoOpenMusicCreator]);
+
+  useEffect(() => {
+    const loadCaptureRig = async () => {
+      try {
+        const [profileRes, capturesRes] = await Promise.all([
+          apiService.getStudioCaptureProfile(),
+          apiService.getStudioCaptureSources(8),
+        ]);
+
+        const profile = profileRes?.data;
+        if (profile && typeof profile === 'object') {
+          setStudioRigProfile({
+            id: profile.id || null,
+            rigName: profile.rigName || 'WiseRaven Capture Rig',
+            analogInputChannels: Number(profile.analogInputChannels || 2),
+            hasAnalogPreamps: Boolean(profile.hasAnalogPreamps),
+            hasUsbCConnectivity: Boolean(profile.hasUsbCConnectivity),
+            hasBluetoothPairing: Boolean(profile.hasBluetoothPairing),
+            hasMidiInOut: Boolean(profile.hasMidiInOut),
+            hasWifi6Streaming: Boolean(profile.hasWifi6Streaming),
+            enableIpProtection: Boolean(profile.enableIpProtection),
+            notes: profile.notes || '',
+          });
+        }
+
+        const captures = Array.isArray(capturesRes?.data) ? capturesRes.data : [];
+        setSourceCaptures(captures);
+      } catch (err) {
+        console.warn('Unable to load capture rig profile:', err?.message || err);
+      }
+    };
+
+    loadCaptureRig();
+  }, []);
+
+  useEffect(() => {
+    const loadInstrumentConnections = async () => {
+      try {
+        const response = await apiService.getInstrumentConnections();
+        const items = Array.isArray(response?.data) ? response.data : [];
+        setRegisteredConnections(items);
+
+        if (items.length > 0) {
+          setInstrumentCodeMap((previous) => {
+            const next = { ...(previous || {}) };
+            for (const item of items) {
+              const key = String(item?.deviceIdentifier || '').trim();
+              if (!key) continue;
+
+              const parsed = safeParseJson(item?.metadataJson, {});
+              const fromMetadata = String(parsed?.instrumentCode || '').trim().toUpperCase();
+              next[key] = fromMetadata.length === 4
+                ? fromMetadata
+                : (next[key] || buildInstrumentCode(`${key}|${item?.deviceName || ''}`));
+            }
+            return next;
+          });
+        }
+      } catch (err) {
+        console.warn('Unable to load instrument connection history:', err?.message || err);
+      }
+    };
+
+    loadInstrumentConnections();
+  }, []);
+
+  const updateRigProfileField = (field, value) => {
+    setStudioRigProfile((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const saveRigProfile = async () => {
+    setIsSavingRigProfile(true);
+    try {
+      const payload = {
+        rigName: studioRigProfile.rigName,
+        analogInputChannels: Math.max(1, Number(studioRigProfile.analogInputChannels || 1)),
+        hasAnalogPreamps: Boolean(studioRigProfile.hasAnalogPreamps),
+        hasUsbCConnectivity: Boolean(studioRigProfile.hasUsbCConnectivity),
+        hasBluetoothPairing: Boolean(studioRigProfile.hasBluetoothPairing),
+        hasMidiInOut: Boolean(studioRigProfile.hasMidiInOut),
+        hasWifi6Streaming: Boolean(studioRigProfile.hasWifi6Streaming),
+        enableIpProtection: Boolean(studioRigProfile.enableIpProtection),
+        notes: studioRigProfile.notes || '',
+      };
+
+      const response = await apiService.upsertStudioCaptureProfile(payload);
+      const profile = response?.data || payload;
+      setStudioRigProfile((prev) => ({
+        ...prev,
+        id: profile.id || prev.id,
+      }));
+      showNotification('Studio capture profile saved', 'success');
+    } catch (err) {
+      showNotification('Failed to save studio capture profile: ' + (err?.message || 'Unknown error'), 'error');
+    } finally {
+      setIsSavingRigProfile(false);
+    }
+  };
+
   // ─── MIDI Device Enumeration ────────────────────────────────────────
   const onMIDISuccess = (midiAccess) => {
     midiAccessRef.current = midiAccess;
@@ -115,10 +405,39 @@ function InstrumentConnectorPage() {
     console.warn('MIDI access denied or not available:', err);
   };
 
+  const handleBluetoothPairing = async () => {
+    if (!navigator.bluetooth) {
+      showNotification('Bluetooth pairing is not supported in this browser. Pair in your OS settings.', 'warning');
+      return;
+    }
+
+    try {
+      const btDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+      const instrumentCode = ensureInstrumentCode(
+        String(btDevice?.id || btDevice?.name || `bt-${Date.now()}`),
+        String(btDevice?.name || 'Bluetooth Audio Device')
+      );
+      showNotification('Bluetooth device selected. Refreshing audio inputs...', 'success');
+      await apiService.registerBluetoothPair({
+        deviceIdentifier: String(btDevice?.id || btDevice?.name || `bt-${Date.now()}`),
+        deviceName: String(btDevice?.name || 'Bluetooth Audio Device'),
+        metadataJson: JSON.stringify({ source: 'web-bluetooth', pairedAt: new Date().toISOString(), instrumentCode })
+      });
+      const audioDevices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = audioDevices.filter((d) => d.kind === 'audioinput');
+      setDevices(inputs);
+    } catch (err) {
+      if (err?.name === 'NotFoundError') {
+        showNotification('No Bluetooth device selected.', 'info');
+        return;
+      }
+      showNotification('Bluetooth pairing failed. Pair from OS settings and retry.', 'error');
+    }
+  };
+
   // ─── Connect to Device ───────────────────────────────────────────────
   const handleConnect = async (deviceId) => {
-    if (connectionStatus === 'connected' || connectionStatus === 'recording') {
-      handleDisconnect();
+    if (!deviceId || connectionStatus === 'connecting') {
       return;
     }
 
@@ -154,18 +473,45 @@ function InstrumentConnectorPage() {
       // Detect device type from label
       const device = devices.find(d => d.deviceId === deviceId);
       if (device) {
-        const label = device.label.toLowerCase();
-        if (label.includes('bluetooth') || label.includes('airpods')) {
-          setConnectionType('bluetooth');
-        } else if (label.includes('usb') || label.includes('interface')) {
-          setConnectionType('usb');
-        } else {
-          setConnectionType('usb'); // default to USB/wired
-        }
+        const detected = detectConnectionType(device.label);
+        const instrumentCode = ensureInstrumentCode(device.deviceId, device.label || 'Instrument Input');
+        setConnectionType(detected);
+        setActiveInstrumentCode(instrumentCode);
+        registerConnection({
+          deviceIdentifier: device.deviceId,
+          deviceName: device.label || 'Unknown Device',
+          transport: detected,
+          metadataJson: JSON.stringify({ source: 'instrument-connector', userAgent: navigator.userAgent }),
+          instrumentCode
+        });
       }
 
       setConnectionStatus('connected');
-      showNotification(`Connected to: ${device?.label || 'Unknown Device'}`, 'success');
+      setConnectionSignal(true);
+      setTimeout(() => setConnectionSignal(false), 400);
+      setTimeout(() => setConnectionSignal(true), 900);
+      const connectionCode = ensureInstrumentCode(device?.deviceId || deviceId, device?.label || 'Instrument Input');
+      setActiveInstrumentCode(connectionCode);
+      showNotification(`Connected to: ${device?.label || 'Unknown Device'} (${connectionCode})`, 'success');
+
+      if (autoOpenMusicCreator && typeof onNavigate === 'function') {
+        try {
+          localStorage.setItem('wr_instrument_handoff', JSON.stringify({
+            connectedAtUtc: new Date().toISOString(),
+            sourceName: device?.label || 'Unknown Device',
+            sourceType: device ? detectConnectionType(device.label) : 'analog',
+            deviceIdentifier: deviceId || 'unknown-device',
+            instrumentCode: connectionCode,
+            rigProfileId: studioRigProfile.id || null,
+          }));
+        } catch {
+          // Ignore local storage failures.
+        }
+
+        setTimeout(() => {
+          onNavigate('radio-creator');
+        }, 300);
+      }
 
       // Start visualizer
       startWaveformVisualization();
@@ -175,6 +521,33 @@ function InstrumentConnectorPage() {
       showNotification('Failed to connect: ' + err.message, 'error');
     }
   };
+
+  // ─── Auto Plug-and-Play Connect ──────────────────────────────────────
+  useEffect(() => {
+    if (
+      devices.length === 0 ||
+      connectionStatus === 'connected' ||
+      connectionStatus === 'recording' ||
+      connectionStatus === 'connecting' ||
+      autoConnectInFlightRef.current
+    ) {
+      return;
+    }
+
+    const preferredDeviceId = selectedDeviceId && devices.some((d) => d.deviceId === selectedDeviceId)
+      ? selectedDeviceId
+      : devices[0]?.deviceId;
+
+    if (!preferredDeviceId) {
+      return;
+    }
+
+    autoConnectInFlightRef.current = true;
+    handleConnect(preferredDeviceId)
+      .finally(() => {
+        autoConnectInFlightRef.current = false;
+      });
+  }, [devices, selectedDeviceId, connectionStatus]);
 
   // ─── Disconnect from Device ─────────────────────────────────────────
   const handleDisconnect = () => {
@@ -203,22 +576,38 @@ function InstrumentConnectorPage() {
     setAudioLevel(0);
     setSelectedDeviceId(null);
     setConnectionType(null);
+    setActiveInstrumentCode('');
     showNotification('Disconnected', 'info');
   };
 
   // ─── Start Recording ────────────────────────────────────────────────
   const handleStartRecording = () => {
-    if (!mediaStreamRef.current) {
+    if (isRecording || isStartingRecording) {
+      return;
+    }
+
+    const stream = mediaStreamRef.current;
+    if (!stream) {
       showNotification('No device connected', 'error');
       return;
     }
 
+    const liveAudioTracks = stream.getAudioTracks().filter((track) => track.readyState === 'live');
+    if (liveAudioTracks.length === 0) {
+      showNotification('Connected device has no live audio input. Reconnect and try again.', 'error');
+      return;
+    }
+
+    setIsStartingRecording(true);
+
     try {
-      const mimeType = 'audio/webm;codecs=opus';
-      const mediaRecorder = new MediaRecorder(mediaStreamRef.current, {
-        mimeType,
+      const mimeType = resolveSupportedRecorderMimeType();
+      const recorderOptions = {
+        ...(mimeType ? { mimeType } : {}),
         audioBitsPerSecond: 128000, // 128 kbps
-      });
+      };
+
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
 
       const chunks = [];
       mediaRecorder.ondataavailable = (e) => {
@@ -227,11 +616,66 @@ function InstrumentConnectorPage() {
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType });
+      mediaRecorder.onerror = (event) => {
+        const reason = event?.error?.message || 'Unknown recording error';
+        clearInterval(recordingIntervalRef.current);
+        setIsRecording(false);
+        setConnectionStatus('connected');
+        showNotification('Recording error: ' + reason, 'error');
+      };
+
+      mediaRecorder.onstart = () => {
+        setIsStartingRecording(false);
+        setIsRecording(true);
+        setRecordingTime(0);
+        recordingStartTimeRef.current = Date.now();
+        setConnectionStatus('recording');
+
+        // Use elapsed clock time to avoid interval drift.
+        recordingIntervalRef.current = setInterval(() => {
+          const startedAt = recordingStartTimeRef.current || Date.now();
+          const elapsedSeconds = (Date.now() - startedAt) / 1000;
+          setRecordingTime(elapsedSeconds);
+        }, 100);
+
+        showNotification('Recording started', 'success');
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blobType = mimeType || chunks[0]?.type || 'audio/webm';
+        const blob = new Blob(chunks, { type: blobType });
         const url = URL.createObjectURL(blob);
         const timestamp = new Date().toLocaleString();
         const deviceLabel = devices.find(d => d.deviceId === selectedDeviceId)?.label || 'Unknown';
+
+        let captureFingerprint = null;
+        if (studioRigProfile.enableIpProtection) {
+          try {
+            const captureResponse = await apiService.recordStudioCaptureSource({
+              rigProfileId: studioRigProfile.id || null,
+              sourceType: connectionType || 'analog',
+              sourceName: deviceLabel,
+              deviceIdentifier: selectedDeviceId || 'unknown-device',
+              fileName: `instrument-${Date.now()}.webm`,
+              durationSeconds: Number(recordingTime.toFixed(2)),
+              channelCount: 2,
+              capturedAtUtc: new Date().toISOString(),
+              metadataJson: JSON.stringify({
+                transport: connectionType || 'analog',
+                audioBitsPerSecond: 128000,
+                mimeType: blobType,
+                userAgent: navigator.userAgent,
+                instrumentCode: activeInstrumentCode || ensureInstrumentCode(selectedDeviceId || 'unknown-device', deviceLabel),
+              }),
+            });
+            captureFingerprint = captureResponse?.data || null;
+            if (captureFingerprint) {
+              setSourceCaptures((prev) => [captureFingerprint, ...prev].slice(0, 8));
+            }
+          } catch (captureError) {
+            showNotification('Capture fingerprint logging failed: ' + (captureError?.message || 'Unknown error'), 'warning');
+          }
+        }
 
         const recording = {
           id: Date.now(),
@@ -242,6 +686,9 @@ function InstrumentConnectorPage() {
           deviceLabel,
           connectionType,
           timestamp,
+          fingerprintHash: captureFingerprint?.fingerprintHash || null,
+          fingerprintedAtUtc: captureFingerprint?.fingerprintedAtUtc || null,
+          instrumentCode: activeInstrumentCode || ensureInstrumentCode(selectedDeviceId || 'unknown-device', deviceLabel),
         };
 
         setRecordings(prev => [recording, ...prev]);
@@ -249,20 +696,10 @@ function InstrumentConnectorPage() {
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-      recordingStartTimeRef.current = Date.now();
-      setConnectionStatus('recording');
-
-      // Update recording time every 100ms
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingTime(t => t + 0.1);
-      }, 100);
-
-      showNotification('Recording started', 'success');
+      mediaRecorder.start(250);
     } catch (err) {
       console.error('Error starting recording:', err);
+      setIsStartingRecording(false);
       showNotification('Failed to start recording: ' + err.message, 'error');
     }
   };
@@ -273,6 +710,7 @@ function InstrumentConnectorPage() {
       mediaRecorderRef.current.stop();
       clearInterval(recordingIntervalRef.current);
       setIsRecording(false);
+      setIsStartingRecording(false);
       setConnectionStatus('connected');
       showNotification('Recording saved', 'success');
     }
@@ -346,10 +784,29 @@ function InstrumentConnectorPage() {
       // Store blob separately
       sessionStorage.setItem('instrument_recording_blob', recording.blob);
 
+      try {
+        localStorage.setItem('wr_instrument_handoff', JSON.stringify({
+          connectedAtUtc: new Date().toISOString(),
+          sourceName: recording.deviceLabel || 'Instrument Input',
+          sourceType: recording.connectionType || 'analog',
+          deviceIdentifier: selectedDeviceId || 'unknown-device',
+          instrumentCode: recording.instrumentCode || activeInstrumentCode || '',
+          recordingName: recording.name,
+          recordingDurationSeconds: Number(recording.duration || 0),
+          recordingFingerprintHash: recording.fingerprintHash || null,
+        }));
+      } catch {
+        // Ignore local storage failures.
+      }
+
       showNotification('Recording ready in Music Studio', 'success');
 
-      // Navigate to Music Studio
-      window.location.href = '/music-player?source=instrument';
+      // Navigate within the app so Radio Creator can continue processing.
+      if (typeof onNavigate === 'function') {
+        onNavigate('radio-creator');
+      } else {
+        window.location.href = '/music-player?source=instrument';
+      }
     } catch (err) {
       console.error('Error exporting:', err);
       showNotification('Failed to export: ' + err.message, 'error');
@@ -369,6 +826,35 @@ function InstrumentConnectorPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const availableInstruments = useMemo(() => {
+    const discovered = devices.map((device) => ({
+      deviceIdentifier: device.deviceId,
+      deviceName: device.label || 'Detected Instrument Input',
+      transport: detectConnectionType(device.label),
+      instrumentCode: getInstrumentCode(device.deviceId, device.label || 'Detected Instrument Input'),
+      source: 'live-device'
+    }));
+
+    const merged = [...discovered];
+    for (const connection of registeredConnections) {
+      const identifier = String(connection?.deviceIdentifier || '').trim();
+      if (!identifier || merged.some((entry) => entry.deviceIdentifier === identifier)) {
+        continue;
+      }
+
+      const metadata = safeParseJson(connection?.metadataJson, {});
+      merged.push({
+        deviceIdentifier: identifier,
+        deviceName: String(connection?.deviceName || 'Saved Instrument').trim() || 'Saved Instrument',
+        transport: detectConnectionType(connection?.transport || connection?.deviceName || ''),
+        instrumentCode: String(metadata?.instrumentCode || getInstrumentCode(identifier, connection?.deviceName || '')).toUpperCase().slice(0, 4),
+        source: 'saved-connection'
+      });
+    }
+
+    return merged;
+  }, [devices, registeredConnections, instrumentCodeMap]);
+
   return (
     <div className="instrument-connector-page">
       <div className="ic-header">
@@ -376,78 +862,110 @@ function InstrumentConnectorPage() {
           <FiMic /> Instrument Connector
         </div>
         <p className="ic-subtitle">
-          Connect USB, Bluetooth, or network audio devices to record live instruments
+          Plug in or pair your instrument input and WiseRavenShare will auto-connect and issue a 4-character instrument code
         </p>
+        <p className="ic-note" style={{ marginTop: '0.35rem' }}>
+          BT, USB, USB-C, and Micro-USB instrument paths are fully wired for auto-detect, connect, and recording.
+        </p>
+        <label className="ic-note" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', marginTop: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={autoOpenMusicCreator}
+            onChange={(e) => setAutoOpenMusicCreator(e.target.checked)}
+          />
+          Auto-open Radio Creator after instrument connection
+        </label>
       </div>
 
       <div className="ic-container">
         {/* Left: Device Selection & Connection */}
         <div className="ic-panel ic-devices">
           <div className="ic-section-header">
-            <h2>Audio Input Devices</h2>
-            <button
-              className="ic-btn-icon"
-              onClick={() => {
-                navigator.mediaDevices.enumerateDevices().then(audioDevices => {
-                  const inputs = audioDevices.filter(d => d.kind === 'audioinput');
-                  setDevices(inputs);
-                  showNotification('Device list refreshed', 'info');
-                });
-              }}
-              title="Refresh device list"
-            >
-              <FiRefreshCw />
-            </button>
+            <h2>Audio Input Devices (Live Detected)</h2>
+            <div className="ic-section-actions">
+              <button
+                className="ic-btn-icon"
+                onClick={handleBluetoothPairing}
+                title="Pair Bluetooth device"
+              >
+                📶
+              </button>
+              <button
+                className="ic-btn-icon"
+                onClick={() => {
+                  navigator.mediaDevices.enumerateDevices().then(audioDevices => {
+                    const inputs = audioDevices.filter(d => d.kind === 'audioinput');
+                    setDevices(inputs);
+                    showNotification('Device list refreshed', 'info');
+                  });
+                }}
+                title="Refresh device list"
+              >
+                <FiRefreshCw />
+              </button>
+            </div>
           </div>
 
           {devices.length === 0 ? (
             <div className="ic-empty-state">
               <FiMicOff />
               <p>No audio input devices found</p>
-              <small>Connect a microphone, audio interface, or Bluetooth device</small>
+              <small>Pair Bluetooth in system settings or plug in a wired/USB device</small>
             </div>
           ) : (
             <div className="ic-device-list">
-              {devices.map(device => (
+              {devices.map(device => {
+                const instrumentCode = getInstrumentCode(device.deviceId, device.label || 'Instrument Input');
+                return (
                 <div
                   key={device.deviceId}
                   className={`ic-device-card ${selectedDeviceId === device.deviceId ? 'active' : ''}`}
                 >
                   <div className="ic-device-info">
                     <div className="ic-device-icon">
-                      {device.label.toLowerCase().includes('bluetooth') && <>📱</>}
-                      {device.label.toLowerCase().includes('usb') && <>🔌</>}
-                      {!device.label.toLowerCase().includes('bluetooth') &&
-                        !device.label.toLowerCase().includes('usb') && <FiMic />}
+                      {detectConnectionType(device.label) === 'bluetooth' && <>📱</>}
+                      {(detectConnectionType(device.label) === 'usb' || detectConnectionType(device.label) === 'usb-c' || detectConnectionType(device.label) === 'micro-usb') && <>🔌</>}
+                      {detectConnectionType(device.label) === 'network' && <>🌐</>}
+                      {detectConnectionType(device.label) === 'wired' && <FiMic />}
                     </div>
                     <div className="ic-device-details">
                       <div className="ic-device-label">{device.label}</div>
                       <div className="ic-device-id">ID: {device.deviceId.slice(0, 8)}...</div>
+                      <div className="ic-device-id">Instrument Code: {instrumentCode}</div>
                     </div>
                   </div>
-                  <button
-                    className={`ic-btn ic-btn-connect ${
-                      selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected'
-                        ? 'connected'
-                        : ''
-                    }`}
-                    onClick={() => handleConnect(device.deviceId)}
-                  >
-                    {selectedDeviceId === device.deviceId &&
-                    connectionStatus !== 'disconnected' ? (
-                      <>
-                        <FiX /> Disconnect
-                      </>
-                    ) : (
-                      <>
-                        <FiLink2 /> Connect
-                      </>
-                    )}
-                  </button>
+                  <div className={`ic-auto-pill ${selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected' ? 'connected' : ''}`}>
+                    {selectedDeviceId === device.deviceId && connectionStatus !== 'disconnected'
+                      ? `Connected ${instrumentCode}`
+                      : `Ready ${instrumentCode}`}
+                  </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
+
+          <small className="ic-note">
+            Plug-and-play is automatic for wired USB variants (USB, USB-C, Micro-USB). Bluetooth devices must be paired in OS or browser prompt first.
+          </small>
+
+          <div className="ic-midi-section" style={{ marginTop: '0.9rem' }}>
+            <h3>Available Instruments (Detected)</h3>
+            {availableInstruments.length === 0 ? (
+              <small className="ic-note">No connected instruments detected yet.</small>
+            ) : (
+              <div className="ic-midi-list">
+                {availableInstruments.map((instrument) => (
+                  <div key={`${instrument.deviceIdentifier}-${instrument.instrumentCode}`} className="ic-midi-card">
+                    <div>{instrument.deviceName}</div>
+                    <small>
+                      {String(instrument.transport || 'wired').toUpperCase()} · {instrument.instrumentCode} · {instrument.source === 'live-device' ? 'Live' : 'Saved'}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* MIDI Devices */}
           {midiDevices.length > 0 && (
@@ -475,69 +993,13 @@ function InstrumentConnectorPage() {
             <h2>Connection Status</h2>
           </div>
 
-          <div className={`ic-status-box ic-status-${connectionStatus}`}>
-            <div className="ic-status-indicator">
-              {connectionStatus === 'disconnected' && (
-                <>
-                  <FiMicOff className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Disconnected</div>
-                    <small>Select a device to connect</small>
-                  </div>
-                </>
-              )}
-              {connectionStatus === 'connecting' && (
-                <>
-                  <FiRefreshCw className="ic-status-icon spinning" />
-                  <div>
-                    <div className="ic-status-title">Connecting...</div>
-                    <small>Requesting access to device</small>
-                  </div>
-                </>
-              )}
-              {(connectionStatus === 'connected' || connectionStatus === 'recording') && (
-                <>
-                  <FiMic className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Connected</div>
-                    <small>
-                      {devices.find(d => d.deviceId === selectedDeviceId)?.label ||
-                        'Unknown Device'}
-                    </small>
-                  </div>
-                </>
-              )}
-              {connectionStatus === 'error' && (
-                <>
-                  <FiMicOff className="ic-status-icon" />
-                  <div>
-                    <div className="ic-status-title">Connection Error</div>
-                    <small>Try another device or check permissions</small>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {connectionType && (
-              <div className="ic-connection-type">
-                {connectionType === 'bluetooth' && (
-                  <>
-                    <FiBluetooth /> Bluetooth
-                  </>
-                )}
-                {connectionType === 'usb' && (
-                  <>
-                    <FiUsb /> USB/Wired
-                  </>
-                )}
-                {connectionType === 'network' && (
-                  <>
-                    <FiWifi /> Network
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          <ConnectionIndicator
+            status={connectionStatus === 'recording' ? 'connected' : connectionStatus}
+            device={devices.find(d => d.deviceId === selectedDeviceId) || null}
+            connectionType={connectionType}
+            instrumentCode={activeInstrumentCode}
+            signal={connectionSignal}
+          />
 
           {/* Audio Level & Waveform */}
           {connectionStatus !== 'disconnected' && (
@@ -572,11 +1034,11 @@ function InstrumentConnectorPage() {
           <div className="ic-recording-controls">
             {!isRecording ? (
               <button
-                className="ic-btn ic-btn-primary"
+                className="ic-btn ic-btn-primary ic-btn-recording-start"
                 onClick={handleStartRecording}
-                disabled={connectionStatus !== 'connected'}
+                disabled={connectionStatus !== 'connected' || isStartingRecording}
               >
-                <FiPlay /> Start Recording
+                <FiPlay /> {isStartingRecording ? 'Starting...' : 'Start Recording'}
               </button>
             ) : (
               <>
@@ -653,37 +1115,76 @@ function InstrumentConnectorPage() {
       {/* Future Adapter Info */}
       <div className="ic-adapter-info">
         <div className="ic-section-header">
-          <h3>🔧 Future: Custom Adapter Hardware</h3>
+          <h3>🔧 Studio Capture Hardware Profile</h3>
         </div>
         <div className="ic-info-box">
           <p>
-            <strong>Coming Soon:</strong> WiseRavenShare is designing a professional audio adapter
-            for multi-instrument studios. This dedicated hardware will support:
+            Configure your active recording rig so analog/USB/USB-C/Micro-USB/Bluetooth/MIDI/WiFi capture paths are saved and
+            every recorded source can be fingerprinted and timestamped for IP protection.
           </p>
-          <ul>
-            <li>
-              <strong>XLR/1/4" analog inputs</strong> with preamps for guitars, keyboards, and mics
-            </li>
-            <li>
-              <strong>USB-C connectivity</strong> for direct computer/tablet integration
-            </li>
-            <li>
-              <strong>Bluetooth pairing</strong> for wireless monitoring and control
-            </li>
-            <li>
-              <strong>MIDI In/Out</strong> for synchronized drum machines, synths, and controllers
-            </li>
-            <li>
-              <strong>Network streaming</strong> (WiFi 6) for multi-room recording sessions
-            </li>
-            <li>
-              <strong>Built-in IP protection</strong> - fingerprint and timestamp each source during
-              capture
-            </li>
-          </ul>
-          <p className="ic-info-cta">
-            Stay tuned for availability. Subscribe to updates in your account settings.
-          </p>
+          <div className="ic-rig-form-grid">
+            <label className="ic-rig-field">
+              <span>Rig Name</span>
+              <input
+                type="text"
+                value={studioRigProfile.rigName}
+                onChange={(e) => updateRigProfileField('rigName', e.target.value)}
+                maxLength={150}
+              />
+            </label>
+            <label className="ic-rig-field">
+              <span>Analog Input Channels (XLR/1/4")</span>
+              <input
+                type="number"
+                min={1}
+                max={32}
+                value={studioRigProfile.analogInputChannels}
+                onChange={(e) => updateRigProfileField('analogInputChannels', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="ic-rig-checks">
+            <label><input type="checkbox" checked={studioRigProfile.hasAnalogPreamps} onChange={(e) => updateRigProfileField('hasAnalogPreamps', e.target.checked)} /> XLR/1/4" analog preamps</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasUsbCConnectivity} onChange={(e) => updateRigProfileField('hasUsbCConnectivity', e.target.checked)} /> USB-C connectivity</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasBluetoothPairing} onChange={(e) => updateRigProfileField('hasBluetoothPairing', e.target.checked)} /> Bluetooth pairing</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasMidiInOut} onChange={(e) => updateRigProfileField('hasMidiInOut', e.target.checked)} /> MIDI In/Out</label>
+            <label><input type="checkbox" checked={studioRigProfile.hasWifi6Streaming} onChange={(e) => updateRigProfileField('hasWifi6Streaming', e.target.checked)} /> WiFi 6 network streaming</label>
+            <label><input type="checkbox" checked={studioRigProfile.enableIpProtection} onChange={(e) => updateRigProfileField('enableIpProtection', e.target.checked)} /> IP fingerprint + timestamp on capture</label>
+          </div>
+
+          <label className="ic-rig-field">
+            <span>Rig Notes</span>
+            <textarea
+              value={studioRigProfile.notes}
+              onChange={(e) => updateRigProfileField('notes', e.target.value)}
+              maxLength={1200}
+              rows={3}
+            />
+          </label>
+
+          <button className="ic-btn ic-btn-primary" onClick={saveRigProfile} disabled={isSavingRigProfile}>
+            {isSavingRigProfile ? 'Saving...' : 'Save Hardware Profile'}
+          </button>
+
+          <div className="ic-capture-log">
+            <h4>Recent IP Fingerprints</h4>
+            {sourceCaptures.length === 0 ? (
+              <p className="ic-info-cta">No fingerprinted captures yet. Start a recording to generate one.</p>
+            ) : (
+              <div className="ic-capture-list">
+                {sourceCaptures.map((item) => (
+                  <div key={item.id} className="ic-capture-item">
+                    <div>
+                      <strong>{item.sourceName}</strong> · {String(item.sourceType || '').toUpperCase()}
+                    </div>
+                    <small>{new Date(item.fingerprintedAtUtc || item.capturedAtUtc).toLocaleString()}</small>
+                    <code>{String(item.fingerprintHash || '').slice(0, 18)}...</code>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
