@@ -513,12 +513,20 @@ const readNumericField = (source, ...keys) => {
 
 const readBooleanField = (source, ...keys) => {
     for (const key of keys) {
-        if (source?.[key] !== undefined && source?.[key] !== null) {
-            return Boolean(source[key]);
+        const value = source?.[key];
+        if (value !== undefined && value !== null) {
+            if (typeof value === 'boolean') {
+                return value;
+            }
+            if (typeof value === 'string') {
+                return value.toLowerCase() === 'true' || value === '1';
+            }
+            if (typeof value === 'number') {
+                return value !== 0;
+            }
         }
     }
-
-    return undefined;
+    return false;
 };
 
 const normalizeInteractionState = (payload) => {
@@ -527,10 +535,10 @@ const normalizeInteractionState = (payload) => {
     return {
         ...source,
         postId: source.postId ?? source.PostId,
-        likesCount: readNumericField(source, 'likesCount', 'LikesCount', 'likes', 'Likes'),
-        repostsCount: readNumericField(source, 'repostsCount', 'RepostsCount', 'reposts', 'Reposts'),
-        commentsCount: readNumericField(source, 'commentsCount', 'CommentsCount', 'comments', 'Comments'),
-        bookmarksCount: readNumericField(source, 'bookmarksCount', 'BookmarksCount', 'bookmarks', 'Bookmarks'),
+        likesCount: readNumericField(source, 'likesCount', 'LikesCount', 'likes', 'Likes') ?? 0,
+        repostsCount: readNumericField(source, 'repostsCount', 'RepostsCount', 'reposts', 'Reposts') ?? 0,
+        commentsCount: readNumericField(source, 'commentsCount', 'CommentsCount', 'comments', 'Comments') ?? 0,
+        bookmarksCount: readNumericField(source, 'bookmarksCount', 'BookmarksCount', 'bookmarks', 'Bookmarks') ?? 0,
         isLiked: readBooleanField(source, 'isLiked', 'IsLiked'),
         isReposted: readBooleanField(source, 'isReposted', 'IsReposted'),
         isBookmarked: readBooleanField(source, 'isBookmarked', 'IsBookmarked')
