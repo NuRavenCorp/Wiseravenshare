@@ -4,7 +4,7 @@ import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
-const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'linkedin', 'bluesky']);
+const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'bluesky']);
 
 const PLATFORMS = [
     { id: 'all', label: 'All Feeds', icon: '🌐', color: '#a855f7' },
@@ -12,9 +12,19 @@ const PLATFORMS = [
     { id: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9' },
     { id: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4' },
     { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
+    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' },
     { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
+const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok', 'linkedin', 'reddit'];
+const OAUTH_EXTRA_STEP_HINTS = {
+    facebook: 'May require selecting/saving a Facebook Page ID to publish.',
+    instagram: 'Must be linked to a Facebook Page with an Instagram Business/Creator account.',
+    youtube: 'If refresh token is missing, reconnect once with consent prompt and save channel details.',
+    tiktok: 'One-click OAuth connection.',
+    linkedin: 'One-click OAuth connection.',
+    reddit: 'One-click OAuth connection.'
+};
 
 const CURATED_TEMPLATES = [
     { id: 'cards', label: 'Cards' },
@@ -48,8 +58,12 @@ const normalizeConnection = (connection, platform) => {
         : platform === 'instagram'
             ? (username ? `https://www.instagram.com/${username}` : '')
             : platform === 'youtube'
-                ? (username ? `https://www.youtube.com/@${username}` : '')
-                : (username ? `https://www.tiktok.com/@${username}` : '');
+                ? (username ? `https://www.youtube.com/@${username.replace(/^@/, '')}` : '')
+                : platform === 'linkedin'
+                    ? (username ? `https://www.linkedin.com/in/${username}` : '')
+                    : platform === 'reddit'
+                        ? (username ? `https://www.reddit.com/user/${username}` : '')
+                        : (username ? `https://www.tiktok.com/@${username}` : '');
 
     return {
         enabled: Boolean(safeConnection.enabled || username || feedUrl || profileUrl),
@@ -139,6 +153,7 @@ const normalizeFeeds = (feeds) => {
         youtube: getConnection(source, 'youtube', 'youTube', 'YouTube', 'Youtube'),
         twitter: getConnection(source, 'twitter', 'Twitter'),
         linkedIn: getConnection(source, 'linkedIn', 'linkedin', 'LinkedIn'),
+        reddit: getConnection(source, 'reddit', 'Reddit'),
         bluesky: getConnection(source, 'bluesky', 'Bluesky')
     };
 };
@@ -242,6 +257,8 @@ const getSnapshot = (user) => {
         facebook: normalizeConnection(feeds.facebook, 'facebook'),
         instagram: normalizeConnection(feeds.instagram, 'instagram'),
         youtube: normalizeConnection(feeds.youtube, 'youtube'),
+        linkedIn: normalizeConnection(feeds.linkedIn, 'linkedin'),
+        reddit: normalizeConnection(feeds.reddit, 'reddit'),
         userName: source.name || cached?.name || 'User',
         checkedAt: new Date().toISOString()
     };
@@ -276,6 +293,7 @@ const normalizeFeedConnections = (feeds = {}) => {
         youtube: normalizeConn(getFeed(feeds, 'youtube', 'youTube', 'YouTube', 'Youtube')),
         twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter')),
         linkedIn: normalizeConn(getFeed(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
+        reddit: normalizeConn(getFeed(feeds, 'reddit', 'Reddit')),
         bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky'))
     };
 };
@@ -283,9 +301,13 @@ const normalizeFeedConnections = (feeds = {}) => {
 const getConnectedPlatforms = (snapshot) => {
     const source = snapshot || {};
     return PLATFORMS
-        .filter((platform) => platform.id !== 'all' && platform.id !== 'reddit')
+        .filter((platform) => platform.id !== 'all' && platform.id !== 'rss')
         .filter((platform) => {
-            const key = platform.id === 'tiktok' ? 'tikTok' : platform.id;
+            const key = platform.id === 'tiktok'
+                ? 'tikTok'
+                : platform.id === 'linkedin'
+                    ? 'linkedIn'
+                    : platform.id;
             const connection = source[key] || {};
             return Boolean(connection.enabled || connection.username || connection.profileUrl || connection.feedUrl || connection.resolvedUrl);
         });
@@ -307,6 +329,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
+    const [publishInstagram, setPublishInstagram] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
     const [displayTemplate, setDisplayTemplate] = useState('cards');
@@ -324,6 +347,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         youtube: snapshot.youtube.username || '',
         twitter: snapshot.twitter?.username || '',
         linkedIn: snapshot.linkedIn?.username || '',
+        reddit: snapshot.reddit?.username || '',
         bluesky: snapshot.bluesky?.username || ''
     });
 
@@ -337,13 +361,22 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [showDeveloperApis, setShowDeveloperApis] = useState(false);
     const [providerStatuses, setProviderStatuses] = useState([]);
     const [providerStatusError, setProviderStatusError] = useState('');
+    const [oauthStatuses, setOauthStatuses] = useState({});
+    const [oauthActionPlatform, setOauthActionPlatform] = useState('');
+    const [manualCompletion, setManualCompletion] = useState({
+        facebook: { page_id: '', page_name: '' },
+        instagram: { user_id: '', instagram_username: '' },
+        youtube: { channel_id: '', channel_handle: '' }
+    });
     const handleInputRefs = useRef({});
 
     const platformDisplayNames = {
         facebook: 'Facebook',
         tiktok: 'TikTok',
         youtube: 'YouTube',
-        instagram: 'Instagram'
+        instagram: 'Instagram',
+        linkedin: 'LinkedIn',
+        reddit: 'Reddit'
     };
 
     const focusHandleInput = (platform) => {
@@ -356,22 +389,44 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         }
     };
 
+    const refreshOAuthStatus = async (platform) => {
+        const normalized = String(platform || '').trim().toLowerCase();
+        const userId = String(user?.id || '').trim();
+        if (!normalized || !userId) return;
+        try {
+            const response = await apiService.getSocialConnectStatus(normalized, userId);
+            const statusPayload = response?.data || {};
+            setOauthStatuses((prev) => ({ ...prev, [normalized]: statusPayload }));
+        } catch {
+            setOauthStatuses((prev) => ({ ...prev, [normalized]: { connected: false, details: {}, error: true } }));
+        }
+    };
+
     const launchConnectPlatform = async (platform) => {
         const normalized = String(platform || '').trim().toLowerCase();
         if (!normalized) {
             return;
         }
 
-        if (normalized === 'tiktok') {
+        if (OAUTH_PLATFORM_IDS.includes(normalized)) {
+            const userId = String(user?.id || '').trim();
+            if (!userId) {
+                setConnectionNotice('Sign in again to connect social accounts.');
+                return;
+            }
+            setOauthActionPlatform(normalized);
             try {
-                const redirectUri = `${window.location.origin}/api/auth/oauth/tiktok/callback`;
-                const res = await socialService.getTikTokAuthUrl(redirectUri);
-                if (res?.authUrl) {
-                    window.open(res.authUrl, '_blank', 'width=600,height=700');
-                    setConnectionNotice('TikTok OAuth opened in a new window.');
+                const response = await apiService.startSocialConnect(normalized, userId);
+                const authorizeUrl = response?.data?.authorize_url;
+                if (!authorizeUrl) {
+                    throw new Error('Missing OAuth authorize URL from server.');
                 }
+                window.open(authorizeUrl, '_blank', 'width=640,height=760');
+                setConnectionNotice(`${platformDisplayNames[normalized] || normalized} OAuth opened. Complete access, then return and click Refresh Status.`);
             } catch (err) {
-                setConnectionNotice(err?.message || 'Failed to launch TikTok OAuth dialog.');
+                setConnectionNotice(err?.message || `Failed to launch ${platformDisplayNames[normalized] || normalized} OAuth.`);
+            } finally {
+                setOauthActionPlatform('');
             }
             return;
         }
@@ -380,6 +435,45 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         setShowHandleConfig(true);
         setConnectionNotice(`Enter your ${platformDisplayNames[normalized] || normalized} handle and save to connect the feed.`);
         window.setTimeout(() => focusHandleInput(normalized), 0);
+    };
+
+    const handleManualCompletionSave = async (platform) => {
+        const normalized = String(platform || '').trim().toLowerCase();
+        const userId = String(user?.id || '').trim();
+        if (!normalized || !userId) {
+            setConnectionNotice('Sign in again to complete connection details.');
+            return;
+        }
+        const fields = manualCompletion[normalized] || {};
+        setOauthActionPlatform(normalized);
+        try {
+            await apiService.completeSocialConnect(normalized, userId, fields);
+            await refreshOAuthStatus(normalized);
+            setConnectionNotice(`${platformDisplayNames[normalized] || normalized} connection details saved.`);
+        } catch (err) {
+            setConnectionNotice(err?.message || `Unable to save ${platformDisplayNames[normalized] || normalized} details right now.`);
+        } finally {
+            setOauthActionPlatform('');
+        }
+    };
+
+    const handleDisconnectPlatform = async (platform) => {
+        const normalized = String(platform || '').trim().toLowerCase();
+        const userId = String(user?.id || '').trim();
+        if (!normalized || !userId) {
+            setConnectionNotice('Sign in again to disconnect this account.');
+            return;
+        }
+        setOauthActionPlatform(normalized);
+        try {
+            await apiService.disconnectSocialConnect(normalized, userId);
+            setOauthStatuses((prev) => ({ ...prev, [normalized]: { connected: false, details: {} } }));
+            setConnectionNotice(`${platformDisplayNames[normalized] || normalized} disconnected.`);
+        } catch (err) {
+            setConnectionNotice(err?.message || `Unable to disconnect ${platformDisplayNames[normalized] || normalized} right now.`);
+        } finally {
+            setOauthActionPlatform('');
+        }
     };
 
     useEffect(() => {
@@ -493,6 +587,37 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
     useEffect(() => {
         let cancelled = false;
+        const userId = String(user?.id || '').trim();
+        if (!showHandleConfig || !userId) {
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        const loadOAuthStatuses = async () => {
+            const results = await Promise.all(
+                OAUTH_PLATFORM_IDS.map(async (platform) => {
+                    try {
+                        const response = await apiService.getSocialConnectStatus(platform, userId);
+                        return [platform, response?.data || { connected: false, details: {} }];
+                    } catch {
+                        return [platform, { connected: false, details: {}, error: true }];
+                    }
+                })
+            );
+            if (!cancelled) {
+                setOauthStatuses(Object.fromEntries(results));
+            }
+        };
+
+        loadOAuthStatuses();
+        return () => {
+            cancelled = true;
+        };
+    }, [showHandleConfig, user?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
 
         const loadSavedConnections = async () => {
             const userId = user?.id;
@@ -523,6 +648,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     youtube: loadedFeeds.youtube.username,
                     twitter: loadedFeeds.twitter?.username || '',
                     linkedIn: loadedFeeds.linkedIn?.username || '',
+                    reddit: loadedFeeds.reddit?.username || '',
                     bluesky: loadedFeeds.bluesky?.username || ''
                 });
             } catch {
@@ -534,6 +660,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     youtube: snapshot.youtube.username || '',
                     twitter: snapshot.twitter?.username || '',
                     linkedIn: snapshot.linkedIn?.username || '',
+                    reddit: snapshot.reddit?.username || '',
                     bluesky: snapshot.bluesky?.username || ''
                 });
             }
@@ -580,7 +707,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     buildConnectionFeedItem('facebook', snapshot.facebook, snapshot.checkedAt),
                     buildConnectionFeedItem('tiktok', snapshot.tikTok, snapshot.checkedAt),
                     buildConnectionFeedItem('instagram', snapshot.instagram, snapshot.checkedAt),
-                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt)
+                    buildConnectionFeedItem('youtube', snapshot.youtube, snapshot.checkedAt),
+                    buildConnectionFeedItem('linkedin', snapshot.linkedIn, snapshot.checkedAt),
+                    buildConnectionFeedItem('reddit', snapshot.reddit, snapshot.checkedAt)
                 ].filter(Boolean);
 
                 const mergedSocialItems = [...apiSocialItems];
@@ -621,7 +750,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, customRssFeeds]);
+    }, [compact, snapshot.facebook.username, snapshot.tikTok.username, snapshot.instagram.username, snapshot.youtube?.username, snapshot.linkedIn?.username, snapshot.reddit?.username, customRssFeeds]);
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
@@ -640,6 +769,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
             twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter || ''),
             linkedIn: keepConnectionMetadata(snapshot.linkedIn, handles.linkedIn || ''),
+            reddit: keepConnectionMetadata(snapshot.reddit, handles.reddit || ''),
             bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '')
         };
 
@@ -876,6 +1006,30 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             });
         }
 
+        if (snapshot.linkedIn?.enabled || snapshot.linkedIn?.resolvedUrl) {
+            items.push({
+                id: 'linkedin',
+                platform: 'LinkedIn',
+                icon: '💼',
+                color: '#60a5fa',
+                username: snapshot.linkedIn?.username,
+                designation: snapshot.linkedIn?.designation,
+                url: snapshot.linkedIn?.resolvedUrl
+            });
+        }
+
+        if (snapshot.reddit?.enabled || snapshot.reddit?.resolvedUrl) {
+            items.push({
+                id: 'reddit',
+                platform: 'Reddit',
+                icon: '🤖',
+                color: '#fb923c',
+                username: snapshot.reddit?.username,
+                designation: snapshot.reddit?.designation,
+                url: snapshot.reddit?.resolvedUrl
+            });
+        }
+
         if (customRssFeeds.length > 0) {
             customRssFeeds.forEach((feed) => {
                 items.push({
@@ -927,7 +1081,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
     const activeMeta = PLATFORMS.find((p) => p.id === activePlatform) || PLATFORMS[0];
     const connectedPlatforms = getConnectedPlatforms(snapshot);
-    const connectablePlatformCount = PLATFORMS.filter((platform) => platform.id !== 'all' && platform.id !== 'reddit' && platform.id !== 'rss').length;
+    const connectablePlatformCount = PLATFORMS.filter((platform) => platform.id !== 'all' && platform.id !== 'rss').length;
     const previewItemsByPlatform = useMemo(() => {
         const grouped = {};
         for (const item of filteredFeedItems) {
@@ -995,7 +1149,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             </span>
                         )) : (
                             <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>
-                                No connected accounts yet. Use “⚙️ Connect Accounts” to link handles.
+                                No connected accounts yet. Use “⚙️ Connect Accounts” to run OAuth and add handles.
                             </span>
                         )}
                     </div>
@@ -1236,10 +1390,123 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     }}
                 >
                     <div style={{ fontWeight: 700, fontSize: '14px', color: '#38bdf8' }}>
-                        🔗 Configure Social Media Handles & Page IDs
+                        🔗 Connect Social Accounts
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Enter your public username, page name, or numeric ID for each platform. Your feeds will sync automatically once saved.
+                        Connect with OAuth first, then save public handles (and only required extra fields) to finalize sync.
+                    </div>
+
+                    <div style={{ border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '10px', padding: '12px', background: 'rgba(56, 189, 248, 0.06)', display: 'grid', gap: '10px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '12px', color: '#7dd3fc' }}>OAuth Connection Hub</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                            {OAUTH_PLATFORM_IDS.map((platformId) => {
+                                const status = oauthStatuses[platformId] || {};
+                                const connected = Boolean(status?.connected);
+                                const statusColor = connected ? '#4ade80' : '#fca5a5';
+                                return (
+                                    <div key={platformId} style={{ border: '1px solid rgba(148, 163, 184, 0.3)', borderRadius: '8px', padding: '10px', background: 'rgba(15,23,42,0.5)', display: 'grid', gap: '6px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                            <strong style={{ textTransform: 'capitalize', fontSize: '12px' }}>{platformDisplayNames[platformId] || platformId}</strong>
+                                            <span style={{ fontSize: '11px', color: statusColor, fontWeight: 700 }}>{connected ? 'Connected' : 'Not Connected'}</span>
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>{OAUTH_EXTRA_STEP_HINTS[platformId]}</div>
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => launchConnectPlatform(platformId)}
+                                                disabled={oauthActionPlatform === platformId}
+                                                style={{ border: 'none', background: 'rgba(103, 232, 249, 0.2)', color: '#67e8f9', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 700 }}
+                                            >
+                                                {oauthActionPlatform === platformId ? 'Opening…' : 'Connect'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => refreshOAuthStatus(platformId)}
+                                                style={{ border: '1px solid rgba(148, 163, 184, 0.45)', background: 'transparent', color: '#cbd5e1', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+                                            >
+                                                Refresh Status
+                                            </button>
+                                            {connected && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDisconnectPlatform(platformId)}
+                                                    disabled={oauthActionPlatform === platformId}
+                                                    style={{ border: '1px solid rgba(248, 113, 113, 0.45)', background: 'rgba(127,29,29,0.2)', color: '#fecaca', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+                                                >
+                                                    Disconnect
+                                                </button>
+                                            )}
+                                        </div>
+                                        {(platformId === 'facebook' || platformId === 'instagram' || platformId === 'youtube') && (
+                                            <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(148, 163, 184, 0.28)', paddingTop: '8px', display: 'grid', gap: '6px' }}>
+                                                {platformId === 'facebook' && (
+                                                    <>
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.facebook.page_id}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, facebook: { ...prev.facebook, page_id: e.target.value } }))}
+                                                            placeholder="Facebook Page ID (if prompted)"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(147,197,253,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.facebook.page_name}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, facebook: { ...prev.facebook, page_name: e.target.value } }))}
+                                                            placeholder="Page name (optional)"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(147,197,253,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                    </>
+                                                )}
+                                                {platformId === 'instagram' && (
+                                                    <>
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.instagram.user_id}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, instagram: { ...prev.instagram, user_id: e.target.value } }))}
+                                                            placeholder="Instagram Business User ID"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(249,168,212,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.instagram.instagram_username}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, instagram: { ...prev.instagram, instagram_username: e.target.value } }))}
+                                                            placeholder="Instagram username (optional)"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(249,168,212,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                    </>
+                                                )}
+                                                {platformId === 'youtube' && (
+                                                    <>
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.youtube.channel_id}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, youtube: { ...prev.youtube, channel_id: e.target.value } }))}
+                                                            placeholder="YouTube channel ID (UC...)"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(248,113,113,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={manualCompletion.youtube.channel_handle}
+                                                            onChange={(e) => setManualCompletion((prev) => ({ ...prev, youtube: { ...prev.youtube, channel_handle: e.target.value } }))}
+                                                            placeholder="Channel handle (@mychannel)"
+                                                            style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid rgba(248,113,113,0.35)', background: '#0b0f14', color: '#fff', fontSize: '11px' }}
+                                                        />
+                                                    </>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleManualCompletionSave(platformId)}
+                                                    disabled={oauthActionPlatform === platformId}
+                                                    style={{ justifySelf: 'start', border: 'none', background: 'rgba(34, 197, 94, 0.2)', color: '#86efac', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 700 }}
+                                                >
+                                                    Save Extra Details
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
@@ -1311,6 +1578,30 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                 onChange={(e) => setHandles({ ...handles, youtube: e.target.value })}
                                 placeholder="e.g. MyChannel"
                                 style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#0b0f14', color: '#fff' }}
+                            />
+                        </label>
+
+                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                            <span style={{ fontWeight: 700, color: '#60a5fa' }}>💼 LinkedIn</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your public LinkedIn handle (without URL), used for feed display.</span>
+                            <input
+                                type="text"
+                                value={handles.linkedIn}
+                                onChange={(e) => setHandles({ ...handles, linkedIn: e.target.value })}
+                                placeholder="your-linkedin-handle"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid rgba(96,165,250,0.35)', background: '#0b0f14', color: '#fff' }}
+                            />
+                        </label>
+
+                        <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
+                            <span style={{ fontWeight: 700, color: '#fb923c' }}>🤖 Reddit</span>
+                            <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Reddit username (without /u/), used for feed display.</span>
+                            <input
+                                type="text"
+                                value={handles.reddit}
+                                onChange={(e) => setHandles({ ...handles, reddit: e.target.value })}
+                                placeholder="reddit_username"
+                                style={{ padding: '8px', borderRadius: '6px', border: '1px solid rgba(251,146,60,0.35)', background: '#0b0f14', color: '#fff' }}
                             />
                         </label>
 

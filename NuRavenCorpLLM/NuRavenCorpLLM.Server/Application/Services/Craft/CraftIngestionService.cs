@@ -24,6 +24,7 @@ public class CraftIngestionService : ICraftIngestionService
     private readonly IEmbeddingService _embed;
     private readonly ILlmGateway _llm;
     private readonly IHttpClientFactory _httpFactory;
+    private readonly ICrawlerChangeNotifier _changeNotifier;
     private readonly ILogger<CraftIngestionService> _logger;
 
     public CraftIngestionService(
@@ -33,10 +34,11 @@ public class CraftIngestionService : ICraftIngestionService
         IEmbeddingService embed,
         ILlmGateway llm,
         IHttpClientFactory httpFactory,
+        ICrawlerChangeNotifier changeNotifier,
         ILogger<CraftIngestionService> logger)
     {
         _sources = sources; _insights = insights; _domains = domains;
-        _embed = embed; _llm = llm; _httpFactory = httpFactory; _logger = logger;
+        _embed = embed; _llm = llm; _httpFactory = httpFactory; _changeNotifier = changeNotifier; _logger = logger;
     }
 
     public async Task<CraftSource> QueueAsync(Guid domainId, SourceKind kind, string title, string url)
@@ -50,16 +52,49 @@ public class CraftIngestionService : ICraftIngestionService
             Status = SourceStatus.Queued
         };
         await _sources.AddAsync(source);
+        await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
+            Component: nameof(CraftIngestionService),
+            ChangeType: "craft.source_queued",
+            Reason: "queue_requested",
+            Result: "source_queued",
+            Success: true,
+            Source: url,
+            ResourceId: source.Id.ToString(),
+            Metadata: new Dictionary<string, string>
+            {
+                ["domainId"] = domainId.ToString(),
+                ["kind"] = kind.ToString()
+            }));
         return source;
     }
 
     public async Task IngestAsync(Guid sourceId)
     {
         var source = await _sources.GetByIdAsync(sourceId);
-        if (source == null) return;
+        if (source == null)
+        {
+            await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
+                Component: nameof(CraftIngestionService),
+                ChangeType: "craft.ingest_skipped",
+                Reason: "source_not_found",
+                Result: "ingestion_not_started",
+                Success: false,
+                ResourceId: sourceId.ToString()));
+            return;
+        }
         source.Status = SourceStatus.Ingesting;
         await _sources.UpdateAsync(source);
+        await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
+            Component: nameof(CraftIngestionService),
+            ChangeType: "craft.ingest_started",
+            Reason: "ingestion_requested",
+            Result: "source_marked_ingesting",
+            Success: true,
+            Source: source.Url,
+            ResourceId: source.Id.ToString(),
+            Metadata: new Dictionary<string, string> { ["kind"] = source.Kind.ToString() }));
 
+        var insightCount = 0;
         try
         {
             source.RawContent = await FetchTextAsync(source);
@@ -82,15 +117,38 @@ public class CraftIngestionService : ICraftIngestionService
                     Embedding = await _embed.EmbedAsync($"{extracted.Title}. {extracted.Content}")
                 };
                 await _insights.AddAsync(insight);
+                insightCount++;
             }
 
             source.Status = SourceStatus.Ingested;
             source.IngestedAt = DateTime.UtcNow;
+            await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
+                Component: nameof(CraftIngestionService),
+                ChangeType: "craft.ingest_completed",
+                Reason: "content_processed",
+                Result: $"ingested_with_{insightCount}_insights",
+                Success: true,
+                Source: source.Url,
+                ResourceId: source.Id.ToString(),
+                Metadata: new Dictionary<string, string>
+                {
+                    ["contentLength"] = source.ContentLength.ToString(),
+                    ["insights"] = insightCount.ToString()
+                }));
         }
         catch (Exception ex)
         {
             source.Status = SourceStatus.Failed;
             source.ErrorMessage = ex.Message;
+            await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
+                Component: nameof(CraftIngestionService),
+                ChangeType: "craft.ingest_failed",
+                Reason: "ingestion_exception",
+                Result: ex.Message,
+                Success: false,
+                Source: source.Url,
+                ResourceId: source.Id.ToString(),
+                Metadata: new Dictionary<string, string> { ["kind"] = source.Kind.ToString() }));
             _logger.LogWarning(ex, "Failed to ingest source {Id}", sourceId);
         }
 

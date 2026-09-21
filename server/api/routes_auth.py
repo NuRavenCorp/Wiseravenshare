@@ -354,6 +354,58 @@ def auth_status(platform: str):
     return jsonify({"platform": platform.lower(), "user_id": user_id, "connected": connected, "details": safe})
 
 
+@bp.route("/<platform>/complete", methods=["POST"])
+def auth_complete(platform: str):
+    """
+    Stores additional user-provided connection metadata needed to finish setup
+    for providers that require post-OAuth context (e.g., page/channel IDs).
+    """
+    user_id = _user_id()
+    if not user_id:
+        return jsonify({"error": "missing user_id (header X-User-Id or body/query param)"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    fields = payload.get("fields")
+    if not isinstance(fields, dict):
+        return jsonify({"error": "body.fields must be an object"}), 400
+
+    allowed = {
+        "page_id",
+        "page_name",
+        "page_access_token",
+        "user_id",
+        "instagram_username",
+        "person_urn",
+        "channel_id",
+        "channel_handle",
+        "subreddit",
+        "open_id",
+        "user_agent",
+        "credentials",
+    }
+    sanitized = {}
+    for key, value in fields.items():
+        normalized_key = str(key or "").strip()
+        if not normalized_key or normalized_key not in allowed:
+            continue
+        text = str(value or "").strip()
+        if text:
+            sanitized[normalized_key] = text
+
+    if not sanitized:
+        return jsonify({"error": "no valid fields supplied"}), 400
+
+    credentials.set_many(platform.lower(), sanitized, user_id=user_id)
+    return jsonify(
+        {
+            "success": True,
+            "platform": platform.lower(),
+            "user_id": user_id,
+            "stored_keys": sorted(sanitized.keys()),
+        }
+    )
+
+
 @bp.route("/<platform>/disconnect", methods=["POST"])
 def auth_disconnect(platform: str):
     user_id = _user_id()
