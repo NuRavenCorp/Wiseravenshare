@@ -30,6 +30,7 @@ public class AiAssistantController : ControllerBase
 
     public AiAssistantController(
         IOllamaChatService chatService,
+        IUserAiConnectorChatService userConnectorChatService,
         IAiJobQueue jobQueue,
         ISiteCrawlerService siteCrawlerService,
         IContentCrawlerService contentCrawlerService,
@@ -38,7 +39,7 @@ public class AiAssistantController : ControllerBase
         IHttpClientFactory httpClientFactory,
         ILogger<AiAssistantController> logger)
     {
-        _defaultChatService = defaultChatService;
+        _defaultChatService = chatService;
         _userConnectorChatService = userConnectorChatService;
         _userStore = userStore;
         _jobQueue = jobQueue;
@@ -60,12 +61,11 @@ public class AiAssistantController : ControllerBase
 
         try
         {
-            var provider = (_configuration["AiProvider"] ?? "digitalocean").Trim();
             var models = await _defaultChatService.GetModelsAsync();
             var isOnline = models.Count > 0;
             var provider = usingConnector
                 ? (connector?.Provider ?? "user-ai")
-                : "platform-default";
+                : (_configuration["AiProvider"] ?? "platform-default").Trim();
             
             if (!isOnline)
             {
@@ -115,8 +115,7 @@ public class AiAssistantController : ControllerBase
                 message = "AI assistant is online and ready",
                 provider,
                 modelCount = models.Count,
-                models = models,
-                provider,
+                models,
                 usingUserConnector = usingConnector
             });
         }
