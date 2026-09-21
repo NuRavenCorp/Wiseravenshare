@@ -23,6 +23,7 @@ import RevenueConsolePage from './Pages/RevenueConsolePage';
 import NewsroomRecorderPage from './Pages/NewsroomRecorderPage';
 import TeamAccessAdminPage from './Pages/TeamAccessAdminPage';
 import FeatureReleaseAdminPage from './Pages/FeatureReleaseAdminPage';
+import AdminPanelPage from './Pages/AdminPanelPage';
 import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
 import CrawlerMetricsInsightsPage from './Pages/CrawlerMetricsInsightsPage';
 import AssistantPage from './Pages/AssistantPage';
@@ -527,6 +528,10 @@ const App = () => {
             case 'growth':
                 return isAdminUser
                     ? <GrowthPage />
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'admin-panel':
+                return isAdminUser
+                    ? <AdminPanelPage onNavigate={setCurrentPage} />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'revenue':
                 return isAdminUser
