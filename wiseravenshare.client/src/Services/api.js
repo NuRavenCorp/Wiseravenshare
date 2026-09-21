@@ -104,6 +104,7 @@ const resolveApiBaseUrl = () => {
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
+const AUTH_BASE_URL = stripTrailingApiSegment(API_BASE_URL) || (typeof window !== 'undefined' ? window.location.origin : '');
 
 const isAuthEndpoint = (url = '') => {
     const value = String(url || '').toLowerCase();
@@ -711,6 +712,85 @@ export const apiService = {
     updateProfile: (userId, updates) => api.put(`/users/${userId}`, updates),
     getSocialFeeds: (userId) => api.get(`/users/${userId}/feeds`),
     updateSocialFeeds: (userId, feeds) => api.put(`/users/${userId}/feeds`, feeds),
+    startSocialConnect: async (platform, userId) => {
+        const normalizedPlatform = encodeURIComponent(String(platform || '').trim().toLowerCase());
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedPlatform) {
+            throw new Error('Platform is required.');
+        }
+        if (!normalizedUserId) {
+            throw new Error('User id is required.');
+        }
+        const token = getAuthToken();
+        const response = await axios.get(`${AUTH_BASE_URL}/auth/${normalizedPlatform}/start`, {
+            params: { user_id: normalizedUserId },
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                'X-User-Id': normalizedUserId
+            }
+        });
+        return response;
+    },
+    getSocialConnectStatus: async (platform, userId) => {
+        const normalizedPlatform = encodeURIComponent(String(platform || '').trim().toLowerCase());
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedPlatform) {
+            throw new Error('Platform is required.');
+        }
+        if (!normalizedUserId) {
+            throw new Error('User id is required.');
+        }
+        const token = getAuthToken();
+        return axios.get(`${AUTH_BASE_URL}/auth/${normalizedPlatform}/status`, {
+            params: { user_id: normalizedUserId },
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                'X-User-Id': normalizedUserId
+            }
+        });
+    },
+    completeSocialConnect: async (platform, userId, fields = {}) => {
+        const normalizedPlatform = encodeURIComponent(String(platform || '').trim().toLowerCase());
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedPlatform) {
+            throw new Error('Platform is required.');
+        }
+        if (!normalizedUserId) {
+            throw new Error('User id is required.');
+        }
+        const token = getAuthToken();
+        return axios.post(
+            `${AUTH_BASE_URL}/auth/${normalizedPlatform}/complete`,
+            { user_id: normalizedUserId, fields },
+            {
+                headers: {
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    'X-User-Id': normalizedUserId
+                }
+            }
+        );
+    },
+    disconnectSocialConnect: async (platform, userId) => {
+        const normalizedPlatform = encodeURIComponent(String(platform || '').trim().toLowerCase());
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedPlatform) {
+            throw new Error('Platform is required.');
+        }
+        if (!normalizedUserId) {
+            throw new Error('User id is required.');
+        }
+        const token = getAuthToken();
+        return axios.post(
+            `${AUTH_BASE_URL}/auth/${normalizedPlatform}/disconnect`,
+            { user_id: normalizedUserId },
+            {
+                headers: {
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    'X-User-Id': normalizedUserId
+                }
+            }
+        );
+    },
     getInstrumentConnections: () => api.get('/instrumentconnections'),
     upsertInstrumentConnection: (payload) => api.post('/instrumentconnections', payload),
     registerBluetoothPair: (payload) => api.post('/instrumentconnections/bluetooth/pair', payload),
