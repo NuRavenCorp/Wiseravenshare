@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Interfaces.Repositories.Personalization;
+using TagType = Wiseravenshare.Server.Entities.Personalization.TagType;
 
 namespace Wiseravenshare.Server.Infrastructure.Data.Repositories;
 

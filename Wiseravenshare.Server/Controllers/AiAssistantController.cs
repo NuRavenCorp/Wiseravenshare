@@ -61,7 +61,7 @@ public class AiAssistantController : ControllerBase
         try
         {
             var provider = (_configuration["AiProvider"] ?? "digitalocean").Trim();
-            var models = await _chatService.GetModelsAsync();
+            var models = await _defaultChatService.GetModelsAsync();
             var isOnline = models.Count > 0;
             var provider = usingConnector
                 ? (connector?.Provider ?? "user-ai")
@@ -201,7 +201,7 @@ public class AiAssistantController : ControllerBase
         }
 
         var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
-        var result = await _chatService.ChatAsync(enrichedRequest);
+        var result = await _defaultChatService.ChatAsync(enrichedRequest);
 
         // If platform AI is not configured, fall back to the user's own connector.
         if (!result.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
@@ -237,7 +237,7 @@ public class AiAssistantController : ControllerBase
 
         try
         {
-            await foreach (var token in _chatService.ChatStreamAsync(enrichedRequest, ct))
+            await foreach (var token in _defaultChatService.ChatStreamAsync(enrichedRequest, ct))
             {
                 if (string.IsNullOrWhiteSpace(token))
                     continue;
@@ -250,12 +250,13 @@ public class AiAssistantController : ControllerBase
             if (!emittedAny)
             {
                 // Try platform non-streaming fallback first.
-                var fallback = await _chatService.ChatAsync(enrichedRequest);
+                var fallback = await _defaultChatService.ChatAsync(enrichedRequest);
 
                 // If platform has no key, try the user's own connector.
-                if (!fallback.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+                var userConnector = TryGetUserConnector();
+                if (!fallback.Success && userConnector is { Enabled: true, HasApiKey: true })
                 {
-                    fallback = await UserConnectorChatAsync(connector, enrichedRequest, ct);
+                    fallback = await UserConnectorChatAsync(userConnector, enrichedRequest, ct);
                 }
 
                 if (!string.IsNullOrWhiteSpace(fallback.Reply))

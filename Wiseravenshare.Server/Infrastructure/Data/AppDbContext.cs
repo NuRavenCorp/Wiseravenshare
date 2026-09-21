@@ -101,6 +101,11 @@ public class AppDbContext : DbContext
     // Personalization
     public DbSet<UserLearningEvent> UserLearningEvents => Set<UserLearningEvent>();
     public DbSet<ContentTagMapping> ContentTagMappings => Set<ContentTagMapping>();
+    public DbSet<Wiseravenshare.Server.Entities.Personalization.UserProfile> UserProfiles => Set<Wiseravenshare.Server.Entities.Personalization.UserProfile>();
+    public DbSet<UserInteraction> UserInteractions => Set<UserInteraction>();
+    public DbSet<Wiseravenshare.Server.Entities.Personalization.ContentTag> ContentTags => Set<Wiseravenshare.Server.Entities.Personalization.ContentTag>();
+    public DbSet<LearningModel> LearningModels => Set<LearningModel>();
+    public DbSet<ModelPrediction> ModelPredictions => Set<ModelPrediction>();
 
     // Communique
     public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
