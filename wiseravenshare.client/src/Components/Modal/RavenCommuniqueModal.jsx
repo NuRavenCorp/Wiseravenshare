@@ -1,6 +1,6 @@
 // wiseravenshare.client/src/Components/Modal/RavenCommuniqueModal.jsx
 import React, { useEffect, useState } from 'react';
-import { getCommuniqueMessages, sendCommunique } from '../../Services/communiqueService';
+import { getCommuniqueMessages, sendCommunique, getCommuniqueInbox } from '../../Services/communiqueService';
 import '../../Styles/RavenCommunique.css';
 
 const CHANNELS = [
@@ -227,3 +227,6 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
         </div>
     );
 }
+
+
+

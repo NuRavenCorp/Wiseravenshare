@@ -8,6 +8,22 @@ const normalizeImageUrl = (value) => {
         return `https:${trimmed}`;
     }
 
+    if (trimmed.startsWith('/')) {
+        try {
+            return new URL(trimmed, window.location.origin).toString();
+        } catch {
+            return trimmed;
+        }
+    }
+
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !trimmed.startsWith('data:') && !trimmed.startsWith('blob:')) {
+        try {
+            return new URL(trimmed, window.location.origin).toString();
+        } catch {
+            return trimmed;
+        }
+    }
+
     return trimmed;
 };
 

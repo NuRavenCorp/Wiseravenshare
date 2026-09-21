@@ -206,7 +206,7 @@ services:
         value: ${TWILIO_FROM_NUMBER}
         type: SECRET
       - key: Communique__Twilio__Enabled
-        value: ${COMMUNIQUE_TWILIO_ENABLED}
+        value: "false"
         type: SECRET
       - key: Communique__Twilio__AccountSid
         value: ${TWILIO_ACCOUNT_SID}
