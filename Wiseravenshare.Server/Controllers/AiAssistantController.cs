@@ -25,7 +25,6 @@ public class AiAssistantController : ControllerBase
     private readonly ISiteCrawlerService _siteCrawlerService;
     private readonly IContentCrawlerService _contentCrawlerService;
     private readonly IConfiguration _configuration;
-    private readonly UserStore _userStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AiAssistantController> _logger;
 
@@ -46,7 +45,6 @@ public class AiAssistantController : ControllerBase
         _siteCrawlerService = siteCrawlerService;
         _contentCrawlerService = contentCrawlerService;
         _configuration = configuration;
-        _userStore = userStore;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
