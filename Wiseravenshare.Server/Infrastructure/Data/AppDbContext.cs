@@ -98,21 +98,6 @@ public class AppDbContext : DbContext
     public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
     public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
 
-    // FM Tuner
-    public DbSet<FMStation> FMStations => Set<FMStation>();
-    public DbSet<FMStationLike> FMStationLikes => Set<FMStationLike>();
-    public DbSet<FMStationBookmark> FMStationBookmarks => Set<FMStationBookmark>();
-    public DbSet<FMStationHistory> FMStationHistories => Set<FMStationHistory>();
-    public DbSet<FMUserPreference> FMUserPreferences => Set<FMUserPreference>();
-    public DbSet<CreatorRadioStation> CreatorRadioStations => Set<CreatorRadioStation>();
-    public DbSet<RadioStationSchedule> RadioStationSchedules => Set<RadioStationSchedule>();
-    public DbSet<RadioStationEpisode> RadioStationEpisodes => Set<RadioStationEpisode>();
-    public DbSet<RadioStationFollow> RadioStationFollows => Set<RadioStationFollow>();
-    public DbSet<RadioStationListen> RadioStationListens => Set<RadioStationListen>();
-    public DbSet<RadioStationRequest> RadioStationRequests => Set<RadioStationRequest>();
-    public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
-    public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
-
     // Communique
     public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
     public DbSet<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences> CommunicationPreferences => Set<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>();
