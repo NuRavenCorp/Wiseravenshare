@@ -309,8 +309,8 @@ public class CopyrightFilingController : ControllerBase
                 copyrightOfficeFee = 65.00m,
                 wiseravenServiceFee = 32.50m,
                 submittedAt = DateTime.UtcNow.AddDays(-1),
-                registrationNumber = null,
-                registeredAt = null,
+                registrationNumber = (string?)null,
+                registeredAt = (DateTime?)null,
                 expectedRegistration = new {
                     earliestDate = DateTime.UtcNow.AddDays(27),
                     latestDate = DateTime.UtcNow.AddDays(41)

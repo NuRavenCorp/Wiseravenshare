@@ -98,6 +98,10 @@ public class AppDbContext : DbContext
     public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
     public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
 
+    // Personalization
+    public DbSet<UserLearningEvent> UserLearningEvents => Set<UserLearningEvent>();
+    public DbSet<ContentTagMapping> ContentTagMappings => Set<ContentTagMapping>();
+
     // Communique
     public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
     public DbSet<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences> CommunicationPreferences => Set<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>();

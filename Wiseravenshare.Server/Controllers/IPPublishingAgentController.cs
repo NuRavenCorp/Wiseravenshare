@@ -163,10 +163,10 @@ public class IPPublishingAgentController : ControllerBase
                 status = "InProgress",
                 formGenerated = DateTime.UtcNow.AddMinutes(-2),
                 submitAttempts = 0,
-                governmentConfirmationNumber = null,
-                lastStatusCheck = null,
+                governmentConfirmationNumber = (string?)null,
+                lastStatusCheck = (DateTime?)null,
                 nextStatusCheck = DateTime.UtcNow.AddMinutes(5),
-                officeActionReceived = null,
+                officeActionReceived = (string?)null,
                 agentNotes = "Form generated, queued for submission"
             });
         }
@@ -203,8 +203,8 @@ public class IPPublishingAgentController : ControllerBase
                 summary = new
                 {
                     totalTasks = 0,
-                    lastTaskStatus = null,
-                    registrationNumber = null,
+                    lastTaskStatus = (string?)null,
+                    registrationNumber = (string?)null,
                     nextAction = "Awaiting automated submission"
                 }
             });

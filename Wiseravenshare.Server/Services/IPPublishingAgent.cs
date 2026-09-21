@@ -193,7 +193,7 @@ public class IPPublishingAgent
                 titleOfWork = workTitle,
                 nameOfAuthor = creatorName,
                 dateOfCompletion = DateTime.UtcNow.AddYears(-1).ToString("yyyy-MM-dd"),
-                publicationDate = null,
+                publicationDate = (string?)null,
                 workMadeForHire = false,
                 anonymousWork = false,
                 pseudonymousWork = false,
@@ -237,8 +237,8 @@ public class IPPublishingAgent
                 classCodes = GetClassCodes(formCode), // 041 for podcasting
                 goodsAndServices = goodsServicesDescription,
                 disclaimerText = "",
-                transliteration = null,
-                translationText = null
+                transliteration = (string?)null,
+                translationText = (string?)null
             },
             specimenInfo = uploadedFileKeys
                 .Where(k => k.Contains("specimen", StringComparison.OrdinalIgnoreCase))
