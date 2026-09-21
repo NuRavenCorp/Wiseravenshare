@@ -9,9 +9,10 @@ bp = Blueprint("platform_webhooks", __name__)
 def receive(platform: str):
     raw = request.get_data()
     headers = {k: v for k, v in request.headers.items()}
+    user_id = request.headers.get("X-User-Id") or request.args.get("user_id")
 
     try:
-        svc = current_app.config["build_platform"](platform)
+        svc = current_app.config["build_platform"](platform, user_id=user_id)
     except KeyError:
         return jsonify({"error": "unknown platform"}), 404
 
