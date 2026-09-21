@@ -125,6 +125,25 @@ public class RavenCommuniqueController : ControllerBase
         return Ok(new { messageSid, status = "pending" });
     }
 
+
+    /// <summary>Incoming messages received from Twilio webhooks (SMS / WhatsApp / Voice).</summary>
+    [HttpGet("inbox")]
+    public IActionResult GetInbox([FromQuery] string? channel = null, [FromQuery] int limit = 25)
+    {
+        var safeLimit = Math.Clamp(limit, 1, 100);
+        var normalizedChannel = string.IsNullOrWhiteSpace(channel)
+            ? string.Empty
+            : channel.Trim().ToLowerInvariant();
+
+        var items = CommuniqueWebhookController.GetInbox()
+            .Where(msg => string.IsNullOrWhiteSpace(normalizedChannel)
+                || string.Equals(msg.Channel, normalizedChannel, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(msg => msg.ReceivedAtUtc)
+            .Take(safeLimit)
+            .ToArray();
+
+        return Ok(items);
+    }
     /// <summary>Aggregated outbound dispatch log across sms / whatsapp / voice channels.</summary>
     [HttpGet("messages")]
     public IActionResult GetMessages([FromQuery] string? channel = null, [FromQuery] int limit = 25)
@@ -279,3 +298,4 @@ public class CheckVerificationRequest
     [MaxLength(10)]
     public string Code { get; set; } = string.Empty;
 }
+

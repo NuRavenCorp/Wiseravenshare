@@ -26,21 +26,44 @@ const AiAssistantPage = ({ addTruthAlert }) => {
     const [useCrawlerContext, setUseCrawlerContext] = useState(true);
     const [aiInitializing, setAiInitializing] = useState(true);
     const [aiError, setAiError] = useState(null);
+    const [connectorSettings, setConnectorSettings] = useState(() => ({
+        enabled: false,
+        provider: 'openai',
+        baseUrl: '',
+        defaultModel: '',
+        apiKey: '',
+        apiKeyMasked: '',
+        hasApiKey: false,
+        clearApiKey: false
+    }));
+    const [connectorSaving, setConnectorSaving] = useState(false);
+    const [connectorMessage, setConnectorMessage] = useState('');
+    const [ollmaInitializing, setOllmaInitializing] = useState(false);
     const scrollRef = useRef(null);
     const abortRef = useRef(null);
 
-    // Initialize provider health check on page load (once only)
-    useEffect(() => {
-        let cancelled = false;
-        
-        const initAi = async () => {
-            setAiInitializing(true);
-            setAiError(null);
-            
+    const normalizeConnector = (data = {}) => {
+        const source = data && typeof data === 'object' ? data : {};
+        const provider = String(source.provider ?? source.Provider ?? 'openai').trim() || 'openai';
+
+        return {
+            enabled: Boolean(source.enabled ?? source.Enabled ?? false),
+            provider,
+            baseUrl: String(source.baseUrl ?? source.BaseUrl ?? '').trim(),
+            defaultModel: String(source.defaultModel ?? source.DefaultModel ?? '').trim(),
+            apiKey: '',
+            apiKeyMasked: source.hasApiKey || source.HasApiKey ? (source.apiKeyMasked ?? source.ApiKeyMasked ?? 'saved') : '',
+            hasApiKey: Boolean(source.hasApiKey ?? source.HasApiKey ?? false),
+            clearApiKey: false
+        };
+    };
+
+    const refreshHealth = async ({ raiseAlert = true } = {}) => {
+        setAiInitializing(true);
+        setAiError(null);
+
+        try {
             const health = await aiAssistantService.healthCheck(5, 1000);
-            
-            if (cancelled) return;
-            
             if (health.online) {
                 setAiError(null);
                 setModels(health.models || []);
@@ -49,23 +72,43 @@ const AiAssistantPage = ({ addTruthAlert }) => {
                 }
             } else {
                 setAiError(health.message);
-                // Alert once per browser session to avoid duplicate offline noise.
                 const alreadyAlerted = sessionStorage.getItem(AI_OFFLINE_ALERT_SESSION_KEY) === '1';
-                if (addTruthAlert && !alreadyAlerted) {
+                if (raiseAlert && addTruthAlert && !alreadyAlerted) {
                     sessionStorage.setItem(AI_OFFLINE_ALERT_SESSION_KEY, '1');
                     addTruthAlert('error', 'AI Assistant Offline', health.message);
                 }
             }
-            
+        } finally {
             setAiInitializing(false);
+        }
+    };
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadConnectorSettings = async () => {
+            try {
+                const settings = await aiAssistantService.getConnectorSettings();
+                if (!cancelled) {
+                    setConnectorSettings(normalizeConnector(settings));
+                }
+            } catch {
+                if (!cancelled) {
+                    setConnectorSettings((previous) => ({
+                        ...previous,
+                        provider: previous.provider || 'openai'
+                    }));
+                }
+            }
         };
-        
-        initAi();
-        
+
+        loadConnectorSettings();
+        refreshHealth({ raiseAlert: true });
+
         return () => {
             cancelled = true;
         };
-    }, []); // Empty dependency array - run only on mount
+    }, []);
 
     useEffect(() => {
         if (scrollRef.current) {

@@ -80,3 +80,21 @@ export const getCommuniqueMessages = async ({ channel = '', limit = 20 } = {}) =
 
     return request(`/communique/messages${suffix}`, 'GET');
 };
+
+/** Incoming messages received via Twilio webhook (SMS / WhatsApp / Voice). */
+export const getCommuniqueInbox = async ({ channel = '', limit = 20 } = {}) => {
+    const query = new URLSearchParams();
+    if (channel) query.set('channel', channel);
+    if (Number.isFinite(limit) && limit > 0) query.set('limit', String(Math.floor(limit)));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+
+    return request(`/communique/inbox${suffix}`, 'GET');
+};
+
+/** Place an outbound voice call to a phone number */
+export const placeVoiceCall = (to) =>
+    post('/communique/send', { channel: 'voice', to, message: '' });
+
+/** Start a Twilio Verify code via call (voice) */
+export const startVoiceVerification = (to) =>
+    post('/communique/verify/start', { to, channel: 'call' });
