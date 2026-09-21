@@ -346,10 +346,10 @@ public class PodcastTrademarkFilingController : ControllerBase
                 usptaFee = "$350.00",
                 createdAt = DateTime.UtcNow.AddDays(-7).ToString("O"),
                 submittedToUSPTOAt = DateTime.UtcNow.AddDays(-6).ToString("O"),
-                registrationNumber = null,
-                registeredAt = null,
-                officeActionIssued = null,
-                officeActionDeadline = null
+                registrationNumber = (string?)null,
+                registeredAt = (DateTime?)null,
+                officeActionIssued = (string?)null,
+                officeActionDeadline = (DateTime?)null
             });
         }
         catch (Exception ex)
