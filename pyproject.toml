@@ -1,0 +1,19 @@
+[project]
+name = "wiseravenshare"
+version = "0.1.0"
+description = "WiseravenShare social media server"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.2",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wiseravenshare*"]
