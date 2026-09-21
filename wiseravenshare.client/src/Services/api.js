@@ -1476,6 +1476,10 @@ export const apiService = {
     gateAllFeatures: (reason = '') => api.post('/admin/feature-release/gate-all', { reason }),
     getMyFeatureAccess: () => api.get('/features/my-access'),
 
+    // IP Publishing Agent — top-level convenience aliases for AdminPanelPage
+    getIpPublishingAgentDiagnostics: () => api.get('/ip-publishing-agent/diagnostics'),
+    getIpBotLogs: (limit = 50) => api.get('/ip-publishing-agent/bot/logs', { params: { limit } }),
+
     // Music Rights Registration
     registerOriginalTrack: (payload) => api.post('/music-rights/register', payload),
     printMusicRightsCertificate: (payload) =>

@@ -26,7 +26,10 @@ const PAGE_NODES = [
   { id: 'terms', label: 'Terms of Service', category: 'legal', icon: 'fas fa-file-contract', tags: ['legal', 'compliance'] },
   { id: 'revenue', label: 'Revenue', category: 'admin', icon: 'fas fa-chart-line', tags: ['admin', 'growth'], adminOnly: true, related: ['team-access-admin'] },
   { id: 'team-access-admin', label: 'Team Access', category: 'admin', icon: 'fas fa-user-shield', tags: ['admin', 'permissions'], adminOnly: true, related: ['team-launchpad'] },
-  { id: 'crawler-metrics', label: 'Crawler Metrics', category: 'admin', icon: 'fas fa-chart-pie', tags: ['admin', 'crawler', 'analytics'], adminOnly: true, related: ['site-crawler-audit', 'growth'] }
+  { id: 'crawler-metrics', label: 'Crawler Metrics', category: 'admin', icon: 'fas fa-chart-pie', tags: ['admin', 'crawler', 'analytics'], adminOnly: true, related: ['site-crawler-audit', 'growth'] },
+  { id: 'admin-panel', label: 'Admin Control Center', category: 'admin', icon: 'fas fa-shield-alt', tags: ['admin', 'control', 'gates', 'site-map'], adminOnly: true, related: ['revenue', 'team-access-admin', 'feature-release', 'site-crawler-audit', 'crawler-metrics'] },
+  { id: 'feature-release', label: 'Feature Gates', category: 'admin', icon: 'fas fa-toggle-on', tags: ['admin', 'features', 'release'], adminOnly: true, related: ['admin-panel', 'revenue'] },
+  { id: 'site-crawler-audit', label: 'Site Crawler', category: 'admin', icon: 'fas fa-spider', tags: ['admin', 'crawler', 'audit'], adminOnly: true, related: ['crawler-metrics', 'admin-panel'] },
 ];
 
 const DEFAULT_NAV_ORDER = [
@@ -56,7 +59,7 @@ const DEFAULT_NAV_ORDER = [
 ];
 
 const ADMIN_INSERT_AFTER = 'canvas';
-const ADMIN_NODES = ['revenue', 'team-access-admin', 'crawler-metrics'];
+const ADMIN_NODES = ['admin-panel', 'revenue', 'team-access-admin', 'crawler-metrics', 'feature-release', 'site-crawler-audit'];
 
 const PAGE_INDEX = new Map(PAGE_NODES.map((node) => [node.id, node]));
 
