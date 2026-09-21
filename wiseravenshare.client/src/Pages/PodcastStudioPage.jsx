@@ -410,7 +410,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const creatorKey = normalizeLoginIdentifier(teamCreatorId);
     const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
     const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
-    const canApproveWorkflow = isCreator || isDesignee;
+    const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
     const canEditScriptPipeline = permissions.canEditScript || isCreator || isDesignee;
     const canEditLiveScript = canEditScriptPipeline || workflowStage === 'Team';
     const canForceShutdownFeed = (isCreator || isDesignee) && ['Owner', 'Producer', 'Editor'].includes(controlRole);
@@ -479,57 +479,6 @@ const PodcastStudioPage = ({ onNavigate }) => {
         if (typeof snapshot.guestMuted === 'boolean') setGuestMuted(snapshot.guestMuted);
         if (typeof snapshot.guestConnected === 'boolean') setGuestConnected(snapshot.guestConnected);
     };
-
-    useEffect(() => {
-        if (teamCreatorId || !user?.id) {
-            return;
-        }
-
-        const creatorId = String(user.id);
-        const creatorName = String(user?.name || user?.displayName || user?.username || user?.email || 'Team Creator');
-        setTeamCreatorId(creatorId);
-        setTeamCreatorLabel(creatorName);
-    }, [teamCreatorId, user]);
-
-    useEffect(() => {
-        if (!activeWorkspacePageId && workspacePages[0]?.id) {
-            setActiveWorkspacePageId(workspacePages[0].id);
-        }
-
-        if (activeWorkspacePageId && !workspacePages.some((page) => page.id === activeWorkspacePageId)) {
-            setActiveWorkspacePageId(workspacePages[0]?.id || '');
-        }
-    }, [activeWorkspacePageId, workspacePages]);
-
-    useEffect(() => {
-        if (activeWorkspacePage?.type !== 'Script') {
-            return;
-        }
-
-        const pageContent = String(activeWorkspacePage?.content || '');
-        if (pageContent !== scriptText) {
-            setScriptText(pageContent);
-        }
-    }, [activeWorkspacePage, scriptText]);
-
-    const actorKeys = useMemo(() => {
-        const keys = [
-            normalizeLoginIdentifier(user?.id),
-            normalizeLoginIdentifier(user?.email),
-            normalizeLoginIdentifier(user?.handle),
-            normalizeLoginIdentifier(user?.username),
-            normalizeLoginIdentifier(user?.displayName),
-            normalizeLoginIdentifier(user?.name)
-        ].filter(Boolean);
-        return Array.from(new Set(keys));
-    }, [user]);
-
-    const creatorKey = normalizeLoginIdentifier(teamCreatorId);
-    const isCreator = Boolean(creatorKey) && actorKeys.includes(creatorKey);
-    const isDesignee = designeeKeys.some((key) => actorKeys.includes(normalizeLoginIdentifier(key)));
-    const canApproveWorkflow = permissions.canApproveSegments && (isCreator || isDesignee);
-
-    const activeWorkspacePage = workspacePages.find((page) => page.id === activeWorkspacePageId) || workspacePages[0] || null;
 
     useEffect(() => {
         if (teamCreatorId || !user?.id) {
