@@ -57,3 +57,5 @@ MUSIC_SHARING_IMPLEMENTATION*
 # Android release artifacts (large binaries)
 *.aab
 release-artifacts/
+# local oauth credential cache for wiseravenshare.server
+.wiseravenshare/

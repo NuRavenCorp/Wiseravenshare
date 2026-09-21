@@ -18,13 +18,15 @@ def run():
         jid, job_type, payload = job
         platform_name, action = job_type.split(".", 1)
         try:
-            svc = build_platform(platform_name)
+            user_id = payload.get("user_id") if isinstance(payload, dict) else None
+            action_payload = payload.get("data", {}) if isinstance(payload, dict) else payload
+            svc = build_platform(platform_name, user_id=user_id)
             if action == "upload":
-                result = svc.upload(MediaUpload(**payload))
+                result = svc.upload(MediaUpload(**action_payload))
             elif action == "post.video":
-                result = svc.post(payload)
+                result = svc.post(action_payload)
             else:
-                result = getattr(svc, action)(payload)
+                result = getattr(svc, action)(action_payload)
             logger.info("job %s done: %s", jid, result)
         except Exception:
             logger.exception("job %s failed", jid)
