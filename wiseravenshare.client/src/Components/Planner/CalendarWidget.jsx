@@ -15,7 +15,9 @@ const CalendarWidget = () => {
         sendEmailReminder: false,
         reminderEmail: '',
         sendSmsReminder: false,
-        reminderPhone: ''
+        reminderPhone: '',
+        preEventUrl: '',
+        postEventUrl: ''
     });
 
     React.useEffect(() => {
@@ -111,7 +113,9 @@ const CalendarWidget = () => {
             sendEmailReminder: false,
             reminderEmail: '',
             sendSmsReminder: false,
-            reminderPhone: ''
+            reminderPhone: '',
+            preEventUrl: '',
+            postEventUrl: ''
         });
     };
 
@@ -126,7 +130,9 @@ const CalendarWidget = () => {
             sendEmailReminder: Boolean(event.sendEmailReminder),
             reminderEmail: event.reminderEmail || '',
             sendSmsReminder: Boolean(event.sendSmsReminder),
-            reminderPhone: event.reminderPhone || ''
+            reminderPhone: event.reminderPhone || '',
+            preEventUrl: event.preEventUrl || '',
+            postEventUrl: event.postEventUrl || ''
         });
     };
 
@@ -144,7 +150,9 @@ const CalendarWidget = () => {
             sendEmailReminder: Boolean(eventForm.sendEmailReminder),
             reminderEmail: String(eventForm.reminderEmail || '').trim(),
             sendSmsReminder: Boolean(eventForm.sendSmsReminder),
-            reminderPhone: String(eventForm.reminderPhone || '').trim()
+            reminderPhone: String(eventForm.reminderPhone || '').trim(),
+            preEventUrl: String(eventForm.preEventUrl || '').trim(),
+            postEventUrl: String(eventForm.postEventUrl || '').trim()
         });
         resetEventForm();
     };
@@ -513,6 +521,20 @@ const CalendarWidget = () => {
                                 style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
                             />
                         )}
+                        <input
+                            type="url"
+                            value={eventForm.preEventUrl}
+                            onChange={(e) => setEventForm(prev => ({ ...prev, preEventUrl: e.target.value }))}
+                            placeholder="Pre-event URL (registration, event page…)"
+                            style={{ width: '100%', marginBottom: '10px', padding: '10px' }}
+                        />
+                        <input
+                            type="url"
+                            value={eventForm.postEventUrl}
+                            onChange={(e) => setEventForm(prev => ({ ...prev, postEventUrl: e.target.value }))}
+                            placeholder="Post-event URL (recap, replay, survey…)"
+                            style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
+                        />
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <button
                                 onClick={saveEditedEvent}

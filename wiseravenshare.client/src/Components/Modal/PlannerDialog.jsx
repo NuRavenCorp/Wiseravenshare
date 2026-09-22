@@ -19,6 +19,8 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
     const [calendarReminderEmail, setCalendarReminderEmail] = useState('');
     const [calendarSendSmsReminder, setCalendarSendSmsReminder] = useState(false);
     const [calendarReminderPhone, setCalendarReminderPhone] = useState('');
+    const [calendarPreEventUrl, setCalendarPreEventUrl] = useState('');
+    const [calendarPostEventUrl, setCalendarPostEventUrl] = useState('');
     const [editingCalendarId, setEditingCalendarId] = useState(null);
 
     const [analyticsTitle, setAnalyticsTitle] = useState('');
@@ -71,6 +73,8 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarReminderEmail('');
         setCalendarSendSmsReminder(false);
         setCalendarReminderPhone('');
+        setCalendarPreEventUrl('');
+        setCalendarPostEventUrl('');
         setAnalyticsTitle('');
         setAnalyticsInsight('');
         setAnalyticsMetric('');
@@ -90,7 +94,9 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
             sendEmailReminder: calendarSendEmailReminder,
             reminderEmail: calendarReminderEmail.trim(),
             sendSmsReminder: calendarSendSmsReminder,
-            reminderPhone: calendarReminderPhone.trim()
+            reminderPhone: calendarReminderPhone.trim(),
+            preEventUrl: calendarPreEventUrl.trim(),
+            postEventUrl: calendarPostEventUrl.trim()
         };
 
         if (editingCalendarId) {
@@ -109,6 +115,8 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarReminderEmail('');
         setCalendarSendSmsReminder(false);
         setCalendarReminderPhone('');
+        setCalendarPreEventUrl('');
+        setCalendarPostEventUrl('');
     };
 
     const editCalendarEntry = (entry) => {
@@ -122,6 +130,8 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
         setCalendarReminderEmail(entry.reminderEmail || '');
         setCalendarSendSmsReminder(Boolean(entry.sendSmsReminder));
         setCalendarReminderPhone(entry.reminderPhone || '');
+        setCalendarPreEventUrl(entry.preEventUrl || '');
+        setCalendarPostEventUrl(entry.postEventUrl || '');
         setActiveSection('calendar');
     };
 
@@ -269,6 +279,20 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
                                     style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
                                 />
                             )}
+                            <input
+                                type="url"
+                                value={calendarPreEventUrl}
+                                onChange={(event) => setCalendarPreEventUrl(event.target.value)}
+                                placeholder="Pre-event URL (registration, event page…)"
+                                style={{ width: '100%', marginBottom: '10px', padding: '10px' }}
+                            />
+                            <input
+                                type="url"
+                                value={calendarPostEventUrl}
+                                onChange={(event) => setCalendarPostEventUrl(event.target.value)}
+                                placeholder="Post-event URL (recap, replay, survey…)"
+                                style={{ width: '100%', marginBottom: '12px', padding: '10px' }}
+                            />
                             <div style={{ display: 'flex', gap: '10px' }}>
                                 <button onClick={saveCalendarEntry} style={{ padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--highlight-color)', color: 'white', cursor: 'pointer' }}>
                                     {editingCalendarId ? 'Update Entry' : 'Save Entry'}
@@ -285,6 +309,8 @@ const PlannerDialog = ({ isOpen, onClose, section = 'tasks' }) => {
                                         setCalendarReminderEmail('');
                                         setCalendarSendSmsReminder(false);
                                         setCalendarReminderPhone('');
+                                        setCalendarPreEventUrl('');
+                                        setCalendarPostEventUrl('');
                                     }} style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer' }}>
                                         Reset
                                     </button>
