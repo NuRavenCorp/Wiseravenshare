@@ -266,6 +266,8 @@ class PlannerState {
             reminderEmail: String(safeEntry.reminderEmail || '').trim(),
             sendSmsReminder: Boolean(safeEntry.sendSmsReminder),
             reminderPhone: String(safeEntry.reminderPhone || '').trim(),
+            preEventUrl: String(safeEntry.preEventUrl || '').trim(),
+            postEventUrl: String(safeEntry.postEventUrl || '').trim(),
             reminderDispatch: {
                 emailSentAt: safeEntry?.reminderDispatch?.emailSentAt || null,
                 smsSentAt: safeEntry?.reminderDispatch?.smsSentAt || null,
@@ -668,6 +670,8 @@ class PlannerState {
             reminderEmail: data.reminderEmail,
             sendSmsReminder: data.sendSmsReminder,
             reminderPhone: data.reminderPhone,
+            preEventUrl: data.preEventUrl,
+            postEventUrl: data.postEventUrl,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         });
