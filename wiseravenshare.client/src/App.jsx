@@ -3,6 +3,7 @@ import Header from './Components/Common/Header';
 import Sidebar from './Components/Common/Sidebar';
 import RightSidebar from './Components/Common/RightSidebar';
 import TruthAlert from './Components/Common/TruthAlert';
+import RavenChatModal from './Components/Modal/RavenChatModal';
 import RavenCommuniqueModal from './Components/Modal/RavenCommuniqueModal';
 import FeedPage from './Pages/FeedPage';
 import AiAssistantPage from './Pages/AiAssistantPage';
@@ -126,6 +127,7 @@ const App = () => {
     const [isRavensightMode, setIsRavensightMode] = useState(false);
     const [profileEditRequested, setProfileEditRequested] = useState(false);
     const [communiqueOpen, setCommuniqueOpen] = useState(false);
+    const [ravenChatOpen, setRavenChatOpen] = useState(false);
     const [truthAlerts, setTruthAlerts] = useState([]);
     const [selectedArticle, setSelectedArticle] = useState(() => {
         try {
@@ -140,6 +142,7 @@ const App = () => {
     const { submitCrawledContent, submitCrawledBatch } = usePersonalization();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const profileSlug = useMemo(() => getProfileSlug(user), [user]);
+    const communiqueEnabled = String(import.meta.env.VITE_ENABLE_RAVEN_COMMUNIQUE || '').trim().toLowerCase() === 'true';
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.has(email);
@@ -854,7 +857,13 @@ const App = () => {
                         Launch Ravensight
                     </button>
                     <button
-                        onClick={() => setCommuniqueOpen(true)}
+                        onClick={() => {
+                            if (!communiqueEnabled) {
+                                addToast('Raven Communiqué is temporarily gated.', 'info');
+                                return;
+                            }
+                            setCommuniqueOpen(true);
+                        }}
                         style={{
                             border: '1px solid rgba(139,92,246,0.5)',
                             background: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
@@ -867,8 +876,26 @@ const App = () => {
                             fontWeight: 'bold'
                         }}
                     >
-                        🪶 Communiqué
+                        🪶 Communiqué{communiqueEnabled ? '' : ' (locked)'}
                     </button>
+                    {isAuthenticated && (
+                        <button
+                            onClick={() => setRavenChatOpen(true)}
+                            style={{
+                                border: '1px solid rgba(59,130,246,0.5)',
+                                background: 'linear-gradient(135deg, #0f766e, #2563eb)',
+                                color: 'white',
+                                padding: '8px 12px',
+                                borderRadius: '999px',
+                                cursor: 'pointer',
+                                fontSize: 'var(--app-nav-font-size)',
+                                minHeight: 'var(--app-touch-target-min-height)',
+                                fontWeight: 'bold'
+                            }}
+                        >
+                            💬 RavenChat
+                        </button>
+                    )}
                 </div>
             </div>
             <div className="container">
@@ -880,7 +907,15 @@ const App = () => {
                     <RightSidebar onNavigate={setCurrentPage} />
                 </div>
             </div>
-            <RavenCommuniqueModal isOpen={communiqueOpen} onClose={() => setCommuniqueOpen(false)} />
+            <RavenChatModal
+                isOpen={ravenChatOpen}
+                onClose={() => setRavenChatOpen(false)}
+                currentUserIdentity={String(user?.id || user?.username || user?.email || '').trim()}
+                currentUserLabel={String(user?.name || user?.username || user?.email || user?.id || 'Me').trim()}
+            />
+            {communiqueEnabled && (
+                <RavenCommuniqueModal isOpen={communiqueOpen} onClose={() => setCommuniqueOpen(false)} />
+            )}
             <footer style={{ textAlign: 'center', padding: '16px 0 24px', fontSize: 'var(--app-nav-font-size)', color: 'var(--light-color)' }}>
                 <button
                     onClick={() => setCurrentPage('privacy')}
