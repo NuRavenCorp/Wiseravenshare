@@ -225,6 +225,15 @@ services:
         value: https://wiseravenshare.com/api/communique/webhook/voice/twiml
       - key: Communique__Twilio__StatusCallbackUrl
         value: https://wiseravenshare.com/api/communique/webhook/voice/status
+      - key: Communique__Conversations__ApiKey
+        value: ${TWILIO_CONVERSATIONS_API_KEY}
+        type: SECRET
+      - key: Communique__Conversations__ApiSecret
+        value: ${TWILIO_CONVERSATIONS_API_SECRET}
+        type: SECRET
+      - key: Communique__Conversations__ServiceSid
+        value: ${TWILIO_CONVERSATIONS_SERVICE_SID}
+        type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
