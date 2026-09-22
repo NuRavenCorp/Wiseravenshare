@@ -1,6 +1,7 @@
 // wiseravenshare.client/src/Components/Modal/RavenCommuniqueModal.jsx
 import React, { useEffect, useState } from 'react';
 import { getCommuniqueMessages, sendCommunique, getCommuniqueInbox } from '../../Services/communiqueService';
+import PhoneVerificationModal from './PhoneVerificationModal';
 import '../../Styles/RavenCommunique.css';
 
 const CHANNELS = [
@@ -9,9 +10,16 @@ const CHANNELS = [
     { key: 'voice',     label: 'Voice',     icon: '📞' }
 ];
 
+const TABS = [
+    { key: 'compose', label: 'Compose', icon: '✍️' },
+    { key: 'verify', label: 'Verify Phone', icon: '🔐' }
+];
+
 const STATUS = { idle: 'idle', sending: 'sending', success: 'success', error: 'error' };
 
 export default function RavenCommuniqueModal({ isOpen, onClose }) {
+    const [activeTab, setActiveTab] = useState('compose');
+    const [showPhoneVerification, setShowPhoneVerification] = useState(false);
     const [channel, setChannel]   = useState('sms');
     const [to, setTo]             = useState('');
     const [message, setMessage]   = useState('');
@@ -81,39 +89,65 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
         setFeedback('');
         setTo('');
         setMessage('');
+        setActiveTab('compose');
         onClose();
     };
 
     return (
-        <div
-            className="rc-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="RavenCommuniqué"
-            onClick={(e) => e.target === e.currentTarget && handleClose()}
-        >
-            <div className="rc-modal">
-                {/* Header */}
-                <div className="rc-header">
-                    <span className="rc-logo">🪶</span>
-                    <h2 className="rc-title">RavenCommuniqué</h2>
-                    <button className="rc-close" onClick={handleClose} aria-label="Close">×</button>
-                </div>
+        <>
+            <div
+                className="rc-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-label="RavenCommuniqué"
+                onClick={(e) => e.target === e.currentTarget && handleClose()}
+            >
+                <div className="rc-modal">
+                    {/* Header */}
+                    <div className="rc-header">
+                        <span className="rc-logo">🪶</span>
+                        <h2 className="rc-title">RavenCommuniqué</h2>
+                        <button className="rc-close" onClick={handleClose} aria-label="Close">×</button>
+                    </div>
 
-                {/* Channel tabs */}
-                <div className="rc-tabs" role="tablist">
-                    {CHANNELS.map(ch => (
-                        <button
-                            key={ch.key}
-                            role="tab"
-                            aria-selected={channel === ch.key}
-                            className={`rc-tab${channel === ch.key ? ' rc-tab--active' : ''}`}
-                            onClick={() => { setChannel(ch.key); setFeedback(''); setStatus(STATUS.idle); }}
-                        >
-                            {ch.icon} {ch.label}
-                        </button>
-                    ))}
-                </div>
+                    {/* Main tabs: Compose / Verify Phone */}
+                    <div className="rc-tabs" role="tablist" style={{ borderBottom: '1px solid rgba(148,163,184,0.2)', marginBottom: '12px' }}>
+                        {TABS.map(tab => (
+                            <button
+                                key={tab.key}
+                                role="tab"
+                                aria-selected={activeTab === tab.key}
+                                className={`rc-tab${activeTab === tab.key ? ' rc-tab--active' : ''}`}
+                                onClick={() => { setActiveTab(tab.key); setFeedback(''); setStatus(STATUS.idle); }}
+                                style={{
+                                    flex: 1,
+                                    padding: '10px',
+                                    borderBottom: activeTab === tab.key ? '2px solid #38bdf8' : 'none',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {tab.icon} {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* COMPOSE TAB */}
+                    {activeTab === 'compose' && (
+                        <>
+                            {/* Channel tabs */}
+                            <div className="rc-tabs" role="tablist">
+                                {CHANNELS.map(ch => (
+                                    <button
+                                        key={ch.key}
+                                        role="tab"
+                                        aria-selected={channel === ch.key}
+                                        className={`rc-tab${channel === ch.key ? ' rc-tab--active' : ''}`}
+                                        onClick={() => { setChannel(ch.key); setFeedback(''); setStatus(STATUS.idle); }}
+                                    >
+                                        {ch.icon} {ch.label}
+                                    </button>
+                                ))}
+                            </div>
 
                 {/* Form */}
                 <form className="rc-form" onSubmit={handleSend} noValidate>
@@ -181,52 +215,83 @@ export default function RavenCommuniqueModal({ isOpen, onClose }) {
                     </button>
                 </form>
 
-                <p className="rc-powered">Powered by Twilio · RavenCommuniqué</p>
+                        <p className="rc-powered">Powered by Twilio · RavenCommuniqué</p>
 
-                <div style={{ marginTop: '12px', borderTop: '1px solid rgba(148,163,184,0.3)', paddingTop: '10px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>
-                        Aggregated Channel Activity (SMS · WhatsApp · Voice)
-                    </div>
-                    {historyLoading && (
-                        <div style={{ fontSize: '12px', opacity: 0.8 }}>Loading activity…</div>
-                    )}
-                    {!historyLoading && historyError && (
-                        <div style={{ fontSize: '12px', color: '#fca5a5' }}>{historyError}</div>
-                    )}
-                    {!historyLoading && !historyError && history.length === 0 && (
-                        <div style={{ fontSize: '12px', opacity: 0.8 }}>No activity yet.</div>
-                    )}
-                    {!historyLoading && history.length > 0 && (
-                        <div style={{ display: 'grid', gap: '6px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                            {history.map((entry) => (
-                                <div
-                                    key={entry.id}
-                                    style={{
-                                        border: '1px solid rgba(148,163,184,0.3)',
-                                        borderRadius: '8px',
-                                        padding: '6px 8px',
-                                        fontSize: '11px',
-                                        background: 'rgba(15,23,42,0.5)'
-                                    }}
-                                >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                                        <strong style={{ textTransform: 'uppercase' }}>{entry.channel}</strong>
-                                        <span>{entry.requestedAtUtc ? new Date(entry.requestedAtUtc).toLocaleString() : ''}</span>
-                                    </div>
-                                    <div>To: {entry.to}</div>
-                                    {entry.messagePreview && <div style={{ opacity: 0.9 }}>{entry.messagePreview}</div>}
-                                    <div style={{ color: entry.success ? '#86efac' : '#fca5a5' }}>
-                                        {entry.success ? 'Delivered request accepted' : (entry.errorMessage || 'Failed')}
-                                    </div>
+                        <div style={{ marginTop: '12px', borderTop: '1px solid rgba(148,163,184,0.3)', paddingTop: '10px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>
+                                Aggregated Channel Activity (SMS · WhatsApp · Voice)
+                            </div>
+                            {historyLoading && (
+                                <div style={{ fontSize: '12px', opacity: 0.8 }}>Loading activity…</div>
+                            )}
+                            {!historyLoading && historyError && (
+                                <div style={{ fontSize: '12px', color: '#fca5a5' }}>{historyError}</div>
+                            )}
+                            {!historyLoading && !historyError && history.length === 0 && (
+                                <div style={{ fontSize: '12px', opacity: 0.8 }}>No activity yet.</div>
+                            )}
+                            {!historyLoading && history.length > 0 && (
+                                <div style={{ display: 'grid', gap: '6px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                                    {history.map((entry) => (
+                                        <div
+                                            key={entry.id}
+                                            style={{
+                                                border: '1px solid rgba(148,163,184,0.3)',
+                                                borderRadius: '8px',
+                                                padding: '6px 8px',
+                                                fontSize: '11px',
+                                                background: 'rgba(15,23,42,0.5)'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                                <strong style={{ textTransform: 'uppercase' }}>{entry.channel}</strong>
+                                                <span>{entry.requestedAtUtc ? new Date(entry.requestedAtUtc).toLocaleString() : ''}</span>
+                                            </div>
+                                            <div>To: {entry.to}</div>
+                                            {entry.messagePreview && <div style={{ opacity: 0.9 }}>{entry.messagePreview}</div>}
+                                            <div style={{ color: entry.success ? '#86efac' : '#fca5a5' }}>
+                                                {entry.success ? 'Delivered request accepted' : (entry.errorMessage || 'Failed')}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
+                            )}
+                        </div>
+                        </>
+                    )}
+
+                    {/* VERIFY PHONE TAB */}
+                    {activeTab === 'verify' && (
+                        <div style={{ padding: '12px 0' }}>
+                            <div style={{ fontSize: '12px', marginBottom: '12px', opacity: 0.8 }}>
+                                Verify your phone number via SMS or WhatsApp to unlock two-factor authentication and secure communications.
+                            </div>
+                            <button
+                                onClick={() => setShowPhoneVerification(true)}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                🔐 Verify Phone Number
+                            </button>
                         </div>
                     )}
                 </div>
             </div>
-        </div>
+
+            {/* Phone Verification Modal */}
+            <PhoneVerificationModal 
+                isOpen={showPhoneVerification} 
+                onClose={() => setShowPhoneVerification(false)} 
+            />
+        </>
     );
 }
-
-
-
