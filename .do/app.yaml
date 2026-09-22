@@ -206,8 +206,7 @@ services:
         value: ${TWILIO_FROM_NUMBER}
         type: SECRET
       - key: Communique__Twilio__Enabled
-        value: "false"
-        type: SECRET
+        value: "true"
       - key: Communique__Twilio__AccountSid
         value: ${TWILIO_ACCOUNT_SID}
         type: SECRET
@@ -218,11 +217,14 @@ services:
         value: ${TWILIO_FROM_NUMBER}
         type: SECRET
       - key: Communique__Twilio__WhatsAppFrom
-        value: ${COMMUNIQUE_TWILIO_WHATSAPP_FROM}
-        type: SECRET
+        value: whatsapp:+18444671905
       - key: Communique__Twilio__VerifyServiceSid
         value: ${TWILIO_VERIFY_SERVICE_SID}
         type: SECRET
+      - key: Communique__Twilio__VoiceWebhookUrl
+        value: https://wiseravenshare.com/api/communique/webhook/voice/twiml
+      - key: Communique__Twilio__StatusCallbackUrl
+        value: https://wiseravenshare.com/api/communique/webhook/voice/status
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
@@ -304,4 +306,3 @@ domains:
     type: ALIAS
   - domain: www.wise-ravens.com
     type: ALIAS
-
