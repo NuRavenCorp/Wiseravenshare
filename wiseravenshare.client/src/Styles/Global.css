@@ -1,24 +1,79 @@
 :root {
-    --primary-color: #131a2f;
-    --secondary-color: #1e2a4a;
-    --accent-color: #a33a5d;
-    --highlight-color: #4f74d6;
-    --light-color: #d7e1ff;
-    --text-color: #f4f7ff;
-    --bg-color: #090f1f;
-    --card-bg: #151f3a;
-    --border-color: #2b3a66;
-    --success-color: #4caf50;
-    --warning-color: #ff9800;
-    --error-color: #f44336;
-    --urgent: #ef4444;
-    --high: #f59e0b;
-    --medium: #10b981;
-    --low: #3b82f6;
-    --app-container-padding: 20px;
-    --app-nav-font-size: 12px;
-    --app-touch-target-min-height: 36px;
-    --app-touch-target-min-width: 36px;
+    /* ── Core palette ────────────────────────────────────────────────── */
+    --primary-color:    #0d1117;
+    --secondary-color:  #161b2e;
+    --accent-color:     #c026d3;
+    --accent2-color:    #7c3aed;
+    --highlight-color:  #6366f1;
+    --neon-blue:        #38bdf8;
+    --neon-purple:      #a855f7;
+    --neon-pink:        #ec4899;
+    --neon-teal:        #2dd4bf;
+    --light-color:      #c7d2fe;
+    --text-color:       #f1f5f9;
+    --text-muted:       #94a3b8;
+    --text-subtle:      #64748b;
+    --bg-color:         #030712;
+    --card-bg:          #0f172a;
+    --border-color:     rgba(99, 102, 241, 0.18);
+    --success-color:    #22c55e;
+    --warning-color:    #f59e0b;
+    --error-color:      #ef4444;
+    --urgent:           #ef4444;
+    --high:             #f59e0b;
+    --medium:           #10b981;
+    --low:              #3b82f6;
+
+    /* ── Glassmorphism tokens ────────────────────────────────────────── */
+    --glass-bg-1:       rgba(15, 23, 42, 0.72);
+    --glass-bg-2:       rgba(15, 23, 42, 0.55);
+    --glass-bg-3:       rgba(15, 23, 42, 0.38);
+    --glass-bg-light:   rgba(255, 255, 255, 0.04);
+    --glass-border:     rgba(148, 163, 184, 0.14);
+    --glass-border-hi:  rgba(148, 163, 184, 0.28);
+    --glass-blur:       saturate(180%) blur(18px);
+    --glass-blur-heavy: saturate(200%) blur(32px);
+    --glass-blur-light: saturate(150%) blur(8px);
+    --glass-shine:      linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.02) 60%, transparent 100%);
+    --glass-shine-top:  linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 40%);
+
+    /* ── Elevation shadows ───────────────────────────────────────────── */
+    --shadow-xs:    0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-sm:    0 4px 6px -1px rgba(0,0,0,0.5), 0 2px 4px -1px rgba(0,0,0,0.4);
+    --shadow-md:    0 10px 15px -3px rgba(0,0,0,0.55), 0 4px 6px -2px rgba(0,0,0,0.4);
+    --shadow-lg:    0 20px 25px -5px rgba(0,0,0,0.6), 0 10px 10px -5px rgba(0,0,0,0.4);
+    --shadow-xl:    0 32px 60px -12px rgba(0,0,0,0.75), 0 16px 24px -8px rgba(0,0,0,0.5);
+    --shadow-glow-blue:   0 0 24px rgba(99,102,241,0.35), 0 0 48px rgba(99,102,241,0.15);
+    --shadow-glow-purple: 0 0 24px rgba(168,85,247,0.35), 0 0 48px rgba(168,85,247,0.15);
+    --shadow-glow-pink:   0 0 24px rgba(236,72,153,0.30), 0 0 48px rgba(236,72,153,0.12);
+    --shadow-glow-teal:   0 0 24px rgba(45,212,191,0.30), 0 0 48px rgba(45,212,191,0.12);
+
+    /* ── Gradient accents ────────────────────────────────────────────── */
+    --grad-primary:   linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+    --grad-cool:      linear-gradient(135deg, #38bdf8 0%, #6366f1 60%, #a855f7 100%);
+    --grad-warm:      linear-gradient(135deg, #f59e0b 0%, #ef4444 50%, #ec4899 100%);
+    --grad-teal:      linear-gradient(135deg, #2dd4bf 0%, #38bdf8 60%, #6366f1 100%);
+    --grad-dark:      linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(168,85,247,0.15) 100%);
+    --grad-card:      linear-gradient(145deg, rgba(99,102,241,0.08) 0%, rgba(168,85,247,0.04) 100%);
+    --grad-border:    linear-gradient(135deg, rgba(99,102,241,0.5), rgba(168,85,247,0.3), rgba(236,72,153,0.2));
+
+    /* ── Typography scale ────────────────────────────────────────────── */
+    --font-sans:   'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono:   'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    --font-display: 'Inter', system-ui, sans-serif;
+
+    /* ── Radius ──────────────────────────────────────────────────────── */
+    --radius-sm:  8px;
+    --radius-md:  14px;
+    --radius-lg:  20px;
+    --radius-xl:  28px;
+    --radius-full: 9999px;
+
+    /* ── Responsive tokens ───────────────────────────────────────────── */
+    --app-container-padding:        20px;
+    --app-nav-font-size:            12px;
+    --app-touch-target-min-height:  36px;
+    --app-touch-target-min-width:   36px;
 }
 
 * {
@@ -38,12 +93,18 @@ html {
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--font-sans);
     background-color: var(--bg-color);
-    background-image: radial-gradient(circle at 20% 0%, rgba(79, 116, 214, 0.18), transparent 45%), radial-gradient(circle at 80% 10%, rgba(163, 58, 93, 0.16), transparent 40%);
+    background-image:
+        radial-gradient(ellipse 80% 60% at 10% -10%, rgba(99, 102, 241, 0.22) 0%, transparent 55%),
+        radial-gradient(ellipse 60% 50% at 90% 5%,  rgba(168, 85, 247, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 40% at 50% 100%, rgba(56, 189, 248, 0.10) 0%, transparent 55%),
+        radial-gradient(ellipse 70% 40% at 80% 70%,  rgba(236, 72, 153, 0.10) 0%, transparent 50%);
     color: var(--text-color);
     line-height: 1.6;
     max-width: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 p, span, div, li, td, th, a, button, input, textarea {

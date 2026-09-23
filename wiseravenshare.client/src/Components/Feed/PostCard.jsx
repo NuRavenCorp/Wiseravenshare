@@ -239,101 +239,111 @@ const PostCard = ({
 
     return (
         <Compartment badge="Feed Post" title="Post Detail">
-        <article
-            style={{
-                background: 'var(--card-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '12px',
-                padding: '16px',
-                marginBottom: '16px'
-            }}
-        >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <strong>{displayUser?.name || 'Unknown'}</strong>
-                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{displayHandle}</div>
+        <article className="post-card glass-reveal">
+
+            {/* ── Header ─────────────────────────────────────── */}
+            <div className="post-header">
+                <div className={`post-avatar${displayUser?.online ? ' post-avatar--online' : ''}`}>
+                    {displayUser?.avatar
+                        ? <img
+                            src={displayUser.avatar}
+                            alt={displayUser.name || 'avatar'}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                        : (displayUser?.name || 'U').charAt(0).toUpperCase()
+                    }
                 </div>
+
+                <div className="post-meta">
+                    <div className="post-meta__name">{displayUser?.name || 'Unknown'}</div>
+                    <div className="post-meta__handle">{displayHandle}</div>
+                    {post.createdAt && (
+                        <div className="post-meta__time">
+                            {new Date(post.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Truth badge */}
+                <span className="truth-badge" title={`Truth Score: ${post.truthScore ?? '?'}%`}>
+                    {truthBadge.icon || '🛡️'} {truthBadge.text}
+                </span>
+
                 {onFollow && post.userId && post.userId !== currentUser?.id && (
                     <button
+                        className={`follow-btn${isFollowing ? ' follow-btn--following' : ''}`}
                         onClick={() => onFollow?.(post.userId)}
-                        style={{
-                            border: `1px solid ${isFollowing ? 'var(--highlight-color)' : 'transparent'}`,
-                            background: isFollowing
-                                ? 'transparent'
-                                : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
-                            color: 'var(--text-color)',
-                            borderRadius: '16px',
-                            padding: '6px 12px',
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            minWidth: '96px'
-                        }}
                     >
-                        {isFollowing ? 'Following' : 'Follow +'}
+                        {isFollowing ? '✓ Following' : '+ Follow'}
                     </button>
                 )}
             </div>
 
-            {/* Media block renders first so montage items are visible before text */}
+            {/* ── Media block ─────────────────────────────────── */}
             {mediaItems.length > 0 && (
                 <div
-                    style={{
-                        marginTop: '12px',
-                        borderRadius: '12px',
-                        overflow: 'hidden',
-                        background: 'rgba(0,0,0,0.4)',
-                        position: 'relative',
-                        zIndex: 1,
-                        padding: mediaItems.length > 1 ? '6px' : 0,
-                        display: 'grid',
-                        gridTemplateColumns: mediaItems.length > 1 ? 'repeat(auto-fit, minmax(220px, 1fr))' : '1fr',
-                        gap: mediaItems.length > 1 ? '6px' : 0
-                    }}
+                    className={mediaItems.length > 1 ? `post-media-grid post-media-grid--${Math.min(mediaItems.length, 4)}` : 'post-media-grid'}
+                    style={mediaItems.length === 1 ? { borderRadius: 'var(--radius-md)', overflow: 'hidden', marginBottom: '14px' } : {}}
                 >
                     {mediaItems.map((resolvedMedia, index) => {
                         const mediaClass = classifyPostMedia({ type: 'Text', mediaType: '' }, resolvedMedia);
+
                         if (mediaClass.isVideoPost) {
                             return (
-                                <video
-                                    key={`${post.id || 'post'}-media-${index}`}
-                                    src={resolvedMedia}
-                                    controls
-                                    playsInline
-                                    preload="metadata"
-                                    style={{ width: '100%', maxHeight: '420px', display: 'block', borderRadius: '12px', background: '#000' }}
-                                />
-                            );
-                        }
-
-                        if (mediaClass.isImagePost) {
-                            return (
-                                <img
-                                    key={`${post.id || 'post'}-media-${index}`}
-                                    src={resolvedMedia}
-                                    alt={`Story media ${index + 1}`}
-                                    style={{ width: '100%', maxHeight: '560px', objectFit: 'contain', display: 'block', borderRadius: '12px', background: '#000' }}
-                                />
-                            );
-                        }
-
-                        if (mediaClass.isAudioPost) {
-                            return (
-                                <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '14px', background: 'rgba(255,255,255,0.04)', borderRadius: '12px' }}>
-                                    <audio
+                                <div key={`${post.id || 'post'}-media-${index}`}
+                                     className={mediaItems.length > 1 ? 'post-media-grid__item' : ''}>
+                                    <video
                                         src={resolvedMedia}
                                         controls
+                                        playsInline
                                         preload="metadata"
-                                        style={{ width: '100%' }}
+                                        style={{
+                                            width: '100%',
+                                            maxHeight: mediaItems.length === 1 ? '420px' : '240px',
+                                            display: 'block',
+                                            background: '#000'
+                                        }}
                                     />
                                 </div>
                             );
                         }
 
+                        if (mediaClass.isImagePost) {
+                            return (
+                                <div key={`${post.id || 'post'}-media-${index}`}
+                                     className={mediaItems.length > 1 ? 'post-media-grid__item' : ''}>
+                                    <img
+                                        src={resolvedMedia}
+                                        alt={`Post media ${index + 1}`}
+                                        style={{
+                                            width: '100%',
+                                            maxHeight: mediaItems.length === 1 ? '500px' : '260px',
+                                            objectFit: 'cover',
+                                            display: 'block'
+                                        }}
+                                    />
+                                </div>
+                            );
+                        }
+
+                        if (mediaClass.isAudioPost) {
+                            return (
+                                <div key={`${post.id || 'post'}-media-${index}`}
+                                     style={{ padding: '14px', background: 'rgba(99,102,241,0.07)', borderRadius: 'var(--radius-md)', marginBottom: '14px', border: '1px solid rgba(99,102,241,0.18)' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>🎵 Audio Attachment</div>
+                                    <audio src={resolvedMedia} controls preload="metadata" style={{ width: '100%' }} />
+                                </div>
+                            );
+                        }
+
                         return (
-                            <div key={`${post.id || 'post'}-media-${index}`} style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span style={{ fontSize: '13px', color: 'var(--light-color)' }}>📄 Attached Story File</span>
-                                <a href={resolvedMedia} target="_blank" rel="noreferrer" style={{ color: 'var(--highlight-color)', fontWeight: 'bold', fontSize: '13px' }}>
-                                    View / Download File
+                            <div key={`${post.id || 'post'}-media-${index}`}
+                                 style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', border: '1px solid var(--glass-border)' }}>
+                                <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>📄 Attached File</span>
+                                <a href={resolvedMedia} target="_blank" rel="noreferrer"
+                                   style={{ color: 'var(--neon-blue)', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}>
+                                    View / Download
                                 </a>
                             </div>
                         );
@@ -341,78 +351,51 @@ const PostCard = ({
                 </div>
             )}
 
-            <p
-                style={{
-                    marginTop: '12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word'
-                }}
-            >
-                {post.content}
-            </p>
+            {/* ── Content ─────────────────────────────────────── */}
+            <p className="post-content">{post.content}</p>
 
+            {/* ── Provenance block ────────────────────────────── */}
             {provenance && (
-                <div
-                    style={{
-                        marginTop: '10px',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '10px',
-                        padding: '10px',
-                        background: 'rgba(255,255,255,0.03)',
-                        display: 'grid',
-                        gap: '8px'
-                    }}
-                >
+                <div style={{
+                    marginBottom: '14px',
+                    border: '1px solid rgba(148,163,184,0.12)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '10px 14px',
+                    background: 'rgba(255,255,255,0.02)',
+                    display: 'grid',
+                    gap: '6px',
+                }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <strong style={{ fontSize: '12px', color: 'var(--light-color)' }}>Provenance</strong>
-                        <span
-                            style={{
-                                ...provenance.statusStyle,
-                                borderRadius: '999px',
-                                padding: '3px 8px',
-                                fontSize: '11px',
-                                fontWeight: 700
-                            }}
-                        >
+                        <strong style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Provenance</strong>
+                        <span style={{ ...provenance.statusStyle, borderRadius: '999px', padding: '3px 9px', fontSize: '11px', fontWeight: 700 }}>
                             {provenance.statusLabel}
                         </span>
                     </div>
-
                     {provenance.evidenceSummary && (
                         <div style={{ fontSize: '12px', color: 'var(--text-color)', whiteSpace: 'pre-wrap' }}>
                             {provenance.evidenceSummary}
                         </div>
                     )}
-
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                         {provenance.sourceUrl && (
-                            <a href={provenance.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                Source Reference
+                            <a href={provenance.sourceUrl} target="_blank" rel="noreferrer"
+                               style={{ fontSize: '12px', color: 'var(--neon-blue)', textDecoration: 'none' }}>
+                                Source ↗
                             </a>
                         )}
                         {provenance.correctionReferenceUrl && (
-                            <a href={provenance.correctionReferenceUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                Correction Reference
+                            <a href={provenance.correctionReferenceUrl} target="_blank" rel="noreferrer"
+                               style={{ fontSize: '12px', color: 'var(--neon-blue)', textDecoration: 'none' }}>
+                                Correction ↗
                             </a>
                         )}
                     </div>
                 </div>
             )}
 
-            <p
-                style={{
-                    marginTop: '12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word'
-                }}
-            >
-                {post.content}
-            </p>
-
+            {/* ── Platform links ───────────────────────────────── */}
             {platformLinks.length > 0 && (
-                <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {platformLinks.map((link) => (
                         <a
                             key={link.label}
@@ -420,82 +403,109 @@ const PostCard = ({
                             target="_blank"
                             rel="noreferrer"
                             style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                padding: '6px 10px',
-                                borderRadius: '999px',
-                                border: '1px solid var(--border-color)',
+                                display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                padding: '5px 12px', borderRadius: '999px',
+                                border: '1px solid var(--glass-border)',
                                 background: 'rgba(255,255,255,0.04)',
-                                color: link.color,
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                textDecoration: 'none'
+                                color: link.color, fontSize: '11px', fontWeight: 700,
+                                textDecoration: 'none', transition: 'all 0.18s'
                             }}
                         >
-                            Open on {link.label}
+                            ↗ {link.label}
                         </a>
                     ))}
                 </div>
             )}
+            {/* ── Prediction badge ────────────────────────────── */}
+            {predictionSummary && (
+                <div style={{ marginBottom: '10px' }}>
+                    <span className="neon-pill neon-pill--indigo">
+                        📊 Predicted: {predictionSummary.predicted}
+                        {predictionSummary.confidence !== null ? ` (${predictionSummary.confidence}%)` : ''}
+                    </span>
+                </div>
+            )}
 
-            <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{truthBadge.text}</div>
-                {predictionSummary && (
-                    <div
-                        title="Predicted engagement score for near-term ranking"
-                        style={{
-                            fontSize: '11px',
-                            color: 'var(--text-color)',
-                            background: 'rgba(125, 211, 252, 0.14)',
-                            border: '1px solid rgba(125, 211, 252, 0.45)',
-                            borderRadius: '999px',
-                            padding: '3px 9px',
-                            fontWeight: 600
-                        }}
-                    >
-                        Predicted: {predictionSummary.predicted}
-                        {predictionSummary.confidence !== null ? ` (${predictionSummary.confidence}% conf)` : ''}
-                    </div>
-                )}
-            </div>
+            {/* ── Action bar ──────────────────────────────────── */}
+            <div className="post-actions">
+                <button
+                    className={`action-btn action-btn--like${post.isLiked ? ' is-active' : ''}`}
+                    onClick={() => onLike?.(post.id)}
+                    title={post.isLiked ? 'Unlike' : 'Like'}
+                >
+                    <span className="action-btn__icon">{post.isLiked ? '❤️' : '🤍'}</span>
+                    <span className="action-btn__count">{likesCount > 0 ? likesCount : ''}</span>
+                </button>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                <button onClick={() => onLike?.(post.id)}>{post.isLiked ? 'Liked' : 'Like'} ({likesCount})</button>
-                <button onClick={() => onRepost?.(post.id)}>{post.isReposted ? 'Reposted' : 'Repost'} ({repostsCount})</button>
-                <button onClick={() => onBookmark?.(post)}>{bookmarkLabel}</button>
-                <button onClick={() => onVerify?.(post)}>Verify</button>
-                <button onClick={() => onDispute?.(post)}>Dispute</button>
-                <button onClick={handleToggleComments}>
-                    Comments ({commentCount})
+                <button
+                    className={`action-btn action-btn--repost${post.isReposted ? ' is-active' : ''}`}
+                    onClick={() => onRepost?.(post.id)}
+                    title={post.isReposted ? 'Unrepost' : 'Repost'}
+                >
+                    <span className="action-btn__icon">🔁</span>
+                    <span className="action-btn__count">{repostsCount > 0 ? repostsCount : ''}</span>
+                </button>
+
+                <button
+                    className="action-btn"
+                    onClick={handleToggleComments}
+                    title="Comments"
+                >
+                    <span className="action-btn__icon">💬</span>
+                    <span className="action-btn__count">{commentCount > 0 ? commentCount : ''}</span>
+                </button>
+
+                {/* Spacer */}
+                <div className="action-btn--spacer" />
+
+                <button
+                    className={`action-btn action-btn--bookmark${post.isBookmarked ? ' is-active' : ''}`}
+                    onClick={() => onBookmark?.(post)}
+                    title={bookmarkLabel}
+                >
+                    <span className="action-btn__icon">{post.isBookmarked ? '🔖' : '🗂️'}</span>
+                </button>
+
+                <button
+                    className="action-btn action-btn--verify"
+                    onClick={() => onVerify?.(post)}
+                    title="Verify"
+                >
+                    <span className="action-btn__icon">🛡️</span>
+                </button>
+
+                <button
+                    className="action-btn"
+                    onClick={() => onDispute?.(post)}
+                    title="Dispute"
+                    style={{ color: 'var(--text-subtle)' }}
+                >
+                    <span className="action-btn__icon">⚠️</span>
                 </button>
             </div>
 
+            {/* ── Integrity report ────────────────────────────── */}
             {integrityReport && (
-                <div
-                    style={{
-                        marginTop: '12px',
-                        padding: '10px',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '10px',
-                        background: 'rgba(255, 255, 255, 0.03)'
-                    }}
-                >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                        <strong style={{ fontSize: '13px' }}>
-                            Integrity Check {integrityReport.mode === 'auto' ? '(Auto)' : '(Manual)'}
+                <div style={{
+                    marginTop: '12px',
+                    padding: '10px 14px',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(99,102,241,0.04)',
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <strong style={{ fontSize: '12px', color: 'var(--text-color)' }}>
+                            🛡️ Integrity {integrityReport.mode === 'auto' ? '(Auto)' : '(Manual)'}
                         </strong>
-                        <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-subtle)' }}>
                             {new Date(integrityReport.checkedAt).toLocaleString()}
                         </span>
                     </div>
-
-                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                        {integrityReport.badge?.text || `Truth Score: ${integrityReport.score || 0}%`}
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--neon-blue)' }}>
+                        {integrityReport.badge?.text || `Score: ${integrityReport.score || 0}%`}
                     </div>
-
                     {Array.isArray(integrityReport.findings) && integrityReport.findings.length > 0 && (
-                        <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '18px', fontSize: '12px' }}>
+                        <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '18px', fontSize: '12px', color: 'var(--text-muted)' }}>
                             {integrityReport.findings.slice(0, 3).map((finding, index) => (
                                 <li key={`${finding.claim}-${index}`} style={{ marginBottom: '4px' }}>
                                     {finding.claim}
@@ -506,10 +516,12 @@ const PostCard = ({
                 </div>
             )}
 
+            {/* ── Comments ────────────────────────────────────── */}
             {showComments && (
-                <div style={{ marginTop: '12px' }}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <div className="comments-section">
+                    <div className="comment-input-row">
                         <input
+                            className="comment-input"
                             value={commentText}
                             onChange={(e) => setCommentText(e.target.value)}
                             onKeyDown={(e) => {
@@ -518,41 +530,38 @@ const PostCard = ({
                                     void addComment();
                                 }
                             }}
-                            placeholder="Write a comment"
-                            style={{
-                                flex: 1,
-                                padding: '8px',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border-color)',
-                                background: 'rgba(255,255,255,0.05)',
-                                color: 'var(--text-color)'
-                            }}
+                            placeholder="Write a comment…"
                         />
-                        <button onClick={() => void addComment()} disabled={isSubmittingComment || !commentText.trim()}>
-                            {isSubmittingComment ? 'Sending...' : 'Send'}
+                        <button
+                            className="comment-send-btn"
+                            onClick={() => void addComment()}
+                            disabled={isSavingComment || !commentText.trim()}
+                        >
+                            {isSavingComment ? '…' : 'Send'}
                         </button>
                     </div>
+
                     {isLoadingComments && (
-                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
-                            Loading comments...
+                        <div style={{ fontSize: '12px', color: 'var(--text-subtle)', marginBottom: '8px' }}>
+                            Loading comments…
                         </div>
                     )}
+
                     {comments.map((comment) => (
-                        <div
-                            key={comment.id}
-                            style={{
-                                fontSize: '13px',
-                                marginBottom: '6px',
-                                overflowWrap: 'anywhere',
-                                wordBreak: 'break-word'
-                            }}
-                        >
-                            <strong>{comment.user?.name || 'User'}:</strong> {comment.content}
+                        <div key={comment.id} className="comment-item">
+                            <div className="comment-item__avatar">
+                                {(comment.user?.name || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <div className="comment-item__body">
+                                <span className="comment-item__name">{comment.user?.name || 'User'}</span>
+                                <span className="comment-item__text">{comment.content}</span>
+                            </div>
                         </div>
                     ))}
+
                     {isSavingComment && (
-                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '6px' }}>
-                            Saving comment...
+                        <div style={{ fontSize: '12px', color: 'var(--text-subtle)', marginTop: '6px' }}>
+                            Saving…
                         </div>
                     )}
                 </div>
