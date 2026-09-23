@@ -44,7 +44,7 @@ const PostStatistics = ({ stats, onBack }) => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">❤️ Total Likes</div>
+          <div className="stat-label">❤️</div>
           <div className="stat-value">{stats.totalLikes}</div>
           <div className="stat-detail">
             {stats.totalPosts > 0 
@@ -54,7 +54,7 @@ const PostStatistics = ({ stats, onBack }) => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">🔁 Total Reposts</div>
+          <div className="stat-label">🔁</div>
           <div className="stat-value">{stats.totalReposts}</div>
           <div className="stat-detail">
             {stats.totalPosts > 0 
@@ -64,7 +64,7 @@ const PostStatistics = ({ stats, onBack }) => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">💬 Total Comments</div>
+          <div className="stat-label">💬</div>
           <div className="stat-value">{stats.totalComments}</div>
           <div className="stat-detail">
             {stats.totalPosts > 0 
@@ -74,7 +74,7 @@ const PostStatistics = ({ stats, onBack }) => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">👁️ Total Shares</div>
+          <div className="stat-label">↗️</div>
           <div className="stat-value">{stats.totalShares}</div>
           <div className="stat-detail">
             {stats.totalPosts > 0 
@@ -110,7 +110,7 @@ const PostStatistics = ({ stats, onBack }) => {
         <h3>📊 Engagement Breakdown</h3>
         <div className="breakdown-bars">
           <div className="breakdown-item">
-            <div className="label">Likes</div>
+            <div className="label">❤️</div>
             <div className="bar-container">
               <div 
                 className="bar likes"
@@ -123,7 +123,7 @@ const PostStatistics = ({ stats, onBack }) => {
           </div>
 
           <div className="breakdown-item">
-            <div className="label">Reposts</div>
+            <div className="label">🔁</div>
             <div className="bar-container">
               <div 
                 className="bar reposts"
@@ -136,7 +136,7 @@ const PostStatistics = ({ stats, onBack }) => {
           </div>
 
           <div className="breakdown-item">
-            <div className="label">Comments</div>
+            <div className="label">💬</div>
             <div className="bar-container">
               <div 
                 className="bar comments"
@@ -149,7 +149,7 @@ const PostStatistics = ({ stats, onBack }) => {
           </div>
 
           <div className="breakdown-item">
-            <div className="label">Shares</div>
+            <div className="label">↗️</div>
             <div className="bar-container">
               <div 
                 className="bar shares"
