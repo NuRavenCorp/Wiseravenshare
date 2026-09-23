@@ -1306,6 +1306,19 @@ CREATE TABLE IF NOT EXISTS app_data.""WiseCoins"" (
     ""DeletedAt"" TIMESTAMPTZ NULL
 );
 
+-- WiseCoins: add columns that were added after initial bootstrap
+ALTER TABLE IF EXISTS app_data.""WiseCoins""
+    ADD COLUMN IF NOT EXISTS ""LockedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""EscrowedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""WorkHoursContributed"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""CurrentValuePerHour"" DECIMAL(18,8) NOT NULL DEFAULT 10,
+    ADD COLUMN IF NOT EXISTS ""HasReceivedInitialAllocation"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""InitialAllocationDate"" TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS ""InitialAllocationAmount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""BadgeMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS ""SkillMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS ""ReputationMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1;
+
 -- CoinTransactions table (currency system)
 CREATE TABLE IF NOT EXISTS app_data.""CoinTransactions"" (
     ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1330,6 +1343,77 @@ CREATE TABLE IF NOT EXISTS app_data.""CoinTransactions"" (
     ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
     ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- CoinStakes table (WSC staking system)
+CREATE TABLE IF NOT EXISTS app_data.""CoinStakes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Amount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHourValue"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""DurationDays"" INTEGER NOT NULL DEFAULT 0,
+    ""StartDate"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""EndDate"" TIMESTAMPTZ NULL,
+    ""StakingRewardRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""CurrentReward"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- WorkHourValuations table (WSC valuation snapshots)
+CREATE TABLE IF NOT EXISTS app_data.""WorkHourValuations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Date"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""WSCPerHour"" DECIMAL(18,8) NOT NULL DEFAULT 10,
+    ""TotalWorkHours"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalWSCInCirculation"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""ActiveUsers"" INTEGER NOT NULL DEFAULT 0,
+    ""AverageWSCPerUser"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""InflationRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""BurnRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""MinimumWageReference"" DECIMAL(18,8) NOT NULL DEFAULT 15,
+    ""FreelancerRateReference"" DECIMAL(18,8) NOT NULL DEFAULT 22,
+    ""ExpertRateReference"" DECIMAL(18,8) NOT NULL DEFAULT 37,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- UserBadges table (badge/achievement system)
+CREATE TABLE IF NOT EXISTS app_data.""UserBadges"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""WiseCoinId"" UUID NULL,
+    ""BadgeId"" TEXT NOT NULL DEFAULT '',
+    ""Name"" TEXT NOT NULL DEFAULT '',
+    ""Description"" TEXT NOT NULL DEFAULT '',
+    ""Tier"" INTEGER NOT NULL DEFAULT 0,
+    ""Category"" INTEGER NOT NULL DEFAULT 0,
+    ""IconUrl"" TEXT NULL,
+    ""MultiplierBonus"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""EarnedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ExpiresAt"" TIMESTAMPTZ NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Metadata"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- WiseCoin rollout tracking (added in rollout phase)
+CREATE TABLE IF NOT EXISTS app_data.wisecoin_rollout_tracking (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE,
+    allocated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    amount DECIMAL(18,8) NOT NULL DEFAULT 0,
+    phase TEXT NOT NULL DEFAULT 'initial',
+    notes TEXT NULL
 );
 
 -- Content crawler catalog (personalization phase 3)
