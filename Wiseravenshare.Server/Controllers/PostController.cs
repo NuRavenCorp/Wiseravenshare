@@ -295,6 +295,44 @@ namespace Wiseravenshare.Server.Controllers
         }
 
         /// <summary>
+        /// Track a post view (fire-and-forget, AllowAnonymous)
+        /// </summary>
+        [HttpPost("{id}/view")]
+        [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        public async Task<IActionResult> TrackView(Guid id)
+        {
+            try
+            {
+                await _postService.TrackViewAsync(id);
+            }
+            catch
+            {
+                // View tracking is best-effort; never surface errors to client.
+            }
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Increment share count when a user shares a post externally
+        /// </summary>
+        [HttpPost("{id}/share")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SharePost(Guid id)
+        {
+            try
+            {
+                var state = await _postService.SharePostAsync(id);
+                return Ok(state);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error recording share for post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to record share." });
+            }
+        }
+
+        /// <summary>
         /// Get trending posts
         /// </summary>
         [HttpGet("trending")]

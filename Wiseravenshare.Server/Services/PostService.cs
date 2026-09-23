@@ -33,6 +33,8 @@ public interface IPostService
     Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto);
     Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count);
     Task<int> GetPostCountAsync(Guid userId);
+    Task TrackViewAsync(Guid postId);
+    Task<PostInteractionDto> SharePostAsync(Guid postId);
 }
 
 public class PostService : IPostService
@@ -771,6 +773,32 @@ public class PostService : IPostService
         return await _postRepository.GetPostCountAsync(userId);
     }
 
+    public async Task TrackViewAsync(Guid postId)
+    {
+        try
+        {
+            await _postRepository.IncrementViewAsync(postId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "View tracking failed for post {PostId}", postId);
+        }
+    }
+
+    public async Task<PostInteractionDto> SharePostAsync(Guid postId)
+    {
+        try
+        {
+            await _postRepository.IncrementShareAsync(postId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Share increment failed for post {PostId}", postId);
+        }
+
+        return await BuildPostInteractionDtoAsync(postId, null);
+    }
+
     private async Task<PostDto> GetPostDtoAsync(Guid postId, Guid? viewerUserId = null)
     {
         var post = await _postRepository.GetByIdAsync(postId);
@@ -992,7 +1020,7 @@ public class PostService : IPostService
         return dtos;
     }
 
-    private async Task<PostInteractionDto> BuildPostInteractionDtoAsync(Guid postId, Guid userId)
+    private async Task<PostInteractionDto> BuildPostInteractionDtoAsync(Guid postId, Guid? userId)
     {
         var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
         return new PostInteractionDto
@@ -1002,6 +1030,8 @@ public class PostService : IPostService
             RepostsCount = interaction.RepostsCount,
             CommentsCount = interaction.CommentsCount,
             BookmarksCount = interaction.BookmarksCount,
+            ViewsCount = interaction.ViewsCount,
+            SharesCount = interaction.SharesCount,
             IsLiked = interaction.IsLiked,
             IsReposted = interaction.IsReposted,
             IsBookmarked = interaction.IsBookmarked
