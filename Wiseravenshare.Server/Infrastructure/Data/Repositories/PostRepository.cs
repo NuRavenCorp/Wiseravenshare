@@ -76,7 +76,11 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
         public async Task LikePostAsync(Guid postId, Guid userId)
         {
             if (await _context.PostLikes.AnyAsync(l => l.PostId == postId && l.UserId == userId))
+            {
+                await RefreshPostCountersAsync(postId);
+                await _context.SaveChangesAsync();
                 return;
+            }
 
             var like = new PostLike { PostId = postId, UserId = userId };
             await _context.PostLikes.AddAsync(like);
@@ -94,15 +98,20 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             {
                 _context.PostLikes.Remove(like);
                 await _context.SaveChangesAsync();
-                await RefreshPostCountersAsync(postId);
-                await _context.SaveChangesAsync();
             }
+
+            await RefreshPostCountersAsync(postId);
+            await _context.SaveChangesAsync();
         }
 
         public async Task RepostPostAsync(Guid postId, Guid userId)
         {
             if (await _context.PostReposts.AnyAsync(r => r.PostId == postId && r.UserId == userId))
+            {
+                await RefreshPostCountersAsync(postId);
+                await _context.SaveChangesAsync();
                 return;
+            }
 
             var repost = new PostRepost { PostId = postId, UserId = userId };
             await _context.PostReposts.AddAsync(repost);
@@ -120,9 +129,10 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             {
                 _context.PostReposts.Remove(repost);
                 await _context.SaveChangesAsync();
-                await RefreshPostCountersAsync(postId);
-                await _context.SaveChangesAsync();
             }
+
+            await RefreshPostCountersAsync(postId);
+            await _context.SaveChangesAsync();
         }
 
         public async Task BookmarkPostAsync(Guid postId, Guid userId)
