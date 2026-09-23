@@ -16,6 +16,7 @@ using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.Currency;
 using AppUserRecord = Wiseravenshare.Server.Models.UserRecord;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -44,6 +45,7 @@ public class AuthController : ControllerBase
     private readonly TeamAccessService _teamAccessService;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IEmailService _emailService;
+    private readonly IWiseCoinService _wiseCoinService;
     private readonly ILogger<AuthController> _logger;
     private readonly RefreshTokenStore _refreshTokenStore;
 
@@ -55,6 +57,7 @@ public class AuthController : ControllerBase
         TeamAccessService teamAccessService,
         IBlobStorageService blobStorageService,
         IEmailService emailService,
+        IWiseCoinService wiseCoinService,
         ILogger<AuthController> logger,
         RefreshTokenStore refreshTokenStore)
     {
@@ -65,6 +68,7 @@ public class AuthController : ControllerBase
         _teamAccessService = teamAccessService;
         _blobStorageService = blobStorageService;
         _emailService = emailService;
+        _wiseCoinService = wiseCoinService;
         _logger = logger;
         _refreshTokenStore = refreshTokenStore;
     }
@@ -149,6 +153,17 @@ public class AuthController : ControllerBase
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
+        try
+        {
+            if (IsProfileComplete(responseUser))
+            {
+                await _wiseCoinService.AwardJobWellDoneBadgeAsync(domainUserId, "profile_complete");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Profile badge award failed during registration for {Email}.", user.Email);
+        }
         return Ok(new { token, refreshToken, adminPassToken, user = responseUser });
     }
 
@@ -233,6 +248,15 @@ public class AuthController : ControllerBase
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
         SetRefreshCookie(refreshToken);
+
+        try
+        {
+            await _wiseCoinService.AwardJobWellDoneBadgeAsync(domainUserId, "login");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Badge award failed during login for {Email}.", user.Email);
+        }
 
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
@@ -431,6 +455,36 @@ public class AuthController : ControllerBase
                 keyConfigured = jwtKeyConfigured
             }
         });
+    }
+
+    private static bool IsProfileComplete(UserResponse user)
+    {
+        var hasConnectedFeed = user.SocialFeeds is not null && (
+            IsConnected(user.SocialFeeds.TikTok) ||
+            IsConnected(user.SocialFeeds.Facebook) ||
+            IsConnected(user.SocialFeeds.Instagram) ||
+            IsConnected(user.SocialFeeds.YouTube) ||
+            IsConnected(user.SocialFeeds.Twitter) ||
+            IsConnected(user.SocialFeeds.LinkedIn) ||
+            IsConnected(user.SocialFeeds.Bluesky));
+
+        return !string.IsNullOrWhiteSpace(user.Name)
+            && !string.IsNullOrWhiteSpace(user.Bio)
+            && !string.IsNullOrWhiteSpace(user.Avatar)
+            && (hasConnectedFeed || !string.IsNullOrWhiteSpace(user.Location) || !string.IsNullOrWhiteSpace(user.Website));
+    }
+
+    private static bool IsConnected(SocialFeedConnection? connection)
+    {
+        if (connection is null)
+        {
+            return false;
+        }
+
+        return connection.Enabled
+            || !string.IsNullOrWhiteSpace(connection.Username)
+            || !string.IsNullOrWhiteSpace(connection.ProfileUrl)
+            || !string.IsNullOrWhiteSpace(connection.FeedUrl);
     }
 
     [HttpGet("oauth/{provider}/start")]

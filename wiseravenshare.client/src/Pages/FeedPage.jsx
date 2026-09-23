@@ -633,29 +633,6 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     return (
         <div>
             <div
-                className="ancient-warning-banner"
-                style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '12px',
-                    marginBottom: '14px',
-                    padding: '10px 12px',
-                    borderRadius: '14px',
-                    border: '1px solid rgba(255, 176, 77, 0.7)',
-                    background: 'linear-gradient(135deg, rgba(118, 45, 18, 0.8), rgba(255, 82, 82, 0.12), rgba(76, 35, 18, 0.75))',
-                    color: '#fff4d6',
-                    boxShadow: '0 8px 24px rgba(255, 160, 74, 0.18), inset 0 0 18px rgba(255, 214, 120, 0.14)'
-                }}
-            >
-                <div style={{ fontSize: '12px', fontWeight: 900, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                    Liars, beware.
-                </div>
-                <div style={{ fontSize: '11px', color: '#ffd3d3', textAlign: 'right', lineHeight: 1.5 }}>
-                    The gods are watching.
-                </div>
-            </div>
-            <div
                 style={{
                     position: 'sticky',
                     top: '88px',

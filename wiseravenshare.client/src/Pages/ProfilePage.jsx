@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
+import { wisecoinService } from '../Services/wisecoinService';
 import PostCard from '../Components/Feed/PostCard.jsx';
 import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useNotification } from '../Contexts/NotificationContext';
@@ -140,7 +141,7 @@ const resizeImageToAvatarDataUrl = (fileOrDataUrl, maxWidth = 400, maxHeight = 4
     });
 };
 
-const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
+const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigate = null }) => {
     const { user, updateProfile } = useAuth();
     const { addToast } = useNotification();
     const emptySocialFeeds = {
@@ -190,6 +191,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
     const [persistenceStatus, setPersistenceStatus] = useState(null);
     const [persistenceLoading, setPersistenceLoading] = useState(false);
     const [persistenceError, setPersistenceError] = useState('');
+    const [earnedBadges, setEarnedBadges] = useState([]);
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
     const adminEmails = useMemo(() => parseAdminEmails(), []);
@@ -385,6 +387,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
         setLoading(true);
         refreshPostsFromStorage(user?.id);
         try {
+            const badgesPromise = wisecoinService.getBadges().catch(() => null);
             const [postsRes, statsRes] = await Promise.all([
                 apiService.getPosts({ userId: user.id }),
                 apiService.getUser(user.id)
@@ -400,6 +403,8 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                     following: statsRes.data.followingCount || 0
                 }));
             }
+            const badgesRes = await badgesPromise;
+            setEarnedBadges(Array.isArray(badgesRes) ? badgesRes : Array.isArray(badgesRes?.data) ? badgesRes.data : []);
         } catch {
             /* API unavailable — localStorage data already set above */
         } finally {
@@ -421,14 +426,6 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
             await updateProfile(nextForm);
             if (user?.id) {
                 localStorage.removeItem(getProfileDraftKey(user.id));
-            }
-            const connectedPlatforms = Object.entries(nextForm.socialFeeds || {})
-                .filter(([, connection]) => Boolean(connection?.enabled || connection?.username || connection?.profileUrl || connection?.feedUrl))
-                .map(([platform]) => platform);
-            if (connectedPlatforms.length > 0) {
-                window.dispatchEvent(new CustomEvent('wiseraven:open-social-aggregator', {
-                    detail: { page: 'social-feeds', platform: connectedPlatforms[0] }
-                }));
             }
             setEditing(false);
             if (cameraStream) {
@@ -824,6 +821,53 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             YouTube Feed
                                         </a>
                                     )}
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate?.('settings')}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            background: 'transparent',
+                                            color: 'var(--highlight-color)',
+                                            borderRadius: '999px',
+                                            padding: '6px 12px',
+                                            cursor: 'pointer',
+                                            fontSize: '13px'
+                                        }}
+                                    >
+                                        Manage connections in Settings
+                                    </button>
+                                </div>
+                                <div style={{ marginTop: '16px', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '12px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                                        <strong>Trophy Case</strong>
+                                        <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>{earnedBadges.length} earned</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                                        {earnedBadges.length > 0 ? earnedBadges.slice(0, 8).map((badge) => (
+                                            <span
+                                                key={badge.id || badge.badgeId || badge.name}
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    padding: '6px 10px',
+                                                    borderRadius: '999px',
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'rgba(255,255,255,0.04)',
+                                                    fontSize: '12px'
+                                                }}
+                                            >
+                                                {badge.iconUrl ? (
+                                                    <img src={badge.iconUrl} alt="" style={{ width: '16px', height: '16px', borderRadius: '50%' }} />
+                                                ) : (
+                                                    <span>🏆</span>
+                                                )}
+                                                {badge.name}
+                                            </span>
+                                        )) : (
+                                            <span style={{ fontSize: '12px', color: 'var(--light-color)' }}>No badges earned yet.</span>
+                                        )}
+                                    </div>
                                 </div>
                             </>
                         ) : (
@@ -889,333 +933,28 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null }) => {
                                             color: 'var(--text-color)'
                                         }}
                                     />
-                                    <div style={{ marginTop: '10px', marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>TikTok feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.tikTok?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        tikTok: { ...prev.socialFeeds.tikTok, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable TikTok feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="TikTok username"
-                                            value={editForm.socialFeeds?.tikTok?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    tikTok: { ...prev.socialFeeds.tikTok, username: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="TikTok profile URL"
-                                            value={editForm.socialFeeds?.tikTok?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    tikTok: { ...prev.socialFeeds.tikTok, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="TikTok feed URL (optional override)"
-                                            value={editForm.socialFeeds?.tikTok?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    tikTok: { ...prev.socialFeeds.tikTok, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            For embed rendering, use a direct TikTok video URL (example: https://www.tiktok.com/@user/video/1234567890).
+                                    <div style={{ marginTop: '10px', marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px', background: 'rgba(255, 255, 255, 0.03)' }}>
+                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>
+                                            Social connections are managed in Settings now
                                         </div>
-                                    </div>
-                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Facebook feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.facebook?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        facebook: { ...prev.socialFeeds.facebook, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable Facebook feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="Facebook page/profile"
-                                            value={editForm.socialFeeds?.facebook?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    facebook: { ...prev.socialFeeds.facebook, username: e.target.value }
-                                                }
-                                            }))}
+                                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--light-color)', lineHeight: 1.6 }}>
+                                            Your profile keeps showing connected channels, but editing them now happens on the Settings page so the workflow stays in one place.
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigate?.('settings')}
                                             style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
+                                                marginTop: '10px',
+                                                padding: '8px 14px',
+                                                borderRadius: '999px',
                                                 border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
+                                                background: 'var(--highlight-color)',
+                                                color: '#fff',
+                                                cursor: 'pointer'
                                             }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Facebook profile/page URL"
-                                            value={editForm.socialFeeds?.facebook?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    facebook: { ...prev.socialFeeds.facebook, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Facebook feed URL (optional override)"
-                                            value={editForm.socialFeeds?.facebook?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    facebook: { ...prev.socialFeeds.facebook, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            For embed rendering, use a direct Facebook post URL (example: https://www.facebook.com/page/posts/postId).
-                                        </div>
-                                    </div>
-                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>Instagram feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.instagram?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        instagram: { ...prev.socialFeeds.instagram, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable Instagram feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="Instagram username"
-                                            value={editForm.socialFeeds?.instagram?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    instagram: { ...prev.socialFeeds.instagram, username: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Instagram profile URL"
-                                            value={editForm.socialFeeds?.instagram?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    instagram: { ...prev.socialFeeds.instagram, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="Instagram feed URL (optional override)"
-                                            value={editForm.socialFeeds?.instagram?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    instagram: { ...prev.socialFeeds.instagram, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            For embed rendering, use an Instagram post/reel URL (example: https://www.instagram.com/p/ABC123xyz/).
-                                        </div>
-                                    </div>
-                                    <div style={{ marginBottom: '10px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px' }}>
-                                        <div style={{ fontSize: '13px', color: 'var(--highlight-color)', marginBottom: '8px' }}>YouTube feed connection</div>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(editForm.socialFeeds?.youtube?.enabled)}
-                                                onChange={(e) => setEditForm((prev) => ({
-                                                    ...prev,
-                                                    socialFeeds: {
-                                                        ...prev.socialFeeds,
-                                                        youtube: { ...prev.socialFeeds.youtube, enabled: e.target.checked }
-                                                    }
-                                                }))}
-                                            />
-                                            Enable YouTube feed
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="YouTube channel handle"
-                                            value={editForm.socialFeeds?.youtube?.username || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    youtube: { ...prev.socialFeeds.youtube, username: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="YouTube channel URL"
-                                            value={editForm.socialFeeds?.youtube?.profileUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    youtube: { ...prev.socialFeeds.youtube, profileUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                marginBottom: '8px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <input
-                                            type="url"
-                                            placeholder="YouTube feed URL (optional override)"
-                                            value={editForm.socialFeeds?.youtube?.feedUrl || ''}
-                                            onChange={(e) => setEditForm((prev) => ({
-                                                ...prev,
-                                                socialFeeds: {
-                                                    ...prev.socialFeeds,
-                                                    youtube: { ...prev.socialFeeds.youtube, feedUrl: e.target.value }
-                                                }
-                                            }))}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px',
-                                                background: 'rgba(255, 255, 255, 0.05)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '8px',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                        <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--highlight-color)' }}>
-                                            Use your channel handle (example: MyChannel) or a channel URL (example: https://www.youtube.com/@MyChannel).
-                                        </div>
+                                        >
+                                            Open Settings
+                                        </button>
                                     </div>
                                     <label style={{ display: 'block', margin: '10px 0 8px', color: 'var(--highlight-color)' }}>
                                         Profile photo

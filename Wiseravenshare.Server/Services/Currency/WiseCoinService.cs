@@ -21,6 +21,7 @@ public interface IWiseCoinService
     Task<IEnumerable<CoinTransaction>> GetTransactionHistoryAsync(Guid userId, int page, int pageSize);
     Task<bool> BurnWSCAsync(Guid? userId, decimal amount, string? reason = null);
     Task UpdateBadgeMultipliersAsync(Guid userId);
+    Task<bool> AwardJobWellDoneBadgeAsync(Guid userId, string jobKey, int? count = null);
 }
 
 public class TransactionResult
@@ -437,5 +438,37 @@ public class WiseCoinService : IWiseCoinService
         wallet.ReputationMultiplier = decimal.Round(repMul, 4);
         await _walletRepository.UpdateAsync(wallet);
         _cache.Remove($"wallet_balance_{userId}");
+    }
+
+    public async Task<bool> AwardJobWellDoneBadgeAsync(Guid userId, string jobKey, int? count = null)
+    {
+        var badgeService = _serviceProvider.GetRequiredService<IBadgeService>();
+        var normalizedJobKey = string.IsNullOrWhiteSpace(jobKey)
+            ? string.Empty
+            : jobKey.Trim().ToLowerInvariant();
+
+        var badgeName = normalizedJobKey switch
+        {
+            "login" => "Checked In",
+            "profile_complete" => "Profile Complete",
+            "profile-complete" => "Profile Complete",
+            "post_created" when count.GetValueOrDefault() <= 1 => "First Post",
+            "post_created" when count.GetValueOrDefault() >= 5 => "Five Posts",
+            "comment_added" => "First Comment",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(badgeName))
+        {
+            return false;
+        }
+
+        var awarded = await badgeService.TryAwardBadgeByNameAsync(userId, badgeName);
+        if (awarded)
+        {
+            await UpdateBadgeMultipliersAsync(userId);
+        }
+
+        return awarded;
     }
 }
