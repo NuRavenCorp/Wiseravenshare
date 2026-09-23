@@ -111,7 +111,7 @@ public class PostService : IPostService
 
         if (user == null)
         {
-            var fallbackUsername = $"user{userId:N}"[..Math.Min(12, $"user{userId:N}".Length)];
+            var fallbackUsername = $"localuser-{userId.ToString("N")[..6]}";
             user = new User
             {
                 Id = userId,

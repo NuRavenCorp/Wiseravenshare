@@ -85,6 +85,43 @@ public sealed class FeatureCompartmentsController : ControllerBase
         });
     }
 
+    [HttpPut("{compartmentKey}/availability")]
+    public async Task<IActionResult> UpdateCompartmentAvailability(
+        string compartmentKey,
+        [FromBody] FeatureCompartmentAvailabilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest())
+        {
+            return Forbid();
+        }
+
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+
+        var mode = string.IsNullOrWhiteSpace(request.Mode) ? "full" : request.Mode.Trim();
+        if (!string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mode, "partial", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mode, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Mode must be one of: full, partial, off." });
+        }
+
+        var compartment = await _featureCompartmentService.SetAvailabilityAsync(
+            compartmentKey,
+            mode,
+            request.Reason,
+            email,
+            cancellationToken);
+
+        return Ok(new
+        {
+            compartment,
+            message = $"Feature compartment '{compartmentKey}' availability set to '{mode.ToLowerInvariant()}'."
+        });
+    }
+
     private bool IsAdminRequest()
     {
         var email = User.FindFirstValue(ClaimTypes.Email)

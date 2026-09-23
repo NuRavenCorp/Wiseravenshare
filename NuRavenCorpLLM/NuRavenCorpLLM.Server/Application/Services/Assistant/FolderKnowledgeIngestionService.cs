@@ -19,19 +19,16 @@ public sealed class FolderKnowledgeIngestionService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly FolderKnowledgeOptions _options;
-    private readonly ICrawlerChangeNotifier _changeNotifier;
     private readonly ILogger<FolderKnowledgeIngestionService> _logger;
     private readonly ConcurrentDictionary<string, string> _fileHashes = new(StringComparer.OrdinalIgnoreCase);
 
     public FolderKnowledgeIngestionService(
         IServiceScopeFactory scopeFactory,
         IOptions<FolderKnowledgeOptions> options,
-        ICrawlerChangeNotifier changeNotifier,
         ILogger<FolderKnowledgeIngestionService> logger)
     {
         _scopeFactory = scopeFactory;
         _options = options.Value;
-        _changeNotifier = changeNotifier;
         _logger = logger;
     }
 
@@ -39,18 +36,6 @@ public sealed class FolderKnowledgeIngestionService : BackgroundService
     {
         if (string.IsNullOrWhiteSpace(_options.RootPath))
         {
-            await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
-                Component: nameof(FolderKnowledgeIngestionService),
-                ChangeType: "folder.sync_skipped",
-                Reason: "missing_root_path_configuration",
-                Result: "sync_not_started",
-                Success: false,
-                Source: "configuration",
-                Metadata: new Dictionary<string, string>
-                {
-                    ["option"] = "FolderKnowledge:RootPath"
-                }), stoppingToken);
-
             _logger.LogInformation("Folder knowledge is disabled because no root path is configured.");
             return;
         }
@@ -78,14 +63,6 @@ public sealed class FolderKnowledgeIngestionService : BackgroundService
 
         if (!Directory.Exists(_options.RootPath))
         {
-            await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
-                Component: nameof(FolderKnowledgeIngestionService),
-                ChangeType: "folder.sync_skipped",
-                Reason: "configured_root_path_missing",
-                Result: "sync_not_started",
-                Success: false,
-                Source: _options.RootPath), ct);
-
             _logger.LogWarning("Folder knowledge root does not exist: {RootPath}", _options.RootPath);
             return;
         }
@@ -118,67 +95,32 @@ public sealed class FolderKnowledgeIngestionService : BackgroundService
                 continue;
             }
 
-            var reason = string.IsNullOrEmpty(existingHash)
-                ? "new_file_discovered"
-                : "file_content_changed";
-            var relativePath = Path.GetRelativePath(_options.RootPath, filePath);
+            _fileHashes[filePath] = contentHash;
 
-            try
+            var fileInfo = new FileInfo(filePath);
+            var knowledge = new AssistantKnowledge
             {
-                _fileHashes[filePath] = contentHash;
-
-                var fileInfo = new FileInfo(filePath);
-                var knowledge = new AssistantKnowledge
+                Title = Path.GetFileNameWithoutExtension(filePath),
+                Content = content,
+                ContentHash = contentHash,
+                Source = "folder",
+                SourceUrl = filePath,
+                SourceId = Path.GetRelativePath(_options.RootPath, filePath),
+                Category = ClassifyExtension(filePath),
+                IsPublic = true,
+                IsApproved = true,
+                Metadata = JsonSerializer.SerializeToDocument(new
                 {
-                    Title = Path.GetFileNameWithoutExtension(filePath),
-                    Content = content,
-                    ContentHash = contentHash,
-                    Source = "folder",
-                    SourceUrl = filePath,
-                    SourceId = relativePath,
-                    Category = ClassifyExtension(filePath),
-                    IsPublic = true,
-                    IsApproved = true,
-                    Metadata = JsonSerializer.SerializeToDocument(new
-                    {
-                        rootPath = _options.RootPath,
-                        relativePath,
-                        extension = Path.GetExtension(filePath),
-                        sizeBytes = fileInfo.Length,
-                        lastWriteUtc = fileInfo.LastWriteTimeUtc
-                    })
-                };
+                    rootPath = _options.RootPath,
+                    relativePath = Path.GetRelativePath(_options.RootPath, filePath),
+                    extension = Path.GetExtension(filePath),
+                    sizeBytes = fileInfo.Length,
+                    lastWriteUtc = fileInfo.LastWriteTimeUtc
+                })
+            };
 
-                await embedding.EmbedAndStoreAsync(knowledge, ct);
-                await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
-                    Component: nameof(FolderKnowledgeIngestionService),
-                    ChangeType: "knowledge.ingested",
-                    Reason: reason,
-                    Result: "embedded_and_stored",
-                    Success: true,
-                    Source: filePath,
-                    ResourceId: relativePath,
-                    Metadata: new Dictionary<string, string>
-                    {
-                        ["category"] = knowledge.Category ?? "file",
-                        ["contentHash"] = contentHash
-                    }), ct);
-
-                _logger.LogInformation("Ingested folder knowledge file {FilePath}", filePath);
-            }
-            catch (Exception ex)
-            {
-                await _changeNotifier.NotifyAsync(new CrawlerChangeEvent(
-                    Component: nameof(FolderKnowledgeIngestionService),
-                    ChangeType: "knowledge.ingest_failed",
-                    Reason: reason,
-                    Result: ex.Message,
-                    Success: false,
-                    Source: filePath,
-                    ResourceId: relativePath), ct);
-
-                _logger.LogWarning(ex, "Failed to ingest folder knowledge file {FilePath}", filePath);
-            }
+            await embedding.EmbedAndStoreAsync(knowledge, ct);
+            _logger.LogInformation("Ingested folder knowledge file {FilePath}", filePath);
         }
     }
 

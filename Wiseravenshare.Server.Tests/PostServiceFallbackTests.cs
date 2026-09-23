@@ -72,8 +72,9 @@ public class PostServiceFallbackTests
         Assert.Equal("hello world", result.Content);
         Assert.Equal("Image", result.Type);
         Assert.Equal("https://example.com/photo.jpg", result.MediaUrl);
-        Assert.Equal($"user{userId:N}"[..Math.Min(12, $"user{userId:N}".Length)], result.User.Username);
+        Assert.StartsWith("localuser-", result.User.Username);
         Assert.Equal(result.User.Username, result.User.DisplayName);
+        Assert.DoesNotMatch("^user[a-f0-9]+$", result.User.Username);
         Assert.NotEqual("Local User", result.User.DisplayName);
     }
 

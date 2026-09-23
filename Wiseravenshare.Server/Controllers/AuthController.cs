@@ -2957,7 +2957,7 @@ LIMIT 1;";
             var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray());
             if (string.IsNullOrWhiteSpace(sanitizedUsername))
             {
-                sanitizedUsername = $"user{parsedId.ToString("N")[..8]}";
+                sanitizedUsername = $"localuser-{parsedId.ToString("N")[..6]}";
             }
 
             var newUser = new Wiseravenshare.Server.Entities.User

@@ -411,7 +411,7 @@ namespace Wiseravenshare.Server.Controllers
             var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(sanitizedUsername))
             {
-                sanitizedUsername = $"user{claimUserId.ToString("N")[..8]}";
+                sanitizedUsername = $"localuser-{claimUserId.ToString("N")[..6]}";
             }
 
             try
