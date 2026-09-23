@@ -78,12 +78,18 @@ public class ConversationsChatController : ControllerBase
 
         try
         {
-            TwilioClient.Init(ApiKey!, ApiSecret!, AccountSid);
+            TwilioClient.Init(AccountSid, ApiKey, ApiSecret);
 
             var conversation = ConversationResource.Create(
                 friendlyName: req.FriendlyName ?? $"Chat: {CurrentIdentity} + {req.ParticipantIdentity}",
                 pathChatServiceSid: ServiceSid
             );
+
+            if (conversation?.Sid == null)
+            {
+                _logger.LogError("Conversation creation returned null SID");
+                return StatusCode(500, new { error = "Failed to create conversation room (no SID returned)." });
+            }
 
             ParticipantResource.Create(
                 identity: CurrentIdentity,
@@ -108,8 +114,8 @@ public class ConversationsChatController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create Conversations room");
-            return StatusCode(500, new { error = "Could not create conversation room." });
+            _logger.LogError(ex, "Failed to create Conversations room: {Message}", ex.Message);
+            return StatusCode(500, new { error = $"Could not create conversation room: {ex.Message}" });
         }
     }
 }
