@@ -44,6 +44,8 @@ export const normalizeInteractionState = (payload) => {
     repostsCount: readNumericField(source, 'repostsCount', 'RepostsCount', 'reposts', 'Reposts') ?? 0,
     commentsCount: readNumericField(source, 'commentsCount', 'CommentsCount', 'comments', 'Comments') ?? 0,
     bookmarksCount: readNumericField(source, 'bookmarksCount', 'BookmarksCount', 'bookmarks', 'Bookmarks') ?? 0,
+    viewsCount: readNumericField(source, 'viewsCount', 'ViewsCount', 'views', 'Views') ?? 0,
+    sharesCount: readNumericField(source, 'sharesCount', 'SharesCount', 'shares', 'Shares') ?? 0,
     isLiked: readBooleanField(source, 'isLiked', 'IsLiked'),
     isReposted: readBooleanField(source, 'isReposted', 'IsReposted'),
     isBookmarked: readBooleanField(source, 'isBookmarked', 'IsBookmarked')

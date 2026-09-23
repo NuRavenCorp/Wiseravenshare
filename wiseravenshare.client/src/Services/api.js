@@ -914,6 +914,18 @@ export const apiService = {
             throw normalizeApiError(error, 'Failed to update repost. Please try again.');
         }
     },
+    // Fire-and-forget view tracking — never throws
+    trackPostView: (postId) => {
+        api.post(`/posts/${postId}/view`).catch(() => null);
+    },
+    sharePost: async (postId) => {
+        try {
+            const response = await api.post(`/posts/${postId}/share`);
+            return normalizeInteractionState(response?.data);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to record share. Please try again.');
+        }
+    },
 
     // Comments endpoints
     getComments: async (postId) => {

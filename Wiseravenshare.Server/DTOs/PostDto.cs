@@ -80,6 +80,8 @@ namespace Wiseravenshare.Server.DTOs.Post
         public int RepostsCount { get; set; }
         public int CommentsCount { get; set; }
         public int BookmarksCount { get; set; }
+        public int ViewsCount { get; set; }
+        public int SharesCount { get; set; }
         public bool IsLiked { get; set; }
         public bool IsReposted { get; set; }
         public bool IsBookmarked { get; set; }

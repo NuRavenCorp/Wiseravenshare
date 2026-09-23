@@ -754,6 +754,14 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         post={post}
                         onLike={handleLike}
                         onRepost={handleRepost}
+                        onShare={(postId) => {
+                            // Update local share count after PostCard fires it
+                            setPosts((prev) => prev.map((p) =>
+                                p.id === postId
+                                    ? { ...p, sharesCount: (Number(p.sharesCount) || 0) + 1 }
+                                    : p
+                            ));
+                        }}
                         onLoadComments={handleLoadComments}
                         onAddComment={handleAddComment}
                         onDispute={handleDisputePost}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Compartment from '../Common/Compartment';
 import { truthEngine } from '../../Services/truthEngine';
 import { apiService } from '../../Services/api';
@@ -9,6 +9,7 @@ const PostCard = ({
     post,
     onLike,
     onRepost,
+    onShare,
     onLoadComments,
     onAddComment,
     onDispute,
@@ -26,6 +27,10 @@ const PostCard = ({
     const [comments, setComments] = useState(post.comments || []);
     const [isLoadingComments, setIsLoadingComments] = useState(false);
     const [isSavingComment, setIsSavingComment] = useState(false);
+    const [viewsCount, setViewsCount] = useState(Number(post.viewsCount ?? post.ViewsCount ?? 0));
+    const [sharesCount, setSharesCount] = useState(Number(post.sharesCount ?? post.SharesCount ?? 0));
+    const articleRef = useRef(null);
+    const viewTrackedRef = useRef(false);
 
     const displayUser = useMemo(() => {
         const postUser = post.user || {};
@@ -237,9 +242,47 @@ const PostCard = ({
         setCommentText('');
     };
 
+    // ── View tracking via IntersectionObserver ──
+    useEffect(() => {
+        if (!post.id || viewTrackedRef.current) return;
+        const el = articleRef.current;
+        if (!el || typeof IntersectionObserver === 'undefined') return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting && !viewTrackedRef.current) {
+                    viewTrackedRef.current = true;
+                    setViewsCount((prev) => prev + 1);
+                    apiService.trackPostView(post.id);
+                    observer.disconnect();
+                }
+            },
+            { threshold: 0.6 }  // 60% visible = counted as viewed
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [post.id]);
+
+    const handleShare = async () => {
+        try {
+            // Copy post URL to clipboard
+            const url = `${window.location.origin}/post/${post.id}`;
+            if (navigator.clipboard) {
+                await navigator.clipboard.writeText(url);
+            }
+        } catch { /* clipboard not available */ }
+
+        setSharesCount((prev) => prev + 1);
+        if (typeof onShare === 'function') {
+            onShare(post.id);
+        } else {
+            apiService.sharePost(post.id).catch(() => null);
+        }
+    };
+
     return (
         <Compartment badge="Feed Post" title="Post Detail">
-        <article className="post-card glass-reveal">
+        <article className="post-card glass-reveal" ref={articleRef}>
 
             {/* ── Header ─────────────────────────────────────── */}
             <div className="post-header">
@@ -452,11 +495,28 @@ const PostCard = ({
                     title="Comments"
                 >
                     <span className="action-btn__icon">💬</span>
-                    <span className="action-btn__count">{commentCount > 0 ? commentCount : ''}</span>
+                    {commentCount > 0 && <span className="action-btn__count">{commentCount}</span>}
                 </button>
 
-                {/* Spacer */}
+                <button
+                    className="action-btn action-btn--share"
+                    onClick={handleShare}
+                    title="Share"
+                >
+                    <span className="action-btn__icon">↗</span>
+                    {sharesCount > 0 && <span className="action-btn__count">{sharesCount}</span>}
+                </button>
+
                 <div className="action-btn--spacer" />
+
+                {/* Views — read-only metric display */}
+                {viewsCount > 0 && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', color: 'var(--text-subtle)', padding: '6px 8px' }}
+                         title="Views">
+                        <span>👁</span>
+                        <span>{viewsCount >= 1000 ? `${(viewsCount / 1000).toFixed(1)}k` : viewsCount}</span>
+                    </div>
+                )}
 
                 <button
                     className={`action-btn action-btn--bookmark${post.isBookmarked ? ' is-active' : ''}`}

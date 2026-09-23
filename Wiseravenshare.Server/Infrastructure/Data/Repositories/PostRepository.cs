@@ -208,14 +208,30 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             await RefreshPostCountersAsync(postId, likesCount, repostsCount, commentsCount, bookmarksCount);
             await _context.SaveChangesAsync();
 
+            var post = await _dbSet.AsNoTracking().FirstOrDefaultAsync(p => p.Id == postId);
+
             return new PostInteractionState(
                 likesCount,
                 repostsCount,
                 commentsCount,
                 bookmarksCount,
+                post?.ViewsCount ?? 0,
+                post?.SharesCount ?? 0,
                 isLiked,
                 isReposted,
                 isBookmarked);
+        }
+
+        public async Task IncrementViewAsync(Guid postId)
+        {
+            await _context.Database.ExecuteSqlAsync(
+                $"UPDATE app_data.\"Posts\" SET \"ViewsCount\" = \"ViewsCount\" + 1 WHERE \"Id\" = {postId}");
+        }
+
+        public async Task IncrementShareAsync(Guid postId)
+        {
+            await _context.Database.ExecuteSqlAsync(
+                $"UPDATE app_data.\"Posts\" SET \"SharesCount\" = \"SharesCount\" + 1 WHERE \"Id\" = {postId}");
         }
 
         private async Task RefreshPostCountersAsync(

@@ -53,6 +53,8 @@ public interface IPostRepository : IRepository<Post>
     Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize);
     Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null);
     Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null);
+    Task IncrementViewAsync(Guid postId);
+    Task IncrementShareAsync(Guid postId);
 }
 
 public sealed record PostInteractionState(
@@ -60,6 +62,8 @@ public sealed record PostInteractionState(
     int RepostsCount,
     int CommentsCount,
     int BookmarksCount,
+    int ViewsCount,
+    int SharesCount,
     bool IsLiked,
     bool IsReposted,
     bool IsBookmarked);
