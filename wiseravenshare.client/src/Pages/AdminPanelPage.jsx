@@ -129,9 +129,12 @@ const SiteMapTab = ({ onNavigate }) => {
     const { addToast } = useNotification();
     const [catalog, setCatalog] = useState(null);
     const [crawlSummary, setCrawlSummary] = useState(null);
+    const [compartments, setCompartments] = useState([]);
     const [loadingCatalog, setLoadingCatalog] = useState(true);
+    const [loadingCompartments, setLoadingCompartments] = useState(true);
     const [actionLoading, setActionLoading] = useState({});
     const [categoryBulkLoading, setCategoryBulkLoading] = useState({});
+    const [availabilitySaving, setAvailabilitySaving] = useState({});
     const [filterCategory, setFilterCategory] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [crawlJobId, setCrawlJobId] = useState(null);
@@ -181,10 +184,24 @@ const SiteMapTab = ({ onNavigate }) => {
         }
     }, []);
 
+    const loadCompartmentAvailability = useCallback(async () => {
+        setLoadingCompartments(true);
+        try {
+            const response = await apiService.getFeatureCompartments();
+            const items = Array.isArray(response?.data?.compartments) ? response.data.compartments : [];
+            setCompartments(items);
+        } catch (err) {
+            addToast(err?.response?.data?.message || 'Unable to load component availability.', 'error');
+        } finally {
+            setLoadingCompartments(false);
+        }
+    }, [addToast]);
+
     useEffect(() => {
         loadCatalog();
         loadCrawlSummary();
-    }, [loadCatalog, loadCrawlSummary]);
+        loadCompartmentAvailability();
+    }, [loadCatalog, loadCrawlSummary, loadCompartmentAvailability]);
 
     const runSiteCrawl = async () => {
         setCrawling(true);
@@ -263,6 +280,33 @@ const SiteMapTab = ({ onNavigate }) => {
         addToast(`Gated ${gated} feature(s) in ${category}.`, 'info');
         await loadCatalog();
         setCategoryBulkLoading((p) => { const n = { ...p }; delete n[category]; return n; });
+    };
+
+    const setCompartmentAvailability = async (compartmentKey, mode) => {
+        const normalizedMode = String(mode || '').trim().toLowerCase();
+        if (!['full', 'partial', 'off'].includes(normalizedMode)) {
+            addToast('Invalid availability mode selected.', 'error');
+            return;
+        }
+
+        setAvailabilitySaving((prev) => ({ ...prev, [compartmentKey]: normalizedMode }));
+        try {
+            await apiService.setFeatureCompartmentAvailability(
+                compartmentKey,
+                normalizedMode,
+                `Availability set to ${normalizedMode} from admin site map panel.`
+            );
+            addToast(`"${compartmentKey}" set to ${normalizedMode}.`, normalizedMode === 'off' ? 'warning' : 'success');
+            await loadCompartmentAvailability();
+        } catch (err) {
+            addToast(err?.response?.data?.message || `Failed to set availability for "${compartmentKey}".`, 'error');
+        } finally {
+            setAvailabilitySaving((prev) => {
+                const next = { ...prev };
+                delete next[compartmentKey];
+                return next;
+            });
+        }
     };
 
     /* Derived: pages grouped by category, filtered */
@@ -411,6 +455,138 @@ const SiteMapTab = ({ onNavigate }) => {
                         fontSize: '13px', fontWeight: 700, cursor: 'pointer',
                     }}
                 >🔒 Gate All</button>
+            </div>
+
+            {/* Component availability matrix */}
+            <div style={{
+                background: 'var(--card-bg)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '16px',
+                overflow: 'hidden'
+            }}>
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                    padding: '14px 18px',
+                    borderBottom: '1px solid var(--border-color)',
+                    background: 'linear-gradient(90deg, rgba(56,189,248,0.12), rgba(56,189,248,0.02))'
+                }}>
+                    <div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, color: '#e2e8f0' }}>
+                            🎚️ Component / Service Availability
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+                            Full = all features available · Partial = teaser mode · Off = subscription lock / misconduct lock
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={loadCompartmentAvailability}
+                        disabled={loadingCompartments}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '9px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: '#94a3b8',
+                            cursor: loadingCompartments ? 'not-allowed' : 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 700
+                        }}
+                    >
+                        {loadingCompartments ? 'Loading…' : '↻ Refresh Matrix'}
+                    </button>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <th style={{ textAlign: 'left', fontSize: '11px', color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '10px 14px' }}>
+                                    Component / Service / Part
+                                </th>
+                                <th style={{ textAlign: 'left', fontSize: '11px', color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '10px 14px' }}>
+                                    Availability (choose one)
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loadingCompartments && (
+                                <tr>
+                                    <td colSpan={2} style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>
+                                        Loading component availability…
+                                    </td>
+                                </tr>
+                            )}
+                            {!loadingCompartments && compartments.length === 0 && (
+                                <tr>
+                                    <td colSpan={2} style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>
+                                        No components found.
+                                    </td>
+                                </tr>
+                            )}
+                            {!loadingCompartments && compartments.map((item) => {
+                                const currentMode = String(item?.availabilityMode || '').trim().toLowerCase() || (item?.isLocked ? 'off' : 'full');
+                                const savingMode = availabilitySaving[item.key];
+                                const isBusy = Boolean(savingMode);
+                                return (
+                                    <tr key={item.key} style={{ borderBottom: '1px solid rgba(148,163,184,0.12)' }}>
+                                        <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
+                                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>{item.name}</div>
+                                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{item.description}</div>
+                                            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>
+                                                {item.key} · {item.endpointCount || 0} endpoint{item.endpointCount === 1 ? '' : 's'}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '12px 14px' }}>
+                                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                                {[
+                                                    { value: 'full', label: 'Full' },
+                                                    { value: 'partial', label: 'Partial' },
+                                                    { value: 'off', label: 'Off' }
+                                                ].map((option) => (
+                                                    <label key={option.value} style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        padding: '5px 9px',
+                                                        borderRadius: '999px',
+                                                        border: currentMode === option.value
+                                                            ? '1px solid rgba(99,102,241,0.55)'
+                                                            : '1px solid rgba(148,163,184,0.25)',
+                                                        background: currentMode === option.value
+                                                            ? 'rgba(99,102,241,0.18)'
+                                                            : 'rgba(15,23,42,0.4)',
+                                                        fontSize: '12px',
+                                                        color: '#cbd5e1',
+                                                        cursor: isBusy ? 'not-allowed' : 'pointer'
+                                                    }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={currentMode === option.value}
+                                                            disabled={isBusy}
+                                                            onChange={() => setCompartmentAvailability(item.key, option.value)}
+                                                            style={{ margin: 0 }}
+                                                        />
+                                                        {option.label}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            {isBusy && (
+                                                <div style={{ marginTop: '6px', fontSize: '11px', color: '#93c5fd' }}>
+                                                    Updating to {savingMode}…
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* Page grid by category */}

@@ -14,6 +14,7 @@ public interface IFeatureCompartmentService
     Task<IReadOnlyList<FeatureCompartmentStatusDto>> GetInventoryAsync(CancellationToken cancellationToken = default);
     Task<FeatureCompartmentStatusDto?> GetStatusAsync(string compartmentKey, CancellationToken cancellationToken = default);
     Task<FeatureCompartmentStatusDto> SetLockAsync(string compartmentKey, bool locked, string? reason, string? lockedByEmail, CancellationToken cancellationToken = default);
+    Task<FeatureCompartmentStatusDto> SetAvailabilityAsync(string compartmentKey, string availabilityMode, string? reason, string? updatedByEmail, CancellationToken cancellationToken = default);
     Task<bool> IsLockedAsync(string compartmentKey, CancellationToken cancellationToken = default);
 }
 
@@ -27,6 +28,7 @@ public sealed record FeatureCompartmentStatusDto(
     string Key,
     string Name,
     string Description,
+    string AvailabilityMode,
     bool IsLocked,
     DateTime? LockedAtUtc,
     string? LockedByEmail,
@@ -37,6 +39,12 @@ public sealed record FeatureCompartmentStatusDto(
 public sealed class FeatureCompartmentLockRequest
 {
     public bool Locked { get; set; }
+    public string? Reason { get; set; }
+}
+
+public sealed class FeatureCompartmentAvailabilityRequest
+{
+    public string? Mode { get; set; }
     public string? Reason { get; set; }
 }
 
@@ -93,6 +101,9 @@ public sealed class FeatureCompartmentLockFilter : IAsyncActionFilter
 public sealed class FeatureCompartmentService : IFeatureCompartmentService
 {
     private const string TableName = "app_data.feature_compartment_locks";
+    private const string AvailabilityFull = "full";
+    private const string AvailabilityPartial = "partial";
+    private const string AvailabilityOff = "off";
     private readonly AppDbContext _db;
     private readonly ISiteCrawlerService _siteCrawlerService;
 
@@ -168,11 +179,12 @@ public sealed class FeatureCompartmentService : IFeatureCompartmentService
         await EnsureTableAsync(cancellationToken);
 
         var sql = $@"
-INSERT INTO {TableName} (compartment_key, is_locked, locked_at_utc, locked_by_email, reason, updated_at_utc)
-VALUES (@compartment_key, @is_locked, @locked_at_utc, @locked_by_email, @reason, NOW())
+INSERT INTO {TableName} (compartment_key, is_locked, availability_mode, locked_at_utc, locked_by_email, reason, updated_at_utc)
+VALUES (@compartment_key, @is_locked, @availability_mode, @locked_at_utc, @locked_by_email, @reason, NOW())
 ON CONFLICT (compartment_key)
 DO UPDATE SET
     is_locked = EXCLUDED.is_locked,
+    availability_mode = EXCLUDED.availability_mode,
     locked_at_utc = EXCLUDED.locked_at_utc,
     locked_by_email = EXCLUDED.locked_by_email,
     reason = EXCLUDED.reason,
@@ -184,6 +196,7 @@ DO UPDATE SET
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("compartment_key", normalizedKey);
         command.Parameters.AddWithValue("is_locked", locked);
+        command.Parameters.AddWithValue("availability_mode", locked ? AvailabilityOff : AvailabilityFull);
         command.Parameters.AddWithValue("locked_at_utc", locked ? DateTime.UtcNow : (object)DBNull.Value);
         command.Parameters.AddWithValue("locked_by_email", (object?)NormalizeOptional(lockedByEmail) ?? DBNull.Value);
         command.Parameters.AddWithValue("reason", (object?)normalizedReason ?? DBNull.Value);
@@ -196,7 +209,47 @@ DO UPDATE SET
     public async Task<bool> IsLockedAsync(string compartmentKey, CancellationToken cancellationToken = default)
     {
         var status = await GetStatusAsync(compartmentKey, cancellationToken);
-        return status?.IsLocked ?? false;
+        return (status?.IsLocked ?? false) || string.Equals(status?.AvailabilityMode, AvailabilityOff, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<FeatureCompartmentStatusDto> SetAvailabilityAsync(string compartmentKey, string availabilityMode, string? reason, string? updatedByEmail, CancellationToken cancellationToken = default)
+    {
+        var normalizedKey = NormalizeKey(compartmentKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            throw new ArgumentException("compartmentKey is required.", nameof(compartmentKey));
+        }
+
+        var normalizedMode = NormalizeAvailabilityMode(availabilityMode);
+        await EnsureTableAsync(cancellationToken);
+
+        var normalizedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        var isLocked = string.Equals(normalizedMode, AvailabilityOff, StringComparison.OrdinalIgnoreCase);
+
+        var sql = $@"
+INSERT INTO {TableName} (compartment_key, is_locked, availability_mode, locked_at_utc, locked_by_email, reason, updated_at_utc)
+VALUES (@compartment_key, @is_locked, @availability_mode, @locked_at_utc, @locked_by_email, @reason, NOW())
+ON CONFLICT (compartment_key)
+DO UPDATE SET
+    is_locked = EXCLUDED.is_locked,
+    availability_mode = EXCLUDED.availability_mode,
+    locked_at_utc = EXCLUDED.locked_at_utc,
+    locked_by_email = EXCLUDED.locked_by_email,
+    reason = EXCLUDED.reason,
+    updated_at_utc = NOW();";
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("compartment_key", normalizedKey);
+        command.Parameters.AddWithValue("is_locked", isLocked);
+        command.Parameters.AddWithValue("availability_mode", normalizedMode);
+        command.Parameters.AddWithValue("locked_at_utc", isLocked ? DateTime.UtcNow : (object)DBNull.Value);
+        command.Parameters.AddWithValue("locked_by_email", (object?)NormalizeOptional(updatedByEmail) ?? DBNull.Value);
+        command.Parameters.AddWithValue("reason", (object?)normalizedReason ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        var status = await GetStatusAsync(normalizedKey, cancellationToken);
+        return status ?? throw new InvalidOperationException($"Feature compartment '{normalizedKey}' could not be resolved.");
     }
 
     private static FeatureCompartmentStatusDto BuildStatus(
@@ -212,11 +265,13 @@ DO UPDATE SET
             .ToList();
 
         locks.TryGetValue(definition.Key, out var lockRecord);
+        var availabilityMode = NormalizeAvailabilityMode(lockRecord?.AvailabilityMode, lockRecord?.IsLocked ?? false);
 
         return new FeatureCompartmentStatusDto(
             definition.Key,
             definition.Name,
             definition.Description,
+            availabilityMode,
             lockRecord?.IsLocked ?? false,
             lockRecord?.LockedAtUtc,
             lockRecord?.LockedByEmail,
@@ -252,7 +307,7 @@ DO UPDATE SET
     {
         var result = new Dictionary<string, FeatureCompartmentLockRecord>(StringComparer.OrdinalIgnoreCase);
         const string sql = $@"
-SELECT compartment_key, is_locked, locked_at_utc, locked_by_email, reason
+SELECT compartment_key, is_locked, availability_mode, locked_at_utc, locked_by_email, reason
 FROM {TableName};";
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -265,9 +320,10 @@ FROM {TableName};";
             result[key] = new FeatureCompartmentLockRecord(
                 key,
                 reader.GetBoolean(1),
-                reader.IsDBNull(2) ? null : reader.GetDateTime(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4));
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetDateTime(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5));
         }
 
         return result;
@@ -281,6 +337,7 @@ CREATE SCHEMA IF NOT EXISTS app_data;
 CREATE TABLE IF NOT EXISTS {TableName} (
     compartment_key TEXT PRIMARY KEY,
     is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    availability_mode TEXT NOT NULL DEFAULT 'full',
     locked_at_utc TIMESTAMPTZ NULL,
     locked_by_email TEXT NULL,
     reason TEXT NULL,
@@ -289,6 +346,9 @@ CREATE TABLE IF NOT EXISTS {TableName} (
 
 ALTER TABLE {TableName}
     ADD COLUMN IF NOT EXISTS locked_at_utc TIMESTAMPTZ NULL;
+
+ALTER TABLE {TableName}
+    ADD COLUMN IF NOT EXISTS availability_mode TEXT NOT NULL DEFAULT 'full';
 
 ALTER TABLE {TableName}
     ADD COLUMN IF NOT EXISTS locked_by_email TEXT NULL;
@@ -302,6 +362,31 @@ ALTER TABLE {TableName}
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        var normalizeSql = $@"
+UPDATE {TableName}
+SET availability_mode = CASE
+    WHEN availability_mode IS NULL OR availability_mode = '' THEN CASE WHEN is_locked THEN 'off' ELSE 'full' END
+    WHEN LOWER(availability_mode) NOT IN ('full', 'partial', 'off') THEN CASE WHEN is_locked THEN 'off' ELSE 'full' END
+    ELSE LOWER(availability_mode)
+END
+WHERE availability_mode IS NULL
+   OR availability_mode = ''
+   OR LOWER(availability_mode) NOT IN ('full', 'partial', 'off');";
+        await using var normalizeCommand = new NpgsqlCommand(normalizeSql, connection);
+        await normalizeCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static string NormalizeAvailabilityMode(string? mode, bool isLockedFallback = false)
+    {
+        var normalized = string.IsNullOrWhiteSpace(mode) ? string.Empty : mode.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            AvailabilityFull => AvailabilityFull,
+            AvailabilityPartial => AvailabilityPartial,
+            AvailabilityOff => AvailabilityOff,
+            _ => isLockedFallback ? AvailabilityOff : AvailabilityFull
+        };
     }
 
     private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
@@ -332,6 +417,7 @@ ALTER TABLE {TableName}
     private sealed record FeatureCompartmentLockRecord(
         string Key,
         bool IsLocked,
+        string? AvailabilityMode,
         DateTime? LockedAtUtc,
         string? LockedByEmail,
         string? Reason);

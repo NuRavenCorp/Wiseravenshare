@@ -30,7 +30,6 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<ILlmIntentRouter, LlmIntentRouter>();
 builder.Services.AddScoped<IAiDataOrchestrator, AiDataOrchestrator>();
 builder.Services.Configure<FolderKnowledgeOptions>(builder.Configuration.GetSection("FolderKnowledge"));
-builder.Services.Configure<ChangeListenerOptions>(builder.Configuration.GetSection("ChangeListeners"));
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
@@ -65,9 +64,6 @@ builder.Services.AddScoped<IDataSourceAdapter, UsersDataSource>();
 
 builder.Services.AddHostedService<AiDataSeedService>();
 builder.Services.AddHostedService<FolderKnowledgeIngestionService>();
-builder.Services.AddSingleton<ICrawlerChangeListener, LoggerCrawlerChangeListener>();
-builder.Services.AddSingleton<ICrawlerChangeListener, FileCrawlerChangeListener>();
-builder.Services.AddSingleton<ICrawlerChangeNotifier, CrawlerChangeNotifier>();
 
 var app = builder.Build();
 
