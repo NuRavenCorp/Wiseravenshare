@@ -129,6 +129,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
         { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
+        { id: 'settings', icon: 'fas fa-cog', label: 'Settings' },
         { id: 'profile', icon: 'fas fa-user', label: 'Profile' }
     ];
 
@@ -187,20 +188,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             color: '#f87171',
             connection: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'), 'youtube')
         },
-        {
-            id: 'twitter-feed',
-            label: 'Twitter / X Feed',
-            icon: 'fab fa-twitter',
-            color: '#38bdf8',
-            connection: normalizeConnection(getConnection(feeds, 'twitter', 'Twitter'), 'twitter')
-        },
-        {
-            id: 'linkedin-feed',
-            label: 'LinkedIn Feed',
-            icon: 'fab fa-linkedin',
-            color: '#60a5fa',
-            connection: normalizeConnection(getConnection(feeds, 'linkedin', 'LinkedIn'), 'linkedin')
-        }
     ];
 
     return (
@@ -352,31 +339,20 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                         <span style={{ fontSize: '0.85rem' }}>{item.label}</span>
                                     </div>
 
-                                    {isActive ? (
-                                        <a
-                                            href={item.connection.resolvedUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            style={{ color: item.color, fontSize: '0.75rem', textDecoration: 'none' }}
-                                        >
-                                            Open
-                                        </a>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={() => onNavigate({ page: 'profile', editProfile: true })}
-                                            style={{
-                                                fontSize: '0.75rem',
-                                                color: 'var(--highlight-color)',
-                                                background: 'transparent',
-                                                border: 'none',
-                                                cursor: 'pointer',
-                                                padding: 0
-                                            }}
-                                        >
-                                            Set up
-                                        </button>
-                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate('settings')}
+                                        style={{
+                                            fontSize: '0.75rem',
+                                            color: item.color,
+                                            background: 'transparent',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            padding: 0
+                                        }}
+                                    >
+                                        {isActive ? 'Manage' : 'Set up'}
+                                    </button>
                                 </div>
 
                                 {item.connection.username && (

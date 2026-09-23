@@ -240,8 +240,8 @@ export default function WiseCoinPage() {
               </div>
               <div className="earning-item">
                 <div className="earning-icon">🏆</div>
-                <h3>Earn Badges</h3>
-                <p>Unlock achievements and earn badge rewards based on rarity.</p>
+                <h3>Well Done Badges</h3>
+                <p>Unlock badges for logging in, completing your profile, posting, and helping the community.</p>
                 <div className="reward-badge">+5-50 WSC</div>
               </div>
               <div className="earning-item">

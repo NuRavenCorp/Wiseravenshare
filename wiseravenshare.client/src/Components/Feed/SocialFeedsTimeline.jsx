@@ -4,7 +4,7 @@ import { socialService } from '../../Services/socialService';
 
 const REFRESH_MS = 15000;
 const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
-const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'bluesky']);
+const DISABLED_SOCIAL_PLATFORMS = new Set(['twitter', 'linkedin', 'bluesky']);
 
 const PLATFORMS = [
     { id: 'all', label: 'All Feeds', icon: '🌐', color: '#a855f7' },
@@ -12,17 +12,15 @@ const PLATFORMS = [
     { id: 'tiktok', label: 'TikTok', icon: '🎵', color: '#67e8f9' },
     { id: 'instagram', label: 'Instagram', icon: '📸', color: '#f9a8d4' },
     { id: 'youtube', label: 'YouTube', icon: '▶️', color: '#f87171' },
-    { id: 'linkedin', label: 'LinkedIn', icon: '💼', color: '#60a5fa' },
     { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
-const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok', 'linkedin', 'reddit'];
+const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok', 'reddit'];
 const OAUTH_EXTRA_STEP_HINTS = {
     facebook: 'May require selecting/saving a Facebook Page ID to publish.',
     instagram: 'Must be linked to a Facebook Page with an Instagram Business/Creator account.',
     youtube: 'If refresh token is missing, reconnect once with consent prompt and save channel details.',
     tiktok: 'One-click OAuth connection.',
-    linkedin: 'One-click OAuth connection.',
     reddit: 'One-click OAuth connection.'
 };
 
@@ -151,8 +149,6 @@ const normalizeFeeds = (feeds) => {
         instagram: getConnection(source, 'instagram', 'Instagram'),
         // ASP.NET Core camelCase serializes YouTube → youTube; check all variants
         youtube: getConnection(source, 'youtube', 'youTube', 'YouTube', 'Youtube'),
-        twitter: getConnection(source, 'twitter', 'Twitter'),
-        linkedIn: getConnection(source, 'linkedIn', 'linkedin', 'LinkedIn'),
         reddit: getConnection(source, 'reddit', 'Reddit'),
         bluesky: getConnection(source, 'bluesky', 'Bluesky')
     };
@@ -291,8 +287,6 @@ const normalizeFeedConnections = (feeds = {}) => {
         tikTok: normalizeConn(getFeed(feeds, 'tikTok', 'tiktok', 'TikTok')),
         instagram: normalizeConn(getFeed(feeds, 'instagram', 'Instagram')),
         youtube: normalizeConn(getFeed(feeds, 'youtube', 'youTube', 'YouTube', 'Youtube')),
-        twitter: normalizeConn(getFeed(feeds, 'twitter', 'Twitter')),
-        linkedIn: normalizeConn(getFeed(feeds, 'linkedIn', 'linkedin', 'LinkedIn')),
         reddit: normalizeConn(getFeed(feeds, 'reddit', 'Reddit')),
         bluesky: normalizeConn(getFeed(feeds, 'bluesky', 'Bluesky'))
     };
@@ -305,9 +299,7 @@ const getConnectedPlatforms = (snapshot) => {
         .filter((platform) => {
             const key = platform.id === 'tiktok'
                 ? 'tikTok'
-                : platform.id === 'linkedin'
-                    ? 'linkedIn'
-                    : platform.id;
+                : platform.id;
             const connection = source[key] || {};
             return Boolean(connection.enabled || connection.username || connection.profileUrl || connection.feedUrl || connection.resolvedUrl);
         });
@@ -345,8 +337,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
         youtube: snapshot.youtube.username || '',
-        twitter: snapshot.twitter?.username || '',
-        linkedIn: snapshot.linkedIn?.username || '',
         reddit: snapshot.reddit?.username || '',
         bluesky: snapshot.bluesky?.username || ''
     });
@@ -767,8 +757,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
             instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
             youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
-            twitter: keepConnectionMetadata(snapshot.twitter, handles.twitter || ''),
-            linkedIn: keepConnectionMetadata(snapshot.linkedIn, handles.linkedIn || ''),
             reddit: keepConnectionMetadata(snapshot.reddit, handles.reddit || ''),
             bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '')
         };
@@ -1003,18 +991,6 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 username: snapshot.youtube?.username,
                 designation: snapshot.youtube?.designation,
                 url: snapshot.youtube?.resolvedUrl
-            });
-        }
-
-        if (snapshot.linkedIn?.enabled || snapshot.linkedIn?.resolvedUrl) {
-            items.push({
-                id: 'linkedin',
-                platform: 'LinkedIn',
-                icon: '💼',
-                color: '#60a5fa',
-                username: snapshot.linkedIn?.username,
-                designation: snapshot.linkedIn?.designation,
-                url: snapshot.linkedIn?.resolvedUrl
             });
         }
 

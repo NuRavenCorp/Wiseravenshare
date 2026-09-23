@@ -219,6 +219,16 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
         }
 
+        try
+        {
+            var postCount = await _postRepository.GetPostCountAsync(userId);
+            await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "post_created", postCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award post milestone badge for user {UserId}", userId);
+        }
+
         // Ingest into content crawler for trending detection (fire-and-forget)
         try
         {
@@ -751,6 +761,15 @@ public class PostService : IPostService
         }
 
         var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+
+        try
+        {
+            await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "comment_added");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award comment badge for user {UserId}", userId);
+        }
         return BuildPostCommentDto(created, interaction.CommentsCount);
     }
 

@@ -1,6 +1,9 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.Extensions.Configuration;
 using Wiseravenshare.Server.Models.Evolution;
 using Wiseravenshare.Server.Services;
 
@@ -9,16 +12,19 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Route("[controller]")]
+[Authorize]
 public sealed class EvolutionController : ControllerBase
 {
     private const string ModulesCacheKey = "registered_modules";
     private readonly IEvolutionService _evolutionService;
     private readonly IMemoryCache _cache;
+    private readonly IConfiguration _configuration;
 
-    public EvolutionController(IEvolutionService evolutionService, IMemoryCache cache)
+    public EvolutionController(IEvolutionService evolutionService, IMemoryCache cache, IConfiguration configuration)
     {
         _evolutionService = evolutionService;
         _cache = cache;
+        _configuration = configuration;
     }
 
     [HttpGet("updates")]
@@ -126,6 +132,15 @@ public sealed class EvolutionController : ControllerBase
     [HttpGet("metrics")]
     public async Task<IActionResult> GetMetrics()
     {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+
+        if (!AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email))
+        {
+            return Forbid();
+        }
+
         var metrics = await _evolutionService.GetSystemMetricsAsync();
         return Ok(metrics);
     }

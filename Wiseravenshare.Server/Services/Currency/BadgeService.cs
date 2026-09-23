@@ -11,6 +11,8 @@ public interface IBadgeService
 {
     Task<Badge> CreateBadgeAsync(Badge badge);
     Task<UserBadge> AwardBadgeAsync(Guid userId, Guid badgeId);
+    Task<Badge?> GetBadgeByNameAsync(string badgeName);
+    Task<bool> TryAwardBadgeByNameAsync(Guid userId, string badgeName);
     Task<Badge> EvolveBadgeAsync(Guid userId, Guid sourceBadgeId, Guid targetBadgeId);
     Task<IEnumerable<Badge>> GetAvailableBadgesAsync(Guid userId);
     Task<IEnumerable<UserBadge>> GetUserBadgesAsync(Guid userId);
@@ -103,6 +105,40 @@ public class BadgeService : IBadgeService
         _cache.Remove($"user_badges_{userId}");
         _logger.LogInformation("Awarded badge {Badge} to user {User}", badge.Name, userId);
         return userBadge;
+    }
+
+    public async Task<Badge?> GetBadgeByNameAsync(string badgeName)
+    {
+        var normalizedName = NormalizeBadgeName(badgeName);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return null;
+        }
+
+        var badges = await _badgeRepository.FindAsync(b =>
+            !b.IsDeleted && b.Name.ToLower() == normalizedName.ToLower());
+
+        return badges.FirstOrDefault();
+    }
+
+    public async Task<bool> TryAwardBadgeByNameAsync(Guid userId, string badgeName)
+    {
+        var badge = await GetBadgeByNameAsync(badgeName);
+        if (badge is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            await AwardBadgeAsync(userId, badge.Id);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex, "Badge {BadgeName} was not awarded to {UserId}", badge.Name, userId);
+            return false;
+        }
     }
 
     public async Task<Badge> EvolveBadgeAsync(Guid userId, Guid sourceBadgeId, Guid targetBadgeId)
@@ -251,19 +287,14 @@ public class BadgeService : IBadgeService
 
     public async Task AwardWelcomeBadgesAsync(Guid userId)
     {
-        var welcome = await _badgeRepository.FindAsync(b => !b.IsDeleted && b.MintingCost == 0 && b.MinimumWorkHours == 0);
-        foreach (var badge in welcome)
+        var firstSteps = await GetBadgeByNameAsync("First Steps");
+        if (firstSteps is null)
         {
-            if (await _userBadgeRepository.ExistsAsync(ub => ub.UserId == userId && ub.BadgeId == badge.Id))
-                continue;
-            await _userBadgeRepository.AddAsync(new UserBadge
-            {
-                UserId = userId, BadgeId = badge.Id, EarnedAt = DateTime.UtcNow,
-                IsActive = true, MultiplierBonus = badge.ValueMultiplier
-            });
-            badge.CurrentSupply++;
-            await _badgeRepository.UpdateAsync(badge);
+            return;
         }
+
+        await TryAwardBadgeByNameAsync(userId, firstSteps.Name);
+
         var coinServiceForWelcome = _serviceProvider.GetRequiredService<IWiseCoinService>();
         await coinServiceForWelcome.UpdateBadgeMultipliersAsync(userId);
         _cache.Remove($"user_badges_{userId}");
@@ -272,12 +303,14 @@ public class BadgeService : IBadgeService
     /// <summary>Idempotently seeds the default badge catalog (welcome, skill, reputation, contributor, rare).</summary>
     public async Task SeedDefaultBadgesAsync()
     {
-        if (await _badgeRepository.CountAsync(b => !b.IsDeleted) > 0) return;
-
         var seeds = new List<Badge>
         {
-            new() { Name = "First Steps", Description = "Joined the Wiseravenshare community", IconUrl = "/badges/first-steps.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.CommunityBuilding, ValueMultiplier = 1.0m, TotalSupply = 10000 },
-            new() { Name = "First Post", Description = "Created your first post", IconUrl = "/badges/first-post.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.ContentCreation, ValueMultiplier = 1.1m, TotalSupply = 10000 },
+            new() { Name = "First Steps", Description = "Joined the Wiseravenshare community", IconUrl = "/badges/first-steps.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.CommunityBuilding, ValueMultiplier = 1.0m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 10000 },
+            new() { Name = "Checked In", Description = "Logged in and showed up", IconUrl = "/badges/checked-in.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.CommunityBuilding, ValueMultiplier = 1.0m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 10000 },
+            new() { Name = "Profile Complete", Description = "Finished your profile and connected your presence", IconUrl = "/badges/profile-complete.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.CommunityBuilding, ValueMultiplier = 1.0m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 10000 },
+            new() { Name = "First Post", Description = "Created your first post", IconUrl = "/badges/first-post.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.ContentCreation, ValueMultiplier = 1.1m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 10000 },
+            new() { Name = "Five Posts", Description = "Published five posts", IconUrl = "/badges/five-posts.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Uncommon, Category = BadgeCategory.ContentCreation, ValueMultiplier = 1.15m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 5000 },
+            new() { Name = "First Comment", Description = "Answered your first community question", IconUrl = "/badges/first-comment.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Common, Category = BadgeCategory.Collaboration, ValueMultiplier = 1.05m, MintingCost = 0, MinimumWorkHours = 0, TotalSupply = 10000 },
             new() { Name = "Truth Seeker", Description = "Verified your first claim", IconUrl = "/badges/truth-seeker.png", Type = BadgeType.Achievement, Rarity = BadgeRarity.Uncommon, Category = BadgeCategory.TruthVerification, ValueMultiplier = 1.1m, TrustMultiplier = 1.2m, MinimumWorkHours = 5, MintingCost = 10, TotalSupply = 5000 },
             new() { Name = "Content Creator", Description = "Created valuable creative content", IconUrl = "/badges/content-creator.png", Type = BadgeType.Skill, Rarity = BadgeRarity.Uncommon, Category = BadgeCategory.ContentCreation, ValueMultiplier = 1.2m, WorkMultiplier = 1.1m, MinimumWorkHours = 10, MintingCost = 25, TotalSupply = 5000 },
             new() { Name = "Truth Guardian", Description = "Verified 100 claims", IconUrl = "/badges/truth-guardian.png", Type = BadgeType.Skill, Rarity = BadgeRarity.Rare, Category = BadgeCategory.TruthVerification, ValueMultiplier = 1.3m, TrustMultiplier = 1.3m, MinimumWorkHours = 50, MintingCost = 50, TotalSupply = 1000 },
@@ -289,20 +322,107 @@ public class BadgeService : IBadgeService
         };
 
         foreach (var badge in seeds)
-            await _badgeRepository.AddAsync(badge);
+        {
+            await EnsureBadgeSeedAsync(badge);
+        }
 
         // Evolution path: First Steps -> Dedicated Contributor
-        var first = seeds.First(b => b.Name == "First Steps");
-        var dedicated = seeds.First(b => b.Name == "Dedicated Contributor");
-        await _evolutionRepository.AddAsync(new BadgeEvolution
+        var first = await GetBadgeByNameAsync("First Steps");
+        var dedicated = await GetBadgeByNameAsync("Dedicated Contributor");
+        if (first is not null && dedicated is not null && !await _evolutionRepository.ExistsAsync(e => e.SourceBadgeId == first.Id && e.TargetBadgeId == dedicated.Id))
         {
-            SourceBadgeId = first.Id,
-            TargetBadgeId = dedicated.Id,
-            EvolutionPath = "Earn 100 work hours to evolve",
-            WorkHoursRequired = 100,
-            WSCRequired = 50
-        });
+            await _evolutionRepository.AddAsync(new BadgeEvolution
+            {
+                SourceBadgeId = first.Id,
+                TargetBadgeId = dedicated.Id,
+                EvolutionPath = "Earn 100 work hours to evolve",
+                WorkHoursRequired = 100,
+                WSCRequired = 50
+            });
+        }
 
         _logger.LogInformation("Seeded default badge catalog ({Count} badges)", seeds.Count);
+    }
+
+    private static string NormalizeBadgeName(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+    }
+
+    private async Task EnsureBadgeSeedAsync(Badge seed)
+    {
+        var existing = await GetBadgeByNameAsync(seed.Name);
+        if (existing is null)
+        {
+            await _badgeRepository.AddAsync(seed);
+            return;
+        }
+
+        var changed = false;
+        if (!string.Equals(existing.Description, seed.Description, StringComparison.Ordinal))
+        {
+            existing.Description = seed.Description;
+            changed = true;
+        }
+        if (!string.Equals(existing.IconUrl, seed.IconUrl, StringComparison.Ordinal))
+        {
+            existing.IconUrl = seed.IconUrl;
+            changed = true;
+        }
+        if (existing.Type != seed.Type)
+        {
+            existing.Type = seed.Type;
+            changed = true;
+        }
+        if (existing.Rarity != seed.Rarity)
+        {
+            existing.Rarity = seed.Rarity;
+            changed = true;
+        }
+        if (existing.Category != seed.Category)
+        {
+            existing.Category = seed.Category;
+            changed = true;
+        }
+        if (existing.ValueMultiplier != seed.ValueMultiplier)
+        {
+            existing.ValueMultiplier = seed.ValueMultiplier;
+            changed = true;
+        }
+        if (existing.WorkMultiplier != seed.WorkMultiplier)
+        {
+            existing.WorkMultiplier = seed.WorkMultiplier;
+            changed = true;
+        }
+        if (existing.TrustMultiplier != seed.TrustMultiplier)
+        {
+            existing.TrustMultiplier = seed.TrustMultiplier;
+            changed = true;
+        }
+        if (existing.StakingMultiplier != seed.StakingMultiplier)
+        {
+            existing.StakingMultiplier = seed.StakingMultiplier;
+            changed = true;
+        }
+        if (existing.MinimumWorkHours != seed.MinimumWorkHours)
+        {
+            existing.MinimumWorkHours = seed.MinimumWorkHours;
+            changed = true;
+        }
+        if (existing.MintingCost != seed.MintingCost)
+        {
+            existing.MintingCost = seed.MintingCost;
+            changed = true;
+        }
+        if (existing.TotalSupply != seed.TotalSupply)
+        {
+            existing.TotalSupply = seed.TotalSupply;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _badgeRepository.UpdateAsync(existing);
+        }
     }
 }

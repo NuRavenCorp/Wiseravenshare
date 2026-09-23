@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.Currency;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -13,11 +14,15 @@ public sealed class UsersController : ControllerBase
 {
     private readonly UserStore _userStore;
     private readonly GrowthService _growthService;
+    private readonly IWiseCoinService _wiseCoinService;
+    private readonly ILogger<UsersController> _logger;
 
-    public UsersController(UserStore userStore, GrowthService growthService)
+    public UsersController(UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger)
     {
         _userStore = userStore;
         _growthService = growthService;
+        _wiseCoinService = wiseCoinService;
+        _logger = logger;
     }
 
     [HttpGet("{id}")]
@@ -47,7 +52,7 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    public IActionResult UpdateProfile(string id, [FromBody] UpdateUserProfileRequest request)
+    public async Task<IActionResult> UpdateProfile(string id, [FromBody] UpdateUserProfileRequest request)
     {
         if (!CanAccessUser(id))
         {
@@ -82,6 +87,7 @@ public sealed class UsersController : ControllerBase
         {
             var user = _userStore.UpdateProfile(id, request);
             _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
+            await TryAwardProfileCompletionBadgeAsync(user);
             return Ok(UserStore.ToResponse(user));
         }
         catch (InvalidOperationException ex)
@@ -111,7 +117,7 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpPut("{id}/feeds")]
-    public IActionResult UpdateSocialFeeds(string id, [FromBody] UpdateSocialFeedsRequest request)
+    public async Task<IActionResult> UpdateSocialFeeds(string id, [FromBody] UpdateSocialFeedsRequest request)
     {
         if (!CanAccessUser(id))
         {
@@ -122,6 +128,7 @@ public sealed class UsersController : ControllerBase
         {
             var user = _userStore.UpdateSocialFeeds(id, request);
             _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
+            await TryAwardProfileCompletionBadgeAsync(user);
             return Ok(user.SocialFeeds);
         }
         catch (InvalidOperationException ex)
@@ -138,5 +145,56 @@ public sealed class UsersController : ControllerBase
     {
         var subjectId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
         return string.Equals(subjectId, id, StringComparison.Ordinal);
+    }
+
+    private async Task TryAwardProfileCompletionBadgeAsync(UserRecord user)
+    {
+        try
+        {
+            if (!IsProfileComplete(user))
+            {
+                return;
+            }
+
+            if (Guid.TryParse(user.Id, out var userId))
+            {
+                await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "profile_complete");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award profile completion badge for {UserId}", user.Id);
+        }
+    }
+
+    private static bool IsProfileComplete(UserRecord user)
+    {
+        var socialFeeds = user.SocialFeeds;
+        var hasConnectedFeed = socialFeeds is not null && (
+            IsConnected(socialFeeds.TikTok) ||
+            IsConnected(socialFeeds.Facebook) ||
+            IsConnected(socialFeeds.Instagram) ||
+            IsConnected(socialFeeds.YouTube) ||
+            IsConnected(socialFeeds.Twitter) ||
+            IsConnected(socialFeeds.LinkedIn) ||
+            IsConnected(socialFeeds.Bluesky));
+
+        return !string.IsNullOrWhiteSpace(user.Name)
+            && !string.IsNullOrWhiteSpace(user.Bio)
+            && !string.IsNullOrWhiteSpace(user.Avatar)
+            && (hasConnectedFeed || !string.IsNullOrWhiteSpace(user.Location) || !string.IsNullOrWhiteSpace(user.Website));
+    }
+
+    private static bool IsConnected(SocialFeedConnection? connection)
+    {
+        if (connection is null)
+        {
+            return false;
+        }
+
+        return connection.Enabled
+            || !string.IsNullOrWhiteSpace(connection.Username)
+            || !string.IsNullOrWhiteSpace(connection.ProfileUrl)
+            || !string.IsNullOrWhiteSpace(connection.FeedUrl);
     }
 }

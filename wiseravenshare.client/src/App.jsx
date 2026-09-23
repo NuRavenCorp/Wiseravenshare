@@ -13,6 +13,7 @@ import MessagesPage from './Pages/MessagesPage';
 import NotificationsPage from './Pages/NotificationsPage';
 import PlannerPage from './Pages/PlannerPage';
 import ProfilePage from './Pages/ProfilePage';
+import SettingsPage from './Pages/SettingsPage';
 import LoginPage from './Pages/LoginPage';
 import BreakingNewsPage from './Pages/BreakingNewsPage';
 import ArticlePage from './Pages/ArticlePage';
@@ -527,8 +528,11 @@ const App = () => {
                     <ProfilePage
                         openEditMode={profileEditRequested}
                         onEditModeHandled={() => setProfileEditRequested(false)}
+                        onNavigate={setCurrentPage}
                     />
                 );
+            case 'settings':
+                return <SettingsPage onNavigate={setCurrentPage} />;
             case 'growth':
                 return isAdminUser
                     ? <GrowthPage />
@@ -769,6 +773,7 @@ const App = () => {
         { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
+        { id: 'settings', label: 'Settings' },
         { id: 'profile', label: 'Profile' }
     ];
 
