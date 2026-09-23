@@ -21,21 +21,32 @@ export default function WiseCoinPage() {
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
+
+      // Run all fetches independently so one failure doesn't kill the whole page.
+      const settle = (promise, fallback = null) =>
+        promise.catch(() => fallback);
+
       const [bal, val, status, txs, bdgs] = await Promise.all([
-        wisecoinService.getBalance(),
-        wisecoinService.getValuation(),
-        wisecoinService.getRolloutStatus(),
-        wisecoinService.getTransactionHistory(1, 10),
-        wisecoinService.getBadges()
+        settle(wisecoinService.getBalance()),
+        settle(wisecoinService.getValuation()),
+        settle(wisecoinService.getRolloutStatus()),
+        settle(wisecoinService.getTransactionHistory(1, 10), []),
+        settle(wisecoinService.getBadges(), []),
       ]);
+
       setBalance(bal);
       setValuation(val);
-      // getRolloutStatus is a public endpoint — gracefully handle 401 when not logged in
       setRolloutStatus(status);
       setTransactions(Array.isArray(txs) ? txs : []);
       setBadges(Array.isArray(bdgs) ? bdgs : []);
+
+      // Only surface an error if the two most critical calls both failed.
+      if (!bal && !val) {
+        setError('Unable to load WiseCoin data. Please sign in or try again.');
+      }
     } catch (err) {
-      setError(err.message);
+      setError('Unable to load WiseCoin data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -59,7 +70,19 @@ export default function WiseCoinPage() {
   };
 
   if (loading) return <div className="wisecoin-container"><div className="loading">Loading...</div></div>;
-  if (error) return <div className="wisecoin-container error">{error}</div>;
+  if (error) return (
+    <div className="wisecoin-container">
+      <div className="wisecoin-hero">
+        <div className="hero-content">
+          <h1>💎 WiseCoin Ecosystem</h1>
+          <p>Earn, stake, and trade your way to influence on WiseRavenShare</p>
+        </div>
+      </div>
+      <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)', fontSize: '14px' }}>
+        {error}
+      </div>
+    </div>
+  );
 
   return (
     <div className="wisecoin-container">
@@ -72,7 +95,7 @@ export default function WiseCoinPage() {
       </div>
 
       {/* Stats Grid */}
-      {balance && (
+      {balance ? (
         <div className="wisecoin-stats">
           <div className="stat-card">
             <div className="stat-label">Your Balance</div>
@@ -104,6 +127,15 @@ export default function WiseCoinPage() {
             <div className="stat-value positive">{Number(balance.workHoursContributed ?? 0).toFixed(1)}</div>
             <div className="stat-sublabel">work hours</div>
           </div>
+        </div>
+      ) : (
+        <div style={{
+          textAlign: 'center', padding: '24px', margin: '16px 0',
+          background: 'rgba(99,102,241,0.07)', borderRadius: '14px',
+          border: '1px solid rgba(99,102,241,0.2)', color: 'var(--text-muted)',
+          fontSize: '14px'
+        }}>
+          🔐 Sign in to view your WiseCoin wallet and balance.
         </div>
       )}
 

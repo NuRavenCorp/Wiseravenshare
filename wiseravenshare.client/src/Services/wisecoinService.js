@@ -4,130 +4,102 @@ import { getAuthToken } from './authStorage.js';
 const API_BASE = '/api/wisecoin';
 
 const getHeaders = (includeContentType = true) => {
-  const headers = { 'Authorization': `Bearer ${getAuthToken()}` };
+  const headers = { 'Authorization': `Bearer ${getAuthToken() || ''}` };
   if (includeContentType) headers['Content-Type'] = 'application/json';
   return headers;
 };
 
+// Returns null on 401/403/404; throws on other errors.
+const safeFetch = async (url, opts = {}) => {
+  const res = await fetch(url, opts);
+  if (res.status === 401 || res.status === 403 || res.status === 404) return null;
+  if (!res.ok) {
+    let msg = res.statusText || 'Request failed';
+    try { const body = await res.json(); msg = body?.error || body?.message || msg; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return res.json();
+};
+
 export const wisecoinService = {
-  // Get user's WSC wallet and balance
   async getBalance() {
-    const response = await fetch(`${API_BASE}/balance`, {
-      headers: getHeaders()
-    });
-    if (!response.ok) throw new Error(`Balance fetch failed: ${response.statusText}`);
-    return response.json();
+    return safeFetch(`${API_BASE}/balance`, { headers: getHeaders() });
   },
 
-  // Get user's transaction history
   async getTransactionHistory(page = 1, pageSize = 20) {
-    const response = await fetch(`${API_BASE}/transactions?page=${page}&pageSize=${pageSize}`, {
+    return safeFetch(`${API_BASE}/transactions?page=${page}&pageSize=${pageSize}`, {
       headers: getHeaders(false)
     });
-    if (!response.ok) throw new Error(`Transactions fetch failed`);
-    return response.json();
   },
 
-  // Get current WSC valuation (public)
   async getValuation() {
-    const response = await fetch(`${API_BASE}/valuation`);
-    if (!response.ok) throw new Error('Valuation fetch failed');
-    return response.json();
+    return safeFetch(`${API_BASE}/valuation`);
   },
 
-  // Get user's badges
   async getBadges() {
-    const response = await fetch(`${API_BASE}/badges`, {
-      headers: getHeaders(false)
-    });
-    if (!response.ok) throw new Error('Badges fetch failed');
-    return response.json();
+    return safeFetch(`${API_BASE}/badges`, { headers: getHeaders(false) });
   },
 
-  // Get available badges to earn
   async getAvailableBadges() {
-    const response = await fetch(`${API_BASE}/badges/available`, {
-      headers: getHeaders(false)
-    });
-    if (!response.ok) throw new Error('Available badges fetch failed');
-    return response.json();
+    return safeFetch(`${API_BASE}/badges/available`, { headers: getHeaders(false) });
   },
 
-  // Claim/award a badge
   async claimBadge(badgeId) {
-    const response = await fetch(`${API_BASE}/badges/${badgeId}/claim`, {
+    return safeFetch(`${API_BASE}/badges/${badgeId}/claim`, {
       method: 'POST',
       headers: getHeaders(false)
     });
-    if (!response.ok) throw new Error('Badge claim failed');
-    return response.json();
   },
 
-  // Transfer WSC to another user
   async transfer(recipientId, amount, message = null) {
-    const response = await fetch(`${API_BASE}/transfer`, {
+    const res = await fetch(`${API_BASE}/transfer`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ recipientId, amount, message })
     });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Transfer failed');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Transfer failed');
     }
-    return response.json();
+    return res.json();
   },
 
-  // Stake WSC tokens
   async stake(amount, durationDays, type = 'Flexible') {
-    const response = await fetch(`${API_BASE}/stake`, {
+    return safeFetch(`${API_BASE}/stake`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ amount, durationDays, type })
     });
-    if (!response.ok) throw new Error('Stake failed');
-    return response.json();
   },
 
-  // Unstake WSC tokens
   async unstake(stakeId) {
-    const response = await fetch(`${API_BASE}/unstake/${stakeId}`, {
+    return safeFetch(`${API_BASE}/unstake/${stakeId}`, {
       method: 'POST',
       headers: getHeaders(false)
     });
-    if (!response.ok) throw new Error('Unstake failed');
-    return response.json();
   },
 
-  // === Rollout Endpoints ===
-
-  // Claim initial WSC allocation (one-time)
   async claimInitialAllocation() {
-    const response = await fetch(`${API_BASE}/rollout/claim-initial`, {
+    const res = await fetch(`${API_BASE}/rollout/claim-initial`, {
       method: 'POST',
       headers: getHeaders(false)
     });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Claim failed');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Claim failed');
     }
-    return response.json();
+    return res.json();
   },
 
-  // Get rollout status (public)
   async getRolloutStatus() {
-    const response = await fetch(`${API_BASE}/rollout/status`);
-    if (!response.ok) throw new Error('Rollout status fetch failed');
-    return response.json();
+    return safeFetch(`${API_BASE}/rollout/status`);
   },
 
-  // Batch allocate to all users (admin only)
   async allocateAll(amountPerUser = 100) {
-    const response = await fetch(`${API_BASE}/rollout/allocate-all`, {
+    return safeFetch(`${API_BASE}/rollout/allocate-all`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ amountPerUser })
     });
-    if (!response.ok) throw new Error('Allocation failed');
-    return response.json();
   }
 };
