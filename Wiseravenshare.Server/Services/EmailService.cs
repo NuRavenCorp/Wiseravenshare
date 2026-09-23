@@ -68,14 +68,191 @@ public sealed class SmtpEmailService : IEmailService
         _logger = logger;
     }
 
-    public Task SendWelcomeEmailAsync(string email, string displayName)
+    public async Task SendWelcomeEmailAsync(string email, string displayName)
     {
-        return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email))
+        {
+            _logger.LogWarning("Skipped welcome email dispatch because destination address '{Email}' is invalid.", email);
+            return;
+        }
+
+        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            _logger.LogWarning("Skipped welcome email dispatch because SMTP host is not configured.");
+            return;
+        }
+
+        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        if (string.IsNullOrWhiteSpace(fromAddress))
+        {
+            _logger.LogWarning("Skipped welcome email dispatch because sender address is not configured.");
+            return;
+        }
+
+        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        if (string.IsNullOrWhiteSpace(fromName))
+        {
+            fromName = "Wise Ravens";
+        }
+
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+
+        var safeName = string.IsNullOrWhiteSpace(displayName) ? email : displayName.Trim();
+        var subject = "Welcome to Wise Ravens!";
+        var body = $"""
+Welcome to Wise Ravens, {safeName}!
+
+Your account has been successfully created. You can now log in and start creating content.
+
+Visit us: https://wiseravenshare.com
+
+If you have any questions, feel free to reach out to our support team.
+
+Wise Ravens Team
+""";
+
+        try
+        {
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(fromAddress, fromName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = false
+            };
+            mail.To.Add(new MailAddress(email, safeName));
+
+            using var client = new SmtpClient(smtpHost, smtpPort)
+            {
+                EnableSsl = enableSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = false,
+                Timeout = smtpTimeout
+            };
+
+            if (!string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+            {
+                client.Credentials = new NetworkCredential(username, password);
+            }
+
+            await client.SendMailAsync(mail);
+            _logger.LogInformation("Successfully sent welcome email to {Email}.", email);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogError(ex, "Invalid email format for {Email}.", email);
+        }
+        catch (SmtpException ex)
+        {
+            _logger.LogError(ex, "SMTP error sending welcome email to {Email}.", email);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send welcome email to {Email}.", email);
+        }
     }
 
-    public Task SendPasswordResetEmailAsync(string email, string displayName, string resetToken)
+    public async Task SendPasswordResetEmailAsync(string email, string displayName, string resetToken)
     {
-        return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email))
+        {
+            _logger.LogWarning("Skipped password reset email dispatch because destination address '{Email}' is invalid.", email);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(resetToken))
+        {
+            _logger.LogWarning("Skipped password reset email dispatch because reset token is missing.");
+            return;
+        }
+
+        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            _logger.LogWarning("Skipped password reset email dispatch because SMTP host is not configured.");
+            return;
+        }
+
+        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        if (string.IsNullOrWhiteSpace(fromAddress))
+        {
+            _logger.LogWarning("Skipped password reset email dispatch because sender address is not configured.");
+            return;
+        }
+
+        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        if (string.IsNullOrWhiteSpace(fromName))
+        {
+            fromName = "Wise Ravens Security";
+        }
+
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+
+        var safeName = string.IsNullOrWhiteSpace(displayName) ? email : displayName.Trim();
+        var subject = "Reset Your Wise Ravens Password";
+        var resetLink = $"https://wiseravenshare.com/reset-password?token={Uri.EscapeDataString(resetToken)}";
+        var body = $"""
+Hello {safeName},
+
+We received a request to reset your Wise Ravens password. Click the link below to set a new password:
+
+{resetLink}
+
+This link will expire in 24 hours. If you did not request a password reset, you can safely ignore this email.
+
+Your account security is important to us. Never share this link with anyone.
+
+Wise Ravens Security Team
+""";
+
+        try
+        {
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(fromAddress, fromName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = false
+            };
+            mail.To.Add(new MailAddress(email, safeName));
+
+            using var client = new SmtpClient(smtpHost, smtpPort)
+            {
+                EnableSsl = enableSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = false,
+                Timeout = smtpTimeout
+            };
+
+            if (!string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+            {
+                client.Credentials = new NetworkCredential(username, password);
+            }
+
+            await client.SendMailAsync(mail);
+            _logger.LogInformation("Successfully sent password reset email to {Email}.", email);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogError(ex, "Invalid email format for {Email}.", email);
+        }
+        catch (SmtpException ex)
+        {
+            _logger.LogError(ex, "SMTP error sending password reset email to {Email}.", email);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send password reset email to {Email}.", email);
+        }
     }
 
     public async Task<bool> SendTeamInviteEmailAsync(TeamInviteEmailMessage message, CancellationToken cancellationToken = default)
