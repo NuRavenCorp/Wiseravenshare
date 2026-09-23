@@ -52,6 +52,7 @@ import { pageMapService } from './Services/pageMapService';
 import aiAssistantService from './Services/aiAssistantService';
 import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
+import './Styles/GlassmorphismUI.css';
 
 const SPONSOR_PAYMENT_LINK = String(
     import.meta.env.VITE_STRIPE_SPONSOR_PAYMENT_LINK
