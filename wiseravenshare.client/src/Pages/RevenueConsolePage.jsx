@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../Services/api';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
+import { authService } from '../Services/Auth.jsx';
 
 const parseAdminEmails = () => {
     const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
@@ -23,7 +24,8 @@ const RevenueConsolePage = () => {
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
-        return email.length > 0 && adminEmails.has(email);
+        // Check email list first, then fall back to JWT claims (access_scope, admin_pass)
+        return (email.length > 0 && adminEmails.has(email)) || authService.isAdminAllAccess();
     }, [adminEmails, user?.email]);
 
     const [loading, setLoading] = useState(true);
