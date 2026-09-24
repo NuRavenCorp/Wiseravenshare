@@ -15,6 +15,7 @@ namespace Wiseravenshare.Server.Services.External.DeepSeekService
         Task<FactVerification> VerifyFactAsync(string fact, string context);
         Task<SemanticAnalysis> AnalyzeSemanticsAsync(string text);
         Task<TruthAssessment> AssessTruthAsync(string claim);
+        string? GetConfiguredApiKey();
     }
 
 
@@ -33,9 +34,18 @@ namespace Wiseravenshare.Server.Services.External.DeepSeekService
             _configuration = configuration;
             _logger = logger;
 
+            var apiKey = configuration["DeepSeek:ApiKey"];
             _httpClient.BaseAddress = new Uri(configuration["DeepSeek:ApiBaseUrl"] ?? "https://api.deepseek.com/v1");
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", configuration["DeepSeek:ApiKey"]);
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", apiKey);
+            }
+        }
+
+        public string? GetConfiguredApiKey()
+        {
+            return _configuration["DeepSeek:ApiKey"];
         }
 
         public async Task<string> GenerateAsync(string prompt)
