@@ -210,7 +210,7 @@ const SiteMapTab = ({ onNavigate }) => {
         setCrawling(true);
         try {
             const job = await siteAuditCrawlerService.startCrawl({
-                rootUrl: window.location.origin,
+                startUrl: window.location.origin,
                 maxPages: 200,
                 maxDepth: 4,
             });
@@ -1349,6 +1349,5 @@ const AdminPanelPage = ({ onNavigate }) => {
 };
 
 export default AdminPanelPage;
-
 
 

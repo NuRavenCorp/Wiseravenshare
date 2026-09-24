@@ -28,10 +28,21 @@ const parseError = async (response) => {
 
 export const siteAuditCrawlerService = {
   async startCrawl(request) {
+    const startUrl = request?.startUrl || request?.rootUrl;
+    if (!startUrl) {
+      throw new Error('Crawler start URL is required.');
+    }
+
+    const payload = {
+      ...request,
+      startUrl,
+    };
+    delete payload.rootUrl;
+
     const response = await fetch(`${API_BASE}/jobs`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify(request)
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
