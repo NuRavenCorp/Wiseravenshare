@@ -527,22 +527,34 @@ public class PostService : IPostService
             });
         }
 
-        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
-
-        // Update engagement in content crawler (fire-and-forget)
+        PostInteractionState interaction;
         try
         {
-            _ = _contentCrawler.UpdateEngagementAsync(
-                postId,
-                post.ViewsCount,
-                interaction.LikesCount,
-                interaction.RepostsCount
-            );
+            interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
+            _logger.LogWarning(ex, "GetInteractionState failed after like for post {PostId}; returning estimated state.", postId);
+            // The like was already saved — return a best-effort response so the client doesn't see a 500.
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount + 1,
+                RepostsCount = post.RepostsCount,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = true,
+                IsReposted = false,
+                IsBookmarked = false
+            };
         }
+
+        // Update engagement in content crawler (fire-and-forget)
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, interaction.LikesCount, interaction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
 
         return new PostInteractionDto
         {
@@ -568,12 +580,32 @@ public class PostService : IPostService
         await _postRepository.UnlikePostAsync(postId, userId);
         _logger.LogInformation("User {UserId} unliked post {PostId}", userId, postId);
 
-        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
-        _ = _contentCrawler.UpdateEngagementAsync(
-            postId,
-            post.ViewsCount,
-            interaction.LikesCount,
-            interaction.RepostsCount);
+        PostInteractionState interaction;
+        try
+        {
+            interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after unlike for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = Math.Max(0, post.LikesCount - 1),
+                RepostsCount = post.RepostsCount,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = false,
+                IsBookmarked = false
+            };
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, interaction.LikesCount, interaction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
 
         return new PostInteractionDto
         {
@@ -629,33 +661,43 @@ public class PostService : IPostService
             });
         }
 
-        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
-
-        // Update engagement in content crawler (fire-and-forget)
+        PostInteractionState repostInteraction;
         try
         {
-            _ = _contentCrawler.UpdateEngagementAsync(
-                postId,
-                post.ViewsCount,
-                interaction.LikesCount,
-                interaction.RepostsCount
-            );
+            repostInteraction = await _postRepository.GetInteractionStateAsync(postId, userId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to update engagement for post {PostId} in content crawler", postId);
+            _logger.LogWarning(ex, "GetInteractionState failed after repost for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount,
+                RepostsCount = post.RepostsCount + 1,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = true,
+                IsBookmarked = false
+            };
         }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, repostInteraction.LikesCount, repostInteraction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
 
         return new PostInteractionDto
         {
             PostId = postId,
-            LikesCount = interaction.LikesCount,
-            RepostsCount = interaction.RepostsCount,
-            CommentsCount = interaction.CommentsCount,
-            BookmarksCount = interaction.BookmarksCount,
-            IsLiked = interaction.IsLiked,
-            IsReposted = interaction.IsReposted,
-            IsBookmarked = interaction.IsBookmarked
+            LikesCount = repostInteraction.LikesCount,
+            RepostsCount = repostInteraction.RepostsCount,
+            CommentsCount = repostInteraction.CommentsCount,
+            BookmarksCount = repostInteraction.BookmarksCount,
+            IsLiked = repostInteraction.IsLiked,
+            IsReposted = repostInteraction.IsReposted,
+            IsBookmarked = repostInteraction.IsBookmarked
         };
     }
 
@@ -670,23 +712,43 @@ public class PostService : IPostService
         await _postRepository.UnrepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} unreposted post {PostId}", userId, postId);
 
-        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
-        _ = _contentCrawler.UpdateEngagementAsync(
-            postId,
-            post.ViewsCount,
-            interaction.LikesCount,
-            interaction.RepostsCount);
+        PostInteractionState unrepostInteraction;
+        try
+        {
+            unrepostInteraction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after unrepost for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount,
+                RepostsCount = Math.Max(0, post.RepostsCount - 1),
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = false,
+                IsBookmarked = false
+            };
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, unrepostInteraction.LikesCount, unrepostInteraction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
 
         return new PostInteractionDto
         {
             PostId = postId,
-            LikesCount = interaction.LikesCount,
-            RepostsCount = interaction.RepostsCount,
-            CommentsCount = interaction.CommentsCount,
-            BookmarksCount = interaction.BookmarksCount,
-            IsLiked = interaction.IsLiked,
-            IsReposted = interaction.IsReposted,
-            IsBookmarked = interaction.IsBookmarked
+            LikesCount = unrepostInteraction.LikesCount,
+            RepostsCount = unrepostInteraction.RepostsCount,
+            CommentsCount = unrepostInteraction.CommentsCount,
+            BookmarksCount = unrepostInteraction.BookmarksCount,
+            IsLiked = unrepostInteraction.IsLiked,
+            IsReposted = unrepostInteraction.IsReposted,
+            IsBookmarked = unrepostInteraction.IsBookmarked
         };
     }
 

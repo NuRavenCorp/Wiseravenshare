@@ -34,7 +34,7 @@ namespace Wiseravenshare.Server.Services.External.DeepSeekService
             _configuration = configuration;
             _logger = logger;
 
-            var apiKey = configuration["DeepSeek:ApiKey"];
+            var apiKey = ResolveApiKey(configuration);
             _httpClient.BaseAddress = new Uri(configuration["DeepSeek:ApiBaseUrl"] ?? "https://api.deepseek.com/v1");
             if (!string.IsNullOrWhiteSpace(apiKey))
             {
@@ -45,7 +45,20 @@ namespace Wiseravenshare.Server.Services.External.DeepSeekService
 
         public string? GetConfiguredApiKey()
         {
-            return _configuration["DeepSeek:ApiKey"];
+            return ResolveApiKey(_configuration);
+        }
+
+        /// <summary>Resolves the DeepSeek API key from multiple config/env sources.</summary>
+        private static string? ResolveApiKey(IConfiguration configuration)
+        {
+            return new[]
+            {
+                configuration["DeepSeek:ApiKey"],
+                configuration["DEEPSEEK_API_KEY"],
+                Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY"),
+                configuration["DeepSeek__ApiKey"]
+            }
+            .FirstOrDefault(k => !string.IsNullOrWhiteSpace(k));
         }
 
         public async Task<string> GenerateAsync(string prompt)
