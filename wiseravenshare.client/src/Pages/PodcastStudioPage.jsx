@@ -2715,7 +2715,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         </div>
                     </div>
 
-                    {/* Billing status bar */}
+                    {/* Billing status bar — hidden for admins (no payment required) */}
+                    {!authService.isAdminAllAccess() && !subscriptionStatus?.isAdmin && (
                     <div style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -2754,6 +2755,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             Manage billing →
                         </button>
                     </div>
+                    )}
                 </div>
 
                 <div style={{
