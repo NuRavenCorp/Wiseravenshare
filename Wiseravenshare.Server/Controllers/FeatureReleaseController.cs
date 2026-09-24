@@ -24,6 +24,7 @@ public sealed class FeatureReleaseController : ControllerBase
         new("media-library",       "Media Library",         "Full media upload, organisation, and library management.",         "creator-pro",   "Core Platform"),
         new("growth-analytics",    "Growth Analytics",      "Platform-wide audience and trend analytics dashboard.",            "growth-suite",  "Core Platform"),
         new("revenue-console",     "Revenue Console",       "Revenue tracking, evidence tooling, and agent reporting.",         "creator-pro",   "Core Platform"),
+        new("podcast-admin-gateway", "Podcast Admin Gateway", "Admin-only: Release, gate, and manage podcast features for the platform.", "admin", "Admin"),
     ];
 
     // ── Tier ordering (lower index = lower tier) ──────────────────────────────
@@ -186,6 +187,82 @@ public sealed class FeatureReleaseController : ControllerBase
         }
 
         return Ok(new { message = $"Gated {gated.Count} features.", gated, count = gated.Count });
+    }
+
+    // ── Admin: PUT /api/admin/feature-release/podcast-gateway/enable-all ──────
+    /// <summary>
+    /// Admins use this to release ALL podcast control room features at once (bundles).
+    /// This is the primary admin flow for enabling podcasting capability across the platform.
+    /// </summary>
+    [Authorize]
+    [HttpPut("api/admin/feature-release/podcast-gateway/enable-all")]
+    public async Task<IActionResult> EnablePodcastGateway(
+        [FromBody] FeatureReleaseRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var email = AdminEmail();
+        var reason = string.IsNullOrWhiteSpace(request?.Reason) 
+            ? $"Podcast control room enabled by admin {email}" 
+            : request.Reason.Trim();
+
+        var podcastFeatures = TierCatalog
+            .Where(e => string.Equals(e.Category, "Podcast Studio", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var released = new List<string>();
+        foreach (var entry in podcastFeatures)
+        {
+            await _featureCompartmentService.SetLockAsync(entry.Key, false, reason, email, cancellationToken);
+            released.Add(entry.Key);
+        }
+
+        return Ok(new
+        {
+            message = $"Podcast control room enabled. Released {released.Count} features for all eligible users.",
+            released,
+            count = released.Count,
+            adminEmail = email
+        });
+    }
+
+    // ── Admin: PUT /api/admin/feature-release/podcast-gateway/disable-all ─────
+    /// <summary>
+    /// Admins use this to gate ALL podcast control room features at once (for maintenance/rollback).
+    /// </summary>
+    [Authorize]
+    [HttpPut("api/admin/feature-release/podcast-gateway/disable-all")]
+    public async Task<IActionResult> DisablePodcastGateway(
+        [FromBody] FeatureReleaseRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var email = AdminEmail();
+        var reason = string.IsNullOrWhiteSpace(request?.Reason)
+            ? $"Podcast control room disabled by admin {email}"
+            : request.Reason.Trim();
+
+        var podcastFeatures = TierCatalog
+            .Where(e => string.Equals(e.Category, "Podcast Studio", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var gated = new List<string>();
+        foreach (var entry in podcastFeatures)
+        {
+            await _featureCompartmentService.SetLockAsync(entry.Key, true, reason, email, cancellationToken);
+            gated.Add(entry.Key);
+        }
+
+        return Ok(new
+        {
+            message = $"Podcast control room disabled. Gated {gated.Count} features behind 'podcast-pro' tier.",
+            gated,
+            count = gated.Count,
+            adminEmail = email,
+            reason = reason
+        });
     }
 
     // ── Any user: GET /api/features/my-access ────────────────────────────────
