@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Services.StreamBridge;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -42,6 +43,7 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly IYouTubeService _youTubeService;
     private readonly IRssFeedService _rssFeedService;
     private readonly ITikTokAggregatorService _tikTokAggregatorService;
+    private readonly IStreamTransferService _streamTransfer;
 
     public SocialPlatformService(
         HttpClient httpClient,
@@ -49,7 +51,8 @@ public class SocialPlatformService : ISocialPlatformService
         ILogger<SocialPlatformService> logger,
         IYouTubeService youTubeService,
         IRssFeedService rssFeedService,
-        ITikTokAggregatorService tikTokAggregatorService)
+        ITikTokAggregatorService tikTokAggregatorService,
+        IStreamTransferService streamTransfer)
     {
         _httpClient = httpClient;
         _configuration = configuration;
@@ -57,6 +60,7 @@ public class SocialPlatformService : ISocialPlatformService
         _youTubeService = youTubeService;
         _rssFeedService = rssFeedService;
         _tikTokAggregatorService = tikTokAggregatorService;
+        _streamTransfer = streamTransfer;
     }
 
     public async Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit)
@@ -1193,3 +1197,7 @@ public class SocialPlatformService : ISocialPlatformService
         return body.Length <= 400 ? body : body[..400];
     }
 }
+
+
+
+
