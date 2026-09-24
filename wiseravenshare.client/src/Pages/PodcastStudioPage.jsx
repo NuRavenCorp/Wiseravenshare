@@ -42,7 +42,7 @@ const PODCAST_AUTOSAVE_STORAGE_KEY = 'wisePodcastSessionAutosave';
 const MAX_REMOTE_GUEST_MONITORS = 3;
 
 const studioModes = ['Phone', 'Tablet', 'Desktop', 'Camera', 'Remote guest'];
-const controlRoles = ['Owner', 'Producer', 'Host', 'Editor', 'Script Lead', 'Guest'];
+const controlRoles = ['Owner', 'Producer', 'Director', 'Host', 'Script Writer', 'Editor', 'Script Lead', 'Guest'];
 
 // Each format button generates its namesake episode structure:
 // Interview = host + guest with prepared interview questions.
@@ -141,6 +141,8 @@ const rolePermissions = {
     Host: { canGoLive: true, canEditScript: false, canAssignShots: true, canApproveSegments: false, canManageGuests: false },
     Editor: { canGoLive: false, canEditScript: true, canAssignShots: false, canApproveSegments: true, canManageGuests: false },
     'Script Lead': { canGoLive: false, canEditScript: true, canAssignShots: false, canApproveSegments: false, canManageGuests: false },
+    Director: { canGoLive: true, canEditScript: false, canAssignShots: true, canApproveSegments: true, canManageGuests: true },
+    'Script Writer': { canGoLive: false, canEditScript: true, canAssignShots: false, canApproveSegments: false, canManageGuests: false },
     Guest: { canGoLive: false, canEditScript: false, canAssignShots: false, canApproveSegments: false, canManageGuests: false }
 };
 
@@ -349,6 +351,12 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [hasSavedRecording, setHasSavedRecording] = useState(false);
     const [savedRecordingMediaUrl, setSavedRecordingMediaUrl] = useState('');
     const [isPublishingEpisodePost, setIsPublishingEpisodePost] = useState(false);
+    const [availableCameras, setAvailableCameras] = useState([]);
+    const [availableMics, setAvailableMics] = useState([]);
+    const [selectedCameraId, setSelectedCameraId] = useState('');
+    const [selectedMicId, setSelectedMicId] = useState('');
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [screenStream, setScreenStream] = useState(null);
 
     // Guest & Remote Controls State
     const [guestCamOn, setGuestCamOn] = useState(true);
@@ -364,6 +372,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [teamDirectory, setTeamDirectory] = useState([]);
     const [tandemSyncedAt, setTandemSyncedAt] = useState(null);
     const [syncMessage, setSyncMessage] = useState('');
+    const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+    const [addMemberName, setAddMemberName] = useState('');
+    const [addMemberRole, setAddMemberRole] = useState('Guest');
+    const [addMemberIdentifier, setAddMemberIdentifier] = useState('');
     const [guestNameInput, setGuestNameInput] = useState('');
     const [newPageType, setNewPageType] = useState('Script');
     const [newPageTitle, setNewPageTitle] = useState('');
@@ -551,6 +563,29 @@ const PodcastStudioPage = ({ onNavigate }) => {
         return normalizedIdentifier
             ? { loginState: 'pending', loginStatus: 'Awaiting login in room' }
             : { loginState: 'manual', loginStatus: 'Manual pair (no login ID)' };
+    };
+
+    const handleAddTeamMember = () => {
+        const name = addMemberName.trim();
+        if (!name) return;
+
+        const loginInfo = resolveLoginState(addMemberIdentifier || name);
+        const updatedList = upsertTeamMember({
+            identifier: addMemberIdentifier.trim() || '',
+            name,
+            role: addMemberRole,
+            locale: 'en',
+            device: 'Remote',
+            status: 'added',
+            loginState: loginInfo.loginState,
+            loginStatus: loginInfo.loginStatus
+        });
+        setTeamMembersList(updatedList);
+        setShowAddMemberModal(false);
+        setAddMemberName('');
+        setAddMemberIdentifier('');
+        setAddMemberRole('Guest');
+        setStatus(`${addMemberRole} "${name}" added to team.`);
     };
 
     const upsertTeamMember = ({ identifier, name, role, locale, device, status, loginState, loginStatus }) => {
@@ -774,26 +809,47 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
     const handleStartTrial = async (planKey) => {
         try {
+            // Normalize camelCase keys (growthSuite → growth_suite) for the price ID map
+            const normalizedKey = planKey
+                .replace(/([A-Z])/g, '_$1')
+                .toLowerCase()
+                .replace(/^_/, '');
+
             const planPriceIdMap = {
-                'growth_suite': process.env.REACT_APP_STRIPE_GROWTH_SUITE_PRICE_ID || 'price_growth_suite',
-                'studio_plus': process.env.REACT_APP_STRIPE_STUDIO_PLUS_PRICE_ID || 'price_studio_plus',
-                'podcast_pro': process.env.REACT_APP_STRIPE_PODCAST_PRO_PRICE_ID || 'price_podcast_pro'
+                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_MONTHLY_ID  || '',
+                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_MONTHLY_ID   || '',
+                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_MONTHLY_ID   || '',
+            };
+            const planPriceIdAnnualMap = {
+                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_ANNUAL_ID   || '',
+                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_ANNUAL_ID    || '',
+                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_ANNUAL_ID    || '',
             };
 
-            const priceId = planPriceIdMap[planKey];
-            const successUrl = `${window.location.origin}/podcast-studio?checkout=success`;
-            const cancelUrl = `${window.location.origin}/podcast-studio?checkout=cancel`;
+            const priceMap  = billingCycle === 'annual' ? planPriceIdAnnualMap : planPriceIdMap;
+            const priceId   = priceMap[normalizedKey] || priceMap[planKey] || '';
 
+            if (!priceId) {
+                setStatus('Stripe is not yet configured for this plan. Please contact support.');
+                return;
+            }
+
+            const successUrl = `${window.location.origin}/podcast-studio?checkout=success&plan=${normalizedKey}`;
+            const cancelUrl  = `${window.location.origin}/podcast-studio?checkout=cancel`;
+
+            setStatus('Opening Stripe checkout…');
             const result = await subscriptionService.createCheckoutSession({
                 priceId,
                 successUrl,
                 cancelUrl,
-                plan: planKey,
-                billingCycle: billingCycle
+                plan: normalizedKey,
+                billingCycle
             });
 
             if (result?.url) {
                 window.location.href = result.url;
+            } else {
+                setStatus('Checkout session could not be created. Please try again.');
             }
         } catch (error) {
             console.error('Checkout error:', error);
@@ -1159,6 +1215,73 @@ const PodcastStudioPage = ({ onNavigate }) => {
     }, []);
 
     useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const checkoutResult = params.get('checkout');
+        if (checkoutResult !== 'success') return;
+
+        // Remove the query param from URL without a page reload
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+
+        setSubscriptionStatusLoading(true);
+        setStatus('🎉 Payment confirmed! Activating your Raven Podcast subscription…');
+        setShowPricingModal(false);
+
+        let attempts = 0;
+        const maxAttempts = 12;
+
+        const poll = async () => {
+            attempts++;
+            try {
+                const res = await apiService.getMyFeatureAccess();
+                const data = res.data ?? res;
+                const active = data?.hasActiveSubscription || data?.isAdmin;
+                if (active) {
+                    setSubscriptionStatus(data);
+                    setSubscriptionStatusLoading(false);
+                    setStatus('✅ Subscription active! Welcome to Raven Podcast Pro. All features are now unlocked.');
+                    return;
+                }
+            } catch {
+                // keep polling
+            }
+
+            if (attempts < maxAttempts) {
+                setTimeout(poll, 2500);
+            } else {
+                setSubscriptionStatusLoading(false);
+                setStatus('⏳ Subscription is processing. Features will unlock in a moment — try refreshing the page if they don\'t appear.');
+            }
+        };
+
+        setTimeout(poll, 1500);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        const enumerateDevices = async () => {
+            try {
+                // Request permission first so labels are available
+                await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                    .then(s => s.getTracks().forEach(t => t.stop()))
+                    .catch(() => null);
+
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === 'videoinput');
+                const mics = devices.filter(d => d.kind === 'audioinput');
+                setAvailableCameras(cameras);
+                setAvailableMics(mics);
+                if (cameras.length > 0 && !selectedCameraId) setSelectedCameraId(cameras[0].deviceId);
+                if (mics.length > 0 && !selectedMicId) setSelectedMicId(mics[0].deviceId);
+            } catch {
+                // Device enumeration is best-effort
+            }
+        };
+        enumerateDevices();
+        navigator.mediaDevices.addEventListener('devicechange', enumerateDevices);
+        return () => navigator.mediaDevices.removeEventListener('devicechange', enumerateDevices);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
         if (autosaveRestoreAppliedRef.current) {
             return;
         }
@@ -1430,19 +1553,34 @@ const PodcastStudioPage = ({ onNavigate }) => {
 
     // Recording Functions
     const startRecording = async () => {
-        // Only presenting roles (Owner / Producer / Host) may go live.
-        if (!permissions.canGoLive) {
-            setStatus(`${controlRole} does not present live. Switch to Owner, Producer or Host to run the broadcast.`);
+        // All active team members can control the recording session
+        const isActiveMember = Boolean(user?.id || user?.email);
+        if (!isActiveMember && !permissions.canGoLive) {
+            setStatus('Sign in to control the recording session.');
             return;
         }
 
         try {
             let stream = null;
             try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: isCameraOn,
-                    audio: !isMuted
-                });
+                const videoConstraint = isCameraOn
+                    ? (selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true)
+                    : false;
+                const audioConstraint = !isMuted
+                    ? (selectedMicId ? { deviceId: { exact: selectedMicId } } : true)
+                    : false;
+                stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: audioConstraint });
+
+                // If screen sharing is active, mix it with the camera stream via canvas compositing
+                if (isScreenSharing && screenStream) {
+                    const screenTrack = screenStream.getVideoTracks()[0];
+                    if (screenTrack) {
+                        // Replace camera video track with screen track for recording
+                        const cameraTrack = stream.getVideoTracks()[0];
+                        if (cameraTrack) stream.removeTrack(cameraTrack);
+                        stream.addTrack(screenTrack);
+                    }
+                }
             } catch (err) {
                 console.warn('Physical camera/microphone unavailable, initializing canvas fallback stream:', err);
                 const canvas = document.createElement('canvas');
@@ -1546,6 +1684,46 @@ const PodcastStudioPage = ({ onNavigate }) => {
         } catch (error) {
             console.error('Error starting studio recording:', error);
             setStatus(`Recording failure: ${error?.message || 'Media stream error'}`);
+        }
+    };
+
+    const toggleScreenShare = async () => {
+        if (isScreenSharing) {
+            // Stop screen share
+            if (screenStream) {
+                screenStream.getTracks().forEach(t => t.stop());
+                setScreenStream(null);
+            }
+            setIsScreenSharing(false);
+            setStatus('Screen sharing stopped.');
+            return;
+        }
+
+        try {
+            const sStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            sStream.getVideoTracks()[0].onended = () => {
+                setIsScreenSharing(false);
+                setScreenStream(null);
+            };
+            setScreenStream(sStream);
+            setIsScreenSharing(true);
+
+            // If already recording, swap the video track live
+            if (isRecording && mediaRecorderRef.current && streamRef.current) {
+                const screenTrack = sStream.getVideoTracks()[0];
+                const sender = streamRef.current.getVideoTracks()[0];
+                if (sender) {
+                    streamRef.current.removeTrack(sender);
+                    sender.stop();
+                }
+                streamRef.current.addTrack(screenTrack);
+                if (videoRef.current) videoRef.current.srcObject = streamRef.current;
+            }
+            setStatus('Screen sharing started. Click again to stop.');
+        } catch (err) {
+            if (err.name !== 'NotAllowedError') {
+                setStatus('Screen share is not available in this browser.');
+            }
         }
     };
 
@@ -3643,6 +3821,62 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <div style={{ marginTop: '6px', fontSize: '12px', color: '#bfdbfe' }}>
                                     Workflow approval gate: Creator ({teamCreatorLabel || 'unassigned'}) or creator designee only.
                                 </div>
+
+                                {/* Source Selector */}
+                                {(availableCameras.length > 1 || availableMics.length > 1) && (
+                                    <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+                                        {availableCameras.length > 1 && (
+                                            <div>
+                                                <label style={{ fontSize: '10px', color: '#64748b', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>📷 Camera</label>
+                                                <select
+                                                    value={selectedCameraId}
+                                                    onChange={(e) => setSelectedCameraId(e.target.value)}
+                                                    disabled={isRecording}
+                                                    style={{ width: '100%', padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#0f172a', color: '#e2e8f0', fontSize: '12px' }}
+                                                >
+                                                    {availableCameras.map(d => (
+                                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,6)}`}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                        {availableMics.length > 1 && (
+                                            <div>
+                                                <label style={{ fontSize: '10px', color: '#64748b', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>🎙️ Microphone</label>
+                                                <select
+                                                    value={selectedMicId}
+                                                    onChange={(e) => setSelectedMicId(e.target.value)}
+                                                    disabled={isRecording}
+                                                    style={{ width: '100%', padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#0f172a', color: '#e2e8f0', fontSize: '12px' }}
+                                                >
+                                                    {availableMics.map(d => (
+                                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0,6)}`}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Screen Share Button */}
+                                <button
+                                    type="button"
+                                    onClick={toggleScreenShare}
+                                    style={{
+                                        marginTop: '8px',
+                                        width: '100%',
+                                        border: `1px solid ${isScreenSharing ? 'rgba(34,197,94,0.5)' : 'rgba(148,163,184,0.2)'}`,
+                                        background: isScreenSharing ? 'rgba(34,197,94,0.12)' : 'transparent',
+                                        color: isScreenSharing ? '#4ade80' : '#94a3b8',
+                                        borderRadius: '8px',
+                                        padding: '8px',
+                                        fontSize: '12px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {isScreenSharing ? '🖥️ Stop Screen Share' : '🖥️ Share Screen'}
+                                </button>
                             </div>
 
                             <label style={{ display: 'grid', gap: '6px' }}>
@@ -3948,65 +4182,47 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         {/* Guest Quick Connect Box */}
                         {(workflowStage === 'Team') && (
                         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '20px' }}>
-                            <div style={{ fontSize: '12px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--light-color)' }}>
-                                Guest Room & Quick Join
-                            </div>
-                            <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
-                                <input
-                                    type="text"
-                                    value={guestNameInput}
-                                    onChange={(e) => setGuestNameInput(e.target.value)}
-                                    placeholder="Guest Name or Handle"
-                                    style={{
-                                        padding: '10px 12px',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--border-color)',
-                                        background: 'rgba(255,255,255,0.04)',
-                                        color: 'var(--text-color)'
-                                    }}
-                                />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div>
+                                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#e2e8f0' }}>🎙️ Team Roster</div>
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Assign roles to each team member. Any logged-in member can control the session.</div>
+                                </div>
                                 <button
                                     type="button"
-                                    onClick={handleGuestInvite}
-                                    style={{
-                                        border: 'none',
-                                        background: 'linear-gradient(135deg, #10b981, #059669)',
-                                        color: '#fff',
-                                        borderRadius: '8px',
-                                        padding: '10px',
-                                        fontWeight: 700,
-                                        cursor: 'pointer'
-                                    }}
+                                    onClick={() => { setAddMemberName(''); setAddMemberRole('Guest'); setAddMemberIdentifier(''); setShowAddMemberModal(true); }}
+                                    style={{ border: '1px solid rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.12)', color: '#38bdf8', borderRadius: '8px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                                 >
-                                    ➕ Pair Guest Feed
+                                    + Add Member
                                 </button>
+                            </div>
+
+                            {/* Role legend */}
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                                {[
+                                    { role: 'Director', color: '#a78bfa', icon: '🎬' },
+                                    { role: 'Producer', color: '#38bdf8', icon: '🎚️' },
+                                    { role: 'Host', color: '#4ade80', icon: '🎤' },
+                                    { role: 'Script Writer', color: '#fbbf24', icon: '✍️' },
+                                    { role: 'Guest', color: '#94a3b8', icon: '👤' },
+                                ].map(({ role, color, icon }) => (
+                                    <span key={role} style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '999px', background: `${color}20`, color, border: `1px solid ${color}40`, fontWeight: 600 }}>
+                                        {icon} {role}
+                                    </span>
+                                ))}
+                            </div>
+
+                            {/* Quick Room Join */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', marginBottom: '14px' }}>
                                 <input
                                     type="text"
                                     value={quickJoinInput}
                                     onChange={(e) => setQuickJoinInput(e.target.value)}
-                                    placeholder="Room ID or invite link for quick join"
-                                    style={{
-                                        padding: '10px 12px',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--border-color)',
-                                        background: 'rgba(255,255,255,0.04)',
-                                        color: 'var(--text-color)'
-                                    }}
+                                    placeholder="Invite link or Room ID"
+                                    style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-color)', fontSize: '13px' }}
                                 />
-                                <button
-                                    type="button"
-                                    onClick={handleQuickJoin}
-                                    style={{
-                                        border: '1px solid rgba(56, 189, 248, 0.5)',
-                                        background: 'rgba(56, 189, 248, 0.15)',
-                                        color: 'var(--text-color)',
-                                        borderRadius: '8px',
-                                        padding: '10px',
-                                        fontWeight: 700,
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Quick Join Room
+                                <button type="button" onClick={handleQuickJoin}
+                                    style={{ border: '1px solid rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.12)', color: '#38bdf8', borderRadius: '8px', padding: '9px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                    Join Room
                                 </button>
                             </div>
                         </div>
@@ -4307,6 +4523,95 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 </div>
                 )}
             </div>
+
+            {/* Add Team Member Modal */}
+            {showAddMemberModal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                    <div style={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '420px', margin: '0 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                            <div>
+                                <div style={{ fontSize: '18px', fontWeight: 800, color: '#e2e8f0' }}>Add Team Member</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Assign a role to invite them to the session</div>
+                            </div>
+                            <button type="button" onClick={() => setShowAddMemberModal(false)}
+                                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer', padding: '4px' }}>✕</button>
+                        </div>
+
+                        <div style={{ display: 'grid', gap: '16px' }}>
+                            {/* Role selector first — drives the name prompt */}
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Role</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                                    {[
+                                        { role: 'Director', icon: '🎬', color: '#a78bfa' },
+                                        { role: 'Producer', icon: '🎚️', color: '#38bdf8' },
+                                        { role: 'Host', icon: '🎤', color: '#4ade80' },
+                                        { role: 'Script Writer', icon: '✍️', color: '#fbbf24' },
+                                        { role: 'Editor', icon: '✂️', color: '#fb923c' },
+                                        { role: 'Guest', icon: '👤', color: '#94a3b8' },
+                                    ].map(({ role, icon, color }) => (
+                                        <button key={role} type="button"
+                                            onClick={() => setAddMemberRole(role)}
+                                            style={{
+                                                border: `1px solid ${addMemberRole === role ? color : 'rgba(148,163,184,0.2)'}`,
+                                                background: addMemberRole === role ? `${color}20` : 'transparent',
+                                                color: addMemberRole === role ? color : '#94a3b8',
+                                                borderRadius: '10px', padding: '10px 8px',
+                                                fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                                                display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center'
+                                            }}>
+                                            <span>{icon}</span> {role}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Name prompt — label changes based on role */}
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                    {addMemberRole === 'Guest' ? "Guest's Name" : `${addMemberRole}'s Name`}
+                                </label>
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={addMemberName}
+                                    onChange={(e) => setAddMemberName(e.target.value)}
+                                    placeholder={`Enter name for ${addMemberRole}…`}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && addMemberName.trim()) { handleAddTeamMember(); } }}
+                                    style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+
+                            {/* Optional: email/handle */}
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Email or Handle (optional)</label>
+                                <input
+                                    type="text"
+                                    value={addMemberIdentifier}
+                                    onChange={(e) => setAddMemberIdentifier(e.target.value)}
+                                    placeholder="@handle or email@example.com"
+                                    style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+
+                            <button
+                                type="button"
+                                disabled={!addMemberName.trim()}
+                                onClick={handleAddTeamMember}
+                                style={{
+                                    background: addMemberName.trim() ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(148,163,184,0.1)',
+                                    color: addMemberName.trim() ? '#fff' : '#64748b',
+                                    border: 'none', borderRadius: '12px', padding: '14px',
+                                    fontSize: '14px', fontWeight: 700, cursor: addMemberName.trim() ? 'pointer' : 'not-allowed',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                ➕ Add {addMemberRole} — {addMemberName.trim() || 'Enter name above'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── Pricing Modal ── */}
             {showPricingModal && (

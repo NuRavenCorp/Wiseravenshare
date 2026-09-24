@@ -117,6 +117,25 @@ services:
       - key: Stripe_WiseravenShare_MusicStudioRights_ProProdId
         value: prod_VC3zXy445DbV0w
         type: SECRET
+      # Podcast Pro plan price IDs (backend uses these for checkout session creation)
+      - key: STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID
+        value: ${STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID
+        value: ${STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID
+        value: ${STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID
+        value: ${STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID
+        value: ${STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID}
+        type: SECRET
+      - key: STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID
+        value: ${STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID}
+        type: SECRET
       - key: Authentication__OAuthProviders__Google__ClientId
         value: ${GOOGLE_OAUTH_CLIENT_ID}
         type: SECRET
@@ -268,6 +287,25 @@ static_sites:
         value: prod_VC3zXy445DbV0w
       - key: VITE_ADMIN_EMAILS
         value: admin@wise-ravens.com
+      # Podcast Pro Stripe price IDs — replace with real price_XXXX from Stripe Dashboard
+      - key: VITE_STRIPE_GROWTH_SUITE_MONTHLY_ID
+        value: ${STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID}
+        type: SECRET
+      - key: VITE_STRIPE_GROWTH_SUITE_ANNUAL_ID
+        value: ${STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID}
+        type: SECRET
+      - key: VITE_STRIPE_STUDIO_PLUS_MONTHLY_ID
+        value: ${STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID}
+        type: SECRET
+      - key: VITE_STRIPE_STUDIO_PLUS_ANNUAL_ID
+        value: ${STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID}
+        type: SECRET
+      - key: VITE_STRIPE_PODCAST_PRO_MONTHLY_ID
+        value: ${STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID}
+        type: SECRET
+      - key: VITE_STRIPE_PODCAST_PRO_ANNUAL_ID
+        value: ${STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID}
+        type: SECRET
 
 ingress:
   rules:
