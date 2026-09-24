@@ -14,6 +14,7 @@ export const SocialBridge: React.FC = () => {
   const [tiktokUsername, setTiktokUsername] = useState('');
   const [publishToFacebook, setPublishToFacebook] = useState(true);
   const [publishToTikTok, setPublishToTikTok] = useState(true);
+  const [publishToWiseRavenStream, setPublishToWiseRavenStream] = useState(true);
 
   const feedQuery = useQuery({
     queryKey: ['social-feed', facebookPageId, tiktokUsername],
@@ -43,8 +44,8 @@ export const SocialBridge: React.FC = () => {
   });
 
   const canSubmit = useMemo(() => {
-    return message.trim().length > 0 && (publishToFacebook || publishToTikTok);
-  }, [message, publishToFacebook, publishToTikTok]);
+    return message.trim().length > 0 && (publishToFacebook || publishToTikTok || publishToWiseRavenStream);
+  }, [message, publishToFacebook, publishToTikTok, publishToWiseRavenStream]);
 
   const submit = () => {
     if (!canSubmit) {
@@ -58,6 +59,7 @@ export const SocialBridge: React.FC = () => {
       videoUrl: videoUrl.trim() || undefined,
       publishToFacebook,
       publishToTikTok,
+      publishToWiseRavenStream,
     });
   };
 
@@ -90,7 +92,7 @@ export const SocialBridge: React.FC = () => {
           </label>
 
           <label className="block text-sm text-gray-300">
-            Optional Public Video URL (required by TikTok direct publish)
+            Optional Public Video URL (required by TikTok, WiseRavenStream, YouTube direct publish)
             <input
               className="mt-1 w-full rounded-lg border border-border bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-primary"
               value={videoUrl}
@@ -107,6 +109,10 @@ export const SocialBridge: React.FC = () => {
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={publishToTikTok} onChange={(e) => setPublishToTikTok(e.target.checked)} />
               TikTok
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={publishToWiseRavenStream} onChange={(e) => setPublishToWiseRavenStream(e.target.checked)} />
+              WiseRavenStream
             </label>
           </div>
 

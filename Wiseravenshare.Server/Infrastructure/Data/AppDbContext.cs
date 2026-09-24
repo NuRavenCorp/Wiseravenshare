@@ -8,6 +8,7 @@ using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
 using Wiseravenshare.Server.Entities.CrossPlatform;
 using Wiseravenshare.Server.Entities.Crawler;
+using Wiseravenshare.Server.Entities.Stream;
 using WiseRavenShare.Server.Core.Entities.Craft;
 using WiseRavenShare.Server.Infrastructure.Data;
 using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
@@ -129,6 +130,10 @@ public class AppDbContext : DbContext
     public DbSet<RoomParticipant> RoomParticipants => Set<RoomParticipant>();
     public DbSet<BridgeMessage> BridgeMessages => Set<BridgeMessage>();
     public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
+
+    // Stream transfers
+    public DbSet<StreamTransfer> StreamTransfers => Set<StreamTransfer>();
+    public DbSet<StreamGatekeeperDecision> StreamGatekeeperDecisions => Set<StreamGatekeeperDecision>();
 
     // Roles
     public DbSet<Wiseravenshare.Server.Entities.Roles.UserRole> UserRoles => Set<Wiseravenshare.Server.Entities.Roles.UserRole>();
@@ -1070,3 +1075,4 @@ public class AppDbContext : DbContext
         });
     }
 }
+

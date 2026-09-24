@@ -42,6 +42,7 @@ import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import WiseCoinPage from './Pages/WiseCoinPage';
+import GatekeeperDashboard from './Pages/GatekeeperDashboard.jsx';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
@@ -537,6 +538,10 @@ const App = () => {
                 return isAdminUser
                     ? <GrowthPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+            case 'gatekeeper':
+                return isAdminUser
+                    ? <GatekeeperDashboard />
+                    : <div style={{ padding: '20px' }}>Admin access required.</div>;
             case 'admin-panel':
                 return isAdminUser
                     ? <AdminPanelPage onNavigate={setCurrentPage} />
@@ -943,3 +948,5 @@ const App = () => {
 };
 
 export default App;
+
+

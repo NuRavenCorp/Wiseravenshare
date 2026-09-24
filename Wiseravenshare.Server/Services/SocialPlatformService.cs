@@ -25,7 +25,8 @@ public interface ISocialPlatformService
         string mediaType,
         bool publishToFacebook,
         bool publishToTikTok,
-        bool publishToYouTube);
+        bool publishToYouTube,
+        bool publishToWiseRavenStream = false);
 }
 
 public class SocialPlatformService : ISocialPlatformService
@@ -319,6 +320,16 @@ public class SocialPlatformService : ISocialPlatformService
                 PublishConfigured = false,
                 ActiveMode = "handle-link-mode",
                 Detail = "Feed card uses connected handle/link."
+            },
+            new()
+            {
+                Platform = "wiseravenstream",
+                ReadConfigured = false,
+                PublishConfigured = IsWiseRavenStreamConfigured(),
+                ActiveMode = IsWiseRavenStreamConfigured() ? "webhook-transfer" : "not-configured",
+                Detail = IsWiseRavenStreamConfigured()
+                    ? "Transfers video uploads to WiseRavenStream via the configured webhook."
+                    : "Set Social:WiseRavenStream:WebhookUrl and token to enable transfers."
             }
         };
 
@@ -374,12 +385,18 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToYouTubeAsync(message, request.VideoUrl));
         }
 
+        if (request.PublishToWiseRavenStream)
+        {
+            response.Results.Add(await PublishToWiseRavenStreamAsync(message, request.VideoUrl, mediaType));
+        }
+
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}, MediaType={MediaType}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
             userId,
             request.PublishToFacebook,
             request.PublishToTikTok,
             request.PublishToYouTube,
+            request.PublishToWiseRavenStream,
             mediaType);
 
         return response;
@@ -392,7 +409,8 @@ public class SocialPlatformService : ISocialPlatformService
         string mediaType,
         bool publishToFacebook,
         bool publishToTikTok,
-        bool publishToYouTube)
+        bool publishToYouTube,
+        bool publishToWiseRavenStream = false)
     {
         var request = new PublishSocialContentRequest
         {
@@ -403,7 +421,8 @@ public class SocialPlatformService : ISocialPlatformService
             MediaType = mediaType,
             PublishToFacebook = publishToFacebook,
             PublishToTikTok = publishToTikTok,
-            PublishToYouTube = publishToYouTube
+            PublishToYouTube = publishToYouTube,
+            PublishToWiseRavenStream = publishToWiseRavenStream
         };
 
         return await PublishAsync(userId, request);
@@ -838,6 +857,153 @@ public class SocialPlatformService : ISocialPlatformService
                 Error = ex.Message
             };
         }
+    }
+
+    private async Task<SocialPublishResultDto> PublishToWiseRavenStreamAsync(string message, string? videoUrl, string mediaType)
+    {
+        if (string.IsNullOrWhiteSpace(videoUrl))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "wiseravenstream",
+                Success = false,
+                Error = "WiseRavenStream transfers require a public videoUrl."
+            };
+        }
+
+        if (!string.Equals(mediaType, SocialMediaType.Video, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, SocialMediaType.Auto, StringComparison.OrdinalIgnoreCase))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "wiseravenstream",
+                Success = false,
+                Error = "WiseRavenStream only accepts video transfers."
+            };
+        }
+
+        var webhookUrl = ResolveWiseRavenStreamWebhookUrl();
+        if (string.IsNullOrWhiteSpace(webhookUrl))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "wiseravenstream",
+                Success = false,
+                Error = "WiseRavenStream is not configured. Set Social:WiseRavenStream:WebhookUrl."
+            };
+        }
+
+        var token = ResolveWiseRavenStreamWebhookToken();
+        var payload = new
+        {
+            eventName = "post.published",
+            job_id = $"wr-{Guid.NewGuid():N}",
+            message = message,
+            media_url = videoUrl,
+            media_type = "video",
+            source = "wiseravenshare",
+            destination = "wiseravenstream"
+        };
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, webhookUrl);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                httpRequest.Headers.TryAddWithoutValidation("X-WR-Webhook-Token", token);
+            }
+
+            httpRequest.Content = JsonContent.Create(payload);
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "WiseRavenStream transfer failed ({Status}): {Body}",
+                    (int)response.StatusCode,
+                    body);
+
+                return new SocialPublishResultDto
+                {
+                    Platform = "wiseravenstream",
+                    Success = false,
+                    Error = $"WiseRavenStream transfer failed ({(int)response.StatusCode}): {TrimError(body)}"
+                };
+            }
+
+            string? externalId = null;
+            string? externalUrl = null;
+
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(body);
+                    externalId = ReadJsonString(document.RootElement, "transfer_id")
+                        ?? ReadJsonString(document.RootElement, "job_id")
+                        ?? ReadJsonString(document.RootElement, "id");
+                    externalUrl = ReadJsonString(document.RootElement, "transfer_url")
+                        ?? ReadJsonString(document.RootElement, "url");
+                }
+                catch (JsonException)
+                {
+                    // Keep the success result even when the downstream webhook does not return JSON.
+                }
+            }
+
+            return new SocialPublishResultDto
+            {
+                Platform = "wiseravenstream",
+                Success = true,
+                ExternalPostId = externalId,
+                ExternalPostUrl = externalUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "WiseRavenStream transfer threw for video URL {VideoUrl}", videoUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "wiseravenstream",
+                Success = false,
+                Error = $"WiseRavenStream transfer failed: {ex.Message}"
+            };
+        }
+    }
+
+    private bool IsWiseRavenStreamConfigured() =>
+        !string.IsNullOrWhiteSpace(ResolveWiseRavenStreamWebhookUrl());
+
+    private string? ResolveWiseRavenStreamWebhookUrl() =>
+        _configuration["Social:WiseRavenStream:WebhookUrl"]
+        ?? _configuration["SOCIAL_WISERAVENSTREAM_WEBHOOK_URL"]
+        ?? _configuration["Social:Publish:MiddlewareWebhookUrl"]
+        ?? _configuration["SOCIAL_PUBLISH_MIDDLEWARE_WEBHOOK_URL"];
+
+    private string? ResolveWiseRavenStreamWebhookToken() =>
+        _configuration["Social:WiseRavenStream:WebhookToken"]
+        ?? _configuration["SOCIAL_WISERAVENSTREAM_WEBHOOK_TOKEN"]
+        ?? _configuration["Social:Publish:WebhookToken"]
+        ?? _configuration["WEBHOOK_TOKEN"]
+        ?? _configuration["SOCIAL_PUBLISH_WEBHOOK_TOKEN"];
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var value = property.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        var serialized = property.ToString();
+        return string.IsNullOrWhiteSpace(serialized) ? null : serialized;
     }
 
     private static DateTimeOffset? ParseDate(JsonElement element, string propertyName)

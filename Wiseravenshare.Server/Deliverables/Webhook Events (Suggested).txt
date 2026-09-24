@@ -1,0 +1,8 @@
+content.auto_screen.started	Screening begins
+content.auto_screen.passed	All 10 PASS → auto-approved
+content.auto_screen.flagged	Any FLAG → human queue
+content.auto_screen.failed	Any FAIL → auto-block
+content.human.reviewed	Admin decision logged
+content.published	Content live
+content.appealed	Appeal submitted
+content.enforcement.applied	Tier action applied

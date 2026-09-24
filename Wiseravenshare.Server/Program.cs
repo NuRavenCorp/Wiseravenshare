@@ -760,6 +760,47 @@ CREATE TABLE IF NOT EXISTS app_data.""InstrumentConnections"" (
 
 CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
     ON app_data.""InstrumentConnections"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StreamTransfers"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""SourceContentId"" VARCHAR(200) NOT NULL,
+    ""SourceCreatorId"" VARCHAR(200) NOT NULL,
+    ""VideoUrl"" VARCHAR(2048) NOT NULL,
+    ""Title"" VARCHAR(500) NOT NULL,
+    ""Description"" VARCHAR(4000) NULL,
+    ""FileSizeBytes"" BIGINT NOT NULL DEFAULT 0,
+    ""MimeType"" VARCHAR(100) NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""StreamVideoUid"" VARCHAR(200) NULL,
+    ""PublishedAt"" TIMESTAMPTZ NULL,
+    ""RetryCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RubricResultJson"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_data.""StreamGatekeeperDecisions"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""TransferId"" UUID NOT NULL REFERENCES app_data.""StreamTransfers""(""Id"") ON DELETE CASCADE,
+    ""AdminId"" VARCHAR(200) NOT NULL,
+    ""Action"" VARCHAR(50) NOT NULL,
+    ""Rationale"" VARCHAR(2000) NOT NULL,
+    ""DecidedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stream_transfers_status
+    ON app_data.""StreamTransfers"" (""Status"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_stream_transfers_creator
+    ON app_data.""StreamTransfers"" (""SourceCreatorId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_stream_gatekeeper_transfer
+    ON app_data.""StreamGatekeeperDecisions"" (""TransferId"");
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
     ON app_data.""InstrumentConnections"" (""UserId"", ""DeviceIdentifier"");
 
@@ -1816,6 +1857,7 @@ builder.Services.AddScoped<IPPublishingAgent>();
 builder.Services.AddScoped<IPFormAutomationBot>();
 builder.Services.AddHostedService<IPPublishingAgentHostedService>();
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.StreamBridge.IStreamTransferService, Wiseravenshare.Server.Services.StreamBridge.StreamTransferService>();
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
@@ -2536,3 +2578,7 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
+
+
+
+

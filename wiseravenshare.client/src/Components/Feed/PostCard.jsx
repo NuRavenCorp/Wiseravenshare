@@ -4,6 +4,7 @@ import { truthEngine } from '../../Services/truthEngine';
 import { apiService } from '../../Services/api';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { classifyPostMedia } from './postMediaClassifier';
+import SendToStreamButton from './SendToStreamButton.jsx';
 
 const PostCard = ({
     post,
@@ -632,3 +633,4 @@ const PostCard = ({
 };
 
 export default PostCard;
+
