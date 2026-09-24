@@ -763,6 +763,7 @@ CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
 
 CREATE TABLE IF NOT EXISTS app_data.""StreamTransfers"" (
     ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""SourceApp"" VARCHAR(100) NOT NULL DEFAULT 'WiseRavenShare',
     ""SourceContentId"" VARCHAR(200) NOT NULL,
     ""SourceCreatorId"" VARCHAR(200) NOT NULL,
     ""VideoUrl"" VARCHAR(2048) NOT NULL,
@@ -800,6 +801,9 @@ CREATE INDEX IF NOT EXISTS idx_stream_transfers_creator
     ON app_data.""StreamTransfers"" (""SourceCreatorId"", ""CreatedAt"" DESC);
 CREATE INDEX IF NOT EXISTS idx_stream_gatekeeper_transfer
     ON app_data.""StreamGatekeeperDecisions"" (""TransferId"");
+
+ALTER TABLE IF EXISTS app_data.""StreamTransfers""
+    ADD COLUMN IF NOT EXISTS ""SourceApp"" VARCHAR(100) NOT NULL DEFAULT 'WiseRavenShare';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
     ON app_data.""InstrumentConnections"" (""UserId"", ""DeviceIdentifier"");
@@ -2578,7 +2582,6 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
-
 
 
 

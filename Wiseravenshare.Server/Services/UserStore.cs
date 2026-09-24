@@ -365,6 +365,21 @@ public sealed class UserStore
             .ToList();
     }
 
+
+    public UserRecord SetPrivileges(string id, IEnumerable<string> privileges)
+    {
+        if (!TryGetById(id, out var user) || user is null)
+            throw new KeyNotFoundException("User not found.");
+
+        user.Privileges = privileges
+            .Select(p => p.Trim().ToLowerInvariant())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct()
+            .ToList();
+        user.UpdatedAtUtc = DateTime.UtcNow;
+        PersistUsers(user);
+        return user;
+    }
     public UserRecord UpdateProfile(string id, UpdateUserProfileRequest request)
     {
         if (!TryGetById(id, out var user) || user is null)
@@ -1435,3 +1450,4 @@ ADD COLUMN IF NOT EXISTS ai_settings JSONB NOT NULL DEFAULT '{{}}'::jsonb;";
         return builder.ConnectionString;
     }
 }
+

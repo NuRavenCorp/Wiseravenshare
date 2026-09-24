@@ -20,6 +20,9 @@ public enum StreamTransferStatus
 
 public class StreamTransfer : BaseEntity
 {
+    [Required, MaxLength(100)]
+    public string SourceApp { get; set; } = "WiseRavenShare";
+
     [Required, MaxLength(200)]
     public string SourceContentId { get; set; } = string.Empty;
 

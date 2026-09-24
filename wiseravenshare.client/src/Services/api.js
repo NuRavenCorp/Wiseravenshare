@@ -1571,6 +1571,14 @@ export const apiService = {
     setFeatureCompartmentAvailability: (key, mode, reason = '') =>
         api.put(`/admin/feature-compartments/${encodeURIComponent(key)}/availability`, { mode, reason }),
 
+
+    // Admin User Management
+    getAdminUsers: (params) => api.get('/admin/users', { params }),
+    getAdminUser: (id) => api.get(`/admin/users/${id}`),
+    setUserPrivileges: (id, privileges) => api.put(`/admin/users/${id}/privileges`, { privileges }),
+    grantUserPrivilege: (id, privilege) => api.post(`/admin/users/${id}/privileges/${encodeURIComponent(privilege)}`),
+    revokeUserPrivilege: (id, privilege) => api.delete(`/admin/users/${id}/privileges/${encodeURIComponent(privilege)}`),
+    getPrivilegeCatalogue: () => api.get('/admin/users/privilege-catalogue'),
     // IP Publishing Agent — top-level convenience aliases for AdminPanelPage
     getIpPublishingAgentDiagnostics: () => api.get('/ip-publishing-agent/diagnostics'),
     getIpBotLogs: (limit = 50) => api.get('/ip-publishing-agent/bot/logs', { params: { limit } }),
@@ -1627,6 +1635,14 @@ export const apiService = {
         getUserFilings: (podcastId) => api.get('/podcast-trademark/user/filings', { params: { podcastId } })
     },
 
+
+    // Admin User Management
+    getAdminUsers: (params) => api.get('/admin/users', { params }),
+    getAdminUser: (id) => api.get(`/admin/users/${id}`),
+    setUserPrivileges: (id, privileges) => api.put(`/admin/users/${id}/privileges`, { privileges }),
+    grantUserPrivilege: (id, privilege) => api.post(`/admin/users/${id}/privileges/${encodeURIComponent(privilege)}`),
+    revokeUserPrivilege: (id, privilege) => api.delete(`/admin/users/${id}/privileges/${encodeURIComponent(privilege)}`),
+    getPrivilegeCatalogue: () => api.get('/admin/users/privilege-catalogue'),
     // IP Publishing Agent & Form Automation Bot
     ipPublishingAgentApi: {
         submitCopyright: (payload) => api.post('/ip-publishing-agent/copyright/submit', payload),

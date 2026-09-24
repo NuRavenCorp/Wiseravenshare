@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { getGatekeeperQueue, submitGatekeeperDecision } from '../Services/streamTransferService.js';
 
 const RESULT_COLOR = { PASS: '#22c55e', FLAG: '#f59e0b', FAIL: '#ef4444' };
@@ -9,18 +9,37 @@ const ACTION_STYLE = {
   Rejected:     { bg: '#ef4444', label: '🚫 Reject' },
 };
 
+const originBadge = {
+  background: '#0f766e',
+  color: '#fff',
+  borderRadius: 9999,
+  padding: '2px 8px',
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  display: 'inline-flex',
+  alignItems: 'center',
+};
+
 export default function GatekeeperDashboard() {
   const [queue, setQueue]         = useState([]);
   const [selected, setSelected]   = useState(null);
   const [rationale, setRationale] = useState('');
   const [busy, setBusy]           = useState(false);
   const [error, setError]         = useState(null);
+  const [notice, setNotice]       = useState('');
+  const [query, setQuery]         = useState('');
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const items = await getGatekeeperQueue();
       setQueue(items);
-    } catch {
+      setSelected((prev) => (prev ? (items.find((item) => item.id === prev.id) ?? null) : null));
+    } catch (err) {
+      if (err?.response?.status === 403) {
+        setError('Forbidden: this page requires Admin or Moderator role.');
+        return;
+      }
       setError('Failed to load queue. Check your permissions.');
     }
   }, []);
@@ -32,11 +51,16 @@ export default function GatekeeperDashboard() {
   }, [load]);
 
   const handleDecision = async (action) => {
-    if (!selected || rationale.trim().length < 10) return;
+    if (!selected || rationale.trim().length < 10) {
+      setError('Rationale must be at least 10 characters.');
+      return;
+    }
     setBusy(true);
     setError(null);
+    setNotice('');
     try {
       await submitGatekeeperDecision(selected.id, action, rationale.trim());
+      setNotice(`Decision saved: ${ACTION_STYLE[action]?.label ?? action}`);
       setSelected(null);
       setRationale('');
       await load();
@@ -49,6 +73,15 @@ export default function GatekeeperDashboard() {
 
   const rubric = selected?.rubricResult?.points ?? [];
   const flagCount = rubric.filter(p => p.result === 'FLAG').length;
+  const filteredQueue = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return queue;
+    return queue.filter((item) => {
+      const title = String(item?.title || '').toLowerCase();
+      const creator = String(item?.sourceCreatorId || '').toLowerCase();
+      return title.includes(needle) || creator.includes(needle);
+    });
+  }, [queue, query]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif' }}>
@@ -58,21 +91,37 @@ export default function GatekeeperDashboard() {
           <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>
             👁️ Gatekeeper Queue
             <span style={{ marginLeft: 8, background: '#f59e0b', color: '#fff', borderRadius: 9999, padding: '2px 8px', fontSize: '0.75rem' }}>
-              {queue.length}
+              {filteredQueue.length}
             </span>
           </h2>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search title or creator"
+              style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 8px', fontSize: '0.8rem' }}
+            />
+            <button
+              onClick={() => { setNotice(''); void load(); }}
+              disabled={busy}
+              style={{ border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', padding: '6px 8px', fontSize: '0.8rem', cursor: 'pointer' }}
+            >
+              Refresh
+            </button>
+          </div>
           {error && <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: 6 }}>{error}</p>}
+          {notice && <p style={{ color: '#166534', fontSize: '0.8rem', marginTop: 6 }}>{notice}</p>}
         </div>
-        {queue.length === 0 && (
+        {filteredQueue.length === 0 && (
           <p style={{ padding: 16, color: '#9ca3af', fontSize: '0.85rem' }}>No items pending review.</p>
         )}
-        {queue.map(t => {
+        {filteredQueue.map(t => {
           const flags = t.rubricResult?.points?.filter(p => p.result === 'FLAG').length ?? 0;
           const isSelected = selected?.id === t.id;
           return (
             <div
               key={t.id}
-              onClick={() => { setSelected(t); setRationale(''); }}
+              onClick={() => { setSelected(t); setRationale(''); setError(null); setNotice(''); }}
               style={{
                 padding: '12px 16px',
                 borderBottom: '1px solid #e5e7eb',
@@ -84,6 +133,9 @@ export default function GatekeeperDashboard() {
               <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
               <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 2 }}>
                 {t.sourceCreatorId} · {new Date(t.createdAt).toLocaleTimeString()}
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <span style={originBadge}>{t.sourceApp || 'WiseRavenShare'}</span>
               </div>
               {flags > 0 && (
                 <span style={{ fontSize: '0.7rem', background: '#fef3c7', color: '#92400e', borderRadius: 4, padding: '1px 6px', marginTop: 4, display: 'inline-block' }}>
@@ -110,6 +162,11 @@ export default function GatekeeperDashboard() {
               Submitted: {new Date(selected.createdAt).toLocaleString()} ·
               {flagCount > 0 && <span style={{ color: '#f59e0b' }}> {flagCount} flag{flagCount > 1 ? 's' : ''}</span>}
             </p>
+            <div style={{ marginBottom: 16 }}>
+              <span style={originBadge}>
+                {selected.sourceApp || 'WiseRavenShare'} → WiseRavenStream
+              </span>
+            </div>
 
             <video src={selected.videoUrl} controls style={{ width: '100%', maxWidth: 640, borderRadius: 8, marginBottom: 20, background: '#000' }} />
 

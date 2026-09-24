@@ -4,6 +4,7 @@ import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { pageMapService } from '../Services/pageMapService';
 import { crawlerService } from '../Services/crawlerService';
+import { getGatekeeperQueue, submitGatekeeperDecision } from '../Services/streamTransferService.js';
 import { siteAuditCrawlerService } from '../Services/siteAuditCrawlerService';
 import FeatureReleaseAdminPage from './FeatureReleaseAdminPage';
 import TeamAccessAdminPage from './TeamAccessAdminPage';
@@ -20,6 +21,8 @@ const TABS = [
     { id: 'revenue',  label: '📊 Revenue',        desc: 'Revenue console and subscription analytics' },
     { id: 'crawler',  label: '🔍 Crawler Audit',  desc: 'Site health scans, SEO issues, and page metrics' },
     { id: 'agent',    label: '🤖 Services Agent', desc: 'IP publishing agent status, bot logs, and diagnostics' },
+    { id: 'stream',   label: '🎬 Stream Queue',  desc: 'Authorise content transfers to WiseRavenStream' },
+    { id: 'users',    label: '👑 Users',         desc: 'Manage user privileges, Pro access, and stream authorisation' },
 ];
 
 const CATEGORY_META = {
@@ -989,6 +992,261 @@ const ServicesAgentTab = () => {
 
 /* ─── Main AdminPanelPage ────────────────────────────────────────────── */
 
+
+/* ─── Stream Queue tab (inline gatekeeper) ────────────────────────────── */
+
+const RUBRIC_COLOR = { PASS: '#4ade80', FLAG: '#f59e0b', FAIL: '#f87171' };
+const DECISION_BTN = {
+  Cleared:      { bg: '#22c55e', label: '✅ Clear & Publish' },
+  RequiresEdit: { bg: '#f59e0b', label: '✏️ Needs Edit' },
+  Escalated:    { bg: '#8b5cf6', label: '⬆️ Escalate' },
+  Rejected:     { bg: '#ef4444', label: '🚫 Reject' },
+};
+
+const StreamQueueTab = () => {
+  const { addToast } = useNotification();
+  const [queue, setQueue]         = useState([]);
+  const [selected, setSelected]   = useState(null);
+  const [rationale, setRationale] = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [busy, setBusy]           = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setQueue(await getGatekeeperQueue()); }
+    catch { addToast('Failed to load stream queue.', 'error'); }
+    finally { setLoading(false); }
+  }, [addToast]);
+
+  useEffect(() => { load(); const iv = setInterval(load, 10000); return () => clearInterval(iv); }, [load]);
+
+  const decide = async (action) => {
+    if (!selected || rationale.trim().length < 10) return;
+    setBusy(true);
+    try {
+      await submitGatekeeperDecision(selected.id, action, rationale.trim());
+      addToast(`Decision "${action}" applied.`, 'success');
+      setSelected(null); setRationale(''); await load();
+    } catch (err) {
+      addToast(err?.response?.data?.error || 'Decision failed.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const rubric = selected?.rubricResult?.points ?? [];
+
+  return (
+    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+      {/* Queue list */}
+      <div style={{ flex: '0 0 280px', background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '16px', overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 700, fontSize: '14px', color: '#e2e8f0' }}>📋 Pending</span>
+          <span style={{ background: '#f59e0b', color: '#000', borderRadius: 999, padding: '1px 8px', fontSize: '12px', fontWeight: 700 }}>{queue.length}</span>
+        </div>
+        {loading && <div style={{ padding: 16, color: '#94a3b8', fontSize: 13 }}>Loading…</div>}
+        {!loading && queue.length === 0 && <div style={{ padding: 16, color: '#94a3b8', fontSize: 13 }}>✓ Queue empty</div>}
+        {queue.map(t => {
+          const flags = t.rubricResult?.points?.filter(p => p.result === 'FLAG').length ?? 0;
+          const sel = selected?.id === t.id;
+          return (
+            <div key={t.id} onClick={() => { setSelected(t); setRationale(''); }}
+              style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer',
+                background: sel ? 'rgba(129,140,248,0.12)' : 'transparent',
+                borderLeft: sel ? '3px solid #818cf8' : '3px solid transparent' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{new Date(t.createdAt).toLocaleTimeString()}</div>
+              {flags > 0 && <span style={{ fontSize: 10, background: 'rgba(245,158,11,0.15)', color: '#f59e0b', borderRadius: 4, padding: '1px 6px' }}>{flags} flag{flags > 1 ? 's' : ''}</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Detail */}
+      <div style={{ flex: 1, minWidth: 300 }}>
+        {!selected ? (
+          <div style={{ padding: 48, textAlign: 'center', color: '#475569' }}>
+            <div style={{ fontSize: 32 }}>🎬</div>
+            <div style={{ marginTop: 8 }}>Select a transfer to review</div>
+          </div>
+        ) : (
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20, display: 'grid', gap: 16 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: '#e2e8f0' }}>{selected.title}</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Creator: {selected.sourceCreatorId} · {new Date(selected.createdAt).toLocaleString()}</div>
+            </div>
+            <video src={selected.videoUrl} controls style={{ width: '100%', maxWidth: 560, borderRadius: 10, background: '#000' }} />
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ background: 'rgba(255,255,255,0.04)' }}>
+                {['#','Point','Result','Conf'].map(h => <th key={h} style={{ textAlign: 'left', padding: '5px 8px', fontWeight: 700, borderBottom: '1px solid var(--border-color)' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>{rubric.map(p => (
+                <tr key={p.pointId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <td style={{ padding: '4px 8px', color: '#64748b' }}>{p.pointId}</td>
+                  <td style={{ padding: '4px 8px', color: '#cbd5e1' }}>{p.pointName}</td>
+                  <td style={{ padding: '4px 8px', fontWeight: 700, color: RUBRIC_COLOR[p.result] ?? '#94a3b8' }}>{p.result}</td>
+                  <td style={{ padding: '4px 8px', color: '#64748b' }}>{Math.round(p.confidence * 100)}%</td>
+                </tr>
+              ))}</tbody>
+            </table>
+            <textarea value={rationale} onChange={e => setRationale(e.target.value)}
+              placeholder="Rationale required (min 10 chars)"
+              style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', padding: 10, fontSize: 13, minHeight: 70, boxSizing: 'border-box', resize: 'vertical' }} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {Object.entries(DECISION_BTN).map(([action, {bg, label}]) => (
+                <button key={action} onClick={() => decide(action)} disabled={busy || rationale.trim().length < 10}
+                  style={{ background: bg, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', opacity: (busy || rationale.trim().length < 10) ? 0.45 : 1, fontSize: 13 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ─── Users tab ───────────────────────────────────────────────────────── */
+
+const KNOWN_PRIVILEGES = ['pro_user', 'stream.publish', 'stream.gatekeeper', 'moderator', 'beta_features'];
+const PRIV_META = {
+  'pro_user':           { icon: '👑', label: 'Pro User',          desc: 'Full Pro-tier feature access' },
+  'stream.publish':     { icon: '🎬', label: 'Stream Publish',    desc: 'Auto-approved for WiseRavenStream transfers' },
+  'stream.gatekeeper':  { icon: '👁️', label: 'Stream Gatekeeper', desc: 'Can review others\' stream queue' },
+  'moderator':          { icon: '🛡️', label: 'Moderator',         desc: 'Content moderation privileges' },
+  'beta_features':      { icon: '🧪', label: 'Beta Features',     desc: 'Early access to unreleased features' },
+};
+
+const UsersTab = () => {
+  const { addToast } = useNotification();
+  const [users, setUsers]       = useState([]);
+  const [total, setTotal]       = useState(0);
+  const [q, setQ]               = useState('');
+  const [page, setPage]         = useState(1);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState({});
+  const PAGE_SIZE = 30;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiService.getAdminUsers({ q: q || undefined, page, pageSize: PAGE_SIZE });
+      setUsers(res.data?.items ?? []);
+      setTotal(res.data?.totalCount ?? 0);
+    } catch (err) {
+      addToast(err?.response?.data?.error || 'Failed to load users.', 'error');
+    } finally { setLoading(false); }
+  }, [q, page, addToast]);
+
+  useEffect(() => { setPage(1); }, [q]);
+  useEffect(() => { load(); }, [load]);
+
+  const togglePrivilege = async (userId, priv, currentPrivs) => {
+    const key = `${userId}-${priv}`;
+    setSaving(s => ({ ...s, [key]: true }));
+    try {
+      const has = currentPrivs.includes(priv);
+      if (has) await apiService.revokeUserPrivilege(userId, priv);
+      else     await apiService.grantUserPrivilege(userId, priv);
+      addToast(`${has ? 'Revoked' : 'Granted'} ${priv}`, 'success');
+      await load();
+    } catch (err) {
+      addToast(err?.response?.data?.error || 'Failed to update privilege.', 'error');
+    } finally { setSaving(s => { const n = {...s}; delete n[key]; return n; }); }
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {/* Search + stats */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={q} onChange={e => setQ(e.target.value)}
+          placeholder="🔍 Search name / email / handle…"
+          style={{ flex: 1, minWidth: 200, padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 13 }} />
+        <span style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>{total} user{total !== 1 ? 's' : ''}</span>
+      </div>
+
+      {/* Privilege legend */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {KNOWN_PRIVILEGES.map(p => {
+          const m = PRIV_META[p];
+          return (
+            <span key={p} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6,
+              background: 'rgba(129,140,248,0.1)', border: '1px solid rgba(129,140,248,0.25)', color: '#a5b4fc' }}
+              title={m.desc}>{m.icon} {m.label}</span>
+          );
+        })}
+      </div>
+
+      {/* User table */}
+      {loading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>⏳ Loading users…</div>
+      ) : (
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: 16, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'rgba(255,255,255,0.04)', borderBottom: '1px solid var(--border-color)' }}>
+                <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>User</th>
+                <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>Privileges</th>
+                <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#94a3b8' }}>Joined</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {u.avatar && <img src={u.avatar} alt="" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />}
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#e2e8f0' }}>{u.name || '—'}</div>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{u.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {KNOWN_PRIVILEGES.map(priv => {
+                        const has = (u.privileges ?? []).includes(priv);
+                        const key = `${u.id}-${priv}`;
+                        const isSaving = saving[key];
+                        const m = PRIV_META[priv];
+                        return (
+                          <button key={priv} onClick={() => togglePrivilege(u.id, priv, u.privileges ?? [])}
+                            disabled={isSaving}
+                            title={m.desc}
+                            style={{
+                              fontSize: 11, padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontWeight: 600,
+                              background: has ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.04)',
+                              border: has ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                              color: has ? '#4ade80' : '#64748b',
+                              opacity: isSaving ? 0.5 : 1,
+                            }}>
+                            {m.icon} {isSaving ? '…' : m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 14px', fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>
+                    {new Date(u.createdAtUtc).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {/* Pagination */}
+          {total > PAGE_SIZE && (
+            <div style={{ padding: '12px 16px', display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)' }}>
+              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
+                style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>← Prev</button>
+              <span style={{ alignSelf: 'center', fontSize: 12, color: '#64748b' }}>{page} / {Math.ceil(total/PAGE_SIZE)}</span>
+              <button onClick={() => setPage(p => p+1)} disabled={page >= Math.ceil(total/PAGE_SIZE)}
+                style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>Next →</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 const AdminPanelPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('sitemap');
@@ -1078,8 +1336,19 @@ const AdminPanelPage = ({ onNavigate }) => {
             {activeTab === 'agent' && (
                 <ServicesAgentTab />
             )}
+
+            {activeTab === 'stream' && (
+                <StreamQueueTab />
+            )}
+
+            {activeTab === 'users' && (
+                <UsersTab />
+            )}
         </div>
     );
 };
 
 export default AdminPanelPage;
+
+
+

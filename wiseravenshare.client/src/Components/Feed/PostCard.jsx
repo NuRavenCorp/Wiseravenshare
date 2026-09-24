@@ -28,6 +28,8 @@ const PostCard = ({
     const [comments, setComments] = useState(post.comments || []);
     const [isLoadingComments, setIsLoadingComments] = useState(false);
     const [isSavingComment, setIsSavingComment] = useState(false);
+    const [isLiked, setIsLiked] = useState(Boolean(post.isLiked));
+    const [likesCount, setLikesCount] = useState(Number(post.likesCount ?? post.likes ?? 0));
     const [viewsCount, setViewsCount] = useState(Number(post.viewsCount ?? post.ViewsCount ?? 0));
     const [sharesCount, setSharesCount] = useState(Number(post.sharesCount ?? post.SharesCount ?? 0));
     const articleRef = useRef(null);
@@ -183,9 +185,60 @@ const PostCard = ({
         return items;
     }, [post.mediaUrl, post.url, post.videoUrl, post.imageUrl, post.mediaUrls]);
 
-    const likesCount = Number(post.likesCount ?? post.likes ?? 0);
+    useEffect(() => {
+        setIsLiked(Boolean(post.isLiked));
+        setLikesCount(Number(post.likesCount ?? post.likes ?? 0));
+    }, [post.id, post.isLiked, post.likesCount, post.likes]);
+
+    const streamVideoUrl = useMemo(
+        () => mediaItems.find((resolvedMedia) => classifyPostMedia(post, resolvedMedia).isVideoPost) || '',
+        [mediaItems, post]
+    );
+
+    const streamTitle = useMemo(() => {
+        const explicitTitle = String(post.title || post.headline || '').trim();
+        if (explicitTitle) {
+            return explicitTitle.slice(0, 500);
+        }
+
+        const contentPreview = String(post.content || '').trim();
+        if (contentPreview) {
+            return contentPreview.slice(0, 120);
+        }
+
+        return `Video post from ${displayHandle}`;
+    }, [displayHandle, post.content, post.headline, post.title]);
+
     const repostsCount = Number(post.repostsCount ?? post.reposts ?? 0);
     const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
+
+    const handleLike = async () => {
+        const previousLiked = isLiked;
+        const previousCount = likesCount;
+        const nextLiked = !previousLiked;
+        const nextCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+
+        setIsLiked(nextLiked);
+        setLikesCount(nextCount);
+
+        try {
+            if (typeof onLike === 'function') {
+                await onLike(post.id);
+                return;
+            }
+
+            const updated = nextLiked
+                ? await apiService.likePost(post.id)
+                : await apiService.unlikePost(post.id);
+
+            setIsLiked(Boolean(updated?.isLiked ?? nextLiked));
+            setLikesCount(Number(updated?.likesCount ?? nextCount));
+        } catch (error) {
+            setIsLiked(previousLiked);
+            setLikesCount(previousCount);
+            console.error('Failed to toggle like:', error);
+        }
+    };
 
     const handleToggleComments = async () => {
         const shouldOpen = !showComments;
@@ -473,11 +526,11 @@ const PostCard = ({
             {/* ── Action bar ──────────────────────────────────── */}
             <div className="post-actions">
                 <button
-                    className={`action-btn action-btn--like${post.isLiked ? ' is-active' : ''}`}
-                    onClick={() => onLike?.(post.id)}
-                    title={post.isLiked ? 'Unlike' : 'Like'}
+                    className={`action-btn action-btn--like${isLiked ? ' is-active' : ''}`}
+                    onClick={handleLike}
+                    title={isLiked ? 'Unlike' : 'Like'}
                 >
-                    <span className="action-btn__icon">{post.isLiked ? '❤️' : '🤍'}</span>
+                    <span className="action-btn__icon">{isLiked ? '❤️' : '🤍'}</span>
                     <span className="action-btn__count">{likesCount > 0 ? likesCount : ''}</span>
                 </button>
 
@@ -507,6 +560,19 @@ const PostCard = ({
                     <span className="action-btn__icon">↗</span>
                     {sharesCount > 0 && <span className="action-btn__count">{sharesCount}</span>}
                 </button>
+
+                {streamVideoUrl && post.id && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '6px' }}>
+                        <SendToStreamButton
+                            contentId={String(post.id)}
+                            videoUrl={streamVideoUrl}
+                            title={streamTitle}
+                            description={String(post.content || '').trim() || undefined}
+                            fileSize={Number(post.fileSizeBytes ?? post.fileSize ?? post.sizeBytes ?? 0)}
+                            mimeType={String(post.mimeType || post.mediaMimeType || '').trim() || undefined}
+                        />
+                    </div>
+                )}
 
                 <div className="action-btn--spacer" />
 
@@ -633,4 +699,3 @@ const PostCard = ({
 };
 
 export default PostCard;
-
