@@ -29,10 +29,12 @@ public sealed record InitiateTransferRequest(
     string Title,
     string? Description,
     long FileSizeBytes,
-    string? MimeType);
+    string? MimeType,
+    string SourceApp = "WiseRavenShare");
 
 public sealed record TransferDto(
     Guid Id,
+    string SourceApp,
     string SourceContentId,
     string SourceCreatorId,
     string VideoUrl,
@@ -65,26 +67,31 @@ public interface IStreamTransferService
 
 public sealed class StreamTransferService : IStreamTransferService
 {
+    private const string DefaultSourceApp = "WiseRavenShare";
     private readonly AppDbContext _db;
     private readonly IUploadMalwareScanner _scanner;
     private readonly ILogger<StreamTransferService> _logger;
 
+    private readonly UserStore _userStore;
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
     public StreamTransferService(
         AppDbContext db,
         IUploadMalwareScanner scanner,
-        ILogger<StreamTransferService> logger)
+        ILogger<StreamTransferService> logger,
+        UserStore userStore)
     {
         _db = db;
         _scanner = scanner;
         _logger = logger;
+        _userStore = userStore;
     }
 
     public async Task<TransferDto> InitiateAsync(InitiateTransferRequest req, CancellationToken ct = default)
     {
         var transfer = new StreamTransfer
         {
+            SourceApp = DefaultSourceApp,
             SourceContentId = req.SourceContentId,
             SourceCreatorId = req.SourceCreatorId,
             VideoUrl = req.VideoUrl,
@@ -98,6 +105,8 @@ public sealed class StreamTransferService : IStreamTransferService
         _db.Set<StreamTransfer>().Add(transfer);
         await _db.SaveChangesAsync(ct);
 
+        // Users with stream.publish privilege are pre-authorised — rubric flags skipped, hard FAILs still block.
+        var creatorHasPublishPrivilege = HasStreamPublishPrivilege(req.SourceCreatorId);
         var rubric = RunAutoScreen(transfer);
         transfer.RubricResultJson = JsonSerializer.Serialize(rubric, _json);
 
@@ -106,7 +115,7 @@ public sealed class StreamTransferService : IStreamTransferService
             transfer.Status = StreamTransferStatus.AutoBlocked;
             _logger.LogWarning("Transfer {Id} auto-blocked: FAIL in rubric", transfer.Id);
         }
-        else if (rubric.AllPassed)
+        else if (rubric.AllPassed || (creatorHasPublishPrivilege && !rubric.Points.Any(p => p.Result == "FAIL")))
         {
             transfer.Status = StreamTransferStatus.Approved;
             _logger.LogInformation("Transfer {Id} auto-approved", transfer.Id);
@@ -211,6 +220,12 @@ public sealed class StreamTransferService : IStreamTransferService
         return new RubricResult(allPassed, points, DateTime.UtcNow, "autoscreen-1.0.0");
     }
 
+    private bool HasStreamPublishPrivilege(string creatorId)
+    {
+        if (_userStore.TryGetById(creatorId, out var u) && u is not null)
+            return u.Privileges.Contains("stream.publish", StringComparer.OrdinalIgnoreCase);
+        return false;
+    }
     private static RubricResult? DeserializeRubric(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
@@ -219,9 +234,13 @@ public sealed class StreamTransferService : IStreamTransferService
     }
 
     private static TransferDto ToDto(StreamTransfer t, RubricResult? rubric) => new(
-        t.Id, t.SourceContentId, t.SourceCreatorId, t.VideoUrl,
+        t.Id, t.SourceApp, t.SourceContentId, t.SourceCreatorId, t.VideoUrl,
         t.Title, t.Description, t.Status.ToString(),
         t.StreamVideoUid, t.CreatedAt, t.PublishedAt,
         t.RetryCount, rubric);
 }
+
+
+
+
 

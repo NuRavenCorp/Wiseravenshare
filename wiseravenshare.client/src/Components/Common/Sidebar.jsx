@@ -138,6 +138,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
             8,
             0,
             { id: 'admin-panel', icon: 'fas fa-shield-alt', label: '🛡️ Admin Panel' },
+            { id: 'gatekeeper', icon: 'fas fa-eye', label: '👁️ Gatekeeper' },
             { id: 'revenue', icon: 'fas fa-chart-line', label: 'Revenue' },
             { id: 'team-access-admin', icon: 'fas fa-user-shield', label: 'Team Access' },
             { id: 'site-crawler-audit', icon: 'fas fa-spider', label: 'Site Crawler' },

@@ -14,6 +14,8 @@ const STATUS_ICON = {
   Cancelled:        { emoji: '✖️', label: 'Cancelled' },
 };
 
+const SOURCE_LABEL = 'WiseRavenShare → WiseRavenStream';
+
 /**
  * "Send to WiseRavenStream" button.
  *
@@ -33,14 +35,16 @@ export default function SendToStreamButton({
   fileSize = 0,
   mimeType,
 }) {
-  const { transfer, loading, error, start } = useStreamTransfer();
+  const { transfer, loading, error, start, retry } = useStreamTransfer({ sourceContentId: contentId });
   const [confirmed, setConfirmed] = useState(false);
+  const canStart = Boolean(contentId && videoUrl && title);
 
   const handleClick = async () => {
     if (!confirmed) { setConfirmed(true); return; }
     setConfirmed(false);
     await start({
       sourceContentId: contentId,
+      sourceApp: 'WiseRavenShare',
       videoUrl,
       title,
       description,
@@ -53,11 +57,14 @@ export default function SendToStreamButton({
     const { emoji, label } = STATUS_ICON[transfer.status] ?? { emoji: '…', label: transfer.status };
     const isRetryable = transfer.status === 'Failed';
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', flexWrap: 'wrap' }}>
         <span title={transfer.status}>{emoji} {label}</span>
+        <span style={badgeStyle('#0f766e')} title="Origin is limited to WiseRavenShare submissions">
+          {transfer.sourceApp || 'WiseRavenShare'}
+        </span>
         {isRetryable && (
           <button
-            onClick={() => start({ sourceContentId: contentId, videoUrl, title, description, fileSizeBytes: fileSize, mimeType })}
+            onClick={() => retry()}
             disabled={loading}
             style={btnStyle('#f59e0b')}
           >
@@ -78,17 +85,25 @@ export default function SendToStreamButton({
 
   if (confirmed) {
     return (
-      <span style={{ display: 'inline-flex', gap: '6px' }}>
+      <span style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '0.8rem', alignSelf: 'center' }}>Send to Stream?</span>
-        <button onClick={handleClick} disabled={loading} style={btnStyle('#22c55e')}>✓ Yes</button>
+        <span style={badgeStyle('#0f766e')} title="WiseRavenShare content only">
+          {SOURCE_LABEL}
+        </span>
+        <button onClick={handleClick} disabled={loading || !canStart} style={btnStyle('#22c55e')}>✓ Yes</button>
         <button onClick={() => setConfirmed(false)} style={btnStyle('#6b7280')}>✗ No</button>
       </span>
     );
   }
 
   return (
-    <button onClick={handleClick} disabled={loading} style={btnStyle('#3b82f6')} title="Send to WiseRavenStream">
-      {loading ? '📤 Sending…' : '📡 Send to Stream'}
+    <button
+      onClick={handleClick}
+      disabled={loading || !canStart}
+      style={btnStyle('#3b82f6')}
+      title={canStart ? `${SOURCE_LABEL}` : 'Video URL and title are required'}
+    >
+      {loading ? '📤 Sending…' : (canStart ? '📡 Send to Stream' : '📡 Stream unavailable')}
     </button>
   );
 }
@@ -103,5 +118,18 @@ function btnStyle(bg) {
     fontSize: '0.8rem',
     cursor: 'pointer',
     fontWeight: 600,
+  };
+}
+
+function badgeStyle(bg) {
+  return {
+    background: bg,
+    color: '#fff',
+    borderRadius: '999px',
+    padding: '2px 8px',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    display: 'inline-flex',
+    alignItems: 'center',
   };
 }

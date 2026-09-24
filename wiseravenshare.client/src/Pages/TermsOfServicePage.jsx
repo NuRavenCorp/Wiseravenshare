@@ -86,7 +86,7 @@ const TermsOfServicePage = ({ onBack }) => (
         </Section>
 
         <p style={{ fontSize: '12px', color: 'var(--light-color)', borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '8px' }}>
-            © {new Date().getFullYear()} NuRaven Corp · wiseravenshare.com/terms
+            © 2025 NuRavenCorp.WiseRavenShare-CreatorSocial. All rights reserved. · wiseravenshare.com/terms
         </p>
     </div>
 );

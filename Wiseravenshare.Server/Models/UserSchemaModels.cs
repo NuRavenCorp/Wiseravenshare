@@ -16,6 +16,8 @@ public sealed class UserRecord
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     public SocialFeedSettings SocialFeeds { get; set; } = new();
     public UserAiConnectorSettings AiConnector { get; set; } = new();
+    /// <summary>Admin-assigned privilege keys, e.g. "pro_user", "stream.publish", "moderator".</summary>
+    public List<string> Privileges { get; set; } = new();
 }
 
 public sealed class UserAiConnectorSettings
@@ -113,3 +115,4 @@ public sealed class UpdateSocialFeedsRequest
     public SocialFeedConnection? LinkedIn { get; set; }
     public SocialFeedConnection? Bluesky { get; set; }
 }
+

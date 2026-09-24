@@ -941,7 +941,7 @@ const App = () => {
                 >
                     Terms of Service
                 </button>
-                &nbsp;·&nbsp;© {new Date().getFullYear()} NuRaven Corp
+                &nbsp;·&nbsp;© 2025 NuRavenCorp.WiseRavenShare-CreatorSocial. All rights reserved.
             </footer>
         </div>
     );
