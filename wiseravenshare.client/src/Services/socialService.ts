@@ -33,6 +33,7 @@ export type PublishSocialContentRequest = {
   publishToFacebook: boolean;
   publishToTikTok: boolean;
   publishToYouTube?: boolean;
+  publishToWiseRavenStream?: boolean;
 };
 
 export type SocialPublishResult = {
@@ -216,6 +217,7 @@ export function buildMediaSharePayload(options: {
   publishToFacebook?: boolean;
   publishToTikTok?: boolean;
   publishToYouTube?: boolean;
+  publishToWiseRavenStream?: boolean;
 }): PublishSocialContentRequest {
   const mediaUrl = String(options.mediaUrl || '').trim();
   const isVideo = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl)
@@ -241,5 +243,6 @@ export function buildMediaSharePayload(options: {
     // TikTok/YouTube only accept video; music shares go to Facebook as audio posts
     publishToTikTok: Boolean(options.publishToTikTok) && isVideo,
     publishToYouTube: Boolean(options.publishToYouTube) && isVideo,
+    publishToWiseRavenStream: Boolean(options.publishToWiseRavenStream) && isVideo,
   };
 }

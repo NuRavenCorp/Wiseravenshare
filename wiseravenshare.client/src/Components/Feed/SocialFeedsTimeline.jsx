@@ -321,6 +321,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
+    const [publishWiseRavenStream, setPublishWiseRavenStream] = useState(false);
     const [publishInstagram, setPublishInstagram] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
     const [publishResults, setPublishResults] = useState(null);
@@ -804,7 +805,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         e?.preventDefault();
         if (!postMessage.trim()) return;
 
-        if (!publishFacebook && !publishTikTok && !publishYouTube) {
+        if (!publishFacebook && !publishTikTok && !publishYouTube && !publishWiseRavenStream) {
             setPublishResults([
                 {
                     platform: 'general',
@@ -827,7 +828,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             const isKnownVideoHost = /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts|vimeo\.com\/|dailymotion\.com\/video)/i.test(mediaUrl)
                 || mediaUrl.includes('videostreaming')
                 || /^data:video\//i.test(mediaUrl);
-            const forceVideoByPlatform = (publishYouTube || publishTikTok) && mediaUrl.length > 0;
+            const forceVideoByPlatform = (publishYouTube || publishTikTok || publishWiseRavenStream) && mediaUrl.length > 0;
             const isVideoUrl = hasVideoExtension || isKnownVideoHost || forceVideoByPlatform;
 
             const isPhotoUrl = !isVideoUrl && mediaUrl.length > 0 && (
@@ -835,15 +836,15 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 || /^data:image\//i.test(mediaUrl)
             );
 
-            // Guard: YouTube/TikTok require a public video URL.
-            if ((publishYouTube || publishTikTok) && !mediaUrl) {
-                const platformName = publishYouTube && publishTikTok
-                    ? 'YouTube/TikTok'
-                    : publishYouTube
-                        ? 'YouTube'
-                        : 'TikTok';
+            // Guard: YouTube/TikTok/WiseRavenStream require a public video URL.
+            if ((publishYouTube || publishTikTok || publishWiseRavenStream) && !mediaUrl) {
+                const platformName = [
+                    publishYouTube ? 'YouTube' : null,
+                    publishTikTok ? 'TikTok' : null,
+                    publishWiseRavenStream ? 'WiseRavenStream' : null
+                ].filter(Boolean).join('/');
                 setPublishResults([{
-                    platform: publishYouTube ? 'youtube' : 'tiktok',
+                    platform: publishWiseRavenStream ? 'wiseravenstream' : (publishYouTube ? 'youtube' : 'tiktok'),
                     success: false,
                     error: `${platformName} requires a public video URL. Paste one in the Video/Photo URL field.`
                 }]);
@@ -875,6 +876,16 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 }
             }
 
+            if (publishWiseRavenStream && !isVideoUrl) {
+                setPublishResults([{
+                    platform: 'wiseravenstream',
+                    success: false,
+                    error: 'WiseRavenStream requires a public video URL.'
+                }]);
+                setIsPublishing(false);
+                return;
+            }
+
             const response = await socialService.publishContent({
                 message: postMessage.trim(),
                 linkUrl: linkUrlInput.trim() || undefined,
@@ -883,7 +894,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
                 publishToTikTok: publishTikTok,
-                publishToYouTube: publishYouTube
+                publishToYouTube: publishYouTube,
+                publishToWiseRavenStream,
+                publishToWiseRavenStream: publishWiseRavenStream
             });
 
             setPublishResults(response?.results || []);
@@ -893,6 +906,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             setPublishFacebook(false);
             setPublishTikTok(false);
             setPublishYouTube(false);
+            setPublishWiseRavenStream(false);
             setPublishInstagram(false);
         } catch (err) {
             setPublishResults([{ platform: 'general', success: false, error: err?.message || 'Publishing request failed.' }]);
@@ -1678,8 +1692,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         type="url"
                         value={mediaUrlInput}
                         onChange={(e) => setMediaUrlInput(e.target.value)}
-                        placeholder={(publishYouTube || publishTikTok) ? "Required: Public video URL (youtube.com, direct .mp4, etc.)" : "Video / Photo URL (optional for TikTok/YouTube)"}
-                        style={{ padding: '8px 10px', borderRadius: '6px', border: `1px solid ${(publishYouTube || publishTikTok) && !mediaUrlInput ? '#f59e0b' : 'var(--border-color)'}`, background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        placeholder={(publishYouTube || publishTikTok || publishWiseRavenStream) ? "Required: Public video URL (youtube.com, direct .mp4, etc.)" : "Video / Photo URL (optional for TikTok/YouTube/WiseRavenStream)"}
+                        style={{ padding: '8px 10px', borderRadius: '6px', border: `1px solid ${(publishYouTube || publishTikTok || publishWiseRavenStream) && !mediaUrlInput ? '#f59e0b' : 'var(--border-color)'}`, background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                     <input
                         type="url"
@@ -1713,21 +1727,25 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             <input type="checkbox" checked={publishYouTube} onChange={(e) => setPublishYouTube(e.target.checked)} />
                             ▶️ YouTube
                         </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={publishWiseRavenStream} onChange={(e) => setPublishWiseRavenStream(e.target.checked)} />
+                            🎬 WiseRavenStream
+                        </label>
                     </div>
 
                     <button
                         type="submit"
-                        disabled={isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)}
+                        disabled={isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishWiseRavenStream && !publishInstagram)}
                         style={{
                             border: 'none',
-                            background: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram))
+                            background: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishWiseRavenStream && !publishInstagram))
                                 ? 'var(--border-color)'
                                 : 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))',
                             color: '#fff',
                             borderRadius: '8px',
                             padding: '10px 24px',
                             fontWeight: 700,
-                            cursor: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishInstagram)) ? 'not-allowed' : 'pointer',
+                            cursor: (isPublishing || !postMessage.trim() || (!publishFacebook && !publishTikTok && !publishYouTube && !publishWiseRavenStream && !publishInstagram)) ? 'not-allowed' : 'pointer',
                             fontSize: '13px'
                         }}
                     >

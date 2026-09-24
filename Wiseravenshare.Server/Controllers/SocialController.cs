@@ -97,7 +97,7 @@ public class SocialController : ControllerBase
             });
         }
 
-        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube)
+        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube && !request.PublishToWiseRavenStream)
         {
             return BadRequest(new ErrorResponse
             {
@@ -115,6 +115,14 @@ public class SocialController : ControllerBase
             return BadRequest(new ErrorResponse
             {
                 Message = "TikTok sharing requires a public videoUrl."
+            });
+        }
+
+        if (request.PublishToWiseRavenStream && string.IsNullOrWhiteSpace(request.VideoUrl))
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Message = "WiseRavenStream transfers require a public videoUrl."
             });
         }
 
