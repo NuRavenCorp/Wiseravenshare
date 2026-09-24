@@ -50,7 +50,12 @@ services:
       - key: Database__ExpectedName
         value: defaultdb
       - key: AiProvider
-        value: gradient
+        value: deepseek
+      - key: DeepSeek__ApiBaseUrl
+        value: https://api.deepseek.com/v1
+      - key: DeepSeek__ApiKey
+        value: ${DEEPSEEK_API_KEY}
+        type: SECRET
       - key: Gradient__BaseUrl
         value: https://ingress.do-ai.run/v1
       - key: Gradient__DefaultModel

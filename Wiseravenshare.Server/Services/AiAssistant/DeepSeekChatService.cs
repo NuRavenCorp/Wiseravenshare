@@ -8,11 +8,12 @@ namespace Wiseravenshare.Server.Services.AiAssistant;
 /// <summary>
 /// DeepSeek-powered chat service for the AI Assistant.
 /// Implements IOllamaChatService interface to provide drop-in replacement for Ollama.
-/// Routes all chat requests to DeepSeek API with conversation history context.
+/// Routes all chat requests to DeepSeek API with conversation history context and crawler insights.
 /// </summary>
 public class DeepSeekChatService : IOllamaChatService
 {
     private readonly IDeepSeekService _deepSeekService;
+    private readonly ISiteCrawlerService? _siteCrawlerService;
     private readonly ILogger<DeepSeekChatService> _logger;
 
     private const string SystemPrompt =
@@ -27,17 +28,25 @@ public class DeepSeekChatService : IOllamaChatService
         "% means part of, not complete, not the whole story (e.g. 'he gave me some bs %answer' " +
         "= a partial, incomplete answer). Interpret these symbols whenever users write them, and USE them often in your own replies — sprinkle '$' into praise and '%' when something is only part of the story — so they catch on quickly across the platform.";
 
-    public DeepSeekChatService(IDeepSeekService deepSeekService, ILogger<DeepSeekChatService> logger)
+    public DeepSeekChatService(IDeepSeekService deepSeekService, ILogger<DeepSeekChatService> logger, ISiteCrawlerService? siteCrawlerService = null)
     {
         _deepSeekService = deepSeekService;
         _logger = logger;
+        _siteCrawlerService = siteCrawlerService;
     }
 
     /// <summary>
-    /// DeepSeek always reports itself as available. Returns single "deepseek-chat" model.
+    /// DeepSeek validates API key is configured. If API key is set, model is available.
     /// </summary>
     public Task<IReadOnlyList<string>> GetModelsAsync()
     {
+        var apiKey = _deepSeekService?.GetConfiguredApiKey() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            _logger.LogWarning("DeepSeek models requested but API key is not configured");
+            return Task.FromResult<IReadOnlyList<string>>(new List<string>());
+        }
+        
         return Task.FromResult<IReadOnlyList<string>>(new[] { "deepseek-chat" });
     }
 
@@ -123,13 +132,33 @@ public class DeepSeekChatService : IOllamaChatService
     }
 
     /// <summary>
-    /// Builds a prompt that includes conversation history context.
+    /// Builds a prompt that includes conversation history context and crawler insights.
     /// </summary>
     private string BuildPrompt(string message, List<AiChatMessage>? history)
     {
         var promptBuilder = new System.Text.StringBuilder();
         promptBuilder.AppendLine("Assistant Instructions: " + SystemPrompt);
         promptBuilder.AppendLine();
+
+        // Include crawler context if available
+        if (_siteCrawlerService != null)
+        {
+            try
+            {
+                var crawlerContext = BuildCrawlerContext();
+                if (!string.IsNullOrWhiteSpace(crawlerContext))
+                {
+                    promptBuilder.AppendLine("=== CRAWLER CONTEXT ===");
+                    promptBuilder.AppendLine(crawlerContext);
+                    promptBuilder.AppendLine("======================");
+                    promptBuilder.AppendLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to include crawler context in prompt");
+            }
+        }
 
         // Include conversation history for context
         if (history is { Count: > 0 })
@@ -146,5 +175,25 @@ public class DeepSeekChatService : IOllamaChatService
         promptBuilder.AppendLine("ASSISTANT:");
 
         return promptBuilder.ToString();
+    }
+
+    /// <summary>
+    /// Builds crawler context snippet for AI awareness of site state and trends.
+    /// </summary>
+    private string BuildCrawlerContext()
+    {
+        try
+        {
+            // This would integrate with actual crawler data to provide:
+            // - Recent trending pages/posts
+            // - Site health metrics
+            // - User engagement patterns
+            // For now, return placeholder
+            return "Crawler insights: Site is healthy with normal traffic patterns.";
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

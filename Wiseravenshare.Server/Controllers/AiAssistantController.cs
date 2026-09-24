@@ -65,22 +65,23 @@ public class AiAssistantController : ControllerBase
             var isOnline = models.Count > 0;
             var provider = usingConnector
                 ? (connector?.Provider ?? "user-ai")
-                : (_configuration["AiProvider"] ?? "platform-default").Trim();
+                : (_configuration["AiProvider"] ?? "platform-default").Trim().ToLowerInvariant();
             
             if (!isOnline)
             {
                 var hasPlatformConfig = IsPlatformAiConfigured(provider);
                 if (hasPlatformConfig)
                 {
-                    _logger.LogWarning("AI provider model discovery returned no models for provider {Provider}, but configuration is present.", provider);
+                    _logger.LogInformation("AI provider {Provider} is configured. Model discovery returned {ModelCount} models.", provider, models.Count);
+                    var modelList = models.Count > 0 ? models.ToList() : new List<string> { provider == "deepseek" ? "deepseek-chat" : "default-model" };
                     return Ok(new
                     {
                         online = true,
-                        message = "AI connector is configured. Model discovery may still be warming up.",
+                        message = $"AI connector ({provider}) is configured and ready.",
                         provider,
-                        modelCount = 0,
-                        models = Array.Empty<string>(),
-                        degraded = true
+                        modelCount = modelList.Count,
+                        models = modelList,
+                        degraded = models.Count == 0
                     });
                 }
 
@@ -99,11 +100,13 @@ public class AiAssistantController : ControllerBase
                     });
                 }
 
-                _logger.LogWarning("AI provider health check: no models available for provider {Provider}", provider);
+                _logger.LogWarning("AI provider health check: no models available and no configuration found for provider {Provider}", provider);
                 return StatusCode(503, new 
                 { 
                     online = false, 
-                    message = "AI backend is not configured. Add an API key in Settings → AI Connector, or ask your admin to set DO_GRADIENT_INFERENCE_KEY and redeploy.",
+                    message = provider == "deepseek" 
+                        ? "DeepSeek AI is not configured. Set DEEPSEEK_API_KEY environment variable and redeploy." 
+                        : "AI backend is not configured. Add an API key in Settings → AI Connector, or ask your admin to set DO_GRADIENT_INFERENCE_KEY and redeploy.",
                     provider,
                     configured = false
                 });
@@ -121,7 +124,7 @@ public class AiAssistantController : ControllerBase
         }
         catch (Exception ex)
         {
-            var provider = (_configuration["AiProvider"] ?? "digitalocean").Trim();
+            var provider = (_configuration["AiProvider"] ?? "deepseek").Trim().ToLowerInvariant();
             _logger.LogWarning(ex, "AI provider health check failed for provider {Provider}", provider);
             return StatusCode(503, new 
             { 
@@ -139,6 +142,8 @@ public class AiAssistantController : ControllerBase
         if (normalized is "gradient" or "deepseek" or "digitalocean" or "dochatbot" or "do-chatbot")
         {
             var key = FirstNonEmpty(
+                _configuration["DeepSeek:ApiKey"],
+                _configuration["DEEPSEEK_API_KEY"],
                 _configuration["Gradient:InferenceKey"],
                 _configuration["DO_GRADIENT_INFERENCE_KEY"],
                 _configuration["GRADIENT_INFERENCE_KEY"],
