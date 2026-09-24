@@ -7,6 +7,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { videoService } from '../../Services/videoService';
 import { apiService } from '../../Services/api';
+import MediaPlayerTab from './MediaPlayerTab';
 import {
     getRavensightLocalSaveRootPreference,
     getRavensightLocalFolderPermission,
@@ -29,7 +30,8 @@ import {
     FiYoutube,
     FiClock,
     FiEye,
-    FiDownload
+    FiDownload,
+    FiMusic
 } from 'react-icons/fi';
 
 export const VideoStudio: React.FC = () => {
@@ -53,6 +55,9 @@ export const VideoStudio: React.FC = () => {
     const [musicLibrary, setMusicLibrary] = useState<Array<{ id: string; title?: string; artist?: string; album?: string; genre?: string; mediaUrl?: string }>>([]);
     const [musicLibraryLoading, setMusicLibraryLoading] = useState(false);
     const [selectedMusicTrackId, setSelectedMusicTrackId] = useState('');
+    const [activeTab, setActiveTab] = useState<'studio' | 'media-player'>('studio');
+    const [captionText, setCaptionText] = useState('');
+    const [narrationBlob, setNarrationBlob] = useState<Blob | null>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -89,6 +94,10 @@ export const VideoStudio: React.FC = () => {
         formData.append('musicTrackArtist', selectedMusicTrack?.artist || '');
         formData.append('musicTrackAlbum', selectedMusicTrack?.album || '');
         formData.append('musicTrackGenre', selectedMusicTrack?.genre || '');
+        formData.append('captionText', captionText);
+        if (narrationBlob) {
+            formData.append('narration', narrationBlob, 'narration.webm');
+        }
         formData.append('destinationFolder', '/wiseravenshare/ravensight/video');
         formData.append('storageMode', 'temporary');
         formData.append('isPermanent', 'false');
@@ -357,6 +366,8 @@ export const VideoStudio: React.FC = () => {
         setDescription('');
         setHasAutoSaved(false);
         setIsAutoSaving(false);
+        setCaptionText('');
+        setNarrationBlob(null);
         setSelectedMusicTrackId(musicLibrary[0]?.id || '');
     };
 
@@ -371,7 +382,36 @@ export const VideoStudio: React.FC = () => {
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-6">
+            {/* Tab Navigation */}
+            <div className="flex gap-4 border-b border-slate-700">
+                <button
+                    onClick={() => setActiveTab('studio')}
+                    className={`px-4 py-2 font-medium transition ${
+                        activeTab === 'studio'
+                            ? 'text-blue-400 border-b-2 border-blue-400'
+                            : 'text-gray-400 hover:text-gray-300'
+                    }`}
+                >
+                    <FiVideo className="inline mr-2" />
+                    Studio
+                </button>
+                <button
+                    onClick={() => setActiveTab('media-player')}
+                    className={`px-4 py-2 font-medium transition ${
+                        activeTab === 'media-player'
+                            ? 'text-blue-400 border-b-2 border-blue-400'
+                            : 'text-gray-400 hover:text-gray-300'
+                    }`}
+                >
+                    <FiMusic className="inline mr-2" />
+                    Media Player
+                </button>
+            </div>
+
+            {/* Studio Tab */}
+            {activeTab === 'studio' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Video Preview */}
             <Card className="lg:col-span-2 p-4">
                 <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
@@ -615,6 +655,20 @@ export const VideoStudio: React.FC = () => {
                     )}
                 </div>
             </Card>
-        </div>
+           </div>
+           )}
+
+           {/* Media Player Tab */}
+           {activeTab === 'media-player' && (
+               <MediaPlayerTab
+                   selectedTrackId={selectedMusicTrackId}
+                   onSelectTrack={(trackId) => setSelectedMusicTrackId(trackId)}
+                   captionText={captionText}
+                   onCaptionChange={setCaptionText}
+                   narrationBlob={narrationBlob}
+                   onNarrationRecorded={setNarrationBlob}
+               />
+           )}
+       </div>
     );
 };
