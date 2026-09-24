@@ -11,6 +11,7 @@ import TeamAccessAdminPage from './TeamAccessAdminPage';
 import RevenueConsolePage from './RevenueConsolePage';
 import SiteCrawlerDashboardPage from './SiteCrawlerDashboardPage';
 import CrawlerMetricsInsightsPage from './CrawlerMetricsInsightsPage';
+import PodcastGatewayTab from './PodcastGatewayTab';
 
 /* ─── static config ──────────────────────────────────────────────────── */
 
@@ -22,6 +23,7 @@ const TABS = [
     { id: 'crawler',  label: '🔍 Crawler Audit',  desc: 'Site health scans, SEO issues, and page metrics' },
     { id: 'agent',    label: '🤖 Services Agent', desc: 'IP publishing agent status, bot logs, and diagnostics' },
     { id: 'stream',   label: '🎬 Stream Queue',  desc: 'Authorise content transfers to WiseRavenStream' },
+    { id: 'podcast',  label: '🎙️ Podcast Gateway', desc: 'Release/gate all podcast control room features for the platform' },
     { id: 'users',    label: '👑 Users',         desc: 'Manage user privileges, Pro access, and stream authorisation' },
 ];
 
@@ -1339,6 +1341,10 @@ const AdminPanelPage = ({ onNavigate }) => {
 
             {activeTab === 'stream' && (
                 <StreamQueueTab />
+            )}
+
+            {activeTab === 'podcast' && (
+                <PodcastGatewayTab loadCatalog={loadCatalog} />
             )}
 
             {activeTab === 'users' && (
