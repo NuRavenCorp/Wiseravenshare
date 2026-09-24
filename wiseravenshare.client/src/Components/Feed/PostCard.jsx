@@ -30,6 +30,8 @@ const PostCard = ({
     const [isSavingComment, setIsSavingComment] = useState(false);
     const [isLiked, setIsLiked] = useState(Boolean(post.isLiked));
     const [likesCount, setLikesCount] = useState(Number(post.likesCount ?? post.likes ?? 0));
+    const [isReposted, setIsReposted] = useState(Boolean(post.isReposted));
+    const [repostsCountLocal, setRepostsCountLocal] = useState(Number(post.repostsCount ?? post.reposts ?? 0));
     const [viewsCount, setViewsCount] = useState(Number(post.viewsCount ?? post.ViewsCount ?? 0));
     const [sharesCount, setSharesCount] = useState(Number(post.sharesCount ?? post.SharesCount ?? 0));
     const articleRef = useRef(null);
@@ -188,7 +190,9 @@ const PostCard = ({
     useEffect(() => {
         setIsLiked(Boolean(post.isLiked));
         setLikesCount(Number(post.likesCount ?? post.likes ?? 0));
-    }, [post.id, post.isLiked, post.likesCount, post.likes]);
+        setIsReposted(Boolean(post.isReposted));
+        setRepostsCountLocal(Number(post.repostsCount ?? post.reposts ?? 0));
+    }, [post.id, post.isLiked, post.likesCount, post.likes, post.isReposted, post.repostsCount, post.reposts]);
 
     const streamVideoUrl = useMemo(
         () => mediaItems.find((resolvedMedia) => classifyPostMedia(post, resolvedMedia).isVideoPost) || '',
@@ -209,7 +213,6 @@ const PostCard = ({
         return `Video post from ${displayHandle}`;
     }, [displayHandle, post.content, post.headline, post.title]);
 
-    const repostsCount = Number(post.repostsCount ?? post.reposts ?? 0);
     const commentCount = Math.max(Number(post.commentsCount ?? 0), comments.length);
 
     const handleLike = async () => {
@@ -237,6 +240,34 @@ const PostCard = ({
             setIsLiked(previousLiked);
             setLikesCount(previousCount);
             console.error('Failed to toggle like:', error);
+        }
+    };
+
+    const handleRepost = async () => {
+        const previousReposted = isReposted;
+        const previousCount = repostsCountLocal;
+        const nextReposted = !previousReposted;
+        const nextCount = Math.max(0, previousCount + (nextReposted ? 1 : -1));
+
+        setIsReposted(nextReposted);
+        setRepostsCountLocal(nextCount);
+
+        try {
+            if (typeof onRepost === 'function') {
+                await onRepost(post.id);
+                return;
+            }
+
+            const updated = nextReposted
+                ? await apiService.repostPost(post.id)
+                : await apiService.unrepostPost(post.id);
+
+            setIsReposted(Boolean(updated?.isReposted ?? nextReposted));
+            setRepostsCountLocal(Number(updated?.repostsCount ?? nextCount));
+        } catch (error) {
+            setIsReposted(previousReposted);
+            setRepostsCountLocal(previousCount);
+            console.error('Failed to toggle repost:', error);
         }
     };
 
@@ -535,12 +566,12 @@ const PostCard = ({
                 </button>
 
                 <button
-                    className={`action-btn action-btn--repost${post.isReposted ? ' is-active' : ''}`}
-                    onClick={() => onRepost?.(post.id)}
-                    title={post.isReposted ? 'Unrepost' : 'Repost'}
+                    className={`action-btn action-btn--repost${isReposted ? ' is-active' : ''}`}
+                    onClick={handleRepost}
+                    title={isReposted ? 'Unrepost' : 'Repost'}
                 >
                     <span className="action-btn__icon">🔁</span>
-                    <span className="action-btn__count">{repostsCount > 0 ? repostsCount : ''}</span>
+                    <span className="action-btn__count">{repostsCountLocal > 0 ? repostsCountLocal : ''}</span>
                 </button>
 
                 <button
