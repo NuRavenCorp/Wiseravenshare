@@ -1742,6 +1742,13 @@ builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assist
 builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.IWebGroundingService,
     WiseRavenShare.Server.Application.Services.Assistant.WebGroundingService>();
 
+// ── ML Microservice (behavioral recommendations) ─────────────────────────────
+builder.Services.AddHttpClient<Wiseravenshare.Server.Services.MlClient>(c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["MlService:BaseUrl"] ?? "http://localhost:8000");
+    c.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.ILlmGateway,
     WiseRavenShare.Server.Infrastructure.External.LlmGatewayAdapter>();
 builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IEmbeddingService,
@@ -2582,6 +2589,7 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
+
 
 
 
