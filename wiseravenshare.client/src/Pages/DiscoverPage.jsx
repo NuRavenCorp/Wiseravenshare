@@ -5,6 +5,7 @@ import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import WiseRavenLogo from '../Components/Common/WiseRavenLogo';
 import { usePersonalization } from '../hooks/usePersonalization';
+import { useRecommendations, postToContentItem, interactionToEvent } from '../hooks/useRecommendations';
 import { crawlerService } from '../Services/crawlerService';
 import { resolveArticleImage } from '../utils/newsImageUtils';
 
@@ -195,6 +196,21 @@ const DiscoverPage = ({ onNavigate }) => {
         return email.length > 0 && adminEmails.has(email);
     }, [adminEmails, user?.email]);
     const { getTrending, track } = usePersonalization();
+
+    // ── In-browser ML recommendations ────────────────────────────────────────────
+    const mlUserId = user?.id ? String(user.id) : 'anon';
+    const mlCatalog = useMemo(() => posts.map(p => postToContentItem(p)), [posts]);
+    const mlHistory = useMemo(() => {
+        const saved = (() => { try { return JSON.parse(localStorage.getItem('wrs_ml_history') || '[]'); } catch { return []; } })();
+        return saved.map(e => interactionToEvent(e, mlUserId));
+    }, [mlUserId]);
+    const { recommendations: mlRecs, profile: mlProfile, ready: mlReady } = useRecommendations({
+        userId: mlUserId,
+        catalog: mlCatalog,
+        history: mlHistory,
+        topK: 5,
+        enabled: posts.length > 0,
+    });
 
     // Load personalized regional trends to supplement the topic list.
     useEffect(() => {
@@ -1014,3 +1030,4 @@ const DiscoverPage = ({ onNavigate }) => {
 };
 
 export default DiscoverPage;
+

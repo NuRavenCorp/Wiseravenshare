@@ -55,6 +55,7 @@ import aiAssistantService from './Services/aiAssistantService';
 import { useScreenSize } from './hooks/useScreenSize';
 import './Styles/Global.css';
 import './Styles/GlassmorphismUI.css';
+import Footer from './Components/Common/Footer';
 
 const SPONSOR_PAYMENT_LINK = String(
     import.meta.env.VITE_STRIPE_SPONSOR_PAYMENT_LINK
@@ -948,5 +949,6 @@ const App = () => {
 };
 
 export default App;
+
 
 
