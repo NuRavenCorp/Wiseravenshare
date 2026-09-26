@@ -1,7 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.DTOs;
+using Wiseravenshare.Server.Entities.Access;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Shared;
 
@@ -48,15 +51,18 @@ public sealed class FeatureReleaseController : ControllerBase
     private readonly IFeatureCompartmentService _featureCompartmentService;
     private readonly ISubscriptionService _subscriptionService;
     private readonly IConfiguration _configuration;
+    private readonly AppDbContext _db;
 
     public FeatureReleaseController(
         IFeatureCompartmentService featureCompartmentService,
         ISubscriptionService subscriptionService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        AppDbContext db)
     {
         _featureCompartmentService = featureCompartmentService;
         _subscriptionService = subscriptionService;
         _configuration = configuration;
+        _db = db;
     }
 
     // ── Admin: GET /api/admin/feature-release/catalog ────────────────────────
@@ -68,6 +74,21 @@ public sealed class FeatureReleaseController : ControllerBase
 
         var compartments = await _featureCompartmentService.GetInventoryAsync(cancellationToken);
         var lockMap = compartments.ToDictionary(c => c.Key, c => c.IsLocked, StringComparer.OrdinalIgnoreCase);
+        var userOverrides = await _db.FeatureFlags
+            .AsNoTracking()
+            .Where(flag => flag.Scope == FeatureScope.User)
+            .ToListAsync(cancellationToken);
+
+        var userIdsFromOverrides = userOverrides
+            .Select(overrideFlag => TryParseUserId(overrideFlag.ScopeValue, out var parsedUserId) ? parsedUserId : Guid.Empty)
+            .Where(parsedUserId => parsedUserId != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var userEmailMap = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIdsFromOverrides.Contains(user.Id))
+            .ToDictionaryAsync(user => user.Id, user => user.Email, cancellationToken);
 
         var features = TierCatalog.Select(entry => new
         {
@@ -77,7 +98,31 @@ public sealed class FeatureReleaseController : ControllerBase
             requiredTier = entry.RequiredTier,
             category     = entry.Category,
             isLocked     = lockMap.TryGetValue(entry.Key, out var locked) && locked,
-            status       = lockMap.TryGetValue(entry.Key, out var l2) && l2 ? "gated" : "released"
+            status       = lockMap.TryGetValue(entry.Key, out var l2) && l2 ? "gated" : "released",
+            userGrantCount = userOverrides.Count(flag =>
+                string.Equals(flag.FeatureKey, entry.Key, StringComparison.OrdinalIgnoreCase)
+                && flag.State == FeatureState.Enabled),
+            userBlockCount = userOverrides.Count(flag =>
+                string.Equals(flag.FeatureKey, entry.Key, StringComparison.OrdinalIgnoreCase)
+                && flag.State == FeatureState.Disabled),
+            userOverrides = userOverrides
+                .Where(flag => string.Equals(flag.FeatureKey, entry.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(flag => flag.UpdatedAt)
+                .Select(flag =>
+                {
+                    var hasUser = TryParseUserId(flag.ScopeValue, out var parsedUserId);
+                    var email = hasUser && userEmailMap.TryGetValue(parsedUserId, out var value) ? value : string.Empty;
+                    return new
+                    {
+                        userId = hasUser ? parsedUserId.ToString("N") : (flag.ScopeValue ?? string.Empty),
+                        userEmail = email,
+                        state = flag.State.ToString().ToLowerInvariant(),
+                        reason = flag.Notes,
+                        updatedAt = flag.UpdatedAt
+                    };
+                })
+                .Take(25)
+                .ToList()
         }).ToList();
 
         return Ok(new
@@ -88,6 +133,49 @@ public sealed class FeatureReleaseController : ControllerBase
             totalFeatures  = features.Count,
             gatedCount     = features.Count(f => f.status == "gated"),
             releasedCount  = features.Count(f => f.status == "released")
+        });
+    }
+
+    // ── Admin: GET /api/admin/feature-release/{key}/user-overrides ───────────
+    [Authorize]
+    [HttpGet("api/admin/feature-release/{key}/user-overrides")]
+    public async Task<IActionResult> GetUserOverrides(string key, CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var overrides = await _db.FeatureFlags
+            .AsNoTracking()
+            .Where(flag => flag.Scope == FeatureScope.User && flag.FeatureKey == key)
+            .OrderByDescending(flag => flag.UpdatedAt)
+            .ToListAsync(cancellationToken);
+
+        var userIds = overrides
+            .Select(overrideFlag => TryParseUserId(overrideFlag.ScopeValue, out var parsedUserId) ? parsedUserId : Guid.Empty)
+            .Where(parsedUserId => parsedUserId != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var userEmailMap = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id))
+            .ToDictionaryAsync(user => user.Id, user => user.Email, cancellationToken);
+
+        return Ok(new
+        {
+            key,
+            overrides = overrides.Select(flag =>
+            {
+                var hasUser = TryParseUserId(flag.ScopeValue, out var parsedUserId);
+                var email = hasUser && userEmailMap.TryGetValue(parsedUserId, out var value) ? value : string.Empty;
+                return new
+                {
+                    userId = hasUser ? parsedUserId.ToString("N") : (flag.ScopeValue ?? string.Empty),
+                    userEmail = email,
+                    state = flag.State.ToString().ToLowerInvariant(),
+                    reason = flag.Notes,
+                    updatedAt = flag.UpdatedAt
+                };
+            }).ToList()
         });
     }
 
@@ -140,6 +228,115 @@ public sealed class FeatureReleaseController : ControllerBase
             isLocked = result.IsLocked,
             status   = "gated",
             tier
+        });
+    }
+
+    // ── Admin: PUT /api/admin/feature-release/{key}/users/{userId}/grant ────
+    [Authorize]
+    [HttpPut("api/admin/feature-release/{key}/users/{userId}/grant")]
+    public async Task<IActionResult> GrantFeatureToUser(
+        string key,
+        string userId,
+        [FromBody] FeatureUserOverrideRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var parsedUserId = await ResolveUserIdAsync(userId, cancellationToken);
+        if (parsedUserId is null)
+        {
+            return NotFound(new { message = "Target user was not found." });
+        }
+
+        var email = AdminEmail();
+        var reason = string.IsNullOrWhiteSpace(request?.Reason)
+            ? $"Feature '{key}' granted to user by admin {email}"
+            : request!.Reason!.Trim();
+
+        var flag = await UpsertUserFeatureOverrideAsync(key, parsedUserId.Value, FeatureState.Enabled, reason, cancellationToken);
+        return Ok(new
+        {
+            key,
+            userId = parsedUserId.Value.ToString("N"),
+            state = flag.State.ToString().ToLowerInvariant(),
+            reason = flag.Notes,
+            updatedAt = flag.UpdatedAt,
+            message = $"Feature '{key}' granted to user '{parsedUserId.Value:N}'."
+        });
+    }
+
+    // ── Admin: PUT /api/admin/feature-release/{key}/users/{userId}/block ────
+    [Authorize]
+    [HttpPut("api/admin/feature-release/{key}/users/{userId}/block")]
+    public async Task<IActionResult> BlockFeatureForUser(
+        string key,
+        string userId,
+        [FromBody] FeatureUserOverrideRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var parsedUserId = await ResolveUserIdAsync(userId, cancellationToken);
+        if (parsedUserId is null)
+        {
+            return NotFound(new { message = "Target user was not found." });
+        }
+
+        var email = AdminEmail();
+        var reason = string.IsNullOrWhiteSpace(request?.Reason)
+            ? $"Feature '{key}' blocked for user by admin {email}"
+            : request!.Reason!.Trim();
+
+        var flag = await UpsertUserFeatureOverrideAsync(key, parsedUserId.Value, FeatureState.Disabled, reason, cancellationToken);
+        return Ok(new
+        {
+            key,
+            userId = parsedUserId.Value.ToString("N"),
+            state = flag.State.ToString().ToLowerInvariant(),
+            reason = flag.Notes,
+            updatedAt = flag.UpdatedAt,
+            message = $"Feature '{key}' blocked for user '{parsedUserId.Value:N}'."
+        });
+    }
+
+    // ── Admin: DELETE /api/admin/feature-release/{key}/users/{userId}/override ─
+    [Authorize]
+    [HttpDelete("api/admin/feature-release/{key}/users/{userId}/override")]
+    public async Task<IActionResult> ClearUserFeatureOverride(
+        string key,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAdminRequest()) return Forbid();
+
+        var parsedUserId = await ResolveUserIdAsync(userId, cancellationToken);
+        if (parsedUserId is null)
+        {
+            return NotFound(new { message = "Target user was not found." });
+        }
+
+        var normalizedUserId = parsedUserId.Value.ToString("N");
+        var legacyUserId = parsedUserId.Value.ToString();
+
+        var overrides = await _db.FeatureFlags
+            .Where(flag => flag.Scope == FeatureScope.User
+                && flag.FeatureKey == key
+                && (flag.ScopeValue == normalizedUserId || flag.ScopeValue == legacyUserId))
+            .ToListAsync(cancellationToken);
+
+        if (overrides.Count == 0)
+        {
+            return NotFound(new { message = "No user override exists for this feature and user." });
+        }
+
+        _db.FeatureFlags.RemoveRange(overrides);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            key,
+            userId = normalizedUserId,
+            message = "User-specific feature override cleared. Default release and tier rules now apply."
         });
     }
 
@@ -293,6 +490,7 @@ public sealed class FeatureReleaseController : ControllerBase
         // Load all compartment locks
         var compartments = await _featureCompartmentService.GetInventoryAsync(cancellationToken);
         var lockMap      = compartments.ToDictionary(c => c.Key, c => c.IsLocked, StringComparer.OrdinalIgnoreCase);
+        var userOverrideMap = await LoadUserOverrideMapAsync(userId, cancellationToken);
 
         var accessible = TierCatalog.Select(entry =>
         {
@@ -300,7 +498,27 @@ public sealed class FeatureReleaseController : ControllerBase
             var tierIndex      = Array.IndexOf(TierOrder, entry.RequiredTier);
             var userTierIndex  = Array.IndexOf(TierOrder, userTier);
             var hasTierAccess  = userTierIndex >= tierIndex;
-            var canAccess      = !isLocked && hasTierAccess;
+            userOverrideMap.TryGetValue(entry.Key, out var userOverrideState);
+
+            var canAccess = userOverrideState switch
+            {
+                FeatureState.Disabled => false,
+                FeatureState.Enabled => true,
+                _ => !isLocked && hasTierAccess
+            };
+
+            var reason = !canAccess
+                ? (userOverrideState == FeatureState.Disabled
+                    ? "Feature is blocked for this user by admin override."
+                    : (isLocked ? "Feature is temporarily locked by admin." : $"Requires '{entry.RequiredTier}' plan."))
+                : (string?)null;
+
+            var accessSource = userOverrideState switch
+            {
+                FeatureState.Disabled => "user-override-block",
+                FeatureState.Enabled => "user-override-grant",
+                _ => "tier-and-release-policy"
+            };
 
             return new
             {
@@ -311,9 +529,8 @@ public sealed class FeatureReleaseController : ControllerBase
                 hasTierAccess,
                 requiredTier = entry.RequiredTier,
                 userTier,
-                reason       = !canAccess
-                    ? (isLocked ? "Feature is temporarily locked by admin." : $"Requires '{entry.RequiredTier}' plan.")
-                    : (string?)null
+                reason,
+                accessSource
             };
         }).ToList();
 
@@ -353,6 +570,90 @@ public sealed class FeatureReleaseController : ControllerBase
 
         return hasActiveSub ? "creator-pro" : "free";
     }
+
+    private async Task<Dictionary<string, FeatureState>> LoadUserOverrideMapAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var userIdCompact = userId.ToString("N");
+        var userIdDefault = userId.ToString();
+
+        var overrides = await _db.FeatureFlags
+            .AsNoTracking()
+            .Where(flag => flag.Scope == FeatureScope.User && (flag.ScopeValue == userIdCompact || flag.ScopeValue == userIdDefault))
+            .ToListAsync(cancellationToken);
+
+        return overrides
+            .GroupBy(flag => flag.FeatureKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(flag => flag.UpdatedAt).First().State,
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParseUserId(string? value, out Guid userId)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && Guid.TryParse(value.Trim(), out userId))
+        {
+            return true;
+        }
+
+        userId = Guid.Empty;
+        return false;
+    }
+
+    private async Task<Guid?> ResolveUserIdAsync(string inputUserId, CancellationToken cancellationToken)
+    {
+        if (TryParseUserId(inputUserId, out var parsedUserId))
+        {
+            var exists = await _db.Users.AnyAsync(user => user.Id == parsedUserId, cancellationToken);
+            return exists ? parsedUserId : null;
+        }
+
+        var byEmail = await _db.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(user => user.Email == inputUserId, cancellationToken);
+        return byEmail?.Id;
+    }
+
+    private async Task<FeatureFlag> UpsertUserFeatureOverrideAsync(
+        string key,
+        Guid userId,
+        FeatureState state,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var scopeValue = userId.ToString("N");
+
+        var existing = await _db.FeatureFlags
+            .SingleOrDefaultAsync(flag =>
+                flag.FeatureKey == key
+                && flag.Scope == FeatureScope.User
+                && flag.ScopeValue == scopeValue,
+                cancellationToken);
+
+        if (existing is null)
+        {
+            existing = new FeatureFlag
+            {
+                FeatureKey = key,
+                Scope = FeatureScope.User,
+                ScopeValue = scopeValue,
+                State = state,
+                Notes = reason,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _db.FeatureFlags.Add(existing);
+        }
+        else
+        {
+            existing.State = state;
+            existing.Notes = reason;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return existing;
+    }
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -372,6 +673,11 @@ public sealed record PricingPlanDisplay(
     string Category);
 
 public sealed class FeatureReleaseRequest
+{
+    public string? Reason { get; set; }
+}
+
+public sealed class FeatureUserOverrideRequest
 {
     public string? Reason { get; set; }
 }
