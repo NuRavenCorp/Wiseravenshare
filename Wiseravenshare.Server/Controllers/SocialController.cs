@@ -97,7 +97,11 @@ public class SocialController : ControllerBase
             });
         }
 
-        if (!request.PublishToFacebook && !request.PublishToTikTok && !request.PublishToYouTube && !request.PublishToWiseRavenStream)
+        if (!request.PublishToFacebook
+            && !request.PublishToInstagram
+            && !request.PublishToTikTok
+            && !request.PublishToYouTube
+            && !request.PublishToWiseRavenStream)
         {
             return BadRequest(new ErrorResponse
             {
@@ -123,6 +127,16 @@ public class SocialController : ControllerBase
             return BadRequest(new ErrorResponse
             {
                 Message = "WiseRavenStream transfers require a public videoUrl."
+            });
+        }
+
+        if (request.PublishToInstagram
+            && string.IsNullOrWhiteSpace(request.VideoUrl)
+            && string.IsNullOrWhiteSpace(request.PhotoUrl))
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Message = "Instagram sharing requires a public videoUrl or photoUrl."
             });
         }
 

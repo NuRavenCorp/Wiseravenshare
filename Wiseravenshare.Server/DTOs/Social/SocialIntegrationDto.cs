@@ -50,6 +50,7 @@ public class PublishSocialContentRequest
     public string MediaType { get; set; } = "auto";
 
     public bool PublishToFacebook { get; set; } = true;
+    public bool PublishToInstagram { get; set; } = false;
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; } = false;
     public bool PublishToWiseRavenStream { get; set; } = false;

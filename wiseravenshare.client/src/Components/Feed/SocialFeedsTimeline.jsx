@@ -17,11 +17,11 @@ const PLATFORMS = [
 ];
 const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok', 'reddit'];
 const OAUTH_EXTRA_STEP_HINTS = {
-    facebook: 'May require selecting/saving a Facebook Page ID to publish.',
-    instagram: 'Must be linked to a Facebook Page with an Instagram Business/Creator account.',
-    youtube: 'If refresh token is missing, reconnect once with consent prompt and save channel details.',
-    tiktok: 'One-click OAuth connection.',
-    reddit: 'One-click OAuth connection.'
+    facebook: '1) Click Connect. 2) Log in to Facebook. 3) Allow access. 4) Save Page ID only if asked.',
+    instagram: '1) Click Connect. 2) Log in with Meta/Facebook. 3) Pick your Instagram Business/Creator account. 4) Allow access.',
+    youtube: '1) Click Connect. 2) Pick your Google account. 3) Allow access. 4) Save channel details only if asked.',
+    tiktok: '1) Click Connect. 2) Log in to TikTok. 3) Allow access.',
+    reddit: '1) Click Connect. 2) Log in to Reddit. 3) Allow access.'
 };
 
 const CURATED_TEMPLATES = [
@@ -807,7 +807,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         e?.preventDefault();
         if (!postMessage.trim()) return;
 
-        if (!publishFacebook && !publishTikTok && !publishYouTube && !publishWiseRavenStream) {
+        if (!publishFacebook && !publishInstagram && !publishTikTok && !publishYouTube && !publishWiseRavenStream) {
             setPublishResults([
                 {
                     platform: 'general',
@@ -888,6 +888,26 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 return;
             }
 
+            if (publishInstagram && !mediaUrl) {
+                setPublishResults([{
+                    platform: 'instagram',
+                    success: false,
+                    error: 'Instagram requires a public video or photo URL.'
+                }]);
+                setIsPublishing(false);
+                return;
+            }
+
+            if (publishInstagram && mediaUrl && !isHttpUrl(mediaUrl)) {
+                setPublishResults([{
+                    platform: 'instagram',
+                    success: false,
+                    error: 'Instagram requires a public http(s) media URL.'
+                }]);
+                setIsPublishing(false);
+                return;
+            }
+
             const response = await socialService.publishContent({
                 message: postMessage.trim(),
                 linkUrl: linkUrlInput.trim() || undefined,
@@ -897,9 +917,9 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 youTubeDescription: publishYouTube ? (youtubeDescriptionInput.trim() || undefined) : undefined,
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
+                publishToInstagram: publishInstagram,
                 publishToTikTok: publishTikTok,
                 publishToYouTube: publishYouTube,
-                publishToWiseRavenStream,
                 publishToWiseRavenStream: publishWiseRavenStream
             });
 
@@ -1389,7 +1409,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         🔗 Connect Social Accounts
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                        Connect with OAuth first, then save public handles (and only required extra fields) to finalize sync.
+                        Super simple: click <strong>Connect</strong>, log in, click <strong>Allow</strong>, then come back and click <strong>Refresh Status</strong>.
                     </div>
 
                     <div style={{ border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '10px', padding: '12px', background: 'rgba(56, 189, 248, 0.06)', display: 'grid', gap: '10px' }}>
@@ -1634,6 +1654,10 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     ✍️ Publish to Social Platforms
                 </div>
+                <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '10px', lineHeight: 1.5 }}>
+                    <strong>Easy steps:</strong> 1) Click the platform buttons you want. 2) Type your message.
+                    3) Paste a public media link if needed. 4) Click <strong>🚀 Publish Post</strong>.
+                </div>
 
                 {/* Platform selector pills — pick one or many */}
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
@@ -1698,14 +1722,14 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         type="url"
                         value={mediaUrlInput}
                         onChange={(e) => setMediaUrlInput(e.target.value)}
-                        placeholder={(publishYouTube || publishTikTok || publishWiseRavenStream) ? "Required: Public video URL (youtube.com, direct .mp4, etc.)" : "Video / Photo URL (optional for TikTok/YouTube/WiseRavenStream)"}
+                        placeholder={(publishYouTube || publishTikTok || publishWiseRavenStream) ? "Required: public video URL, like https://.../video.mp4" : "Optional media URL: photo or video link"}
                         style={{ padding: '8px 10px', borderRadius: '6px', border: `1px solid ${(publishYouTube || publishTikTok || publishWiseRavenStream) && !mediaUrlInput ? '#f59e0b' : 'var(--border-color)'}`, background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                     <input
                         type="url"
                         value={linkUrlInput}
                         onChange={(e) => setLinkUrlInput(e.target.value)}
-                        placeholder="Link URL (optional for Facebook)"
+                        placeholder="Optional website link, like https://mynews.com/story"
                         style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                 </div>
@@ -1743,11 +1767,29 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     </div>
                 )}
 
+                {publishTikTok && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(103,232,249,0.35)', background: 'rgba(14,116,144,0.12)', fontSize: '12px', lineHeight: 1.45, color: '#bae6fd' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>TikTok publish guardrails</div>
+                        <div>Use a public <strong>vertical 9:16 video URL</strong> for best results. Keep clips short (ideally under 60s for cross-posted short-form).</div>
+                    </div>
+                )}
+
+                {publishInstagram && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(249,168,212,0.35)', background: 'rgba(157,23,77,0.14)', fontSize: '12px', lineHeight: 1.45, color: '#fbcfe8' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '4px' }}>Instagram publish guardrails</div>
+                        <div>Instagram API publishing requires a <strong>Business/Creator account</strong> linked to a Facebook Page. Use a public photo or video URL (Reels should be vertical 9:16 for best placement).</div>
+                    </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={publishFacebook} onChange={(e) => setPublishFacebook(e.target.checked)} />
                             📘 Facebook
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={publishInstagram} onChange={(e) => setPublishInstagram(e.target.checked)} />
+                            📸 Instagram
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={publishTikTok} onChange={(e) => setPublishTikTok(e.target.checked)} />
