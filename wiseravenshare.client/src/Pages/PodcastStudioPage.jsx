@@ -389,6 +389,41 @@ const PODCAST_SETUP_PHASES = [
             { label: 'Launch', detail: 'Schedule a trailer + first episodes, then promote short clips on social to build early momentum.' },
         ],
     },
+    {
+        phase: '5',
+        icon: '▶️',
+        title: 'Publish to YouTube',
+        color: '#f87171',
+        border: 'rgba(248,113,113,0.35)',
+        bg: 'rgba(248,113,113,0.08)',
+        youtubeGuide: true,
+        methods: [
+            {
+                id: 'video',
+                label: 'Method 1 — Video upload',
+                badge: 'Video episodes',
+                color: '#f87171',
+                steps: [
+                    { label: 'Open YouTube Studio', detail: 'Go to YouTube Studio, click Create, and select "New podcast" (or Content → Podcasts if you already have one).' },
+                    { label: 'Fill out details', detail: 'Add the podcast title, description, visibility setting, and a square thumbnail image.' },
+                    { label: 'Upload video files', detail: 'Click Create → Upload videos, then assign the uploaded files to your podcast playlist / show settings.' },
+                ],
+            },
+            {
+                id: 'rss',
+                label: 'Method 2 — RSS feed',
+                badge: 'Audio-only',
+                color: '#fb923c',
+                steps: [
+                    { label: 'Create a new podcast', detail: 'Open YouTube Studio, click Create, choose "New podcast", then select "Submit RSS Feed" and accept the terms.' },
+                    { label: 'Paste your RSS URL', detail: 'Copy the RSS feed URL from your hosting platform (Buzzsprout, Libsyn, etc.) and paste it into YouTube.' },
+                    { label: 'Verify your email', detail: 'Enter the confirmation code YouTube emails you, then choose which past or future episodes to sync, and save.' },
+                    { label: 'Publish', detail: 'Wait for the approval email, return to Content → Podcasts in YouTube Studio, and click Publish next to your feed.' },
+                ],
+            },
+        ],
+        steps: [],
+    },
 ];
 
 const PodcastStudioPage = ({ onNavigate }) => {
@@ -418,6 +453,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
     // Setup guide panel
     const [showSetupGuide, setShowSetupGuide] = useState(false);
     const [setupGuideExpandedPhase, setSetupGuideExpandedPhase] = useState(null);
+    const [youtubeGuideMethod, setYoutubeGuideMethod] = useState('video');
 
     // Pricing & Subscription State
     const [showPricingModal, setShowPricingModal] = useState(false);
@@ -3185,35 +3221,147 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                         {/* Expanded steps */}
                                         {setupGuideExpandedPhase === ph.phase && (
                                             <div style={{ padding: '0 14px 14px', display: 'grid', gap: '10px' }}>
-                                                {ph.steps.map((step, si) => (
-                                                    <div key={si} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                                        <span style={{
-                                                            width: '22px',
-                                                            height: '22px',
-                                                            borderRadius: '50%',
-                                                            background: `${ph.color}22`,
-                                                            border: `1px solid ${ph.border}`,
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            fontSize: '10px',
-                                                            fontWeight: 800,
-                                                            color: ph.color,
-                                                            flexShrink: 0,
-                                                            marginTop: '1px'
-                                                        }}>
-                                                            {si + 1}
-                                                        </span>
-                                                        <div>
-                                                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '2px' }}>
-                                                                {step.label}
+                                                {/* YouTube guide: method tabs + steps */}
+                                                {ph.youtubeGuide ? (
+                                                    <>
+                                                        {/* Method toggle */}
+                                                        <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                                                            {ph.methods.map((m) => (
+                                                                <button
+                                                                    key={m.id}
+                                                                    type="button"
+                                                                    onClick={() => setYoutubeGuideMethod(m.id)}
+                                                                    style={{
+                                                                        padding: '6px 12px',
+                                                                        borderRadius: '999px',
+                                                                        fontSize: '11px',
+                                                                        fontWeight: 700,
+                                                                        cursor: 'pointer',
+                                                                        border: youtubeGuideMethod === m.id ? `1px solid ${m.color}` : '1px solid rgba(148,163,184,0.2)',
+                                                                        background: youtubeGuideMethod === m.id ? `${m.color}18` : 'transparent',
+                                                                        color: youtubeGuideMethod === m.id ? m.color : '#94a3b8',
+                                                                        transition: 'all 0.15s',
+                                                                    }}
+                                                                >
+                                                                    {m.label}
+                                                                    <span style={{
+                                                                        marginLeft: '6px',
+                                                                        fontSize: '10px',
+                                                                        fontWeight: 700,
+                                                                        padding: '1px 6px',
+                                                                        borderRadius: '999px',
+                                                                        background: youtubeGuideMethod === m.id ? `${m.color}22` : 'rgba(148,163,184,0.1)',
+                                                                        color: youtubeGuideMethod === m.id ? m.color : '#64748b',
+                                                                    }}>
+                                                                        {m.badge}
+                                                                    </span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        {/* Active method steps */}
+                                                        {ph.methods.filter((m) => m.id === youtubeGuideMethod).map((m) => (
+                                                            <div key={m.id} style={{ display: 'grid', gap: '10px' }}>
+                                                                {m.steps.map((step, si) => (
+                                                                    <div key={si} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                                                        <span style={{
+                                                                            width: '22px',
+                                                                            height: '22px',
+                                                                            borderRadius: '50%',
+                                                                            background: `${m.color}22`,
+                                                                            border: `1px solid ${m.color}55`,
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            fontSize: '10px',
+                                                                            fontWeight: 800,
+                                                                            color: m.color,
+                                                                            flexShrink: 0,
+                                                                            marginTop: '1px',
+                                                                        }}>
+                                                                            {si + 1}
+                                                                        </span>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '2px' }}>
+                                                                                {step.label}
+                                                                            </div>
+                                                                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                                                                {step.detail}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                {m.id === 'rss' && (
+                                                                    <div style={{
+                                                                        marginTop: '4px',
+                                                                        padding: '10px 12px',
+                                                                        borderRadius: '8px',
+                                                                        background: 'rgba(251,146,60,0.08)',
+                                                                        border: '1px solid rgba(251,146,60,0.25)',
+                                                                        fontSize: '11px',
+                                                                        color: '#fdba74',
+                                                                        lineHeight: 1.5,
+                                                                    }}>
+                                                                        💡 <strong>Tip:</strong> YouTube converts audio-only RSS episodes into static-image video using your cover art. No video file required.
+                                                                    </div>
+                                                                )}
+                                                                {m.id === 'video' && (
+                                                                    <a
+                                                                        href="https://studio.youtube.com"
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        style={{
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            gap: '6px',
+                                                                            marginTop: '4px',
+                                                                            fontSize: '12px',
+                                                                            fontWeight: 700,
+                                                                            color: '#f87171',
+                                                                            textDecoration: 'none',
+                                                                            padding: '7px 12px',
+                                                                            borderRadius: '8px',
+                                                                            border: '1px solid rgba(248,113,113,0.3)',
+                                                                            background: 'rgba(248,113,113,0.08)',
+                                                                        }}
+                                                                    >
+                                                                        ▶ Open YouTube Studio ↗
+                                                                    </a>
+                                                                )}
                                                             </div>
-                                                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-                                                                {step.detail}
+                                                        ))}
+                                                    </>
+                                                ) : (
+                                                    /* Standard phases */
+                                                    ph.steps.map((step, si) => (
+                                                        <div key={si} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                                            <span style={{
+                                                                width: '22px',
+                                                                height: '22px',
+                                                                borderRadius: '50%',
+                                                                background: `${ph.color}22`,
+                                                                border: `1px solid ${ph.border}`,
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                fontSize: '10px',
+                                                                fontWeight: 800,
+                                                                color: ph.color,
+                                                                flexShrink: 0,
+                                                                marginTop: '1px'
+                                                            }}>
+                                                                {si + 1}
+                                                            </span>
+                                                            <div>
+                                                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '2px' }}>
+                                                                    {step.label}
+                                                                </div>
+                                                                <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                                                    {step.detail}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    ))
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -3240,6 +3388,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                     { label: '📦 Buzzsprout', url: 'https://www.buzzsprout.com' },
                                     { label: '🎵 Spotify for Creators', url: 'https://podcasters.spotify.com' },
                                     { label: '🍎 Apple Podcasts Connect', url: 'https://podcastsconnect.apple.com' },
+                                    { label: '▶ YouTube Studio', url: 'https://studio.youtube.com' },
                                     { label: '🎨 Canva cover art', url: 'https://www.canva.com/create/podcast-covers/' },
                                 ].map((tool) => (
                                     <a
