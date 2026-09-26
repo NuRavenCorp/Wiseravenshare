@@ -240,6 +240,34 @@ const PODCAST_PRICING_PLANS = {
     }
 };
 
+const PODCAST_TIER_LABELS = {
+    free: 'Free',
+    creator_pro: 'Creator Pro',
+    'creator-pro': 'Creator Pro',
+    growth_suite: 'Growth Suite',
+    'growth-suite': 'Growth Suite',
+    studio_plus: 'Studio Plus',
+    'studio-plus': 'Studio Plus',
+    podcast_pro: 'Podcast Pro',
+    'podcast-pro': 'Podcast Pro',
+    admin: 'Administrator'
+};
+
+const PODCAST_TIER_ORDER = ['free', 'creator-pro', 'growth-suite', 'studio-plus', 'podcast-pro', 'admin'];
+
+const normalizeTierId = (tier = '') => String(tier || '').trim().toLowerCase().replace(/_/g, '-');
+
+const getTierRank = (tier = '') => {
+    const normalized = normalizeTierId(tier);
+    const index = PODCAST_TIER_ORDER.indexOf(normalized);
+    return index >= 0 ? index : 0;
+};
+
+const getTierLabel = (tier = '') => {
+    const normalized = normalizeTierId(tier);
+    return PODCAST_TIER_LABELS[normalized] || PODCAST_TIER_LABELS[String(tier || '').trim().toLowerCase()] || 'Free';
+};
+
 const normalizeLoginIdentifier = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
 
 const inferIdentifierType = (identifier) => {
@@ -306,6 +334,63 @@ const resolveUploadedMediaUrl = (payload, fallback = '') => {
     return fallback;
 };
 
+// ─── Podcast setup guide (shown in the collapsible "New to podcasting?" panel) ──
+const PODCAST_SETUP_PHASES = [
+    {
+        phase: '1',
+        icon: '🎯',
+        title: 'Plan your concept and format',
+        color: '#818cf8',
+        border: 'rgba(129,140,248,0.35)',
+        bg: 'rgba(129,140,248,0.08)',
+        steps: [
+            { label: 'Choose a niche', detail: 'Pick a topic that matches your passion and expertise to maintain long-term consistency.' },
+            { label: 'Define your audience', detail: 'Write a one-sentence pitch — who your show is for and what result they will get.' },
+            { label: 'Pick a format', detail: 'Solo monologue, co-hosted conversation, or remote / in-person interviews.' },
+            { label: 'Outline episodes', detail: 'Plan your first 3–4 episodes with clear, searchable titles before you record.' },
+        ],
+    },
+    {
+        phase: '2',
+        icon: '🎤',
+        title: 'Get your gear and software',
+        color: '#34d399',
+        border: 'rgba(52,211,153,0.35)',
+        bg: 'rgba(52,211,153,0.08)',
+        steps: [
+            { label: 'Microphone', detail: 'Start with an affordable USB mic like the Samson Q2U or Fifine AM8.' },
+            { label: 'Headphones', detail: 'Wear closed-back headphones to monitor your voice and prevent echo.' },
+            { label: 'Recording software', detail: 'Use Riverside or Descript for local-track recording and remote guest sessions.' },
+        ],
+    },
+    {
+        phase: '3',
+        icon: '🎬',
+        title: 'Record and edit',
+        color: '#fb923c',
+        border: 'rgba(251,146,60,0.35)',
+        bg: 'rgba(251,146,60,0.08)',
+        steps: [
+            { label: 'Prepare your space', detail: 'Record in a quiet room — soft furnishings like carpets and curtains cut room echo.' },
+            { label: 'Edit for clarity', detail: 'Cut long pauses, stumbles, and filler words using transcript-based editors.' },
+            { label: 'Add assets', detail: 'Create 1,400–3,000 px square cover art (Canva works great) and add a simple intro.' },
+        ],
+    },
+    {
+        phase: '4',
+        icon: '🚀',
+        title: 'Host and publish',
+        color: '#38bdf8',
+        border: 'rgba(56,189,248,0.35)',
+        bg: 'rgba(56,189,248,0.08)',
+        steps: [
+            { label: 'Select a host', detail: 'Use Buzzsprout, Spotify for Creators, or Riverside as your podcast hosting platform.' },
+            { label: 'Generate an RSS feed', detail: 'Your host creates the RSS link. Submit it to Apple Podcasts, Spotify, and YouTube.' },
+            { label: 'Launch', detail: 'Schedule a trailer + first episodes, then promote short clips on social to build early momentum.' },
+        ],
+    },
+];
+
 const PodcastStudioPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const [title, setTitle] = useState('');
@@ -329,6 +414,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [syncingRole, setSyncingRole] = useState('');
     const [allowedRoleLabels, setAllowedRoleLabels] = useState(controlRoles);
     const [permissions, setPermissions] = useState(rolePermissions.Owner);
+
+    // Setup guide panel
+    const [showSetupGuide, setShowSetupGuide] = useState(false);
+    const [setupGuideExpandedPhase, setSetupGuideExpandedPhase] = useState(null);
 
     // Pricing & Subscription State
     const [showPricingModal, setShowPricingModal] = useState(false);
@@ -2510,6 +2599,90 @@ const PodcastStudioPage = ({ onNavigate }) => {
     };
 
     const nextFlowActionLabel = nextRequiredFlow.actionLabel;
+    const activePodcastTier = normalizeTierId(subscriptionStatus?.userTier || subscriptionStatus?.tier || 'free');
+    const isPodcastAccessAdmin = Boolean(subscriptionStatus?.isAdmin || authService.isAdminAllAccess());
+    const hasPodcastAccess = Boolean(subscriptionStatus?.hasActiveSubscription || isPodcastAccessAdmin);
+
+    const getTierAccessState = (requiredTier) => {
+        if (subscriptionStatusLoading) {
+            return {
+                unlocked: false,
+                badge: 'Checking access',
+                badgeTone: 'neutral',
+                note: 'Checking billing access...',
+                activeLabel: 'Loading'
+            };
+        }
+
+        if (isPodcastAccessAdmin) {
+            return {
+                unlocked: true,
+                badge: 'Unlocked',
+                badgeTone: 'success',
+                note: 'Administrator all-access.',
+                activeLabel: 'Admin'
+            };
+        }
+
+        const unlocked = hasPodcastAccess && getTierRank(activePodcastTier) >= getTierRank(requiredTier);
+        return {
+            unlocked,
+            badge: unlocked ? 'Unlocked' : `Needs ${getTierLabel(requiredTier)}`,
+            badgeTone: unlocked ? 'success' : 'locked',
+            note: unlocked
+                ? `Included in ${getTierLabel(activePodcastTier)}.`
+                : `Available in ${getTierLabel(requiredTier)}.`,
+            activeLabel: getTierLabel(activePodcastTier)
+        };
+    };
+
+    const podcastMetricCards = [
+        {
+            title: 'Direct publishing',
+            description: 'Send content to connected channels without manual copy-paste steps.',
+            tier: 'creator_pro',
+            icon: '📡',
+            unlockedAction: () => openRavensightTab('upload', 'Opening Ravensight Upload...'),
+            unlockedActionLabel: 'Publish now →',
+            lockedAction: () => promptGuidedStudioUpgrade('Direct publishing is available starting at Creator Pro.'),
+            lockedActionLabel: 'Upgrade to Creator Pro →'
+        },
+        {
+            title: 'Scheduling and queueing',
+            description: 'Plan a content run in advance so publishing keeps moving when the team is offline.',
+            tier: 'creator_pro',
+            icon: '🗓️',
+            unlockedAction: () => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...'),
+            unlockedActionLabel: 'Open planner →',
+            lockedAction: () => promptGuidedStudioUpgrade('Scheduling and queueing is available starting at Creator Pro.'),
+            lockedActionLabel: 'Upgrade to Creator Pro →'
+        },
+        {
+            title: 'Growth analytics',
+            description: 'Use trend and audience signals to prioritize what gets posted next.',
+            tier: 'growth_suite',
+            icon: '📊',
+            unlockedAction: () => navigateToFeaturePage('feed', 'Opening growth analytics context...'),
+            unlockedActionLabel: 'Open analytics →',
+            lockedAction: () => { setSelectedPlan('growth_suite'); setShowPricingModal(true); },
+            lockedActionLabel: 'View pricing →'
+        },
+        {
+            title: 'Team workflows',
+            description: 'Bring reviewers, editors, and operators into the same publishing lane.',
+            tier: 'studio_plus',
+            icon: '🏗️',
+            unlockedAction: () => navigateToFeaturePage('collaboration', 'Opening team workflows...'),
+            unlockedActionLabel: 'Open team tools →',
+            lockedAction: () => { setSelectedPlan('studio_plus'); setShowPricingModal(true); },
+            lockedActionLabel: 'View pricing →'
+        }
+    ].map((card) => ({
+        ...card,
+        access: getTierAccessState(card.tier)
+    }));
+
+    const unlockedPodcastMetricCount = podcastMetricCards.filter((card) => card.access.unlocked).length;
     const isGuidedStudioUnlocked = Boolean(
         subscriptionStatus?.features?.find((f) => f.key === 'guided-studio-flow')?.canAccess
         || subscriptionStatus?.isAdmin
@@ -2773,124 +2946,99 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 color: '#4ade80'
                             }}>
                                 <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />
-                                2 feature groups unlocked
+                                {unlockedPodcastMetricCount} feature groups unlocked
                             </div>
                         </div>
                     </div>
 
                     {/* Feature cards */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '18px' }}>
-                        {/* Direct publishing — Unlocked */}
-                        <div style={{
-                            background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.7))',
-                            border: '1px solid rgba(52,211,153,0.35)',
-                            borderRadius: '14px',
-                            padding: '16px'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                                <div style={{ fontSize: '22px' }}>📡</div>
-                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#4ade80', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.35)', padding: '2px 8px', borderRadius: '999px' }}>
-                                    Unlocked
-                                </span>
-                            </div>
-                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Direct publishing</div>
-                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-                                Send content to connected channels without manual copy-paste steps.
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => openRavensightTab('upload', 'Opening Ravensight Upload...')}
-                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(52,211,153,0.45)', background: 'rgba(16,185,129,0.12)', color: '#34d399', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                                Publish now →
-                            </button>
-                        </div>
+                        {podcastMetricCards.map((card) => {
+                            const tone = card.access.unlocked
+                                ? {
+                                    background: card.title === 'Growth analytics'
+                                        ? 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.7))'
+                                        : card.title === 'Team workflows'
+                                            ? 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(15,23,42,0.7))'
+                                            : 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(15,23,42,0.7))',
+                                    border: card.title === 'Growth analytics'
+                                        ? '1px solid rgba(52,211,153,0.35)'
+                                        : card.title === 'Team workflows'
+                                            ? '1px solid rgba(167,139,250,0.35)'
+                                            : '1px solid rgba(56,189,248,0.35)',
+                                    color: card.title === 'Team workflows' ? '#c4b5fd' : '#34d399'
+                                }
+                                : {
+                                    background: 'rgba(15,23,42,0.5)',
+                                    border: '1px solid rgba(100,116,139,0.25)',
+                                    color: '#94a3b8'
+                                };
 
-                        {/* Scheduling & queueing — Unlocked */}
-                        <div style={{
-                            background: 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(15,23,42,0.7))',
-                            border: '1px solid rgba(56,189,248,0.3)',
-                            borderRadius: '14px',
-                            padding: '16px'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                                <div style={{ fontSize: '22px' }}>🗓️</div>
-                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '2px 8px', borderRadius: '999px' }}>
-                                    Unlocked
-                                </span>
-                            </div>
-                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: '4px' }}>Scheduling &amp; queueing</div>
-                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-                                Plan a content run in advance so publishing keeps moving when the team is offline.
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => navigateToFeaturePage('planner', 'Opening Planner for release scheduling...')}
-                                style={{ marginTop: '12px', width: '100%', border: '1px solid rgba(56,189,248,0.35)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                                Open planner →
-                            </button>
-                        </div>
-
-                        {/* Growth analytics — gated */}
-                        <div style={{
-                            background: 'rgba(15,23,42,0.5)',
-                            border: '1px solid rgba(100,116,139,0.25)',
-                            borderRadius: '14px',
-                            padding: '16px',
-                            opacity: 0.75
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                                <div style={{ fontSize: '22px' }}>📊</div>
-                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
-                                    Needs growth suite
-                                </span>
-                            </div>
-                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Growth analytics</div>
-                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                                Use trend and audience signals to prioritize what gets posted next.
-                            </div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
-                                Try free for 14 days with Growth Suite
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => { setSelectedPlan('growth_suite'); setShowPricingModal(true); }}
-                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                                View pricing →
-                            </button>
-                        </div>
-
-                        {/* Team workflows — gated */}
-                        <div style={{
-                            background: 'rgba(15,23,42,0.5)',
-                            border: '1px solid rgba(100,116,139,0.25)',
-                            borderRadius: '14px',
-                            padding: '16px',
-                            opacity: 0.75
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                                <div style={{ fontSize: '22px' }}>🏗️</div>
-                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.25)', padding: '2px 8px', borderRadius: '999px' }}>
-                                    Needs studio plus
-                                </span>
-                            </div>
-                            <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>Team workflows</div>
-                            <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                                Bring reviewers, editors, and operators into the same publishing lane.
-                            </div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
-                                Try free for 7 days with Studio Plus
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => { setSelectedPlan('studio_plus'); setShowPricingModal(true); }}
-                                style={{ marginTop: '8px', width: '100%', border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(148,163,184,0.06)', color: '#64748b', borderRadius: '8px', padding: '7px 0', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                                View pricing →
-                            </button>
-                        </div>
+                            return (
+                                <div
+                                    key={card.title}
+                                    style={{
+                                        background: tone.background,
+                                        border: tone.border,
+                                        borderRadius: '14px',
+                                        padding: '16px',
+                                        opacity: card.access.unlocked ? 1 : 0.78
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                        <div style={{ fontSize: '22px' }}>{card.icon}</div>
+                                        <span style={{
+                                            fontSize: '10px',
+                                            fontWeight: 800,
+                                            letterSpacing: '0.12em',
+                                            textTransform: 'uppercase',
+                                            color: tone.color,
+                                            background: card.access.unlocked ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.1)',
+                                            border: card.access.unlocked ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(148,163,184,0.25)',
+                                            padding: '2px 8px',
+                                            borderRadius: '999px'
+                                        }}>
+                                            {card.access.badge}
+                                        </span>
+                                    </div>
+                                    <div style={{ fontWeight: 700, color: card.access.unlocked ? '#e2e8f0' : '#94a3b8', marginBottom: '4px' }}>{card.title}</div>
+                                    <div style={{ fontSize: '12px', color: card.access.unlocked ? '#cbd5e1' : '#64748b', lineHeight: 1.5 }}>
+                                        {card.description}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+                                        {card.access.note}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={card.access.unlocked ? card.unlockedAction : card.lockedAction}
+                                        style={{
+                                            marginTop: '8px',
+                                            width: '100%',
+                                            border: card.access.unlocked
+                                                ? `1px solid ${card.title === 'Team workflows' ? 'rgba(167,139,250,0.35)' : 'rgba(52,211,153,0.45)'}`
+                                                : '1px solid rgba(148,163,184,0.2)',
+                                            background: card.access.unlocked
+                                                ? card.title === 'Team workflows'
+                                                    ? 'rgba(139,92,246,0.12)'
+                                                    : 'rgba(16,185,129,0.12)'
+                                                : 'rgba(148,163,184,0.06)',
+                                            color: card.access.unlocked
+                                                ? card.title === 'Team workflows'
+                                                    ? '#c4b5fd'
+                                                    : '#34d399'
+                                                : '#64748b',
+                                            borderRadius: '8px',
+                                            padding: '7px 0',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        {card.access.unlocked ? card.unlockedActionLabel : card.lockedActionLabel}
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     {/* Billing status bar — hidden for admins (no payment required) */}
@@ -2933,6 +3081,207 @@ const PodcastStudioPage = ({ onNavigate }) => {
                             Manage billing →
                         </button>
                     </div>
+                    )}
+                </div>
+
+                {/* ── Podcast Setup Guide ─────────────────────────────────────── */}
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,41,59,0.9))',
+                    border: '1px solid rgba(148,163,184,0.18)',
+                    borderRadius: '18px',
+                    overflow: 'hidden'
+                }}>
+                    {/* Collapsible header */}
+                    <button
+                        type="button"
+                        onClick={() => setShowSetupGuide((v) => !v)}
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '16px 20px',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            gap: '12px'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '20px' }}>📻</span>
+                            <div>
+                                <div style={{ fontSize: '14px', fontWeight: 800, color: '#e2e8f0' }}>
+                                    New to podcasting? Start here.
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+                                    4-phase setup guide — concept, gear, recording, and publishing
+                                </div>
+                            </div>
+                        </div>
+                        <span style={{ fontSize: '18px', color: '#94a3b8', transform: showSetupGuide ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+                            ▾
+                        </span>
+                    </button>
+
+                    {/* Expanded content */}
+                    {showSetupGuide && (
+                        <div style={{ padding: '0 20px 20px' }}>
+                            {/* Phase grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                                {PODCAST_SETUP_PHASES.map((ph) => (
+                                    <div
+                                        key={ph.phase}
+                                        style={{
+                                            background: ph.bg,
+                                            border: `1px solid ${ph.border}`,
+                                            borderRadius: '14px',
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        {/* Phase header — click to expand */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setSetupGuideExpandedPhase((prev) => (prev === ph.phase ? null : ph.phase))}
+                                            style={{
+                                                width: '100%',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '10px',
+                                                padding: '12px 14px',
+                                                background: 'none',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                textAlign: 'left'
+                                            }}
+                                        >
+                                            <span style={{
+                                                fontSize: '22px',
+                                                width: '36px',
+                                                height: '36px',
+                                                borderRadius: '50%',
+                                                background: `${ph.color}22`,
+                                                border: `1px solid ${ph.border}`,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0
+                                            }}>
+                                                {ph.icon}
+                                            </span>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: ph.color, marginBottom: '2px' }}>
+                                                    Phase {ph.phase}
+                                                </div>
+                                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0', lineHeight: 1.3 }}>
+                                                    {ph.title}
+                                                </div>
+                                            </div>
+                                            <span style={{ fontSize: '14px', color: '#64748b', transform: setupGuideExpandedPhase === ph.phase ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+                                                ▾
+                                            </span>
+                                        </button>
+
+                                        {/* Expanded steps */}
+                                        {setupGuideExpandedPhase === ph.phase && (
+                                            <div style={{ padding: '0 14px 14px', display: 'grid', gap: '10px' }}>
+                                                {ph.steps.map((step, si) => (
+                                                    <div key={si} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                                        <span style={{
+                                                            width: '22px',
+                                                            height: '22px',
+                                                            borderRadius: '50%',
+                                                            background: `${ph.color}22`,
+                                                            border: `1px solid ${ph.border}`,
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            fontSize: '10px',
+                                                            fontWeight: 800,
+                                                            color: ph.color,
+                                                            flexShrink: 0,
+                                                            marginTop: '1px'
+                                                        }}>
+                                                            {si + 1}
+                                                        </span>
+                                                        <div>
+                                                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', marginBottom: '2px' }}>
+                                                                {step.label}
+                                                            </div>
+                                                            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                                                                {step.detail}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Quick-links bar */}
+                            <div style={{
+                                background: 'rgba(255,255,255,0.03)',
+                                border: '1px solid rgba(148,163,184,0.12)',
+                                borderRadius: '12px',
+                                padding: '14px 16px',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '14px',
+                                flexWrap: 'wrap'
+                            }}>
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', whiteSpace: 'nowrap', paddingTop: '2px' }}>
+                                    Recommended tools
+                                </div>
+                                {[
+                                    { label: '🎙 Riverside.fm', url: 'https://riverside.fm' },
+                                    { label: '✏️ Descript', url: 'https://www.descript.com' },
+                                    { label: '📦 Buzzsprout', url: 'https://www.buzzsprout.com' },
+                                    { label: '🎵 Spotify for Creators', url: 'https://podcasters.spotify.com' },
+                                    { label: '🍎 Apple Podcasts Connect', url: 'https://podcastsconnect.apple.com' },
+                                    { label: '🎨 Canva cover art', url: 'https://www.canva.com/create/podcast-covers/' },
+                                ].map((tool) => (
+                                    <a
+                                        key={tool.url}
+                                        href={tool.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{
+                                            fontSize: '12px',
+                                            fontWeight: 600,
+                                            color: '#60a5fa',
+                                            textDecoration: 'none',
+                                            padding: '5px 10px',
+                                            borderRadius: '8px',
+                                            border: '1px solid rgba(96,165,250,0.25)',
+                                            background: 'rgba(96,165,250,0.06)',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {tool.label} ↗
+                                    </a>
+                                ))}
+                            </div>
+
+                            {/* Dismiss */}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSetupGuide(false)}
+                                    style={{
+                                        fontSize: '12px',
+                                        color: '#64748b',
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        padding: '4px 8px'
+                                    }}
+                                >
+                                    Hide setup guide
+                                </button>
+                            </div>
+                        </div>
                     )}
                 </div>
 
