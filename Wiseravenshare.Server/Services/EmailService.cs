@@ -10,6 +10,7 @@ public interface IEmailService
     Task SendPasswordResetEmailAsync(string email, string displayName, string resetToken);
     Task<bool> SendTeamInviteEmailAsync(TeamInviteEmailMessage message, CancellationToken cancellationToken = default);
     Task<bool> SendCollaborationInviteEmailAsync(CollaborationInviteEmailMessage message, CancellationToken cancellationToken = default);
+    string GetLastDispatchError();
 }
 
 public sealed class TeamInviteEmailMessage
@@ -35,6 +36,8 @@ public sealed class CollaborationInviteEmailMessage
 
 public class NoopEmailService : IEmailService
 {
+    public string GetLastDispatchError() => "Email service is disabled.";
+
     public Task SendWelcomeEmailAsync(string email, string displayName)
     {
         return Task.CompletedTask;
@@ -61,6 +64,7 @@ public sealed class SmtpEmailService : IEmailService
     private readonly IConfiguration _configuration;
     private readonly ILogger<SmtpEmailService> _logger;
     private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private string _lastDispatchError = string.Empty;
 
     public SmtpEmailService(IConfiguration configuration, ILogger<SmtpEmailService> logger)
     {
@@ -76,31 +80,42 @@ public sealed class SmtpEmailService : IEmailService
             return;
         }
 
-        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        var smtpHost = GetConfig(
+            "InviteEmail:SmtpHost",
+            "ReminderNotifications:Email:SmtpHost",
+            "REMINDER_EMAIL_SMTP_HOST",
+            "INVITE_EMAIL_SMTP_HOST",
+            "SMTP_HOST",
+            "EMAIL_SMTP_HOST");
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
             _logger.LogWarning("Skipped welcome email dispatch because SMTP host is not configured.");
             return;
         }
 
-        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var fromAddress = GetValidatedFromAddress();
         if (string.IsNullOrWhiteSpace(fromAddress))
         {
             _logger.LogWarning("Skipped welcome email dispatch because sender address is not configured.");
             return;
         }
 
-        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        var fromName = GetConfig(
+            "InviteEmail:FromName",
+            "ReminderNotifications:Email:FromName",
+            "REMINDER_EMAIL_FROM_NAME",
+            "INVITE_EMAIL_FROM_NAME",
+            "SMTP_FROM_NAME");
         if (string.IsNullOrWhiteSpace(fromName))
         {
             fromName = "Wise Ravens";
         }
 
-        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
-        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
-        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
-        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
-        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort", "REMINDER_EMAIL_SMTP_PORT", "SMTP_PORT");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl", "REMINDER_EMAIL_SMTP_ENABLE_SSL", "SMTP_ENABLE_SSL");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout", "REMINDER_EMAIL_SMTP_TIMEOUT", "SMTP_TIMEOUT");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username", "REMINDER_EMAIL_SMTP_USERNAME", "SMTP_USERNAME", "SMTP_USER");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password", "REMINDER_EMAIL_SMTP_PASSWORD", "SMTP_PASSWORD");
 
         var safeName = string.IsNullOrWhiteSpace(displayName) ? email : displayName.Trim();
         var subject = "Welcome to Wise Ravens!";
@@ -141,6 +156,7 @@ Wise Ravens Team
             }
 
             await client.SendMailAsync(mail);
+            _lastDispatchError = string.Empty;
             _logger.LogInformation("Successfully sent welcome email to {Email}.", email);
         }
         catch (FormatException ex)
@@ -171,31 +187,42 @@ Wise Ravens Team
             return;
         }
 
-        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        var smtpHost = GetConfig(
+            "InviteEmail:SmtpHost",
+            "ReminderNotifications:Email:SmtpHost",
+            "REMINDER_EMAIL_SMTP_HOST",
+            "INVITE_EMAIL_SMTP_HOST",
+            "SMTP_HOST",
+            "EMAIL_SMTP_HOST");
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
             _logger.LogWarning("Skipped password reset email dispatch because SMTP host is not configured.");
             return;
         }
 
-        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var fromAddress = GetValidatedFromAddress();
         if (string.IsNullOrWhiteSpace(fromAddress))
         {
             _logger.LogWarning("Skipped password reset email dispatch because sender address is not configured.");
             return;
         }
 
-        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        var fromName = GetConfig(
+            "InviteEmail:FromName",
+            "ReminderNotifications:Email:FromName",
+            "REMINDER_EMAIL_FROM_NAME",
+            "INVITE_EMAIL_FROM_NAME",
+            "SMTP_FROM_NAME");
         if (string.IsNullOrWhiteSpace(fromName))
         {
             fromName = "Wise Ravens Security";
         }
 
-        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
-        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
-        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
-        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
-        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort", "REMINDER_EMAIL_SMTP_PORT", "SMTP_PORT");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl", "REMINDER_EMAIL_SMTP_ENABLE_SSL", "SMTP_ENABLE_SSL");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout", "REMINDER_EMAIL_SMTP_TIMEOUT", "SMTP_TIMEOUT");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username", "REMINDER_EMAIL_SMTP_USERNAME", "SMTP_USERNAME", "SMTP_USER");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password", "REMINDER_EMAIL_SMTP_PASSWORD", "SMTP_PASSWORD");
 
         var safeName = string.IsNullOrWhiteSpace(displayName) ? email : displayName.Trim();
         var subject = "Reset Your Wise Ravens Password";
@@ -239,6 +266,7 @@ Wise Ravens Security Team
             }
 
             await client.SendMailAsync(mail);
+            _lastDispatchError = string.Empty;
             _logger.LogInformation("Successfully sent password reset email to {Email}.", email);
         }
         catch (FormatException ex)
@@ -257,9 +285,12 @@ Wise Ravens Security Team
 
     public async Task<bool> SendTeamInviteEmailAsync(TeamInviteEmailMessage message, CancellationToken cancellationToken = default)
     {
+        _lastDispatchError = string.Empty;
+
         if (message is null)
         {
             _logger.LogWarning("Skipped invite email dispatch because message payload was null.");
+            _lastDispatchError = "Invite email payload was null.";
             return false;
         }
 
@@ -267,40 +298,55 @@ Wise Ravens Security Team
         if (string.IsNullOrWhiteSpace(toEmail))
         {
             _logger.LogWarning("Skipped invite email dispatch because destination address was missing.");
+            _lastDispatchError = "Invite destination email is missing.";
             return false;
         }
 
         if (!IsValidEmail(toEmail))
         {
             _logger.LogWarning("Skipped invite email dispatch because destination address '{Email}' is invalid.", toEmail);
+            _lastDispatchError = "Invite destination email format is invalid.";
             return false;
         }
 
-        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        var smtpHost = GetConfig(
+            "InviteEmail:SmtpHost",
+            "ReminderNotifications:Email:SmtpHost",
+            "REMINDER_EMAIL_SMTP_HOST",
+            "INVITE_EMAIL_SMTP_HOST",
+            "SMTP_HOST",
+            "EMAIL_SMTP_HOST");
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
             _logger.LogWarning("Skipped invite email dispatch because SMTP host is not configured.");
+            _lastDispatchError = "SMTP host is not configured.";
             return false;
         }
 
-        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var fromAddress = GetValidatedFromAddress();
         if (string.IsNullOrWhiteSpace(fromAddress))
         {
             _logger.LogWarning("Skipped invite email dispatch because sender address is not configured.");
+            _lastDispatchError = "Sender address is not configured.";
             return false;
         }
 
-        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        var fromName = GetConfig(
+            "InviteEmail:FromName",
+            "ReminderNotifications:Email:FromName",
+            "REMINDER_EMAIL_FROM_NAME",
+            "INVITE_EMAIL_FROM_NAME",
+            "SMTP_FROM_NAME");
         if (string.IsNullOrWhiteSpace(fromName))
         {
             fromName = "Wise Ravens Team Access";
         }
 
-        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
-        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
-        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
-        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
-        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort", "REMINDER_EMAIL_SMTP_PORT", "SMTP_PORT");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl", "REMINDER_EMAIL_SMTP_ENABLE_SSL", "SMTP_ENABLE_SSL");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout", "REMINDER_EMAIL_SMTP_TIMEOUT", "SMTP_TIMEOUT");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username", "REMINDER_EMAIL_SMTP_USERNAME", "SMTP_USERNAME", "SMTP_USER");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password", "REMINDER_EMAIL_SMTP_PASSWORD", "SMTP_PASSWORD");
 
         var safeRole = string.IsNullOrWhiteSpace(message.TeamRole) ? "member" : message.TeamRole.Trim();
         var inviteType = message.Prearranged ? "prearranged access" : "team access";
@@ -332,31 +378,38 @@ Wise Ravens Security Team
             }
 
             await client.SendMailAsync(mail, cancellationToken);
+            _lastDispatchError = string.Empty;
             _logger.LogInformation("Successfully sent team invite email to {Email}.", toEmail);
             return true;
         }
         catch (FormatException ex)
         {
             _logger.LogError(ex, "Invalid email format for {Email}.", toEmail);
+            _lastDispatchError = "Sender or destination email format is invalid.";
             return false;
         }
         catch (SmtpException ex)
         {
             _logger.LogError(ex, "SMTP error sending team invite email to {Email}.", toEmail);
+            _lastDispatchError = $"SMTP rejected the invite email ({ex.StatusCode}).";
             return false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send team invite email to {Email}.", toEmail);
+            _lastDispatchError = "Unexpected error during invite email dispatch.";
             return false;
         }
     }
 
     public async Task<bool> SendCollaborationInviteEmailAsync(CollaborationInviteEmailMessage message, CancellationToken cancellationToken = default)
     {
+        _lastDispatchError = string.Empty;
+
         if (message is null)
         {
             _logger.LogWarning("Skipped collaboration invite email dispatch because payload was null.");
+            _lastDispatchError = "Collaboration invite payload was null.";
             return false;
         }
 
@@ -364,40 +417,55 @@ Wise Ravens Security Team
         if (string.IsNullOrWhiteSpace(toEmail))
         {
             _logger.LogWarning("Skipped collaboration invite email dispatch because destination address was missing.");
+            _lastDispatchError = "Collaboration invite destination email is missing.";
             return false;
         }
 
         if (!IsValidEmail(toEmail))
         {
             _logger.LogWarning("Skipped collaboration invite email dispatch because destination address '{Email}' is invalid.", toEmail);
+            _lastDispatchError = "Collaboration invite destination email format is invalid.";
             return false;
         }
 
-        var smtpHost = GetConfig("InviteEmail:SmtpHost", "ReminderNotifications:Email:SmtpHost");
+        var smtpHost = GetConfig(
+            "InviteEmail:SmtpHost",
+            "ReminderNotifications:Email:SmtpHost",
+            "REMINDER_EMAIL_SMTP_HOST",
+            "INVITE_EMAIL_SMTP_HOST",
+            "SMTP_HOST",
+            "EMAIL_SMTP_HOST");
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
             _logger.LogWarning("Skipped collaboration invite email dispatch because SMTP host is not configured.");
+            _lastDispatchError = "SMTP host is not configured.";
             return false;
         }
 
-        var fromAddress = GetConfig("InviteEmail:FromAddress", "ReminderNotifications:Email:FromAddress", "InviteEmail:Username", "ReminderNotifications:Email:Username");
+        var fromAddress = GetValidatedFromAddress();
         if (string.IsNullOrWhiteSpace(fromAddress))
         {
             _logger.LogWarning("Skipped collaboration invite email dispatch because sender address is not configured.");
+            _lastDispatchError = "Sender address is not configured.";
             return false;
         }
 
-        var fromName = GetConfig("InviteEmail:FromName", "ReminderNotifications:Email:FromName");
+        var fromName = GetConfig(
+            "InviteEmail:FromName",
+            "ReminderNotifications:Email:FromName",
+            "REMINDER_EMAIL_FROM_NAME",
+            "INVITE_EMAIL_FROM_NAME",
+            "SMTP_FROM_NAME");
         if (string.IsNullOrWhiteSpace(fromName))
         {
             fromName = "Wise Ravens Collaboration";
         }
 
-        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort");
-        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl");
-        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout");
-        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username");
-        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password");
+        var smtpPort = ParseIntConfig(587, "InviteEmail:SmtpPort", "ReminderNotifications:Email:SmtpPort", "REMINDER_EMAIL_SMTP_PORT", "SMTP_PORT");
+        var enableSsl = ParseBoolConfig(true, "InviteEmail:EnableSsl", "ReminderNotifications:Email:EnableSsl", "REMINDER_EMAIL_SMTP_ENABLE_SSL", "SMTP_ENABLE_SSL");
+        var smtpTimeout = ParseIntConfig(30000, "InviteEmail:SmtpTimeout", "ReminderNotifications:Email:SmtpTimeout", "REMINDER_EMAIL_SMTP_TIMEOUT", "SMTP_TIMEOUT");
+        var username = GetConfig("InviteEmail:Username", "ReminderNotifications:Email:Username", "REMINDER_EMAIL_SMTP_USERNAME", "SMTP_USERNAME", "SMTP_USER");
+        var password = GetConfig("InviteEmail:Password", "ReminderNotifications:Email:Password", "REMINDER_EMAIL_SMTP_PASSWORD", "SMTP_PASSWORD");
 
         var safeRoomName = string.IsNullOrWhiteSpace(message.RoomName) ? "Cross-Platform Collaboration Room" : message.RoomName.Trim();
         var subject = $"Collaboration invite: {safeRoomName}";
@@ -428,24 +496,33 @@ Wise Ravens Security Team
             }
 
             await client.SendMailAsync(mail, cancellationToken);
+            _lastDispatchError = string.Empty;
             _logger.LogInformation("Successfully sent collaboration invite email to {Email}.", toEmail);
             return true;
         }
         catch (FormatException ex)
         {
             _logger.LogError(ex, "Invalid email format for {Email}.", toEmail);
+            _lastDispatchError = "Sender or destination email format is invalid.";
             return false;
         }
         catch (SmtpException ex)
         {
             _logger.LogError(ex, "SMTP error sending collaboration invite email to {Email}.", toEmail);
+            _lastDispatchError = $"SMTP rejected the collaboration invite ({ex.StatusCode}).";
             return false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send collaboration invite email to {Email}.", toEmail);
+            _lastDispatchError = "Unexpected error during collaboration invite dispatch.";
             return false;
         }
+    }
+
+    public string GetLastDispatchError()
+    {
+        return _lastDispatchError;
     }
 
     private static bool IsValidEmail(string email)
@@ -494,6 +571,31 @@ Wise Ravens Security Team
         }
 
         return fallback;
+    }
+
+    private string GetValidatedFromAddress()
+    {
+        var fromAddress = GetConfig(
+            "InviteEmail:FromAddress",
+            "ReminderNotifications:Email:FromAddress",
+            "REMINDER_EMAIL_FROM_ADDRESS",
+            "INVITE_EMAIL_FROM_ADDRESS",
+            "SMTP_FROM_ADDRESS",
+            "SMTP_FROM_EMAIL");
+
+        if (IsValidEmail(fromAddress))
+        {
+            return fromAddress;
+        }
+
+        var usernameFallback = GetConfig(
+            "InviteEmail:Username",
+            "ReminderNotifications:Email:Username",
+            "REMINDER_EMAIL_SMTP_USERNAME",
+            "SMTP_USERNAME",
+            "SMTP_USER");
+
+        return IsValidEmail(usernameFallback) ? usernameFallback : string.Empty;
     }
 
     private static string BuildInviteBody(TeamInviteEmailMessage message, string safeRole)

@@ -62,13 +62,20 @@ const FeatureReleaseAdminPage = () => {
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState({});
     const [bulkLoading, setBulkLoading] = useState(false);
+    const [overrideLoading, setOverrideLoading] = useState({});
+    const [selectedUserByFeature, setSelectedUserByFeature] = useState({});
+    const [adminUsers, setAdminUsers] = useState([]);
     const [billingCycle, setBillingCycle] = useState('monthly');
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await apiService.getFeatureReleaseCatalog();
-            setCatalog(res.data);
+            const [catalogRes, usersRes] = await Promise.all([
+                apiService.getFeatureReleaseCatalog(),
+                apiService.getAdminUsers({ page: 1, pageSize: 200 })
+            ]);
+            setCatalog(catalogRes.data);
+            setAdminUsers(Array.isArray(usersRes?.data?.items) ? usersRes.data.items : []);
         } catch (err) {
             addToast(err?.response?.data?.message || err?.message || 'Unable to load feature catalog.', 'error');
         } finally {
@@ -173,7 +180,7 @@ const FeatureReleaseAdminPage = () => {
                         🎛️ Feature Release Console
                     </div>
                     <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>
-                        Release or gate features instantly. Changes take effect for all users immediately.
+                        Release globally, then grant or block specific users per feature.
                         {catalog && (
                             <span style={{ marginLeft: '12px', color: '#a5b4fc' }}>
                                 {catalog.releasedCount} released · {catalog.gatedCount} gated
@@ -300,6 +307,77 @@ const FeatureReleaseAdminPage = () => {
                     <div style={{ display: 'grid', gap: '10px' }}>
                         {features.map((feature) => {
                             const busy = actionLoading[feature.key];
+                            const selectedUserId = selectedUserByFeature[feature.key] || '';
+                            const userOverrideBusy = overrideLoading[feature.key];
+
+                            const grantToUser = async () => {
+                                if (!selectedUserId) {
+                                    addToast('Select a user first.', 'error');
+                                    return;
+                                }
+
+                                const reason = window.prompt(`Optional reason for granting ${feature.name} to this user:`, '') || '';
+                                setOverrideLoading((prev) => ({ ...prev, [feature.key]: 'granting' }));
+                                try {
+                                    await apiService.grantFeatureToUser(feature.key, selectedUserId, reason);
+                                    addToast(`Granted ${feature.name} to selected user.`, 'success');
+                                    await load();
+                                } catch (err) {
+                                    addToast(err?.response?.data?.message || `Failed to grant ${feature.name} to user.`, 'error');
+                                } finally {
+                                    setOverrideLoading((prev) => {
+                                        const next = { ...prev };
+                                        delete next[feature.key];
+                                        return next;
+                                    });
+                                }
+                            };
+
+                            const blockForUser = async () => {
+                                if (!selectedUserId) {
+                                    addToast('Select a user first.', 'error');
+                                    return;
+                                }
+
+                                const reason = window.prompt(`Optional reason for blocking ${feature.name} for this user:`, '') || '';
+                                setOverrideLoading((prev) => ({ ...prev, [feature.key]: 'blocking' }));
+                                try {
+                                    await apiService.blockFeatureForUser(feature.key, selectedUserId, reason);
+                                    addToast(`Blocked ${feature.name} for selected user.`, 'info');
+                                    await load();
+                                } catch (err) {
+                                    addToast(err?.response?.data?.message || `Failed to block ${feature.name} for user.`, 'error');
+                                } finally {
+                                    setOverrideLoading((prev) => {
+                                        const next = { ...prev };
+                                        delete next[feature.key];
+                                        return next;
+                                    });
+                                }
+                            };
+
+                            const clearUserOverride = async () => {
+                                if (!selectedUserId) {
+                                    addToast('Select a user first.', 'error');
+                                    return;
+                                }
+
+                                setOverrideLoading((prev) => ({ ...prev, [feature.key]: 'clearing' }));
+                                try {
+                                    await apiService.clearFeatureUserOverride(feature.key, selectedUserId);
+                                    addToast(`Cleared user override for ${feature.name}.`, 'success');
+                                    await load();
+                                } catch (err) {
+                                    addToast(err?.response?.data?.message || `Failed to clear override for ${feature.name}.`, 'error');
+                                } finally {
+                                    setOverrideLoading((prev) => {
+                                        const next = { ...prev };
+                                        delete next[feature.key];
+                                        return next;
+                                    });
+                                }
+                            };
+
                             return (
                                 <div
                                     key={feature.key}
@@ -367,6 +445,137 @@ const FeatureReleaseAdminPage = () => {
                                             {busy === 'gating' ? '...' : '🔒 Gate'}
                                         </button>
                                     </div>
+
+                                    <div style={{ gridColumn: '1 / -1', marginTop: '6px', paddingTop: '10px', borderTop: '1px dashed rgba(148,163,184,0.22)' }}>
+                                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#cbd5e1', marginBottom: '8px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                            User-specific release override
+                                        </div>
+                                        <div style={{ display: 'grid', gap: '8px' }}>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                                                <select
+                                                    value={selectedUserId}
+                                                    onChange={(event) => {
+                                                        const value = event.target.value;
+                                                        setSelectedUserByFeature((prev) => ({ ...prev, [feature.key]: value }));
+                                                    }}
+                                                    style={{
+                                                        minWidth: '240px',
+                                                        background: 'rgba(15,23,42,0.9)',
+                                                        border: '1px solid rgba(148,163,184,0.35)',
+                                                        color: '#e2e8f0',
+                                                        borderRadius: '8px',
+                                                        fontSize: '12px',
+                                                        padding: '7px 10px'
+                                                    }}
+                                                >
+                                                    <option value="">Select user</option>
+                                                    {adminUsers.map((candidate) => (
+                                                        <option key={candidate.id} value={candidate.id}>
+                                                            {candidate.name} ({candidate.email})
+                                                        </option>
+                                                    ))}
+                                                </select>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={grantToUser}
+                                                    disabled={!selectedUserId || Boolean(userOverrideBusy)}
+                                                    style={{
+                                                        border: '1px solid rgba(34,197,94,0.4)',
+                                                        background: 'rgba(34,197,94,0.10)',
+                                                        color: '#4ade80',
+                                                        borderRadius: '8px',
+                                                        padding: '6px 12px',
+                                                        fontWeight: 700,
+                                                        fontSize: '11px',
+                                                        cursor: !selectedUserId || userOverrideBusy ? 'not-allowed' : 'pointer',
+                                                        opacity: !selectedUserId || userOverrideBusy ? 0.6 : 1
+                                                    }}
+                                                >
+                                                    {userOverrideBusy === 'granting' ? '...' : 'Grant User'}
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={blockForUser}
+                                                    disabled={!selectedUserId || Boolean(userOverrideBusy)}
+                                                    style={{
+                                                        border: '1px solid rgba(248,113,113,0.4)',
+                                                        background: 'rgba(248,113,113,0.10)',
+                                                        color: '#f87171',
+                                                        borderRadius: '8px',
+                                                        padding: '6px 12px',
+                                                        fontWeight: 700,
+                                                        fontSize: '11px',
+                                                        cursor: !selectedUserId || userOverrideBusy ? 'not-allowed' : 'pointer',
+                                                        opacity: !selectedUserId || userOverrideBusy ? 0.6 : 1
+                                                    }}
+                                                >
+                                                    {userOverrideBusy === 'blocking' ? '...' : 'Block User'}
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={clearUserOverride}
+                                                    disabled={!selectedUserId || Boolean(userOverrideBusy)}
+                                                    style={{
+                                                        border: '1px solid rgba(148,163,184,0.4)',
+                                                        background: 'rgba(148,163,184,0.08)',
+                                                        color: '#cbd5e1',
+                                                        borderRadius: '8px',
+                                                        padding: '6px 12px',
+                                                        fontWeight: 700,
+                                                        fontSize: '11px',
+                                                        cursor: !selectedUserId || userOverrideBusy ? 'not-allowed' : 'pointer',
+                                                        opacity: !selectedUserId || userOverrideBusy ? 0.6 : 1
+                                                    }}
+                                                >
+                                                    {userOverrideBusy === 'clearing' ? '...' : 'Clear Override'}
+                                                </button>
+                                            </div>
+
+                                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                                Active user overrides: {feature.userGrantCount || 0} grants · {feature.userBlockCount || 0} blocks
+                                            </div>
+
+                                            {Array.isArray(feature.userOverrides) && feature.userOverrides.length > 0 ? (
+                                                <div style={{ display: 'grid', gap: '6px' }}>
+                                                    {feature.userOverrides.slice(0, 6).map((entry) => (
+                                                        <div
+                                                            key={`${feature.key}-${entry.userId}-${entry.state}`}
+                                                            style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                gap: '10px',
+                                                                fontSize: '11px',
+                                                                color: '#cbd5e1',
+                                                                background: 'rgba(15,23,42,0.45)',
+                                                                border: '1px solid rgba(148,163,184,0.18)',
+                                                                borderRadius: '8px',
+                                                                padding: '6px 10px'
+                                                            }}
+                                                        >
+                                                            <span>
+                                                                {entry.userEmail || entry.userId}
+                                                            </span>
+                                                            <span style={{
+                                                                fontWeight: 700,
+                                                                color: entry.state === 'enabled' ? '#4ade80' : '#f87171',
+                                                                textTransform: 'uppercase',
+                                                                letterSpacing: '0.06em'
+                                                            }}>
+                                                                {entry.state === 'enabled' ? 'GRANT' : 'BLOCK'}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                                    No user-specific overrides yet.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                             );
                         })}
@@ -381,10 +590,10 @@ const FeatureReleaseAdminPage = () => {
             }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#c4b5fd', marginBottom: '8px' }}>ℹ️ How Release / Gate works</div>
                 <div style={{ fontSize: '12px', color: '#94a3b8', display: 'grid', gap: '6px' }}>
-                    <div><strong style={{ color: '#e2e8f0' }}>Release</strong> — removes the admin lock. Users whose Stripe subscription tier covers the feature can access it immediately.</div>
-                    <div><strong style={{ color: '#e2e8f0' }}>Gate</strong> — places an admin lock. All users (including paid) are blocked until the feature is released again. Use for maintenance or staged rollout.</div>
-                    <div><strong style={{ color: '#e2e8f0' }}>Agent release</strong> — any user or agent with an admin role can call <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>PUT /api/admin/feature-release/{'{key}'}/release</code> to release a feature programmatically.</div>
-                    <div><strong style={{ color: '#e2e8f0' }}>My access check</strong> — clients call <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>GET /api/features/my-access</code> to get their feature entitlement list with per-feature <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>canAccess</code> flags.</div>
+                    <div><strong style={{ color: '#e2e8f0' }}>Release</strong> — unlocks default access for users who satisfy tier rules.</div>
+                    <div><strong style={{ color: '#e2e8f0' }}>Gate</strong> — applies a global lock for maintenance or staged rollouts.</div>
+                    <div><strong style={{ color: '#e2e8f0' }}>Grant User / Block User</strong> — explicit per-user override that wins over default tier and release state.</div>
+                    <div><strong style={{ color: '#e2e8f0' }}>Clear Override</strong> — removes per-user override so default policy applies again.</div>
                 </div>
             </div>
         </div>

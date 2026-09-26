@@ -1566,6 +1566,13 @@ export const apiService = {
     gateFeature: (key, reason = '') => api.put(`/admin/feature-release/${encodeURIComponent(key)}/gate`, { reason }),
     releaseAllFeatures: (reason = '') => api.post('/admin/feature-release/release-all', { reason }),
     gateAllFeatures: (reason = '') => api.post('/admin/feature-release/gate-all', { reason }),
+    getFeatureUserOverrides: (key) => api.get(`/admin/feature-release/${encodeURIComponent(key)}/user-overrides`),
+    grantFeatureToUser: (key, userId, reason = '') =>
+        api.put(`/admin/feature-release/${encodeURIComponent(key)}/users/${encodeURIComponent(userId)}/grant`, { reason }),
+    blockFeatureForUser: (key, userId, reason = '') =>
+        api.put(`/admin/feature-release/${encodeURIComponent(key)}/users/${encodeURIComponent(userId)}/block`, { reason }),
+    clearFeatureUserOverride: (key, userId) =>
+        api.delete(`/admin/feature-release/${encodeURIComponent(key)}/users/${encodeURIComponent(userId)}/override`),
     getMyFeatureAccess: () => api.get('/features/my-access'),
     getFeatureCompartments: () => api.get('/admin/feature-compartments'),
     setFeatureCompartmentAvailability: (key, mode, reason = '') =>

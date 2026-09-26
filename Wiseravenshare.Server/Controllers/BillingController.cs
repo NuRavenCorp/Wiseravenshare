@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using Stripe;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.DTOs;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 
@@ -15,10 +17,12 @@ namespace Wiseravenshare.Server.Controllers;
 public class BillingController : ControllerBase
 {
     private readonly ISubscriptionService _subscriptionService;
+    private readonly AppDbContext _db;
 
-    public BillingController(ISubscriptionService subscriptionService)
+    public BillingController(ISubscriptionService subscriptionService, AppDbContext db)
     {
         _subscriptionService = subscriptionService;
+        _db = db;
     }
 
     [Authorize]
@@ -27,6 +31,12 @@ public class BillingController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateCheckoutSession([FromBody] global::Wiseravenshare.Server.DTOs.CreateCheckoutSessionRequest request)
     {
+        var verificationResult = await EnsureEmailVerifiedForPurchaseAsync();
+        if (verificationResult is not null)
+        {
+            return verificationResult;
+        }
+
         try
         {
             var userId = User.GetUserId();
@@ -123,6 +133,36 @@ public class BillingController : ControllerBase
 
         var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
         return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<IActionResult?> EnsureEmailVerifiedForPurchaseAsync()
+    {
+        if (IsAllAccessAdmin())
+        {
+            return null;
+        }
+
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new
+            {
+                message = "User context is missing. Please sign in again.",
+                code = "missing_user_context"
+            });
+        }
+
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
+        if (user is null || !user.IsVerified)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Email verification is required before completing a purchase.",
+                code = "email_not_verified"
+            });
+        }
+
+        return null;
     }
 
     [AllowAnonymous]

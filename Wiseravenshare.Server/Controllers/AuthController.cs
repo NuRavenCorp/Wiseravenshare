@@ -745,6 +745,7 @@ public class AuthController : ControllerBase
             ExpiresAtUtc = issued.ExpiresAtUtc,
             InviteLink = inviteLink
         });
+        var dispatchError = _emailService.GetLastDispatchError();
 
         return Ok(new
         {
@@ -755,7 +756,7 @@ public class AuthController : ControllerBase
             emailDispatchStatus = emailDelivered ? "sent" : "not_sent",
             emailDispatchMessage = emailDelivered
                 ? "Invite email sent."
-                : "Invite token created but email was not sent. Verify SMTP settings and share the invite link manually."
+                : $"Invite token created but email was not sent. {dispatchError}"
         });
     }
 
@@ -834,6 +835,7 @@ public class AuthController : ControllerBase
             ExpiresAtUtc = issued.ExpiresAtUtc,
             InviteLink = inviteLink
         });
+        var dispatchError = _emailService.GetLastDispatchError();
 
         return Ok(new
         {
@@ -844,7 +846,7 @@ public class AuthController : ControllerBase
             emailDispatchStatus = emailDelivered ? "sent" : "not_sent",
             emailDispatchMessage = emailDelivered
                 ? "Invite email sent."
-                : "Prearranged token created but email was not sent. Verify SMTP settings and share the invite link manually."
+                : $"Prearranged token created but email was not sent. {dispatchError}"
         });
     }
 
