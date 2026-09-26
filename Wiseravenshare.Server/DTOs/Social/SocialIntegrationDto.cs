@@ -36,6 +36,12 @@ public class PublishSocialContentRequest
     [MaxLength(500)]
     public string? MusicUrl { get; set; }
 
+    [MaxLength(120)]
+    public string? YouTubeTitle { get; set; }
+
+    [MaxLength(5000)]
+    public string? YouTubeDescription { get; set; }
+
     /// <summary>
     /// Optional hint describing the shared media. Defaults to "auto" which infers the type from the URLs.
     /// Supported values: auto, text, photo, video, music.

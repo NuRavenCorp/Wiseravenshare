@@ -29,6 +29,8 @@ export type PublishSocialContentRequest = {
   videoUrl?: string;
   photoUrl?: string;
   musicUrl?: string;
+  youTubeTitle?: string;
+  youTubeDescription?: string;
   mediaType?: SocialMediaType;
   publishToFacebook: boolean;
   publishToTikTok: boolean;

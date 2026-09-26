@@ -722,8 +722,9 @@ export const apiService = {
             throw new Error('User id is required.');
         }
         const token = getAuthToken();
+        const returnUrl = typeof window !== 'undefined' ? window.location.href : undefined;
         const response = await axios.get(`${AUTH_BASE_URL}/auth/${normalizedPlatform}/start`, {
-            params: { user_id: normalizedUserId },
+            params: { user_id: normalizedUserId, return_url: returnUrl },
             headers: {
                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 'X-User-Id': normalizedUserId
