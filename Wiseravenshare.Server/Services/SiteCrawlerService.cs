@@ -33,6 +33,8 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
 
     public async Task<IReadOnlyList<SiteCrawlerNodeDto>> GetNodesAsync(string? countryCode = null, CancellationToken ct = default)
     {
+        await EnsureCrawlerCatalogTableAsync(ct);
+
         var cacheKey = $"crawler_nodes_{countryCode ?? "GLOBAL"}";
         if (_cache.TryGetValue(cacheKey, out object? cachedObj) && cachedObj is IReadOnlyList<SiteCrawlerNodeDto> cachedNodes)
         {
@@ -296,6 +298,8 @@ public sealed class SiteCrawlerService : ISiteCrawlerService
 
     public async Task<SiteCrawlerSummaryDto> GetSummaryAsync(string? countryCode = null, string? userCategory = null, CancellationToken ct = default)
     {
+        await EnsureCrawlerCatalogTableAsync(ct);
+
         var cacheKey = $"crawler_summary_{countryCode ?? "GLOBAL"}_{userCategory ?? "ALL"}";
         if (_cache.TryGetValue(cacheKey, out object? cachedObj) && cachedObj is SiteCrawlerSummaryDto cachedSummary)
         {
@@ -599,7 +603,7 @@ ALTER TABLE app_data.site_crawler_catalog
 
     private async Task<NpgsqlConnection> OpenNewConnectionAsync(CancellationToken ct)
     {
-        var connectionString = _db.Database.GetConnectionString();
+        var connectionString = _db.Database.GetDbConnection().ConnectionString;
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException("Database connection string is unavailable for crawler service.");

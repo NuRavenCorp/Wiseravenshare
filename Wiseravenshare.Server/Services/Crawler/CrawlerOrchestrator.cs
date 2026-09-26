@@ -107,12 +107,16 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     public async Task<CrawlJob> GetJobAsync(Guid jobId, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         var job = await _db.Set<CrawlJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, ct);
         return job ?? throw new InvalidOperationException("Crawl job not found.");
     }
 
     public async Task<IReadOnlyList<CrawlJob>> GetJobsAsync(Guid? userId = null, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         var query = _db.Set<CrawlJob>().AsNoTracking().AsQueryable();
         if (userId.HasValue && userId.Value != Guid.Empty)
         {
@@ -124,6 +128,8 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     public async Task<IReadOnlyList<CrawledPage>> GetPagesAsync(Guid jobId, int page, int pageSize, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         var safePage = Math.Max(1, page);
         var safePageSize = Math.Clamp(pageSize, 1, 500);
         return await _db.Set<CrawledPage>()
@@ -146,6 +152,8 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     public async Task<IReadOnlyList<CrawlIssue>> GetIssuesAsync(Guid jobId, string? category, string? severity, string? code, int page, int pageSize, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         var query = _db.Set<CrawlIssue>().AsNoTracking().Where(i => i.CrawlJobId == jobId);
 
         if (Enum.TryParse<IssueCategory>(category, true, out var categoryValue))
@@ -173,6 +181,8 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     public async Task<IReadOnlyList<CrawlMetric>> GetMetricsAsync(Guid jobId, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         return await _db.Set<CrawlMetric>()
             .AsNoTracking()
             .Where(metric => metric.CrawlJobId == jobId)
@@ -181,10 +191,12 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
     }
 
     public Task<CrawlReportDto> GenerateReportAsync(Guid jobId, ReportFormat format, CancellationToken ct = default)
-        => _reportGenerator.GenerateAsync(jobId, format, ct);
+        => GenerateReportInternalAsync(jobId, format, ct);
 
     public async Task<bool> CancelJobAsync(Guid jobId, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         if (RunningJobs.TryGetValue(jobId, out var cts))
         {
             cts.Cancel();
@@ -204,6 +216,8 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     public async Task<bool> DeleteJobAsync(Guid jobId, CancellationToken ct = default)
     {
+        await EnsureCrawlerTablesAsync(ct);
+
         await CancelJobAsync(jobId, ct);
 
         var pages = _db.Set<CrawledPage>().Where(p => p.CrawlJobId == jobId);
@@ -696,8 +710,12 @@ public sealed class CrawlerOrchestrator : ICrawlerOrchestrator
 
     private Task EnsureCrawlerTablesAsync(CancellationToken ct)
     {
-        // Crawler tables are now managed by EF migrations (FixCrawlerTableSchema).
-        // This method is retained for backwards compatibility but is a no-op.
-        return Task.CompletedTask;
+        return _db.Database.MigrateAsync(ct);
+    }
+
+    private async Task<CrawlReportDto> GenerateReportInternalAsync(Guid jobId, ReportFormat format, CancellationToken ct)
+    {
+        await EnsureCrawlerTablesAsync(ct);
+        return await _reportGenerator.GenerateAsync(jobId, format, ct);
     }
 }
