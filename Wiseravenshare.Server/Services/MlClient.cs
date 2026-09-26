@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 
-namespace wiseravenstream.Server.Services;
+namespace Wiseravenshare.Server.Services;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
