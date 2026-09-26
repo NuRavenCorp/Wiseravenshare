@@ -19,7 +19,7 @@ const formatCurrency = (amount) => {
 };
 
 const RevenueConsolePage = () => {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { addToast } = useNotification();
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
@@ -176,6 +176,15 @@ const RevenueConsolePage = () => {
     };
 
     const weekOptions = plan?.milestones || [];
+
+    if (authLoading) {
+        return (
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
+                <h2 style={{ marginTop: 0 }}>Revenue Console</h2>
+                <div style={{ color: 'var(--light-color)' }}>Verifying access…</div>
+            </div>
+        );
+    }
 
     if (!isAdminUser) {
         return (
