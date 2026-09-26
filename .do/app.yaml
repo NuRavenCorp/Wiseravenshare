@@ -87,6 +87,24 @@ services:
         type: SECRET
       - key: Persistence__RequireDatabase
         value: "true"
+      # Radio Creator / streaming infrastructure
+      - key: Streaming__Icecast__Enabled
+        value: "false"
+      - key: Streaming__Icecast__PublicUrl
+        value: https://stream.wiseravenshare.com
+      - key: Streaming__Icecast__BaseUrl
+        value: https://stream.wiseravenshare.com
+      - key: Streaming__Icecast__MountPrefix
+        value: radio
+      - key: Streaming__Icecast__SourceHost
+        value: stream.wiseravenshare.com
+      - key: Streaming__Icecast__SourcePort
+        value: "8001"
+      - key: Streaming__Icecast__SourceUsername
+        value: source
+      - key: Streaming__Icecast__SourcePassword
+        value: ${ICECAST_SOURCE_PASSWORD}
+        type: SECRET
       - key: STRIPE_PUBLISHABLE_API
         value: ${STRIPE_PUBLISHABLE_API}
         type: SECRET
