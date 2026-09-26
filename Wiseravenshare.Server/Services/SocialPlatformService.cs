@@ -386,7 +386,11 @@ public class SocialPlatformService : ISocialPlatformService
         }
         else if (request.PublishToYouTube)
         {
-            response.Results.Add(await PublishToYouTubeAsync(message, request.VideoUrl));
+            response.Results.Add(await PublishToYouTubeAsync(
+                message,
+                request.VideoUrl,
+                request.YouTubeTitle,
+                request.YouTubeDescription));
         }
 
         if (request.PublishToWiseRavenStream)
@@ -826,7 +830,11 @@ public class SocialPlatformService : ISocialPlatformService
         };
     }
 
-    private async Task<SocialPublishResultDto> PublishToYouTubeAsync(string message, string? videoUrl)
+    private async Task<SocialPublishResultDto> PublishToYouTubeAsync(
+        string message,
+        string? videoUrl,
+        string? youtubeTitle,
+        string? youtubeDescription)
     {
         if (string.IsNullOrWhiteSpace(videoUrl))
         {
@@ -840,8 +848,17 @@ public class SocialPlatformService : ISocialPlatformService
 
         try
         {
-            var title = message.Length > 100 ? message[..100] : message;
-            var description = $"Shared from Ravensight feed. Source: {videoUrl}";
+            var resolvedTitle = string.IsNullOrWhiteSpace(youtubeTitle) ? message : youtubeTitle.Trim();
+            var title = resolvedTitle.Length > 100 ? resolvedTitle[..100] : resolvedTitle;
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                title = "WiseRavenShare upload";
+            }
+
+            var resolvedDescription = string.IsNullOrWhiteSpace(youtubeDescription)
+                ? $"Shared from WiseRavenShare. Source: {videoUrl}"
+                : youtubeDescription.Trim();
+            var description = resolvedDescription.Length > 5000 ? resolvedDescription[..5000] : resolvedDescription;
             var publishedUrl = await _youTubeService.PublishVideoFromUrlAsync(videoUrl, title, description);
 
             return new SocialPublishResultDto
@@ -1197,7 +1214,6 @@ public class SocialPlatformService : ISocialPlatformService
         return body.Length <= 400 ? body : body[..400];
     }
 }
-
 
 
 

@@ -535,6 +535,183 @@ public class AuthController : ControllerBase
         return Redirect(authorizationUrl);
     }
 
+    [HttpGet("{platform}/start")]
+    [Authorize]
+    public IActionResult StartSocialConnect(
+        string platform,
+        [FromQuery(Name = "user_id")] string? userId = null,
+        [FromQuery(Name = "return_url")] string? returnUrl = null)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedPlatform = NormalizeOAuthProvider(platform);
+        if (string.IsNullOrWhiteSpace(normalizedPlatform))
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}' for OAuth connection." });
+        }
+
+        var requestedUserId = ResolveRequestedSocialConnectUserId(userId);
+        if (string.IsNullOrWhiteSpace(requestedUserId))
+        {
+            return BadRequest(new { message = "User id is required to connect a social account." });
+        }
+
+        var normalizedReturnUrl = ResolveOAuthReturnUrl(returnUrl);
+        var providerConfig = ReadOAuthProviderConfig(normalizedPlatform);
+        if (!providerConfig.IsEnabled)
+        {
+            return Conflict(new { message = $"{normalizedPlatform} OAuth is not configured in Authentication:OAuthProviders." });
+        }
+
+        var callbackUrl = BuildOAuthCallbackUrl(normalizedPlatform, providerConfig);
+        if (string.IsNullOrWhiteSpace(callbackUrl))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to resolve OAuth callback URL." });
+        }
+
+        CleanupExpiredOAuthStates();
+        var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        OAuthStatesByToken[state] = new OAuthStateRecord
+        {
+            Provider = normalizedPlatform,
+            ReturnUrl = normalizedReturnUrl,
+            ExpiresAtUtc = DateTime.UtcNow.Add(OAuthStateLifetime),
+            IsSocialConnect = true,
+            RequestedUserId = requestedUserId
+        };
+
+        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedPlatform, providerConfig, callbackUrl, state);
+        return Ok(new
+        {
+            provider = normalizedPlatform,
+            authorize_url = authorizationUrl,
+            callback_url = callbackUrl
+        });
+    }
+
+    [HttpGet("{platform}/status")]
+    [Authorize]
+    public IActionResult GetSocialConnectStatus(string platform, [FromQuery(Name = "user_id")] string? userId = null)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedPlatform = NormalizeOAuthProvider(platform);
+        if (string.IsNullOrWhiteSpace(normalizedPlatform))
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+        }
+
+        var requestedUserId = ResolveRequestedSocialConnectUserId(userId);
+        if (string.IsNullOrWhiteSpace(requestedUserId) || !_userStore.TryGetById(requestedUserId, out var user) || user is null)
+        {
+            return Ok(new { connected = false, details = new { }, message = "User not found for social status check." });
+        }
+
+        var connection = GetSocialConnection(user, normalizedPlatform);
+        if (connection is null)
+        {
+            return Ok(new { connected = false, details = new { }, message = "Platform connection not available." });
+        }
+
+        var connected = IsConnected(connection);
+        return Ok(new
+        {
+            connected,
+            details = new
+            {
+                username = connection.Username,
+                profileUrl = connection.ProfileUrl,
+                feedUrl = connection.FeedUrl,
+                designation = connection.Designation,
+                tokenExpiresAt = connection.TokenExpiresAt
+            }
+        });
+    }
+
+    [HttpPost("{platform}/complete")]
+    [Authorize]
+    public IActionResult CompleteSocialConnect(
+        string platform,
+        [FromBody] SocialConnectCompleteRequest? request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedPlatform = NormalizeOAuthProvider(platform);
+        if (string.IsNullOrWhiteSpace(normalizedPlatform))
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+        }
+
+        var requestedUserId = ResolveRequestedSocialConnectUserId(request?.UserId);
+        if (string.IsNullOrWhiteSpace(requestedUserId))
+        {
+            return BadRequest(new { message = "User id is required to save social connection details." });
+        }
+
+        if (!_userStore.TryGetById(requestedUserId, out var user) || user is null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var currentConnection = GetSocialConnection(user, normalizedPlatform) ?? new SocialFeedConnection();
+        var fields = request?.Fields ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var merged = BuildManualConnectionUpdate(normalizedPlatform, currentConnection, fields);
+        if (merged is null)
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+        }
+
+        _userStore.UpdateSocialFeeds(requestedUserId, merged);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("{platform}/disconnect")]
+    [Authorize]
+    public IActionResult DisconnectSocialConnect(string platform, [FromBody] SocialConnectDisconnectRequest? request)
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var normalizedPlatform = NormalizeOAuthProvider(platform);
+        if (string.IsNullOrWhiteSpace(normalizedPlatform))
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+        }
+
+        var requestedUserId = ResolveRequestedSocialConnectUserId(request?.UserId);
+        if (string.IsNullOrWhiteSpace(requestedUserId))
+        {
+            return BadRequest(new { message = "User id is required to disconnect social account." });
+        }
+
+        var cleared = new SocialFeedConnection
+        {
+            Enabled = false,
+            Username = string.Empty,
+            ProfileUrl = string.Empty,
+            FeedUrl = string.Empty,
+            Designation = string.Empty,
+            AccessToken = string.Empty,
+            RefreshToken = string.Empty,
+            TokenExpiresAt = null
+        };
+
+        var update = normalizedPlatform switch
+        {
+            "facebook" => new UpdateSocialFeedsRequest { Facebook = cleared },
+            "tiktok" => new UpdateSocialFeedsRequest { TikTok = cleared },
+            "youtube" => new UpdateSocialFeedsRequest { YouTube = cleared },
+            _ => null
+        };
+
+        if (update is null)
+        {
+            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+        }
+
+        _userStore.UpdateSocialFeeds(requestedUserId, update);
+        return Ok(new { success = true });
+    }
+
     [HttpGet("oauth/{provider}/callback")]
     [AllowAnonymous]
     public async Task<IActionResult> OAuthCallback(
@@ -677,12 +854,25 @@ public class AuthController : ControllerBase
         {
             try
             {
-                user = _userStore.UpdateSocialFeeds(user.Id, socialFeedActivationRequest);
+                var targetUserId = stateRecord.IsSocialConnect && !string.IsNullOrWhiteSpace(stateRecord.RequestedUserId)
+                    ? stateRecord.RequestedUserId
+                    : user.Id;
+                user = _userStore.UpdateSocialFeeds(targetUserId, socialFeedActivationRequest);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Unable to activate social feed settings for {Provider} on {Email}.", normalizedProvider, normalizedEmail);
             }
+        }
+
+        if (stateRecord.IsSocialConnect)
+        {
+            var successRedirect = BuildUrl(stateRecord.ReturnUrl, new Dictionary<string, string?>
+            {
+                ["socialConnectStatus"] = "connected",
+                ["socialConnectProvider"] = normalizedProvider
+            });
+            return Redirect(successRedirect);
         }
 
         var domainUserId = await EnsureDomainUserAsync(user);
@@ -1506,14 +1696,17 @@ public class AuthController : ControllerBase
 
     private TokenValidationParameters BuildTokenValidationParameters()
     {
+        var configuredIssuer = _configuration["Authentication:Jwt:Issuer"];
+        var configuredAudience = _configuration["Authentication:Jwt:Audience"];
+
         return new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey())),
-            ValidateIssuer = true,
-            ValidIssuer = _configuration["Authentication:Jwt:Issuer"],
-            ValidateAudience = true,
-            ValidAudience = _configuration["Authentication:Jwt:Audience"],
+            ValidateIssuer = !string.IsNullOrWhiteSpace(configuredIssuer),
+            ValidIssuer = configuredIssuer,
+            ValidateAudience = !string.IsNullOrWhiteSpace(configuredAudience),
+            ValidAudience = configuredAudience,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1)
         };
@@ -1974,6 +2167,7 @@ public class AuthController : ControllerBase
             "microsoft" => "microsoft",
             "facebook" => "facebook",
             "tiktok" => "tiktok",
+            "youtube" => "youtube",
             _ => string.Empty
         };
     }
@@ -1986,6 +2180,7 @@ public class AuthController : ControllerBase
             "microsoft" => "Microsoft",
             "facebook" => "Facebook",
             "tiktok" => "TikTok",
+            "youtube" => "YouTube",
             _ => string.Empty
         };
 
@@ -2261,6 +2456,17 @@ public class AuthController : ControllerBase
                 ["scope"] = "user.info.basic",
                 ["state"] = state
             }),
+            "youtube" => BuildUrl("https://accounts.google.com/o/oauth2/v2/auth", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "openid email profile https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+                ["state"] = state,
+                ["access_type"] = "offline",
+                ["prompt"] = "consent",
+                ["include_granted_scopes"] = "true"
+            }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -2278,6 +2484,7 @@ public class AuthController : ControllerBase
             "microsoft" => await ResolveMicrosoftProfileAsync(httpClient, config, code, callbackUrl),
             "facebook" => await ResolveFacebookProfileAsync(httpClient, config, code, callbackUrl),
             "tiktok" => await ResolveTikTokProfileAsync(httpClient, config, code, callbackUrl),
+            "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -2311,6 +2518,86 @@ public class AuthController : ControllerBase
             ProviderUserId = root.TryGetProperty("sub", out var subNode) ? subNode.GetString() ?? string.Empty : string.Empty,
             Name = root.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
             Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveYouTubeProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", new Dictionary<string, string>
+        {
+            ["code"] = code,
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["redirect_uri"] = callbackUrl,
+            ["grant_type"] = "authorization_code"
+        });
+
+        if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
+        {
+            throw new InvalidOperationException("YouTube access token was not returned.");
+        }
+
+        using var profileRequest = new HttpRequestMessage(HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
+        profileRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
+        using var profileResponse = await httpClient.SendAsync(profileRequest);
+        profileResponse.EnsureSuccessStatusCode();
+        await using var profileStream = await profileResponse.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(profileStream);
+        var profileRoot = profileJson.RootElement;
+
+        var fallbackName = profileRoot.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty;
+        var fallbackEmail = profileRoot.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty;
+        var fallbackUserId = profileRoot.TryGetProperty("sub", out var subNode) ? subNode.GetString() ?? string.Empty : string.Empty;
+
+        using var channelRequest = new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true");
+        channelRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenPayload.AccessToken);
+        using var channelResponse = await httpClient.SendAsync(channelRequest);
+
+        if (channelResponse.IsSuccessStatusCode)
+        {
+            await using var channelStream = await channelResponse.Content.ReadAsStreamAsync();
+            using var channelJson = await JsonDocument.ParseAsync(channelStream);
+            if (channelJson.RootElement.TryGetProperty("items", out var itemsNode)
+                && itemsNode.ValueKind == JsonValueKind.Array
+                && itemsNode.GetArrayLength() > 0)
+            {
+                var first = itemsNode[0];
+                var channelId = first.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty;
+                var snippetNode = first.TryGetProperty("snippet", out var snippet) ? snippet : default;
+                var channelTitle = snippetNode.ValueKind == JsonValueKind.Object && snippetNode.TryGetProperty("title", out var titleNode)
+                    ? titleNode.GetString() ?? string.Empty
+                    : string.Empty;
+                var customUrl = snippetNode.ValueKind == JsonValueKind.Object && snippetNode.TryGetProperty("customUrl", out var customUrlNode)
+                    ? customUrlNode.GetString() ?? string.Empty
+                    : string.Empty;
+
+                var providerUserId = !string.IsNullOrWhiteSpace(customUrl)
+                    ? customUrl.Trim().TrimStart('@')
+                    : (!string.IsNullOrWhiteSpace(channelId) ? channelId : fallbackUserId);
+                var resolvedName = !string.IsNullOrWhiteSpace(customUrl)
+                    ? customUrl.Trim()
+                    : (!string.IsNullOrWhiteSpace(channelTitle) ? channelTitle : fallbackName);
+
+                return new SocialProfile
+                {
+                    ProviderUserId = providerUserId,
+                    Name = resolvedName,
+                    Email = fallbackEmail,
+                    AccessToken = tokenPayload.AccessToken,
+                    RefreshToken = tokenPayload.RefreshToken,
+                    TokenExpiresAt = tokenPayload.TokenExpiresAt
+                };
+            }
+        }
+
+        return new SocialProfile
+        {
+            ProviderUserId = fallbackUserId,
+            Name = fallbackName,
+            Email = fallbackEmail,
+            AccessToken = tokenPayload.AccessToken,
+            RefreshToken = tokenPayload.RefreshToken,
+            TokenExpiresAt = tokenPayload.TokenExpiresAt
         };
     }
 
@@ -2445,7 +2732,13 @@ public class AuthController : ControllerBase
         return new TokenExchangePayload
         {
             AccessToken = root.TryGetProperty("access_token", out var accessTokenNode) ? accessTokenNode.GetString() ?? string.Empty : string.Empty,
-            IdToken = root.TryGetProperty("id_token", out var idTokenNode) ? idTokenNode.GetString() ?? string.Empty : string.Empty
+            RefreshToken = root.TryGetProperty("refresh_token", out var refreshTokenNode) ? refreshTokenNode.GetString() ?? string.Empty : string.Empty,
+            IdToken = root.TryGetProperty("id_token", out var idTokenNode) ? idTokenNode.GetString() ?? string.Empty : string.Empty,
+            TokenExpiresAt = root.TryGetProperty("expires_in", out var expiresInNode)
+                && expiresInNode.TryGetInt32(out var expiresInSeconds)
+                && expiresInSeconds > 0
+                    ? DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds)
+                    : null
         };
     }
 
@@ -2527,8 +2820,123 @@ public class AuthController : ControllerBase
             Username = identifier,
             ProfileUrl = profileUrl,
             FeedUrl = profileUrl,
-            Designation = designation
+            Designation = designation,
+            AccessToken = profile.AccessToken,
+            RefreshToken = profile.RefreshToken,
+            TokenExpiresAt = profile.TokenExpiresAt
         };
+    }
+
+    private string ResolveRequestedSocialConnectUserId(string? requestedUserId)
+    {
+        var explicitUserId = (requestedUserId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitUserId))
+        {
+            return explicitUserId;
+        }
+
+        return User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("user_id")
+            ?? string.Empty;
+    }
+
+    private static SocialFeedConnection? GetSocialConnection(UserRecord user, string platform)
+    {
+        var feeds = user.SocialFeeds ?? new SocialFeedSettings();
+        return platform switch
+        {
+            "facebook" => feeds.Facebook,
+            "tiktok" => feeds.TikTok,
+            "youtube" => feeds.YouTube,
+            _ => null
+        };
+    }
+
+    private static UpdateSocialFeedsRequest? BuildManualConnectionUpdate(
+        string platform,
+        SocialFeedConnection existing,
+        IReadOnlyDictionary<string, string> fields)
+    {
+        var next = new SocialFeedConnection
+        {
+            Enabled = true,
+            Username = existing.Username,
+            ProfileUrl = existing.ProfileUrl,
+            FeedUrl = existing.FeedUrl,
+            Designation = existing.Designation,
+            AccessToken = existing.AccessToken,
+            RefreshToken = existing.RefreshToken,
+            TokenExpiresAt = existing.TokenExpiresAt
+        };
+
+        static string ReadField(IReadOnlyDictionary<string, string> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                {
+                    return value.Trim();
+                }
+            }
+
+            return string.Empty;
+        }
+
+        var channelHandle = ReadField(fields, "channel_handle", "channelHandle", "username", "handle");
+        var channelId = ReadField(fields, "channel_id", "channelId", "id");
+        var pageId = ReadField(fields, "page_id", "pageId");
+        var pageName = ReadField(fields, "page_name", "pageName");
+
+        switch (platform)
+        {
+            case "youtube":
+                if (!string.IsNullOrWhiteSpace(channelHandle))
+                {
+                    var normalized = channelHandle.TrimStart('@');
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://www.youtube.com/@{normalized}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+                else if (!string.IsNullOrWhiteSpace(channelId))
+                {
+                    next.Username = channelId;
+                    next.ProfileUrl = $"https://www.youtube.com/channel/{channelId}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+
+                return new UpdateSocialFeedsRequest { YouTube = next };
+            case "facebook":
+                if (!string.IsNullOrWhiteSpace(pageName))
+                {
+                    next.Username = pageName;
+                }
+                else if (!string.IsNullOrWhiteSpace(pageId))
+                {
+                    next.Username = pageId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(pageId))
+                {
+                    next.ProfileUrl = $"https://www.facebook.com/{pageId}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+
+                return new UpdateSocialFeedsRequest { Facebook = next };
+            case "tiktok":
+                var tiktokUser = ReadField(fields, "username", "handle", "user_id", "open_id");
+                if (!string.IsNullOrWhiteSpace(tiktokUser))
+                {
+                    var normalized = tiktokUser.TrimStart('@');
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://www.tiktok.com/@{normalized}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+
+                return new UpdateSocialFeedsRequest { TikTok = next };
+            default:
+                return null;
+        }
     }
 
     private static string ResolveSocialAccountIdentifier(string provider, SocialProfile profile)
@@ -2556,7 +2964,9 @@ public class AuthController : ControllerBase
         {
             "facebook" => $"https://www.facebook.com/{identifier}",
             "tiktok" => $"https://www.tiktok.com/@{identifier}",
-            "youtube" => $"https://www.youtube.com/@{identifier}",
+            "youtube" => identifier.StartsWith("UC", StringComparison.OrdinalIgnoreCase)
+                ? $"https://www.youtube.com/channel/{identifier}"
+                : $"https://www.youtube.com/@{identifier.TrimStart('@')}",
             "twitter" => $"https://x.com/{identifier}",
             "linkedin" => $"https://www.linkedin.com/in/{identifier}",
             _ => string.Empty
@@ -3078,6 +3488,8 @@ LIMIT 1;";
         public string Provider { get; set; } = string.Empty;
         public string ReturnUrl { get; set; } = string.Empty;
         public DateTime ExpiresAtUtc { get; set; }
+        public bool IsSocialConnect { get; set; }
+        public string RequestedUserId { get; set; } = string.Empty;
     }
 
     private sealed class OAuthProviderConfig
@@ -3092,7 +3504,9 @@ LIMIT 1;";
     private sealed class TokenExchangePayload
     {
         public string AccessToken { get; init; } = string.Empty;
+        public string RefreshToken { get; init; } = string.Empty;
         public string IdToken { get; init; } = string.Empty;
+        public DateTimeOffset? TokenExpiresAt { get; init; }
     }
 
     private sealed class SocialProfile
@@ -3100,6 +3514,9 @@ LIMIT 1;";
         public string ProviderUserId { get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
+        public string AccessToken { get; init; } = string.Empty;
+        public string RefreshToken { get; init; } = string.Empty;
+        public DateTimeOffset? TokenExpiresAt { get; init; }
     }
 
     private sealed class PodcastControlState
@@ -3127,6 +3544,17 @@ LIMIT 1;";
         public string? BlobObjectKey { get; init; }
         public string? BlobPublicUrl { get; init; }
     }
+}
+
+public sealed class SocialConnectCompleteRequest
+{
+    public string UserId { get; set; } = string.Empty;
+    public Dictionary<string, string> Fields { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class SocialConnectDisconnectRequest
+{
+    public string UserId { get; set; } = string.Empty;
 }
 
 public sealed class LoginRequest

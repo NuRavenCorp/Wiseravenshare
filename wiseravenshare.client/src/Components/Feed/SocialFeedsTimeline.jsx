@@ -318,6 +318,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [postMessage, setPostMessage] = useState('');
     const [mediaUrlInput, setMediaUrlInput] = useState('');
     const [linkUrlInput, setLinkUrlInput] = useState('');
+    const [youtubeTitleInput, setYoutubeTitleInput] = useState('');
+    const [youtubeDescriptionInput, setYoutubeDescriptionInput] = useState('');
     const [publishFacebook, setPublishFacebook] = useState(false);
     const [publishTikTok, setPublishTikTok] = useState(false);
     const [publishYouTube, setPublishYouTube] = useState(false);
@@ -891,6 +893,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 linkUrl: linkUrlInput.trim() || undefined,
                 videoUrl: isVideoUrl ? mediaUrl : undefined,
                 photoUrl: isPhotoUrl ? mediaUrl : undefined,
+                youTubeTitle: publishYouTube ? (youtubeTitleInput.trim() || undefined) : undefined,
+                youTubeDescription: publishYouTube ? (youtubeDescriptionInput.trim() || undefined) : undefined,
                 mediaType: isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'text',
                 publishToFacebook: publishFacebook,
                 publishToTikTok: publishTikTok,
@@ -903,6 +907,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             setPostMessage('');
             setMediaUrlInput('');
             setLinkUrlInput('');
+            setYoutubeTitleInput('');
+            setYoutubeDescriptionInput('');
             setPublishFacebook(false);
             setPublishTikTok(false);
             setPublishYouTube(false);
@@ -1703,6 +1709,30 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
                     />
                 </div>
+
+                {publishYouTube && (
+                    <div style={{ display: 'grid', gap: '8px', marginBottom: '10px' }}>
+                        <input
+                            type="text"
+                            value={youtubeTitleInput}
+                            onChange={(e) => setYoutubeTitleInput(e.target.value)}
+                            maxLength={120}
+                            placeholder="YouTube title (optional — defaults to post message)"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px' }}
+                        />
+                        <textarea
+                            rows={3}
+                            value={youtubeDescriptionInput}
+                            onChange={(e) => setYoutubeDescriptionInput(e.target.value)}
+                            maxLength={5000}
+                            placeholder="YouTube description (optional)"
+                            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(15,23,42,0.4)', color: '#fff', fontSize: '12px', resize: 'vertical' }}
+                        />
+                        <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                            Tip: include <strong>#Shorts</strong> in title or description for short vertical videos.
+                        </div>
+                    </div>
+                )}
 
                 {publishYouTube && (
                     <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.15)', fontSize: '12px', lineHeight: 1.45, color: '#fecaca' }}>
