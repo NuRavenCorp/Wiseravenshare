@@ -181,15 +181,55 @@ services:
       - key: Social__Facebook__PageAccessToken
         value: ${SOCIAL_FACEBOOK_PAGE_ACCESS_TOKEN}
         type: SECRET
-      - key: Social__Facebook__Provider
-        value: zernio
-      - key: Social__TikTok__Provider
-        value: zernio
+      - key: Authentication__OAuthProviders__Facebook__ClientId
+        value: ${FACEBOOK_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Facebook__ClientSecret
+        value: ${FACEBOOK_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Facebook__RedirectUri
+        value: https://wiseravenshare.com/api/auth/oauth/facebook/callback
+      - key: Authentication__OAuthProviders__TikTok__ClientId
+        value: ${TIKTOK_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__TikTok__ClientSecret
+        value: ${TIKTOK_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__TikTok__RedirectUri
+        value: https://wiseravenshare.com/api/auth/oauth/tiktok/callback
+      - key: Authentication__OAuthProviders__YouTube__ClientId
+        value: ${YOUTUBE_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__YouTube__ClientSecret
+        value: ${YOUTUBE_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__YouTube__RedirectUri
+        value: https://wiseravenshare.com/api/auth/oauth/youtube/callback
+      - key: Authentication__OAuthProviders__Instagram__ClientId
+        value: ${INSTAGRAM_OAUTH_CLIENT_ID}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Instagram__ClientSecret
+        value: ${INSTAGRAM_OAUTH_CLIENT_SECRET}
+        type: SECRET
+      - key: Authentication__OAuthProviders__Instagram__RedirectUri
+        value: https://wiseravenshare.com/api/auth/oauth/instagram/callback
       - key: Social__TikTok__Username
         value: ${SOCIAL_TIKTOK_USERNAME}
         type: SECRET
       - key: Social__TikTok__AccessToken
         value: ${SOCIAL_TIKTOK_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Instagram__BusinessAccountId
+        value: ${SOCIAL_INSTAGRAM_BUSINESS_ACCOUNT_ID}
+        type: SECRET
+      - key: Social__Instagram__AccessToken
+        value: ${SOCIAL_INSTAGRAM_ACCESS_TOKEN}
+        type: SECRET
+      - key: Social__Bluesky__Handle
+        value: ${SOCIAL_BLUESKY_HANDLE}
+        type: SECRET
+      - key: Social__Bluesky__AppPassword
+        value: ${SOCIAL_BLUESKY_APP_PASSWORD}
         type: SECRET
       - key: Social__Zernio__ApiKey
         value: ${ZERNIO_API_KEY}
@@ -210,12 +250,6 @@ services:
         type: SECRET
       - key: Social__Publish__WebhookToken
         value: ${SOCIAL_PUBLISH_WEBHOOK_TOKEN}
-        type: SECRET
-      - key: Social__Instagram__Username
-        value: ${SOCIAL_INSTAGRAM_USERNAME}
-        type: SECRET
-      - key: Social__Instagram__ProfileUrl
-        value: ${SOCIAL_INSTAGRAM_PROFILE_URL}
         type: SECRET
       - key: ReminderNotifications__Email__FromName
         value: ${REMINDER_EMAIL_FROM_NAME}

@@ -340,6 +340,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         tiktok: snapshot.tikTok.username || '',
         instagram: snapshot.instagram.username || '',
         youtube: snapshot.youtube.username || '',
+        linkedIn: snapshot.linkedIn?.username || '',
         reddit: snapshot.reddit?.username || '',
         bluesky: snapshot.bluesky?.username || ''
     });
@@ -747,21 +748,46 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
 
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
-        const keepConnectionMetadata = (existing, nextUsername) => ({
-            enabled: Boolean(nextUsername.trim() || existing?.enabled || existing?.profileUrl || existing?.feedUrl),
-            username: nextUsername.trim(),
-            profileUrl: String(existing?.profileUrl || '').trim(),
-            feedUrl: String(existing?.feedUrl || '').trim(),
-            designation: String(existing?.designation || '').trim()
-        });
+
+        const buildProfileUrl = (platform, username) => {
+            if (!username) return '';
+            switch (platform) {
+                case 'facebook': return `https://www.facebook.com/${username}`;
+                case 'tiktok': return `https://www.tiktok.com/@${username.replace(/^@/, '')}`;
+                case 'instagram': return `https://www.instagram.com/${username.replace(/^@/, '')}`;
+                case 'youtube': return username.startsWith('UC')
+                    ? `https://www.youtube.com/channel/${username}`
+                    : `https://www.youtube.com/@${username.replace(/^@/, '')}`;
+                case 'reddit': return `https://www.reddit.com/user/${username}`;
+                case 'linkedin': return `https://www.linkedin.com/in/${username}`;
+                case 'bluesky': return `https://bsky.app/profile/${username}`;
+                default: return '';
+            }
+        };
+
+        const keepConnectionMetadata = (existing, nextUsername, platform) => {
+            const trimmed = (nextUsername || '').trim();
+            const existingProfileUrl = String(existing?.profileUrl || '').trim();
+            const existingFeedUrl = String(existing?.feedUrl || '').trim();
+            const autoProfileUrl = trimmed ? buildProfileUrl(platform, trimmed) : '';
+            const resolvedProfileUrl = existingProfileUrl || autoProfileUrl;
+            return {
+                enabled: Boolean(trimmed || existing?.enabled || existingProfileUrl || existingFeedUrl),
+                username: trimmed,
+                profileUrl: resolvedProfileUrl,
+                feedUrl: existingFeedUrl || resolvedProfileUrl,
+                designation: String(existing?.designation || '').trim()
+            };
+        };
 
         const updatedFeeds = {
-            facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook),
-            tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok),
-            instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram),
-            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube),
-            reddit: keepConnectionMetadata(snapshot.reddit, handles.reddit || ''),
-            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '')
+            facebook: keepConnectionMetadata(snapshot.facebook, handles.facebook, 'facebook'),
+            tikTok: keepConnectionMetadata(snapshot.tikTok, handles.tiktok, 'tiktok'),
+            instagram: keepConnectionMetadata(snapshot.instagram, handles.instagram, 'instagram'),
+            youtube: keepConnectionMetadata(snapshot.youtube, handles.youtube, 'youtube'),
+            reddit: keepConnectionMetadata(snapshot.reddit, handles.reddit || '', 'reddit'),
+            bluesky: keepConnectionMetadata(snapshot.bluesky, handles.bluesky || '', 'bluesky'),
+            linkedIn: keepConnectionMetadata(snapshot.linkedIn, handles.linkedIn || '', 'linkedin')
         };
 
         try {
