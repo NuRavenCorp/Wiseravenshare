@@ -20,16 +20,34 @@ public class ConversationsChatController : ControllerBase
         _logger = logger;
     }
 
-    private string? AccountSid    => _config["Communique:Twilio:AccountSid"];
-    private string? ApiKey        => _config["Communique:Conversations:ApiKey"];
-    private string? ApiSecret     => _config["Communique:Conversations:ApiSecret"];
-    private string? ServiceSid    => _config["Communique:Conversations:ServiceSid"];
+    private string? AccountSid    => FirstNonEmpty(_config["Communique:Twilio:AccountSid"], _config["TWILIO_ACCOUNT_SID"]);
+    private string? ApiKey        => FirstNonEmpty(_config["Communique:Conversations:ApiKey"], _config["TWILIO_CONVERSATIONS_API_KEY"]);
+    private string? ApiSecret     => FirstNonEmpty(_config["Communique:Conversations:ApiSecret"], _config["TWILIO_CONVERSATIONS_API_SECRET"]);
+    private string? ServiceSid    => FirstNonEmpty(_config["Communique:Conversations:ServiceSid"], _config["TWILIO_CONVERSATIONS_SERVICE_SID"]);
 
     private bool IsConfigured =>
         !string.IsNullOrWhiteSpace(AccountSid) &&
         !string.IsNullOrWhiteSpace(ApiKey)     &&
         !string.IsNullOrWhiteSpace(ApiSecret)  &&
         !string.IsNullOrWhiteSpace(ServiceSid);
+
+    private bool HasValidSidShapes =>
+        (AccountSid ?? string.Empty).StartsWith("AC", StringComparison.OrdinalIgnoreCase)
+        && (ApiKey ?? string.Empty).StartsWith("SK", StringComparison.OrdinalIgnoreCase)
+        && (ServiceSid ?? string.Empty).StartsWith("IS", StringComparison.OrdinalIgnoreCase);
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
 
     private string CurrentIdentity =>
         User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -43,6 +61,8 @@ public class ConversationsChatController : ControllerBase
     {
         if (!IsConfigured)
             return StatusCode(503, new { error = "Conversations service not configured." });
+        if (!HasValidSidShapes)
+            return StatusCode(503, new { error = "Conversations credentials are set but invalid. Expected AC (account), SK (API key), and IS (service SID)." });
 
         try
         {
@@ -72,13 +92,15 @@ public class ConversationsChatController : ControllerBase
     {
         if (!IsConfigured)
             return StatusCode(503, new { error = "Conversations service not configured." });
+        if (!HasValidSidShapes)
+            return StatusCode(503, new { error = "Conversations credentials are set but invalid. Expected AC (account), SK (API key), and IS (service SID)." });
 
         if (string.IsNullOrWhiteSpace(req?.ParticipantIdentity))
             return BadRequest(new { error = "participantIdentity is required." });
 
         try
         {
-            TwilioClient.Init(AccountSid, ApiKey, ApiSecret);
+            TwilioClient.Init(ApiKey, ApiSecret, AccountSid);
 
             var conversation = ConversationResource.Create(
                 friendlyName: req.FriendlyName ?? $"Chat: {CurrentIdentity} + {req.ParticipantIdentity}",
@@ -125,4 +147,3 @@ public sealed class CreateRoomRequest
     public string? ParticipantIdentity { get; set; }
     public string? FriendlyName { get; set; }
 }
-
