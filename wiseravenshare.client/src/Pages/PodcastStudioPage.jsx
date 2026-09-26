@@ -454,6 +454,8 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const [showSetupGuide, setShowSetupGuide] = useState(false);
     const [setupGuideExpandedPhase, setSetupGuideExpandedPhase] = useState(null);
     const [youtubeGuideMethod, setYoutubeGuideMethod] = useState('video');
+    const [showBillingPanel, setShowBillingPanel] = useState(false);
+    const [billingPortalLoading, setBillingPortalLoading] = useState(false);
 
     // Pricing & Subscription State
     const [showPricingModal, setShowPricingModal] = useState(false);
@@ -3077,47 +3079,205 @@ const PodcastStudioPage = ({ onNavigate }) => {
                         })}
                     </div>
 
-                    {/* Billing status bar — hidden for admins (no payment required) */}
-                    {!authService.isAdminAllAccess() && !subscriptionStatus?.isAdmin && (
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: 'rgba(248,113,113,0.08)',
-                        border: '1px solid rgba(248,113,113,0.25)',
-                        borderRadius: '12px',
-                        padding: '12px 16px',
-                        flexWrap: 'wrap',
-                        gap: '10px'
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '18px' }}>💳</span>
-                            <div>
-                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fca5a5' }}>Billing status</div>
-                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                                    Subscription not active — Synced from Stripe with status <strong style={{ color: '#f87171' }}>inactive</strong>.
+                    {/* Billing panel — shows subscription details and Stripe portal for paid users,
+                        pricing modal for free users, or admin billing tools for admins */}
+                    {(() => {
+                        const isAdmin = authService.isAdminAllAccess() || subscriptionStatus?.isAdmin;
+                        const isActive = Boolean(subscriptionStatus?.hasActiveSubscription);
+                        const tierLabel = getTierLabel(activePodcastTier);
+
+                        const handleOpenPortal = async () => {
+                            setBillingPortalLoading(true);
+                            try {
+                                const res = await subscriptionService.createPortalSession({
+                                    returnUrl: window.location.href
+                                });
+                                if (res?.url) {
+                                    window.location.assign(res.url);
+                                } else {
+                                    setStatus('Stripe portal is unavailable right now. Try again shortly.');
+                                }
+                            } catch {
+                                setStatus('Could not open Stripe billing portal. Check your connection and retry.');
+                            } finally {
+                                setBillingPortalLoading(false);
+                            }
+                        };
+
+                        // Admins see an admin billing controls block
+                        if (isAdmin) {
+                            return (
+                                <div style={{
+                                    background: 'rgba(99,102,241,0.07)',
+                                    border: '1px solid rgba(99,102,241,0.28)',
+                                    borderRadius: '12px',
+                                    padding: '14px 16px'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '18px' }}>🛡️</span>
+                                            <div>
+                                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#c4b5fd' }}>Administrator — Billing Access</div>
+                                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                                    Admins have all-access. Use the admin panel to manage user subscriptions and feature releases.
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => navigateToFeaturePage('admin', 'Opening Admin Panel…')}
+                                                style={{
+                                                    border: '1px solid rgba(99,102,241,0.4)',
+                                                    background: 'rgba(99,102,241,0.14)',
+                                                    color: '#c4b5fd',
+                                                    borderRadius: '8px',
+                                                    padding: '7px 14px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                🎛️ Admin Panel →
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => navigateToFeaturePage('feature-release', 'Opening Feature Release Console…')}
+                                                style={{
+                                                    border: '1px solid rgba(99,102,241,0.3)',
+                                                    background: 'transparent',
+                                                    color: '#a78bfa',
+                                                    borderRadius: '8px',
+                                                    padding: '7px 14px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                Release features →
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        // Active subscription — offer Stripe portal
+                        if (isActive) {
+                            return (
+                                <div style={{
+                                    background: 'rgba(16,185,129,0.07)',
+                                    border: '1px solid rgba(16,185,129,0.3)',
+                                    borderRadius: '12px',
+                                    padding: '14px 16px'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '18px' }}>✅</span>
+                                            <div>
+                                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#34d399' }}>
+                                                    Subscription active — {tierLabel}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                                    Manage your plan, invoices, and payment method via Stripe.
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenPortal}
+                                            disabled={billingPortalLoading}
+                                            style={{
+                                                border: '1px solid rgba(16,185,129,0.4)',
+                                                background: 'rgba(16,185,129,0.12)',
+                                                color: '#34d399',
+                                                borderRadius: '8px',
+                                                padding: '7px 14px',
+                                                fontSize: '12px',
+                                                fontWeight: 700,
+                                                cursor: billingPortalLoading ? 'wait' : 'pointer',
+                                                whiteSpace: 'nowrap',
+                                                opacity: billingPortalLoading ? 0.65 : 1
+                                            }}
+                                        >
+                                            {billingPortalLoading ? 'Opening…' : '💳 Manage billing →'}
+                                        </button>
+                                    </div>
+
+                                    {/* Plan details */}
+                                    {subscriptionStatus?.currentPeriodEnd && (
+                                        <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b' }}>
+                                            Renews {new Date(subscriptionStatus.currentPeriodEnd).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+
+                        // No active subscription — show upgrade prompt
+                        return (
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: 'rgba(248,113,113,0.08)',
+                                border: '1px solid rgba(248,113,113,0.25)',
+                                borderRadius: '12px',
+                                padding: '12px 16px',
+                                flexWrap: 'wrap',
+                                gap: '10px'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span style={{ fontSize: '18px' }}>💳</span>
+                                    <div>
+                                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#fca5a5' }}>No active podcast plan</div>
+                                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                            Upgrade to unlock Guided Studio Flow, analytics, and team workflows.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setSelectedPlan('podcast_pro'); setShowPricingModal(true); }}
+                                        style={{
+                                            border: '1px solid rgba(248,113,113,0.4)',
+                                            background: 'rgba(248,113,113,0.12)',
+                                            color: '#fca5a5',
+                                            borderRadius: '8px',
+                                            padding: '7px 14px',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        View plans →
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleOpenPortal}
+                                        disabled={billingPortalLoading}
+                                        style={{
+                                            border: '1px solid rgba(148,163,184,0.25)',
+                                            background: 'transparent',
+                                            color: '#94a3b8',
+                                            borderRadius: '8px',
+                                            padding: '7px 14px',
+                                            fontSize: '12px',
+                                            fontWeight: 600,
+                                            cursor: billingPortalLoading ? 'wait' : 'pointer',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {billingPortalLoading ? 'Opening…' : 'Manage billing →'}
+                                    </button>
                                 </div>
                             </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => navigateToFeaturePage('revenue', 'Opening Billing & Revenue...')}
-                            style={{
-                                border: '1px solid rgba(248,113,113,0.4)',
-                                background: 'rgba(248,113,113,0.12)',
-                                color: '#fca5a5',
-                                borderRadius: '8px',
-                                padding: '7px 14px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap'
-                            }}
-                        >
-                            Manage billing →
-                        </button>
-                    </div>
-                    )}
+                        );
+                    })()}
                 </div>
 
                 {/* ── Podcast Setup Guide ─────────────────────────────────────── */}
