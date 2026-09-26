@@ -1,9 +1,16 @@
+import { getAuthToken } from './authStorage.js';
+
 const API_BASE = '/api/conversations';
 
 async function fetchJson(url, options = {}) {
+    const token = getAuthToken();
     const res = await fetch(url, {
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...options.headers },
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...options.headers
+        },
         ...options
     });
     const data = await res.json().catch(() => ({}));

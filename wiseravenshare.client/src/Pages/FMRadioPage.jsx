@@ -65,6 +65,25 @@ const FALLBACK_AUDIO_CANDIDATES = [
   'https://playerservices.streamtheworld.com/api/livestream-redirect/WBLSFMAAC.aac'
 ];
 
+const RADIO_CREATOR_INFRASTRUCTURE_STEPS = [
+  'Provision a streaming server such as Icecast or AzuraCast on a public host.',
+  'Point the listener URL at the public stream domain and keep the mount prefix stable.',
+  'Set the source host, port, username, and password used by your source client.',
+  'Use the Radio Creator station record to claim the frequency, schedule, and permissions.',
+  'Connect a source client (BUTT, OBS, Liquidsoap, or equivalent) and test playback before going live.'
+];
+
+const RADIO_CREATOR_ENV_VARS = [
+  ['Streaming__Icecast__Enabled', 'Turn the stream integration on after the server is reachable.'],
+  ['Streaming__Icecast__PublicUrl', 'Public listener URL, e.g. https://stream.wiseravenshare.com.'],
+  ['Streaming__Icecast__BaseUrl', 'Internal source host URL used by the backend to build source endpoints.'],
+  ['Streaming__Icecast__MountPrefix', 'Mount prefix for all creator stations, default: radio.'],
+  ['Streaming__Icecast__SourceHost', 'Host name or IP for the Icecast source endpoint.'],
+  ['Streaming__Icecast__SourcePort', 'Source port used by the streaming server.'],
+  ['Streaming__Icecast__SourceUsername', 'Username used by the source client.'],
+  ['Streaming__Icecast__SourcePassword', 'Source password; keep this secret.'],
+];
+
 // Keep track player audio alive across route/tab navigation.
 let persistentHowl = null;
 let persistentTrack = null;
@@ -1414,6 +1433,35 @@ const FMRadioPage = () => {
 
   const renderCreatorStudio = (isModern = false) => (
     <div className={isModern ? 'mod-creator-shell' : 'wr-creator-shell'}>
+      <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
+        <h3>Radio Station Infrastructure</h3>
+        <p className="wr-creator-empty">
+          WiseRavenShare already handles the station record, frequency integrity, and stream URL provisioning.
+          Finish the broadcast chain by wiring the streaming server and source client below.
+        </p>
+        <div className="wr-creator-guide-grid">
+          <div>
+            <h4>Setup checklist</h4>
+            <ul className="wr-creator-guide-list">
+              {RADIO_CREATOR_INFRASTRUCTURE_STEPS.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h4>Deployment env vars</h4>
+            <ul className="wr-creator-env-list">
+              {RADIO_CREATOR_ENV_VARS.map(([key, description]) => (
+                <li key={key}>
+                  <code>{key}</code>
+                  <span>{description}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <div className={isModern ? 'mod-creator-grid' : 'wr-creator-grid'}>
         <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
           <h3>Radio Station Builder</h3>

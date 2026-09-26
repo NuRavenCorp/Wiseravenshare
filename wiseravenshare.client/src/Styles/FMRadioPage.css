@@ -495,6 +495,11 @@
   .wr-brand h1 { font-size: 1.1rem; letter-spacing: .35em; }
   .wr-grille { height: 48px; }
   .wr-caption-grid { grid-template-columns: 1fr; }
+  .wr-creator-grid,
+  .wr-creator-form-grid,
+  .wr-creator-guide-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Spectrum visualizer ─── */
@@ -752,6 +757,39 @@
   font-family: 'VT323', monospace;
   letter-spacing: .14em;
   color: var(--wr-amber-hot);
+}
+.wr-creator-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.wr-creator-guide-grid h4 {
+  margin: 0 0 8px;
+  font-family: 'VT323', monospace;
+  letter-spacing: .12em;
+  color: var(--wr-amber);
+}
+.wr-creator-guide-list,
+.wr-creator-env-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--wr-cream-dark);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+.wr-creator-env-list li {
+  display: grid;
+  gap: 2px;
+}
+.wr-creator-env-list code {
+  color: var(--wr-amber-hot);
+  font-size: .76rem;
+  word-break: break-word;
+}
+.wr-creator-env-list span {
+  color: var(--wr-cream-dark);
 }
 .wr-creator-form-grid {
   display: grid;
