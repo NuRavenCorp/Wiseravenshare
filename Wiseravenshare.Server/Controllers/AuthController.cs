@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -698,6 +699,7 @@ public class AuthController : ControllerBase
         var update = normalizedPlatform switch
         {
             "facebook" => new UpdateSocialFeedsRequest { Facebook = cleared },
+            "instagram" => new UpdateSocialFeedsRequest { Instagram = cleared },
             "tiktok" => new UpdateSocialFeedsRequest { TikTok = cleared },
             "youtube" => new UpdateSocialFeedsRequest { YouTube = cleared },
             _ => null
@@ -2166,6 +2168,7 @@ public class AuthController : ControllerBase
             "google" => "google",
             "microsoft" => "microsoft",
             "facebook" => "facebook",
+            "instagram" => "instagram",
             "tiktok" => "tiktok",
             "youtube" => "youtube",
             _ => string.Empty
@@ -2179,6 +2182,7 @@ public class AuthController : ControllerBase
             "google" => "Google",
             "microsoft" => "Microsoft",
             "facebook" => "Facebook",
+            "instagram" => "Instagram",
             "tiktok" => "TikTok",
             "youtube" => "YouTube",
             _ => string.Empty
@@ -2445,6 +2449,14 @@ public class AuthController : ControllerBase
                 ["scope"] = "email,public_profile",
                 ["state"] = state
             }),
+            "instagram" => BuildUrl("https://www.facebook.com/v19.0/dialog/oauth", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "email,public_profile,instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management",
+                ["state"] = state
+            }),
             "tiktok" => BuildUrl("https://www.tiktok.com/v2/auth/authorize/", new Dictionary<string, string?>
             {
                 ["client_key"] = config.ClientId,
@@ -2483,6 +2495,7 @@ public class AuthController : ControllerBase
             "google" => await ResolveGoogleProfileAsync(httpClient, config, code, callbackUrl),
             "microsoft" => await ResolveMicrosoftProfileAsync(httpClient, config, code, callbackUrl),
             "facebook" => await ResolveFacebookProfileAsync(httpClient, config, code, callbackUrl),
+            "instagram" => await ResolveInstagramProfileAsync(httpClient, config, code, callbackUrl),
             "tiktok" => await ResolveTikTokProfileAsync(httpClient, config, code, callbackUrl),
             "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
@@ -2654,6 +2667,20 @@ public class AuthController : ControllerBase
         var accessToken = tokenJson.RootElement.TryGetProperty("access_token", out var accessTokenNode)
             ? accessTokenNode.GetString() ?? string.Empty
             : string.Empty;
+        DateTimeOffset? tokenExpiresAt = null;
+        if (tokenJson.RootElement.TryGetProperty("expires_in", out var expiresNode))
+        {
+            if (expiresNode.TryGetInt64(out var expiresInSeconds) && expiresInSeconds > 0)
+            {
+                tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds);
+            }
+            else if (expiresNode.ValueKind == JsonValueKind.String
+                     && long.TryParse(expiresNode.GetString(), out var parsedExpiry)
+                     && parsedExpiry > 0)
+            {
+                tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(parsedExpiry);
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(accessToken))
         {
@@ -2676,7 +2703,117 @@ public class AuthController : ControllerBase
         {
             ProviderUserId = root.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty,
             Name = root.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
-            Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty
+            Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty,
+            AccessToken = accessToken,
+            TokenExpiresAt = tokenExpiresAt
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveInstagramProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenUrl = BuildUrl("https://graph.facebook.com/v26.0/oauth/access_token", new Dictionary<string, string?>
+        {
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret,
+            ["redirect_uri"] = callbackUrl,
+            ["code"] = code
+        });
+
+        using var tokenResponse = await httpClient.GetAsync(tokenUrl);
+        tokenResponse.EnsureSuccessStatusCode();
+        await using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(tokenStream);
+        var tokenRoot = tokenJson.RootElement;
+        var accessToken = tokenRoot.TryGetProperty("access_token", out var accessTokenNode)
+            ? accessTokenNode.GetString() ?? string.Empty
+            : string.Empty;
+
+        DateTimeOffset? tokenExpiresAt = null;
+        if (tokenRoot.TryGetProperty("expires_in", out var expiresNode))
+        {
+            if (expiresNode.TryGetInt64(out var expiresInSeconds) && expiresInSeconds > 0)
+            {
+                tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds);
+            }
+            else if (expiresNode.ValueKind == JsonValueKind.String
+                     && long.TryParse(expiresNode.GetString(), out var parsedExpiry)
+                     && parsedExpiry > 0)
+            {
+                tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(parsedExpiry);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("Instagram access token was not returned.");
+        }
+
+        var profileUrl = BuildUrl("https://graph.facebook.com/me", new Dictionary<string, string?>
+        {
+            ["fields"] = "id,name,email",
+            ["access_token"] = accessToken
+        });
+
+        using var profileResponse = await httpClient.GetAsync(profileUrl);
+        profileResponse.EnsureSuccessStatusCode();
+        await using var profileStream = await profileResponse.Content.ReadAsStreamAsync();
+        using var profileJson = await JsonDocument.ParseAsync(profileStream);
+        var profileRoot = profileJson.RootElement;
+        var fallbackId = profileRoot.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty;
+        var fallbackName = profileRoot.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty;
+        var fallbackEmail = profileRoot.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty;
+
+        var pagesUrl = BuildUrl("https://graph.facebook.com/me/accounts", new Dictionary<string, string?>
+        {
+            ["fields"] = "instagram_business_account{id,username},name",
+            ["limit"] = "25",
+            ["access_token"] = accessToken
+        });
+
+        string instagramUserId = string.Empty;
+        string instagramUsername = string.Empty;
+
+        using var pagesResponse = await httpClient.GetAsync(pagesUrl);
+        if (pagesResponse.IsSuccessStatusCode)
+        {
+            await using var pagesStream = await pagesResponse.Content.ReadAsStreamAsync();
+            using var pagesJson = await JsonDocument.ParseAsync(pagesStream);
+            if (pagesJson.RootElement.TryGetProperty("data", out var pagesNode)
+                && pagesNode.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var page in pagesNode.EnumerateArray())
+                {
+                    if (!page.TryGetProperty("instagram_business_account", out var accountNode)
+                        || accountNode.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    instagramUserId = accountNode.TryGetProperty("id", out var instagramIdNode)
+                        ? instagramIdNode.GetString() ?? string.Empty
+                        : string.Empty;
+                    instagramUsername = accountNode.TryGetProperty("username", out var usernameNode)
+                        ? usernameNode.GetString() ?? string.Empty
+                        : string.Empty;
+                    if (!string.IsNullOrWhiteSpace(instagramUserId) || !string.IsNullOrWhiteSpace(instagramUsername))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        var providerUserId = !string.IsNullOrWhiteSpace(instagramUsername)
+            ? instagramUsername
+            : (!string.IsNullOrWhiteSpace(instagramUserId) ? instagramUserId : fallbackId);
+
+        return new SocialProfile
+        {
+            ProviderUserId = providerUserId,
+            Name = !string.IsNullOrWhiteSpace(instagramUsername) ? instagramUsername : fallbackName,
+            Email = fallbackEmail,
+            AccessToken = accessToken,
+            TokenExpiresAt = tokenExpiresAt
         };
     }
 
@@ -2787,6 +2924,7 @@ public class AuthController : ControllerBase
         return provider switch
         {
             "facebook" => new UpdateSocialFeedsRequest { Facebook = connection },
+            "instagram" => new UpdateSocialFeedsRequest { Instagram = connection },
             "tiktok" => new UpdateSocialFeedsRequest { TikTok = connection },
             "youtube" => new UpdateSocialFeedsRequest { YouTube = connection },
             "twitter" => new UpdateSocialFeedsRequest { Twitter = connection },
@@ -2807,6 +2945,7 @@ public class AuthController : ControllerBase
         var designation = provider switch
         {
             "facebook" => "facebook-page",
+            "instagram" => "instagram-creator",
             "tiktok" => "tiktok-creator",
             "youtube" => "youtube-channel",
             "twitter" => "x-profile",
@@ -2847,6 +2986,7 @@ public class AuthController : ControllerBase
         return platform switch
         {
             "facebook" => feeds.Facebook,
+            "instagram" => feeds.Instagram,
             "tiktok" => feeds.TikTok,
             "youtube" => feeds.YouTube,
             _ => null
@@ -2887,6 +3027,8 @@ public class AuthController : ControllerBase
         var channelId = ReadField(fields, "channel_id", "channelId", "id");
         var pageId = ReadField(fields, "page_id", "pageId");
         var pageName = ReadField(fields, "page_name", "pageName");
+        var instagramUserId = ReadField(fields, "user_id", "instagram_user_id", "business_user_id");
+        var instagramUsername = ReadField(fields, "instagram_username", "username", "handle");
 
         switch (platform)
         {
@@ -2923,6 +3065,23 @@ public class AuthController : ControllerBase
                 }
 
                 return new UpdateSocialFeedsRequest { Facebook = next };
+            case "instagram":
+                if (!string.IsNullOrWhiteSpace(instagramUsername))
+                {
+                    next.Username = instagramUsername.TrimStart('@');
+                }
+                else if (!string.IsNullOrWhiteSpace(instagramUserId))
+                {
+                    next.Username = instagramUserId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(next.Username))
+                {
+                    next.ProfileUrl = $"https://www.instagram.com/{next.Username.TrimStart('@')}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+                next.Designation = "instagram-creator";
+                return new UpdateSocialFeedsRequest { Instagram = next };
             case "tiktok":
                 var tiktokUser = ReadField(fields, "username", "handle", "user_id", "open_id");
                 if (!string.IsNullOrWhiteSpace(tiktokUser))
@@ -2947,6 +3106,7 @@ public class AuthController : ControllerBase
         return provider switch
         {
             "facebook" => providerUserId,
+            "instagram" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
             "tiktok" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
             "youtube" or "twitter" or "linkedin" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
             _ => string.Empty
@@ -2963,6 +3123,7 @@ public class AuthController : ControllerBase
         return provider switch
         {
             "facebook" => $"https://www.facebook.com/{identifier}",
+            "instagram" => $"https://www.instagram.com/{identifier.TrimStart('@')}",
             "tiktok" => $"https://www.tiktok.com/@{identifier}",
             "youtube" => identifier.StartsWith("UC", StringComparison.OrdinalIgnoreCase)
                 ? $"https://www.youtube.com/channel/{identifier}"
@@ -3548,12 +3709,14 @@ LIMIT 1;";
 
 public sealed class SocialConnectCompleteRequest
 {
+    [JsonPropertyName("user_id")]
     public string UserId { get; set; } = string.Empty;
     public Dictionary<string, string> Fields { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class SocialConnectDisconnectRequest
 {
+    [JsonPropertyName("user_id")]
     public string UserId { get; set; } = string.Empty;
 }
 

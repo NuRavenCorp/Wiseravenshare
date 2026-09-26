@@ -305,9 +305,11 @@ public class SocialPlatformService : ISocialPlatformService
             {
                 Platform = "instagram",
                 ReadConfigured = false,
-                PublishConfigured = false,
-                ActiveMode = "handle-link-mode",
-                Detail = "Feed card uses connected handle/link."
+                PublishConfigured = IsInstagramConfigured(),
+                ActiveMode = IsInstagramConfigured() ? "graph-api" : "handle-link-mode",
+                Detail = IsInstagramConfigured()
+                    ? "Instagram Graph API publish is configured."
+                    : "Feed card uses connected handle/link. Set Social:Instagram:BusinessAccountId and Social:Instagram:AccessToken to publish."
             },
             new()
             {
@@ -373,6 +375,20 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToTikTokAsync(message, request.VideoUrl));
         }
 
+        if (request.PublishToInstagram && mediaType == SocialMediaType.Music)
+        {
+            response.Results.Add(new SocialPublishResultDto
+            {
+                Platform = "instagram",
+                Success = false,
+                Error = "Instagram does not support music-only posts via API. Share a photo or video."
+            });
+        }
+        else if (request.PublishToInstagram)
+        {
+            response.Results.Add(await PublishToInstagramAsync(message, request.VideoUrl, request.PhotoUrl, mediaType));
+        }
+
         if (request.PublishToYouTube && (mediaType == SocialMediaType.Photo || mediaType == SocialMediaType.Music))
         {
             // YouTube accepts video only via API; music and photos should go to Facebook.
@@ -399,9 +415,10 @@ public class SocialPlatformService : ISocialPlatformService
         }
 
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, TikTok={TikTok}, YouTube={YouTube}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, Instagram={Instagram}, TikTok={TikTok}, YouTube={YouTube}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
             userId,
             request.PublishToFacebook,
+            request.PublishToInstagram,
             request.PublishToTikTok,
             request.PublishToYouTube,
             request.PublishToWiseRavenStream,
@@ -830,6 +847,122 @@ public class SocialPlatformService : ISocialPlatformService
         };
     }
 
+    private async Task<SocialPublishResultDto> PublishToInstagramAsync(string message, string? videoUrl, string? photoUrl, string mediaType)
+    {
+        var businessAccountId = _configuration["Social:Instagram:BusinessAccountId"];
+        var accessToken = _configuration["Social:Instagram:AccessToken"];
+        if (string.IsNullOrWhiteSpace(businessAccountId) || string.IsNullOrWhiteSpace(accessToken))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "instagram",
+                Success = false,
+                Error = "Instagram is not configured. Set Social:Instagram:BusinessAccountId and Social:Instagram:AccessToken."
+            };
+        }
+
+        var isVideo = string.Equals(mediaType, SocialMediaType.Video, StringComparison.OrdinalIgnoreCase);
+        var mediaUrl = isVideo ? videoUrl : photoUrl;
+        if (string.IsNullOrWhiteSpace(mediaUrl))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "instagram",
+                Success = false,
+                Error = isVideo
+                    ? "Instagram video publish requires a public videoUrl."
+                    : "Instagram publish requires a public photoUrl or videoUrl."
+            };
+        }
+
+        var createPayload = new Dictionary<string, string>
+        {
+            ["caption"] = message,
+            ["access_token"] = accessToken
+        };
+        if (isVideo)
+        {
+            createPayload["media_type"] = "REELS";
+            createPayload["video_url"] = mediaUrl;
+        }
+        else
+        {
+            createPayload["image_url"] = mediaUrl;
+        }
+
+        try
+        {
+            using var createContent = new FormUrlEncodedContent(createPayload);
+            using var createResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{businessAccountId}/media", createContent);
+            var createBody = await createResponse.Content.ReadAsStringAsync();
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "instagram",
+                    Success = false,
+                    Error = $"Instagram container creation failed ({(int)createResponse.StatusCode}): {TrimError(createBody)}"
+                };
+            }
+
+            using var createDoc = JsonDocument.Parse(createBody);
+            var containerId = createDoc.RootElement.TryGetProperty("id", out var containerNode)
+                ? containerNode.GetString()
+                : null;
+            if (string.IsNullOrWhiteSpace(containerId))
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "instagram",
+                    Success = false,
+                    Error = "Instagram did not return a media container id."
+                };
+            }
+
+            var publishPayload = new Dictionary<string, string>
+            {
+                ["creation_id"] = containerId,
+                ["access_token"] = accessToken
+            };
+
+            using var publishContent = new FormUrlEncodedContent(publishPayload);
+            using var publishResponse = await _httpClient.PostAsync($"{FacebookGraphBase}/{businessAccountId}/media_publish", publishContent);
+            var publishBody = await publishResponse.Content.ReadAsStringAsync();
+            if (!publishResponse.IsSuccessStatusCode)
+            {
+                return new SocialPublishResultDto
+                {
+                    Platform = "instagram",
+                    Success = false,
+                    Error = $"Instagram publish failed ({(int)publishResponse.StatusCode}): {TrimError(publishBody)}"
+                };
+            }
+
+            using var publishDoc = JsonDocument.Parse(publishBody);
+            var mediaId = publishDoc.RootElement.TryGetProperty("id", out var mediaNode)
+                ? mediaNode.GetString()
+                : null;
+
+            return new SocialPublishResultDto
+            {
+                Platform = "instagram",
+                Success = true,
+                ExternalPostId = mediaId,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(mediaId) ? null : $"https://www.instagram.com/p/{mediaId}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Instagram publish threw for media URL {MediaUrl}", mediaUrl);
+            return new SocialPublishResultDto
+            {
+                Platform = "instagram",
+                Success = false,
+                Error = $"Instagram publish failed: {ex.Message}"
+            };
+        }
+    }
+
     private async Task<SocialPublishResultDto> PublishToYouTubeAsync(
         string message,
         string? videoUrl,
@@ -996,6 +1129,13 @@ public class SocialPlatformService : ISocialPlatformService
 
     private bool IsWiseRavenStreamConfigured() =>
         !string.IsNullOrWhiteSpace(ResolveWiseRavenStreamWebhookUrl());
+
+    private bool IsInstagramConfigured()
+    {
+        var businessAccountId = _configuration["Social:Instagram:BusinessAccountId"];
+        var accessToken = _configuration["Social:Instagram:AccessToken"];
+        return !string.IsNullOrWhiteSpace(businessAccountId) && !string.IsNullOrWhiteSpace(accessToken);
+    }
 
     private string? ResolveWiseRavenStreamWebhookUrl() =>
         _configuration["Social:WiseRavenStream:WebhookUrl"]
@@ -1214,6 +1354,3 @@ public class SocialPlatformService : ISocialPlatformService
         return body.Length <= 400 ? body : body[..400];
     }
 }
-
-
-
