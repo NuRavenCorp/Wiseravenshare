@@ -41,6 +41,7 @@ import FMRadioPage from './Pages/FMRadioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
+import PodcastCheckoutPage from './Pages/PodcastCheckoutPage';
 import WiseCoinPage from './Pages/WiseCoinPage';
 import GatekeeperDashboard from './Pages/GatekeeperDashboard.jsx';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
@@ -611,6 +612,8 @@ const App = () => {
                 return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
+            case 'podcast-checkout':
+                return <PodcastCheckoutPage />;
             case 'wisecoin':
                 return <WiseCoinPage />;
             case 'privacy':
