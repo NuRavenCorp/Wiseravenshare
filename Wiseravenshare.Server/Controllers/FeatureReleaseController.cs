@@ -22,6 +22,7 @@ public sealed class FeatureReleaseController : ControllerBase
         new("podcast-pro-bundle",  "Podcast Pro Bundle",   "Full access to all podcast studio capabilities.",                   "podcast-pro",   "Podcast Studio"),
         new("podcast-analytics",   "Podcast Analytics",    "Audience insights and trending content signals for podcasters.",    "growth-suite",  "Podcast Studio"),
         new("team-workflows",      "Team Workflows",        "Multi-role approval chains, review lanes, and editor handoffs.",    "studio-plus",   "Podcast Studio"),
+        new("persistent-workspace-pages", "Persistent Workspace Pages", "Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.", "studio-plus", "Podcast Studio"),
         new("script-pipeline",     "Script Pipeline",       "Structured 4-segment script pipeline for show production.",        "copy-standard", "Copywriting"),
         new("ai-copywriting",      "AI Copywriting",        "AI-assisted script and copy generation from the assistant.",       "copy-pro",      "Copywriting"),
         new("media-library",       "Media Library",         "Full media upload, organisation, and library management.",         "creator-pro",   "Core Platform"),

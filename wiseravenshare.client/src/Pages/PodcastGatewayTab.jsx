@@ -13,6 +13,7 @@ import { useNotification } from '../Contexts/NotificationContext';
  * - Podcast Pro Bundle
  * - Podcast Analytics
  * - Team Workflows
+ * - Persistent Workspace Pages
  *
  * Admins:
  * - Don't need to pay for any feature releases
@@ -51,6 +52,12 @@ const PodcastGatewayTab = ({ loadCatalog }) => {
       desc: 'Multi-role approval chains, review lanes, and editor handoffs.',
       tier: 'studio-plus'
     },
+    {
+      key: 'persistent-workspace-pages',
+      name: 'Persistent Workspace Pages',
+      desc: 'Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.',
+      tier: 'studio-plus'
+    },
   ];
 
   const enableAllPodcastFeatures = useCallback(async () => {
@@ -60,7 +67,8 @@ const PodcastGatewayTab = ({ loadCatalog }) => {
       '- Guided Studio Flow\n' +
       '- Podcast Pro Bundle\n' +
       '- Podcast Analytics\n' +
-      '- Team Workflows\n\n' +
+      '- Team Workflows\n' +
+      '- Persistent Workspace Pages\n\n' +
       'Users will need appropriate subscription tier or admin privileges.'
     )) {
       return;

@@ -84,6 +84,12 @@ const RADIO_CREATOR_ENV_VARS = [
   ['Streaming__Icecast__SourcePassword', 'Source password; keep this secret.'],
 ];
 
+const RADIO_CREATOR_PAYMENT_STEPS = [
+  'Activate a Creator plan in Subscribe before launching a new station.',
+  'After payment, return to FM Radio and open Radio Creator to unlock station provisioning.',
+  'Use Caption + Canvas Studio for pre-launch promos while payment is processing.',
+];
+
 // Keep track player audio alive across route/tab navigation.
 let persistentHowl = null;
 let persistentTrack = null;
@@ -215,9 +221,12 @@ const resolveTrackSourceCandidates = (track) => {
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const FMRadioPage = () => {
+const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   // Tabs
-  const [tab, setTab] = useState('radio');
+  const [tab, setTab] = useState(() => {
+    const validTabs = new Set(['radio', 'cassette', 'creator', 'caption']);
+    return validTabs.has(initialTab) ? initialTab : 'radio';
+  });
 
   // FM tuner display
   const [tunedFreq,    setTunedFreq]    = useState(98.5);
@@ -260,6 +269,7 @@ const FMRadioPage = () => {
   const [captionMediaType, setCaptionMediaType] = useState('');
   const [captionMediaFile, setCaptionMediaFile] = useState(null);
   const [captionPlaying,   setCaptionPlaying]   = useState(false);
+  const [captionTextDraft, setCaptionTextDraft] = useState('');
   const [captionTrackDuration, setCaptionTrackDuration] = useState(0);
   const [captionClipStart, setCaptionClipStart] = useState(0);
   const [captionClipEnd, setCaptionClipEnd] = useState(0);
@@ -329,6 +339,7 @@ const FMRadioPage = () => {
   const modCanvasRef    = useRef(null);   // modern viz canvas
   const captionAudioRef = useRef(null);
   const captionMediaRef = useRef(null);
+  const captionKeyboardRef = useRef(null);
   const captionStopAtRef = useRef(null);
   const containerRef    = useRef(null);
   const vizRafRef       = useRef(null);
@@ -424,6 +435,12 @@ const FMRadioPage = () => {
 
     loadTags();
   }, [creatorRegionIso]);
+
+  useEffect(() => {
+    const validTabs = new Set(['radio', 'cassette', 'creator', 'caption']);
+    if (!validTabs.has(initialTab)) return;
+    setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     try {
@@ -1420,6 +1437,21 @@ const FMRadioPage = () => {
     setCaptionPlaying(false);
   };
 
+  const openCaptionKeyboard = () => {
+    setTab('caption');
+    window.setTimeout(() => {
+      captionKeyboardRef.current?.focus?.();
+    }, 40);
+  };
+
+  const jumpToCanvasStudio = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('canvas');
+      return;
+    }
+    setTab('caption');
+  };
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const needlePct = `${((tunedFreq - FM_LOW) / (FM_HIGH - FM_LOW)) * 100}%`;
   const progress  = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -1743,6 +1775,34 @@ const FMRadioPage = () => {
     </div>
   );
 
+  const renderCreatorPaymentGate = (isModern = false) => (
+    <div className={isModern ? 'mod-creator-shell' : 'wr-creator-shell'}>
+      <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
+        <h3>Radio Creator is Payment-Gated</h3>
+        <p className="wr-creator-empty">
+          Station creation is temporarily locked here until a Creator payment is active.
+          Your FM Radio and Canvas Studio flows remain available.
+        </p>
+        <ul className="wr-creator-guide-list">
+          {RADIO_CREATOR_PAYMENT_STEPS.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ul>
+        <div className="wr-creator-actions">
+          <button className="wr-insert-tape" onClick={() => (typeof onNavigate === 'function' ? onNavigate('wisecoin') : null)}>
+            Open Subscription & Payment
+          </button>
+          <button className="wr-mode-btn" onClick={openCaptionKeyboard}>
+            Open Caption + Keyboard
+          </button>
+          <button className="wr-mode-btn" onClick={jumpToCanvasStudio}>
+            Open Canvas Studio
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+
   const renderClassicTheme = () => (
     <div className="wr-cabinet">
       <div className="wr-brand">
@@ -1952,10 +2012,24 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(false)}
+      {tab === 'creator' && renderCreatorPaymentGate(false)}
       {tab === 'caption' && (
         <div className="wr-caption-wrap">
           <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
+          <div style={{ marginBottom: 12, display: 'grid', gap: 8 }}>
+            <input
+              ref={captionKeyboardRef}
+              type="text"
+              value={captionTextDraft}
+              onChange={(event) => setCaptionTextDraft(event.target.value)}
+              placeholder="Write your caption here..."
+              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'var(--card-bg)', color: 'var(--text-color)' }}
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="wr-mode-btn" onClick={openCaptionKeyboard}>Bring Up Keyboard</button>
+              <button className="wr-mode-btn" onClick={jumpToCanvasStudio}>Open Canvas Studio</button>
+            </div>
+          </div>
           <div className="wr-caption-cols">
             <div>
               <div className="wr-section-label">1. Add Music track selector</div>
@@ -2194,6 +2268,20 @@ const FMRadioPage = () => {
       {tab === 'caption' && (
         <div className="mod-caption-wrap">
           <h3 style={{ margin: '0 0 16px' }}>Caption Media with Music</h3>
+          <div style={{ marginBottom: 12, display: 'grid', gap: 8 }}>
+            <input
+              ref={captionKeyboardRef}
+              type="text"
+              value={captionTextDraft}
+              onChange={(event) => setCaptionTextDraft(event.target.value)}
+              placeholder="Write your caption here..."
+              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'var(--card-bg)', color: 'var(--text-color)' }}
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="mod-pill" onClick={openCaptionKeyboard}>Bring Up Keyboard</button>
+              <button className="mod-pill" onClick={jumpToCanvasStudio}>Open Canvas Studio</button>
+            </div>
+          </div>
           <div className="mod-caption-cols">
             <div>
               <div className="mod-section-label">1. Add Music track selector</div>
@@ -2258,7 +2346,7 @@ const FMRadioPage = () => {
         </div>
       )}
 
-      {tab === 'creator' && renderCreatorStudio(true)}
+      {tab === 'creator' && renderCreatorPaymentGate(true)}
 
       {showGlobalTransport && (
         <div className="mod-mini-transport" role="region" aria-label="Track player quick controls">

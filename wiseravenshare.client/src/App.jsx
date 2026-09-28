@@ -868,28 +868,6 @@ const App = () => {
                     >
                         Launch Ravensight
                     </button>
-                    <button
-                        onClick={() => {
-                            if (!communiqueEnabled) {
-                                addToast('Raven Communiqué is temporarily gated.', 'info');
-                                return;
-                            }
-                            setCommuniqueOpen(true);
-                        }}
-                        style={{
-                            border: '1px solid rgba(139,92,246,0.5)',
-                            background: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
-                            color: 'white',
-                            padding: '8px 12px',
-                            borderRadius: '999px',
-                            cursor: 'pointer',
-                            fontSize: 'var(--app-nav-font-size)',
-                            minHeight: 'var(--app-touch-target-min-height)',
-                            fontWeight: 'bold'
-                        }}
-                    >
-                        🪶 Communiqué{communiqueEnabled ? '' : ' (locked)'}
-                    </button>
                     {isAuthenticated && (
                         <button
                             onClick={() => setRavenChatOpen(true)}
@@ -949,6 +927,5 @@ const App = () => {
 };
 
 export default App;
-
 
 
