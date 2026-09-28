@@ -450,6 +450,10 @@ const App = () => {
         }
     };
 
+    const handleSubscribe = () => {
+        setCurrentPage('podcast-checkout');
+    };
+
     const enterRavensightMode = () => {
         setCurrentPage('ravensight');
         setIsRavensightMode(true);
@@ -806,7 +810,7 @@ const App = () => {
     if (isRavensightMode) {
         return (
             <div>
-                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
+                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} onSubscribe={handleSubscribe} user={user} />
                 <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                     <button
                         onClick={exitRavensightMode}
@@ -833,7 +837,7 @@ const App = () => {
 
     return (
         <div>
-                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} user={user} />
+                <Header onNavigate={navigateToPage} currentPage={currentPage} onLogout={handleLogout} onSponsor={handleSponsor} onSubscribe={handleSubscribe} user={user} />
             <TruthAlert alerts={truthAlerts} onDismiss={(id) => setTruthAlerts(prev => prev.filter(a => a.id !== id))} />
             <div className="container" style={{ paddingTop: '10px', paddingBottom: '0' }}>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

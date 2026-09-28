@@ -1,7 +1,7 @@
 import React from 'react';
 import WiseRavenLogo from './WiseRavenLogo';
 
-const Header = ({ onLogout, user, onSponsor }) => {
+const Header = ({ onLogout, user, onSponsor, onSubscribe }) => {
 
     return (
         <header style={{
@@ -46,6 +46,24 @@ const Header = ({ onLogout, user, onSponsor }) => {
                     }}>Liars, beware.</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        onClick={onSubscribe}
+                        style={{
+                            background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '20px',
+                            cursor: 'pointer',
+                            fontWeight: '800',
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase',
+                            fontSize: '12px'
+                        }}
+                    >
+                        Subscribe
+                    </button>
                     <button
                         type="button"
                         onClick={onSponsor}

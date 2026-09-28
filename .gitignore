@@ -24,6 +24,7 @@ runtimes/
 __*.ENV__*
 __.ENV__*
 tmp.do.appspec.yaml
+tmp.do.appspec.live.yaml
 
 # Logs
 **/logs/
