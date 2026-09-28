@@ -485,7 +485,7 @@ public sealed class FeatureReleaseController : ControllerBase
         try { sub = await _subscriptionService.GetSubscriptionStatusAsync(userId); }
         catch { /* treat as no subscription */ }
 
-        var userTier = isAdmin ? "admin" : ResolveTierFromPriceId(sub?.PriceId, sub?.HasActiveSubscription ?? false);
+        var userTier = isAdmin ? "admin" : ResolveTierFromSubscription(sub?.PlanKey, sub?.PriceId, sub?.HasActiveSubscription ?? false);
 
         // Load all compartment locks
         var compartments = await _featureCompartmentService.GetInventoryAsync(cancellationToken);
@@ -552,6 +552,74 @@ public sealed class FeatureReleaseController : ControllerBase
 
     private string AdminEmail()
         => User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? string.Empty;
+
+    /// <summary>
+    /// Resolves user tier from the stored PlanKey (first priority), then falls back to
+    /// env-configured Stripe price ID matching, then to string-pattern matching.
+    /// This ensures real Stripe price IDs like price_1AbcXXX unlock the correct features.
+    /// </summary>
+    private string ResolveTierFromSubscription(string? planKey, string? priceId, bool hasActiveSub)
+    {
+        if (!hasActiveSub)
+            return "free";
+
+        // 1. Use the stored plan key if it was resolved and persisted by the webhook handler.
+        if (!string.IsNullOrWhiteSpace(planKey))
+        {
+            return planKey.Trim().ToLowerInvariant() switch
+            {
+                "podcast_pro"   => "podcast-pro",
+                "studio_plus"   => "studio-plus",
+                "growth_suite"  => "growth-suite",
+                "copy_pro"      => "copy-pro",
+                "copy_standard" => "copy-standard",
+                "creator_pro"   => "creator-pro",
+                "admin"         => "admin",
+                _ => "creator-pro"
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(priceId))
+            return "creator-pro";
+
+        var p = priceId.Trim();
+        var lower = p.ToLowerInvariant();
+
+        // 2. Check against env-configured real Stripe price IDs.
+        var planMappings = new[]
+        {
+            ("podcast-pro",   new[] { "STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID",   "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID" }),
+            ("studio-plus",   new[] { "STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID",   "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID" }),
+            ("growth-suite",  new[] { "STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID",  "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID" }),
+            ("copy-pro",      new[] { "STRIPE_PRICE_COPY_PRO_MONTHLY_ID",      "STRIPE_PRICE_COPY_PRO_ANNUAL_ID" }),
+            ("copy-standard", new[] { "STRIPE_PRICE_COPY_STANDARD_MONTHLY_ID", "STRIPE_PRICE_COPY_STANDARD_ANNUAL_ID" }),
+            ("creator-pro",   new[] { "STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID",   "STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID" }),
+        };
+
+        foreach (var (tier, envKeys) in planMappings)
+        {
+            foreach (var envKey in envKeys)
+            {
+                var configured = _configuration[envKey];
+                if (!string.IsNullOrWhiteSpace(configured)
+                    && string.Equals(configured.Trim(), p, StringComparison.OrdinalIgnoreCase))
+                {
+                    return tier;
+                }
+            }
+        }
+
+        // 3. String-pattern fallback for dev/test price IDs that embed the plan name.
+        if (lower == "admin-pass" || lower == "admin_all_access") return "admin";
+        if (lower.Contains("podcast_pro") || lower.Contains("podcast-pro")) return "podcast-pro";
+        if (lower.Contains("studio_plus") || lower.Contains("studio-plus")) return "studio-plus";
+        if (lower.Contains("growth_suite") || lower.Contains("growth-suite")) return "growth-suite";
+        if (lower.Contains("copy_pro") || lower.Contains("copy-pro")) return "copy-pro";
+        if (lower.Contains("copy_standard") || lower.Contains("copy-standard")) return "copy-standard";
+        if (lower.Contains("creator_pro") || lower.Contains("creator-pro")) return "creator-pro";
+
+        return "creator-pro";
+    }
 
     private static string ResolveTierFromPriceId(string? priceId, bool hasActiveSub)
     {
