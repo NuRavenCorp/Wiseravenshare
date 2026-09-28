@@ -115,6 +115,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'notifications', icon: 'fas fa-bell', label: 'Notifications' },
         { id: 'messages', icon: 'fas fa-envelope', label: 'Messages' },
         { id: 'wisecoin', icon: 'fas fa-coins', label: '💎 WiseCoin' },
+        { id: 'podcast-checkout', icon: 'fas fa-star', label: '⭐ Subscribe' },
         { id: 'planner', icon: 'fas fa-tasks', label: 'Planner' },
         { id: 'newsroom-video', icon: 'fas fa-video', label: 'Newsroom Video' },
         { id: 'amateur-journalist', icon: 'fas fa-microphone-alt', label: 'Amateur Journalist' },

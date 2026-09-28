@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 import './PodcastCheckoutPage.css';
 
 const PodcastCheckoutPage = () => {
@@ -80,12 +79,15 @@ const PodcastCheckoutPage = () => {
   }, []);
 
   const checkRedirectStatus = () => {
-    const session = searchParams.get('session_id');
-    const cancelled = searchParams.get('cancelled');
+    const params = new URLSearchParams(window.location.search);
+    const session = params.get('session_id');
+    const cancelled = params.get('cancelled');
 
     if (session) {
       showSuccessMessage('Payment successful! Features are unlocking...');
-      setTimeout(() => navigate('/podcast-studio'), 2000);
+      setTimeout(() => {
+        window.location.href = '/?page=podcast-studio';
+      }, 2000);
     }
 
     if (cancelled) {
