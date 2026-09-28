@@ -278,6 +278,15 @@ public class PaymentsController : ControllerBase
             }
         };
 
+        var trialDays = ResolveTrialDays(plan);
+        if (trialDays > 0)
+        {
+            options.SubscriptionData = new SessionSubscriptionDataOptions
+            {
+                TrialPeriodDays = trialDays
+            };
+        }
+
         Session session;
         try
         {
@@ -387,6 +396,17 @@ public class PaymentsController : ControllerBase
             : "STRIPE_PRICE_MONTHLY_ID";
 
         return ResolveConfig(legacySectionKey, legacyEnvKey);
+    }
+
+    private static int ResolveTrialDays(string plan)
+    {
+        return string.IsNullOrWhiteSpace(plan) ? 0 : plan.Trim().ToLowerInvariant() switch
+        {
+            "growth_suite" => 14,
+            "studio_plus" => 7,
+            "podcast_pro" => 30,
+            _ => 0
+        };
     }
 
     private static bool IsStripePriceId(string? value)

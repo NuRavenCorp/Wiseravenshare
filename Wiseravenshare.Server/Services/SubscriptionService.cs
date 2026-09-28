@@ -5,6 +5,7 @@ using BillingPortalSessionCreateOptions = Stripe.BillingPortal.SessionCreateOpti
 using CheckoutSession = Stripe.Checkout.Session;
 using CheckoutSessionCreateOptions = Stripe.Checkout.SessionCreateOptions;
 using CheckoutSessionLineItemOptions = Stripe.Checkout.SessionLineItemOptions;
+using CheckoutSessionSubscriptionDataOptions = Stripe.Checkout.SessionSubscriptionDataOptions;
 using CheckoutSessionService = Stripe.Checkout.SessionService;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Infrastructure.Data;
@@ -71,8 +72,20 @@ public class SubscriptionService : ISubscriptionService
     private readonly AppDbContext _dbContext;
     private readonly ILogger<SubscriptionService> _logger;
     private readonly GrowthService _growthService;
+    private readonly IConfiguration _configuration;
     private readonly string _secretKey;
     private readonly string _webhookSecret;
+
+    // Maps plan keys to their env variable names (monthly + annual) for price ID lookup
+    private static readonly (string PlanKey, string[] EnvKeys)[] PlanPriceEnvMap =
+    [
+        ("podcast_pro",   ["STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID",   "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"]),
+        ("studio_plus",   ["STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID",   "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID"]),
+        ("growth_suite",  ["STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID",  "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID"]),
+        ("copy_pro",      ["STRIPE_PRICE_COPY_PRO_MONTHLY_ID",      "STRIPE_PRICE_COPY_PRO_ANNUAL_ID"]),
+        ("copy_standard", ["STRIPE_PRICE_COPY_STANDARD_MONTHLY_ID", "STRIPE_PRICE_COPY_STANDARD_ANNUAL_ID"]),
+        ("creator_pro",   ["STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID",   "STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID"]),
+    ];
 
     public SubscriptionService(
         AppDbContext dbContext,
@@ -83,6 +96,7 @@ public class SubscriptionService : ISubscriptionService
         _dbContext = dbContext;
         _logger = logger;
         _growthService = growthService;
+        _configuration = configuration;
 
         _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
         _webhookSecret = ResolveConfig(configuration, "Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
@@ -127,9 +141,20 @@ public class SubscriptionService : ISubscriptionService
             AllowPromotionCodes = true,
             Metadata = new Dictionary<string, string>
             {
-                ["userId"] = userId.ToString()
+                ["userId"] = userId.ToString(),
+                ["plan"] = NormalizePlan(request.Plan),
+                ["billingCycle"] = NormalizeBillingCycle(request.BillingCycle)
             }
         };
+
+        var trialDays = ResolveTrialDays(request.Plan);
+        if (trialDays > 0)
+        {
+            options.SubscriptionData = new CheckoutSessionSubscriptionDataOptions
+            {
+                TrialPeriodDays = trialDays
+            };
+        }
 
         var sessionService = new CheckoutSessionService();
         var session = await sessionService.CreateAsync(options);
@@ -143,6 +168,29 @@ public class SubscriptionService : ISubscriptionService
         {
             SessionId = session.Id,
             Url = session.Url
+        };
+    }
+
+    private static string NormalizePlan(string? plan)
+    {
+        return string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeBillingCycle(string? billingCycle)
+    {
+        return string.Equals(billingCycle, "annual", StringComparison.OrdinalIgnoreCase)
+            ? "annual"
+            : "monthly";
+    }
+
+    private static int ResolveTrialDays(string? plan)
+    {
+        return NormalizePlan(plan) switch
+        {
+            "growth_suite" => 14,
+            "studio_plus" => 7,
+            "podcast_pro" => 30,
+            _ => 0
         };
     }
 
@@ -197,6 +245,7 @@ public class SubscriptionService : ISubscriptionService
             HasActiveSubscription = isActive,
             Status = subscription.Status,
             PriceId = subscription.StripePriceId,
+            PlanKey = subscription.PlanKey,
             CurrentPeriodEnd = subscription.CurrentPeriodEnd,
             CancelAtPeriodEnd = subscription.CancelAtPeriodEnd,
             StripeCustomerId = subscription.StripeCustomerId,
@@ -399,6 +448,29 @@ public class SubscriptionService : ISubscriptionService
         subscription.LastWebhookEventId = eventId;
         subscription.UpdatedAt = DateTime.UtcNow;
 
+        // Resolve and persist the plan key so feature access works with real Stripe price IDs.
+        // Priority: (1) session/subscription metadata plan field, (2) env-var price ID lookup.
+        var resolvedPlanKey = string.Empty;
+        if (metadata != null && metadata.TryGetValue("plan", out var metadataPlan) && !string.IsNullOrWhiteSpace(metadataPlan))
+        {
+            resolvedPlanKey = metadataPlan.Trim().ToLowerInvariant();
+        }
+        if (string.IsNullOrWhiteSpace(resolvedPlanKey) && stripeSubscription.Metadata.TryGetValue("plan", out var subPlan) && !string.IsNullOrWhiteSpace(subPlan))
+        {
+            resolvedPlanKey = subPlan.Trim().ToLowerInvariant();
+        }
+        if (string.IsNullOrWhiteSpace(resolvedPlanKey) && !string.IsNullOrWhiteSpace(stripePriceId))
+        {
+            resolvedPlanKey = ResolvePlanKeyFromPriceId(stripePriceId);
+        }
+        if (!string.IsNullOrWhiteSpace(resolvedPlanKey))
+        {
+            subscription.PlanKey = resolvedPlanKey;
+            _logger.LogInformation(
+                "Resolved plan key '{PlanKey}' for user {UserId} from price {PriceId}.",
+                resolvedPlanKey, subscription.UserId, stripePriceId);
+        }
+
         await _dbContext.SaveChangesAsync();
 
         try
@@ -560,6 +632,44 @@ public class SubscriptionService : ISubscriptionService
                 return value.Trim();
             }
         }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Looks up a plan key ("podcast_pro", "studio_plus", etc.) from a real Stripe price ID
+    /// by comparing against configured env-var price IDs. Falls back to string-pattern matching
+    /// for dev/test price IDs that embed the plan name.
+    /// </summary>
+    private string ResolvePlanKeyFromPriceId(string priceId)
+    {
+        if (string.IsNullOrWhiteSpace(priceId))
+            return string.Empty;
+
+        var p = priceId.Trim();
+
+        // Check against all env-configured real Stripe price IDs (highest priority)
+        foreach (var (planKey, envKeys) in PlanPriceEnvMap)
+        {
+            foreach (var envKey in envKeys)
+            {
+                var configured = _configuration[envKey];
+                if (!string.IsNullOrWhiteSpace(configured)
+                    && string.Equals(configured.Trim(), p, StringComparison.OrdinalIgnoreCase))
+                {
+                    return planKey;
+                }
+            }
+        }
+
+        // String-pattern fallback for dev/test price IDs
+        var lower = p.ToLowerInvariant();
+        if (lower.Contains("podcast_pro") || lower.Contains("podcast-pro")) return "podcast_pro";
+        if (lower.Contains("studio_plus") || lower.Contains("studio-plus")) return "studio_plus";
+        if (lower.Contains("growth_suite") || lower.Contains("growth-suite")) return "growth_suite";
+        if (lower.Contains("copy_pro") || lower.Contains("copy-pro")) return "copy_pro";
+        if (lower.Contains("copy_standard") || lower.Contains("copy-standard")) return "copy_standard";
+        if (lower.Contains("creator_pro") || lower.Contains("creator-pro")) return "creator_pro";
 
         return string.Empty;
     }

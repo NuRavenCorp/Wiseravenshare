@@ -24,5 +24,12 @@ public class UserSubscription : BaseEntity
     [MaxLength(100)]
     public string? LastWebhookEventId { get; set; }
 
+    /// <summary>
+    /// Resolved plan key derived from the Stripe price ID at webhook time.
+    /// Values: growth_suite | studio_plus | podcast_pro | creator_pro | copy_pro | copy_standard | (empty)
+    /// </summary>
+    [MaxLength(50)]
+    public string? PlanKey { get; set; }
+
     public virtual User User { get; set; } = null!;
 }

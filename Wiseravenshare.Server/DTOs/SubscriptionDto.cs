@@ -5,6 +5,8 @@ public class CreateCheckoutSessionRequest
     public string PriceId { get; set; } = string.Empty;
     public string SuccessUrl { get; set; } = string.Empty;
     public string CancelUrl { get; set; } = string.Empty;
+    public string Plan { get; set; } = "creator_pro";
+    public string BillingCycle { get; set; } = "monthly";
 }
 
 public class CheckoutSessionResponse
@@ -28,6 +30,8 @@ public class SubscriptionStatusDto
     public bool HasActiveSubscription { get; set; }
     public string Status { get; set; } = "inactive";
     public string? PriceId { get; set; }
+    /// <summary>Resolved plan key: podcast_pro | studio_plus | growth_suite | creator_pro | etc.</summary>
+    public string? PlanKey { get; set; }
     public DateTime? CurrentPeriodEnd { get; set; }
     public bool CancelAtPeriodEnd { get; set; }
     public string? StripeCustomerId { get; set; }
