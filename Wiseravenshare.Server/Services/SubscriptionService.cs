@@ -8,6 +8,7 @@ using CheckoutSessionLineItemOptions = Stripe.Checkout.SessionLineItemOptions;
 using CheckoutSessionSubscriptionDataOptions = Stripe.Checkout.SessionSubscriptionDataOptions;
 using CheckoutSessionService = Stripe.Checkout.SessionService;
 using Wiseravenshare.Server.Exceptions;
+using Wiseravenshare.Server.Entities.Access;
 using Wiseravenshare.Server.Infrastructure.Data;
 
 namespace Wiseravenshare.Server.Services;
@@ -75,6 +76,7 @@ public class SubscriptionService : ISubscriptionService
     private readonly IConfiguration _configuration;
     private readonly string _secretKey;
     private readonly string _webhookSecret;
+    private readonly IFeatureAccessPolicyService _featureAccessPolicyService;
 
     // Maps plan keys to their env variable names (monthly + annual) for price ID lookup
     private static readonly (string PlanKey, string[] EnvKeys)[] PlanPriceEnvMap =
@@ -91,12 +93,14 @@ public class SubscriptionService : ISubscriptionService
         AppDbContext dbContext,
         IConfiguration configuration,
         ILogger<SubscriptionService> logger,
-        GrowthService growthService)
+        GrowthService growthService,
+        IFeatureAccessPolicyService featureAccessPolicyService)
     {
         _dbContext = dbContext;
         _logger = logger;
         _growthService = growthService;
         _configuration = configuration;
+        _featureAccessPolicyService = featureAccessPolicyService;
 
         _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
         _webhookSecret = ResolveConfig(configuration, "Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
@@ -495,6 +499,9 @@ public class SubscriptionService : ISubscriptionService
             {
                 _growthService.TrackEvent(subscription.UserId.ToString(), email, "subscription_activated", metadataPayload);
 
+                // Auto-release features based on tier
+                await ReleaseFeaturesByTierAsync(subscription.UserId, subscription.PlanKey ?? string.Empty);
+
                 var sourceReference = BuildRevenueEvidenceSourceReference(eventId, stripeSubscription.Id);
                 var existingEvidence = _growthService.GetRevenueEvidence(subscription.UserId.ToString(), email, null, null)
                     .Any(entry => string.Equals(entry.SourceReference, sourceReference, StringComparison.OrdinalIgnoreCase));
@@ -682,4 +689,103 @@ public class SubscriptionService : ISubscriptionService
             Steps = trigger.Steps.ToList()
         };
     }
+
+    /// <summary>
+    /// Auto-release features based on subscription tier when payment is received.
+    /// Maps plan key (growth_suite, studio_plus, podcast_pro) to feature keys for immediate unlock.
+    /// </summary>
+    private async Task ReleaseFeaturesByTierAsync(Guid userId, string planKey)
+    {
+        if (string.IsNullOrWhiteSpace(planKey) || _featureAccessPolicyService == null)
+        {
+            return;
+        }
+
+        var featuresByPlan = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Growth Suite: Analytics, sentiment, history, recommendations, reports
+            ["growth_suite"] = new[]
+            {
+                "growth-analytics-dashboard",
+                "audience-sentiment-tracking",
+                "30-day-performance-history",
+                "topic-recommendations",
+                "monthly-download-reports",
+                "podcast-analytics"
+            },
+
+            // Studio Plus: Team workflows + all Growth Suite features
+            ["studio_plus"] = new[]
+            {
+                "growth-analytics-dashboard",
+                "audience-sentiment-tracking",
+                "30-day-performance-history",
+                "topic-recommendations",
+                "monthly-download-reports",
+                "team-review-workflows",
+                "assignment-approval-chains",
+                "permission-based-editing",
+                "team-member-analytics",
+                "multi-role-simultaneous-editing",
+                "team-workspace-shared-assets",
+                "persistent-workspace-pages",
+                "podcast-analytics"
+            },
+
+            // Podcast Pro Bundle: Premium support + all Growth Suite + all Studio Plus
+            ["podcast_pro"] = new[]
+            {
+                "growth-analytics-dashboard",
+                "audience-sentiment-tracking",
+                "30-day-performance-history",
+                "topic-recommendations",
+                "monthly-download-reports",
+                "team-review-workflows",
+                "assignment-approval-chains",
+                "permission-based-editing",
+                "team-member-analytics",
+                "multi-role-simultaneous-editing",
+                "team-workspace-shared-assets",
+                "persistent-workspace-pages",
+                "podcast-analytics",
+                "guided-studio-flow",
+                "podcast-pro-bundle",
+                "24-7-priority-support",
+                "monthly-strategy-calls",
+                "custom-episode-templates",
+                "advanced-analytics-export"
+            }
+        };
+
+        if (!featuresByPlan.TryGetValue(planKey, out var featuresToRelease))
+        {
+            _logger.LogWarning("No features mapped for plan key {PlanKey}. Skipping auto-release.", planKey);
+            return;
+        }
+
+        try
+        {
+            foreach (var featureKey in featuresToRelease)
+            {
+                await _featureAccessPolicyService.SetFeatureStateAsync(
+                    featureKey: featureKey,
+                    scope: FeatureScope.User,
+                    scopeValue: userId.ToString(),
+                    state: FeatureState.Enabled,
+                    reason: $"Auto-released via subscription tier '{planKey}'",
+                    actorUserId: userId);
+
+                _logger.LogInformation(
+                    "Auto-released feature {FeatureKey} for user {UserId} via subscription tier {PlanKey}.",
+                    featureKey, userId, planKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Error auto-releasing features for user {UserId} with plan {PlanKey}.",
+                userId, planKey);
+        }
+    }
 }
+

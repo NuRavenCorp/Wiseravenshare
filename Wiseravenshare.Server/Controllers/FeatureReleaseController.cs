@@ -20,13 +20,33 @@ public sealed class FeatureReleaseController : ControllerBase
         // key, displayName, description, requiredTier, category
         new("guided-studio-flow",  "Guided Studio Flow",   "Podcast workflow navigator: Plan → Script → Record → Ship.",        "podcast-pro",   "Podcast Studio"),
         new("podcast-pro-bundle",  "Podcast Pro Bundle",   "Full access to all podcast studio capabilities.",                   "podcast-pro",   "Podcast Studio"),
+         
+        // Growth Suite features
+        new("growth-analytics-dashboard",    "Growth Analytics & Trending Content Dashboard",    "Real-time audience metrics and trending topics across all platforms.",    "growth-suite",  "Podcast Studio"),
+        new("audience-sentiment-tracking",   "Audience Sentiment Tracking",                     "Track sentiment and engagement across YouTube, TikTok, Instagram, Facebook, and more.",    "growth-suite",  "Podcast Studio"),
+        new("30-day-performance-history",    "30-Day Performance History",                      "Access full performance metrics and historical trends over 30 days.",    "growth-suite",  "Podcast Studio"),
+        new("topic-recommendations",         "Topic Recommendations Based on Trends",           "AI-powered recommendations for trending topics to maximize engagement.",    "growth-suite",  "Podcast Studio"),
+        new("monthly-download-reports",      "Monthly Download Reports",                       "Download comprehensive monthly performance and analytics reports.",    "growth-suite",  "Podcast Studio"),
+         
+        // Studio Plus features (includes Growth Suite)
+        new("team-review-workflows",         "Team Review Workflows (Unlimited Reviewers)",     "Manage unlimited reviewers with structured approval workflows.",    "studio-plus",   "Podcast Studio"),
+        new("assignment-approval-chains",    "Assignment & Approval Chains",                   "Create structured workflows with assignment routing and approval gates.",    "studio-plus",   "Podcast Studio"),
+        new("permission-based-editing",      "Permission-Based Editing Roles",                 "Define custom roles with granular editing and publishing permissions.",    "studio-plus",   "Podcast Studio"),
+        new("team-member-analytics",         "Team Member Analytics & Activity Logs",          "Track individual team member contributions, edits, and activity.",    "studio-plus",   "Podcast Studio"),
+        new("multi-role-simultaneous-editing", "Multi-Role Simultaneous Editing",             "Multiple team members edit simultaneously with real-time conflict resolution.",    "studio-plus",   "Podcast Studio"),
+        new("team-workspace-shared-assets",  "Team Workspace with Shared Assets",              "Centralized asset library for scripts, media, props, and references.",    "studio-plus",   "Podcast Studio"),
+        new("persistent-workspace-pages",    "Persistent Workspace Pages",                     "Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.",    "studio-plus",   "Podcast Studio"),
+         
+        // Podcast Pro Bundle (includes Growth Suite + Studio Plus + premium support)
+        new("24-7-priority-support",         "24/7 Priority Email Support",                    "Get dedicated email support available 24/7 with fast response times.",    "podcast-pro",   "Podcast Studio"),
+        new("monthly-strategy-calls",        "Monthly Strategy Calls with Our Team",           "Schedule monthly strategy calls with the WiseRavenShare team.",    "podcast-pro",   "Podcast Studio"),
+        new("custom-episode-templates",      "Custom Episode Templates",                       "Pre-built templates for common podcast formats and episode types.",    "podcast-pro",   "Podcast Studio"),
+        new("advanced-analytics-export",     "Advanced Analytics Export",                      "Export advanced analytics data in multiple formats for external analysis.",    "podcast-pro",   "Podcast Studio"),
+         
         new("podcast-analytics",   "Podcast Analytics",    "Audience insights and trending content signals for podcasters.",    "growth-suite",  "Podcast Studio"),
-        new("team-workflows",      "Team Workflows",        "Multi-role approval chains, review lanes, and editor handoffs.",    "studio-plus",   "Podcast Studio"),
-        new("persistent-workspace-pages", "Persistent Workspace Pages", "Keep unlimited pages for scripts, subject matter, props, and references. Pages persist until your team removes them.", "studio-plus", "Podcast Studio"),
         new("script-pipeline",     "Script Pipeline",       "Structured 4-segment script pipeline for show production.",        "copy-standard", "Copywriting"),
         new("ai-copywriting",      "AI Copywriting",        "AI-assisted script and copy generation from the assistant.",       "copy-pro",      "Copywriting"),
         new("media-library",       "Media Library",         "Full media upload, organisation, and library management.",         "creator-pro",   "Core Platform"),
-        new("growth-analytics",    "Growth Analytics",      "Platform-wide audience and trend analytics dashboard.",            "growth-suite",  "Core Platform"),
         new("revenue-console",     "Revenue Console",       "Revenue tracking, evidence tooling, and agent reporting.",         "creator-pro",   "Core Platform"),
         new("podcast-admin-gateway", "Podcast Admin Gateway", "Admin-only: Release, gate, and manage podcast features for the platform.", "admin", "Admin"),
     ];
