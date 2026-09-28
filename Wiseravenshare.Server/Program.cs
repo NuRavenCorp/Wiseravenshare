@@ -1835,6 +1835,8 @@ builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationServi
 builder.Services.AddScoped<IIcecastStreamService, IcecastStreamService>();
 builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
 builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
+builder.Services.AddScoped<IPodcastSessionService, PodcastSessionService>();
+builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
 builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
 builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
 builder.Services.AddScoped<ICrawlerOrchestrator, CrawlerOrchestrator>();
@@ -1994,6 +1996,11 @@ static string ResolveJwtKey(IConfiguration configuration)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        var configuredIssuer = builder.Configuration["Authentication:Jwt:Issuer"];
+        var configuredAudience = builder.Configuration["Authentication:Jwt:Audience"];
+        var validateIssuer = !string.IsNullOrWhiteSpace(configuredIssuer);
+        var validateAudience = !string.IsNullOrWhiteSpace(configuredAudience);
+
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -2015,10 +2022,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
-            ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Authentication:Jwt:Issuer"],
-            ValidateAudience = true,
-            ValidAudience = builder.Configuration["Authentication:Jwt:Audience"],
+            ValidateIssuer = validateIssuer,
+            ValidIssuer = configuredIssuer,
+            ValidateAudience = validateAudience,
+            ValidAudience = configuredAudience,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1)
         };

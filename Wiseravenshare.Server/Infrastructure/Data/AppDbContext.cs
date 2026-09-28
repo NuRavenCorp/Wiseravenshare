@@ -154,6 +154,11 @@ public class AppDbContext : DbContext
     public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>    AssistantKnowledge     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>();
     public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample> AssistantLearningSamples => Set<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample>();
 
+    // Podcast Studio Sessions (Multi-Device, Persistent Team Sessions)
+    public DbSet<PodcastSession> PodcastSessions => Set<PodcastSession>();
+    public DbSet<PodcastSessionDevice> PodcastSessionDevices => Set<PodcastSessionDevice>();
+    public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -1072,6 +1077,67 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(a => a.AssignedById)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Podcast Studio Sessions (Multi-Device, Persistent Team Sessions)
+        modelBuilder.Entity<PodcastSession>(entity =>
+        {
+            entity.ToTable("podcast_sessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.TeamId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.InitiatedByUserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.AccessScope).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AllowedUserIds).HasColumnType("text");
+            entity.Property(e => e.StateJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.TeamId, e.Status });
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasMany(e => e.Devices)
+                .WithOne(d => d.Session)
+                .HasForeignKey(d => d.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PodcastSessionDevice>(entity =>
+        {
+            entity.ToTable("podcast_session_devices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.SessionId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.UserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.DeviceName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.DeviceType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.UserAgent).HasMaxLength(500);
+            entity.Property(e => e.LocalStateJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.SessionId, e.IsActive });
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.LastHeartbeatAt);
+        });
+
+        modelBuilder.Entity<WorkspacePage>(entity =>
+        {
+            entity.ToTable("workspace_pages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.SessionId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.TeamId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CreatedByUserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.LastEditedByUserId).HasMaxLength(255);
+            entity.Property(e => e.PageType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.Content).HasColumnType("text");
+            entity.Property(e => e.Tags).HasMaxLength(500);
+            entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.SessionId, e.IsArchived });
+            entity.HasIndex(e => new { e.SessionId, e.PageType });
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.UpdatedAt);
+            entity.HasOne(e => e.Session)
+                .WithMany()
+                .HasForeignKey(e => e.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
