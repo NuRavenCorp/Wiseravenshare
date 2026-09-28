@@ -943,14 +943,14 @@ const PodcastStudioPage = ({ onNavigate }) => {
                 .replace(/^_/, '');
 
             const planPriceIdMap = {
-                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_MONTHLY_ID  || '',
-                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_MONTHLY_ID   || '',
-                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_MONTHLY_ID   || '',
+                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_MONTHLY_ID  || 'price_1UCjXjK4zW843WGui7qNCPPC',
+                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_MONTHLY_ID   || 'price_1UCjVuK4zW843WGuq7fhuyjh',
+                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_MONTHLY_ID   || 'price_1UKhbdK4zW843WGusq2WmkmY',
             };
             const planPriceIdAnnualMap = {
-                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_ANNUAL_ID   || '',
-                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_ANNUAL_ID    || '',
-                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_ANNUAL_ID    || '',
+                'growth_suite':  import.meta.env.VITE_STRIPE_GROWTH_SUITE_ANNUAL_ID   || 'price_1UCjXEK4zW843WGuVAfHpHuK',
+                'studio_plus':   import.meta.env.VITE_STRIPE_STUDIO_PLUS_ANNUAL_ID    || 'price_1UCjV2K4zW843WGuLyklflF8',
+                'podcast_pro':   import.meta.env.VITE_STRIPE_PODCAST_PRO_ANNUAL_ID    || 'price_1UKhbgK4zW843WGuWtDANdOH',
             };
 
             const priceMap  = billingCycle === 'annual' ? planPriceIdAnnualMap : planPriceIdMap;
