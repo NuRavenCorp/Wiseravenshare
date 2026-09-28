@@ -187,8 +187,8 @@ const PODCAST_PRICING_PLANS = {
             'Monthly download reports'
         ],
         prices: {
-            monthly: 4900, // $49/month
-            annual: 49000  // $490/year (saves $98/year)
+            monthly: 3900, // $39/month
+            annual: 39000  // $390/year (saves $78/year)
         },
         trial: {
             days: 14,
@@ -208,8 +208,8 @@ const PODCAST_PRICING_PLANS = {
             'Team workspace with shared assets'
         ],
         prices: {
-            monthly: 9900, // $99/month
-            annual: 99000  // $990/year (saves $198/year)
+            monthly: 7900, // $79/month
+            annual: 79000  // $790/year (saves $158/year)
         },
         trial: {
             days: 7,
