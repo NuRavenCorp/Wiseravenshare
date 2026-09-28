@@ -24,8 +24,8 @@ const PodcastCheckoutPage = () => {
       ],
       monthlyPrice: 39,
       annualPrice: 390,
-      monthlyPriceId: 'price_1U43yMGSLShTSiwXw25X6tAF',
-      annualPriceId: 'price_1U43zuGSLShTSiwXdTTWzIwV',
+      monthlyPriceId: 'price_1UCjXjK4zW843WGui7qNCPPC',
+      annualPriceId: 'price_1UCjXEK4zW843WGuVAfHpHuK',
       trialDays: 14,
       badge: 'Best for growth',
       color: '#6366f1'
@@ -45,8 +45,8 @@ const PodcastCheckoutPage = () => {
       ],
       monthlyPrice: 79,
       annualPrice: 790,
-      monthlyPriceId: 'price_1U4440GSLShTSiwXpvkfcoql',
-      annualPriceId: 'price_1U445KGSLShTSiwX8taoEF7y',
+      monthlyPriceId: 'price_1UCjVuK4zW843WGuq7fhuyjh',
+      annualPriceId: 'price_1UCjV2K4zW843WGuLyklflF8',
       trialDays: 7,
       badge: 'For teams',
       color: '#8b5cf6'
@@ -65,8 +65,8 @@ const PodcastCheckoutPage = () => {
       ],
       monthlyPrice: 149,
       annualPrice: 1490,
-      monthlyPriceId: 'price_1UKgrHGSLShTSiwXUne9ghm5',
-      annualPriceId: 'price_1UKgseGSLShTSiwXg6aUMLpE',
+      monthlyPriceId: 'price_1UKhbdK4zW843WGusq2WmkmY',
+      annualPriceId: 'price_1UKhbgK4zW843WGuWtDANdOH',
       trialDays: 30,
       badge: 'Best value',
       color: '#ec4899'
