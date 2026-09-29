@@ -1,9 +1,8 @@
 # WiseRavenShare Audio + Karaoke Services — Activation Checklist
 
-## ⚠️ STATUS: PENDING ACTIVATION
+## ✅ STATUS: ACTIVATED
 
-These services are **built and wired** but not yet running.
-The workspace owner must complete the steps below to bring them online.
+These services are running and validated on the primary site stack.
 
 ---
 
@@ -16,21 +15,10 @@ The workspace owner must complete the steps below to bring them online.
 
 ---
 
-## Step 1 — Python environment (do once per machine / container)
+## Step 1 — Container build (preferred)
 
 ```bash
-# Audio processor
-cd services/audio-processor
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# Karaoke engine
-cd ../karaoke-engine
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-# NOTE: first run downloads htdemucs_ft model weights (~316 MB)
+docker compose build audio-processor karaoke-engine
 ```
 
 ---
@@ -38,14 +26,7 @@ pip install -r requirements.txt
 ## Step 2 — Run locally alongside ASP.NET Core
 
 ```bash
-# Terminal A
-cd services/audio-processor && python main.py   # → http://localhost:8001
-
-# Terminal B  
-cd services/karaoke-engine  && python main.py   # → http://localhost:8002
-
-# Terminal C
-cd Wiseravenshare.Server && dotnet run           # → http://localhost:5242
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
 ---
@@ -53,8 +34,8 @@ cd Wiseravenshare.Server && dotnet run           # → http://localhost:5242
 ## Step 3 — Verify health endpoints
 
 ```
-GET http://localhost:5242/api/podcast-audio/health  → { "upstream": "ok" }
-GET http://localhost:5242/api/karaoke/health         → { "upstream": "ok" }
+GET http://localhost:10000/api/podcast-audio/health  → { "upstream": "ok" }
+GET http://localhost:10000/api/karaoke/health        → { "upstream": "ok" }
 ```
 
 ---
@@ -77,4 +58,6 @@ GET http://localhost:5242/api/karaoke/health         → { "upstream": "ok" }
 
 ---
 
-*Leave this file in place until activation is complete.*
+Activation validated on local site endpoints:
+- `http://localhost:10000/api/podcast-audio/health`
+- `http://localhost:10000/api/karaoke/health`

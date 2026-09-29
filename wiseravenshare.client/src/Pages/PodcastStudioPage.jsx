@@ -255,6 +255,36 @@ const PODCAST_TIER_LABELS = {
 
 const PODCAST_TIER_ORDER = ['free', 'creator-pro', 'growth-suite', 'studio-plus', 'podcast-pro', 'admin'];
 
+const PLAN_PAYMENT_LINKS = {
+    growth_suite: {
+        monthly: String(import.meta.env.VITE_STRIPE_GROWTH_SUITE_MONTHLY_LINK || 'https://buy.stripe.com/test_4gM4gAc2KbXjcsgcds5ZC01').trim(),
+        annual: String(import.meta.env.VITE_STRIPE_GROWTH_SUITE_ANNUAL_LINK || 'https://buy.stripe.com/test_aFadRaaYG1iF0Jyb9o5ZC02').trim()
+    },
+    studio_plus: {
+        monthly: String(import.meta.env.VITE_STRIPE_STUDIO_PLUS_MONTHLY_LINK || 'https://buy.stripe.com/test_aFa9AU4Aid1ndwk91g5ZC03').trim(),
+        annual: String(import.meta.env.VITE_STRIPE_STUDIO_PLUS_ANNUAL_LINK || 'https://buy.stripe.com/test_9B64gA9UC4uRak86T85ZC04').trim()
+    },
+    podcast_pro: {
+        monthly: String(import.meta.env.VITE_STRIPE_PODCAST_PRO_MONTHLY_LINK || 'https://buy.stripe.com/test_bJe7sM6IqgdzeAocds5ZC05').trim(),
+        annual: String(import.meta.env.VITE_STRIPE_PODCAST_PRO_ANNUAL_LINK || 'https://buy.stripe.com/test_8x24gAgj0bXj1NC5P45ZC06').trim()
+    }
+};
+
+const redirectToPaymentLink = (planKey, billingCycle, setStatus) => {
+    const cycle = String(billingCycle || 'monthly').toLowerCase() === 'annual' ? 'annual' : 'monthly';
+    const normalizedPlan = String(planKey || '').toLowerCase();
+    const planLinks = PLAN_PAYMENT_LINKS[normalizedPlan] || null;
+    const selectedLink = planLinks ? String(planLinks[cycle] || '').trim() : '';
+
+    if (!selectedLink) {
+        return false;
+    }
+
+    setStatus('Redirecting to Stripe payment link...');
+    window.location.href = selectedLink;
+    return true;
+};
+
 const normalizeTierId = (tier = '') => String(tier || '').trim().toLowerCase().replace(/_/g, '-');
 
 const getTierRank = (tier = '') => {
@@ -957,7 +987,10 @@ const PodcastStudioPage = ({ onNavigate }) => {
             const priceId   = priceMap[normalizedKey] || priceMap[planKey] || '';
 
             if (!priceId) {
-                setStatus('Stripe is not yet configured for this plan. Please contact support.');
+                const redirected = redirectToPaymentLink(normalizedKey, billingCycle, setStatus);
+                if (!redirected) {
+                    setStatus('Stripe is not yet configured for this plan. Please contact support.');
+                }
                 return;
             }
 
@@ -976,11 +1009,21 @@ const PodcastStudioPage = ({ onNavigate }) => {
             if (result?.url) {
                 window.location.href = result.url;
             } else {
-                setStatus('Checkout session could not be created. Please try again.');
+                const redirected = redirectToPaymentLink(normalizedKey, billingCycle, setStatus);
+                if (!redirected) {
+                    setStatus('Checkout session could not be created. Please try again.');
+                }
             }
         } catch (error) {
             console.error('Checkout error:', error);
-            setStatus(`Unable to start checkout: ${error?.message || 'Unknown error'}`);
+            const normalizedKey = planKey
+                .replace(/([A-Z])/g, '_$1')
+                .toLowerCase()
+                .replace(/^_/, '');
+            const redirected = redirectToPaymentLink(normalizedKey, billingCycle, setStatus);
+            if (!redirected) {
+                setStatus(`Unable to start checkout: ${error?.message || 'Unknown error'}`);
+            }
         }
     };
 
