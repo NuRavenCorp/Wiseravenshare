@@ -15,13 +15,19 @@ const PLATFORMS = [
     { id: 'rss', label: 'Custom RSS', icon: '📡', color: '#f97316' },
     { id: 'reddit', label: 'Reddit', icon: '🤖', color: '#f97316' }
 ];
-const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok', 'reddit'];
+const OAUTH_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'tiktok'];
 const OAUTH_EXTRA_STEP_HINTS = {
     facebook: '1) Click Connect. 2) Log in to Facebook. 3) Allow access. 4) Save Page ID only if asked.',
     instagram: '1) Click Connect. 2) Log in with Meta/Facebook. 3) Pick your Instagram Business/Creator account. 4) Allow access.',
     youtube: '1) Click Connect. 2) Pick your Google account. 3) Allow access. 4) Save channel details only if asked.',
-    tiktok: '1) Click Connect. 2) Log in to TikTok. 3) Allow access.',
-    reddit: '1) Click Connect. 2) Log in to Reddit. 3) Allow access.'
+    tiktok: '1) Click Connect. 2) Log in to TikTok. 3) Allow access.'
+};
+
+const parseAdminEmails = () => {
+    return String(import.meta.env.VITE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
 };
 
 const CURATED_TEMPLATES = [
@@ -316,6 +322,12 @@ const getConnectedPlatforms = (snapshot, oauthStatuses = {}) => {
 };
 
 const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' }) => {
+    const adminEmails = useMemo(() => parseAdminEmails(), []);
+    const isAdminUser = useMemo(() => {
+        const email = String(user?.email || '').trim().toLowerCase();
+        return email.length > 0 && adminEmails.has(email);
+    }, [adminEmails, user?.email]);
+
     const [snapshot, setSnapshot] = useState(() => getSnapshot(user));
     const [feedItems, setFeedItems] = useState([]);
     const [isLoadingFeed, setIsLoadingFeed] = useState(false);
@@ -804,6 +816,12 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const handleSaveHandles = async (e) => {
         e?.preventDefault();
 
+        if (!isAdminUser) {
+            setConnectionNotice('Advanced connection fields are reserved for administrators.');
+            setShowHandleConfig(false);
+            return;
+        }
+
         const buildProfileUrl = (platform, username) => {
             if (!username) return '';
             switch (platform) {
@@ -1278,22 +1296,24 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                        type="button"
-                        onClick={() => setShowCustomRssFeeds(!showCustomRssFeeds)}
-                        style={{
-                            border: '1px solid rgba(249, 115, 22, 0.45)',
-                            background: 'rgba(249, 115, 22, 0.1)',
-                            color: '#fdba74',
-                            borderRadius: '8px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        📡 Custom RSS Feeds ({customRssFeeds.length})
-                    </button>
+                    {isAdminUser && (
+                        <button
+                            type="button"
+                            onClick={() => setShowCustomRssFeeds(!showCustomRssFeeds)}
+                            style={{
+                                border: '1px solid rgba(249, 115, 22, 0.45)',
+                                background: 'rgba(249, 115, 22, 0.1)',
+                                color: '#fdba74',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            📡 Custom RSS Feeds ({customRssFeeds.length})
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => setShowTikTokDemo(!showTikTokDemo)}
@@ -1325,26 +1345,28 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     >
                         ⚙️ Connect Accounts
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => setShowDeveloperApis(!showDeveloperApis)}
-                        style={{
-                            border: '1px solid rgba(148, 163, 184, 0.45)',
-                            background: 'rgba(148, 163, 184, 0.08)',
-                            color: '#cbd5e1',
-                            borderRadius: '8px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        📘 Developer APIs
-                    </button>
+                    {isAdminUser && (
+                        <button
+                            type="button"
+                            onClick={() => setShowDeveloperApis(!showDeveloperApis)}
+                            style={{
+                                border: '1px solid rgba(148, 163, 184, 0.45)',
+                                background: 'rgba(148, 163, 184, 0.08)',
+                                color: '#cbd5e1',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            📘 Developer APIs
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {showCustomRssFeeds && (
+            {isAdminUser && showCustomRssFeeds && (
                 <form
                     onSubmit={handleAddCustomFeed}
                     style={{
@@ -1403,7 +1425,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 </form>
             )}
 
-            {showDeveloperApis && (
+            {isAdminUser && showDeveloperApis && (
                 <div
                     style={{
                         marginBottom: '16px',
@@ -1512,6 +1534,11 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                     <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
                         Super simple: click <strong>Connect</strong>, log in, click <strong>Allow</strong>, then come back and click <strong>Refresh Status</strong>.
                     </div>
+                    {!isAdminUser && (
+                        <div style={{ fontSize: '12px', color: '#bae6fd' }}>
+                            Advanced feed fields are hidden for non-admin accounts.
+                        </div>
+                    )}
 
                     <div style={{ border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '10px', padding: '12px', background: 'rgba(56, 189, 248, 0.06)', display: 'grid', gap: '10px' }}>
                         <div style={{ fontWeight: 700, fontSize: '12px', color: '#7dd3fc' }}>OAuth Connection Hub</div>
@@ -1554,7 +1581,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                                                 </button>
                                             )}
                                         </div>
-                                        {(platformId === 'facebook' || platformId === 'instagram' || platformId === 'youtube') && (
+                                        {isAdminUser && (platformId === 'facebook' || platformId === 'instagram' || platformId === 'youtube') && (
                                             <div style={{ marginTop: '4px', borderTop: '1px dashed rgba(148, 163, 184, 0.28)', paddingTop: '8px', display: 'grid', gap: '6px' }}>
                                                 {platformId === 'facebook' && (
                                                     <>
@@ -1625,7 +1652,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             })}
                         </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    {isAdminUser && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                         <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
                             <span style={{ fontWeight: 700, color: '#93c5fd' }}>📘 Facebook</span>
                             <span style={{ color: 'var(--light-color)', fontSize: '11px' }}>Your Page username or numeric Page ID (e.g. <em>MyBrandPage</em> or <em>109283749283</em>). Found in Page Settings → Page Info.</span>
@@ -1722,7 +1750,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                             />
                         </label>
 
-                    </div>
+                        </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                         <button
@@ -1732,12 +1761,14 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         >
                             Cancel
                         </button>
-                        <button
-                            type="submit"
-                            style={{ border: 'none', background: '#38bdf8', color: '#000', borderRadius: '6px', padding: '6px 16px', fontWeight: 700, cursor: 'pointer' }}
-                        >
-                            Save Handles
-                        </button>
+                        {isAdminUser && (
+                            <button
+                                type="submit"
+                                style={{ border: 'none', background: '#38bdf8', color: '#000', borderRadius: '6px', padding: '6px 16px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Save Handles
+                            </button>
+                        )}
                     </div>
                 </form>
             )}

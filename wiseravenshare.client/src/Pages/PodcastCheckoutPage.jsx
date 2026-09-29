@@ -3,16 +3,16 @@ import './PodcastCheckoutPage.css';
 
 const PLAN_PAYMENT_LINKS = {
   growth_suite: {
-    monthly: 'https://buy.stripe.com/test_4gM4gAc2KbXjcsgcds5ZC01',
-    annual: 'https://buy.stripe.com/test_aFadRaaYG1iF0Jyb9o5ZC02'
+    monthly: 'https://buy.stripe.com/test_aFa8wQc2K6CZ1NC1yO5ZC07',
+    annual: 'https://buy.stripe.com/test_dRmfZic2K0eB4ZOfpE5ZC08'
   },
   studio_plus: {
-    monthly: 'https://buy.stripe.com/test_aFa9AU4Aid1ndwk91g5ZC03',
-    annual: 'https://buy.stripe.com/test_9B64gA9UC4uRak86T85ZC04'
+    monthly: 'https://buy.stripe.com/test_6oU4gAfeW5yVdwkelA5ZC09',
+    annual: 'https://buy.stripe.com/test_28EcN6c2K8L7gIw2CS5ZC0a'
   },
   podcast_pro: {
-    monthly: 'https://buy.stripe.com/test_bJe7sM6IqgdzeAocds5ZC05',
-    annual: 'https://buy.stripe.com/test_8x24gAgj0bXj1NC5P45ZC06'
+    monthly: 'https://buy.stripe.com/test_bJebJ2eaS8L7fEs0uK5ZC0b',
+    annual: 'https://buy.stripe.com/test_3cIbJ2d6Of9veAo2CS5ZC0c'
   }
 };
 
