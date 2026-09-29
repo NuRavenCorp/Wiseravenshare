@@ -292,7 +292,7 @@ const normalizeFeedConnections = (feeds = {}) => {
     };
 };
 
-const getConnectedPlatforms = (snapshot) => {
+const getConnectedPlatforms = (snapshot, oauthStatuses = {}) => {
     const source = snapshot || {};
     return PLATFORMS
         .filter((platform) => platform.id !== 'all' && platform.id !== 'rss')
@@ -301,7 +301,17 @@ const getConnectedPlatforms = (snapshot) => {
                 ? 'tikTok'
                 : platform.id;
             const connection = source[key] || {};
-            return Boolean(connection.enabled || connection.username || connection.profileUrl || connection.feedUrl || connection.resolvedUrl);
+            const oauthStatus = oauthStatuses[platform.id] || {};
+            return Boolean(
+                connection.enabled ||
+                connection.username ||
+                connection.profileUrl ||
+                connection.feedUrl ||
+                connection.resolvedUrl ||
+                oauthStatus.connected ||
+                oauthStatus.isConnected ||
+                oauthStatus.active
+            );
         });
 };
 
@@ -607,6 +617,51 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         loadOAuthStatuses();
         return () => {
             cancelled = true;
+        };
+    }, [showHandleConfig, user?.id]);
+
+    useEffect(() => {
+        if (!showHandleConfig) {
+            return undefined;
+        }
+
+        let cancelled = false;
+        const userId = String(user?.id || '').trim();
+        if (!userId) {
+            return undefined;
+        }
+
+        const refreshAllStatuses = async () => {
+            const results = await Promise.all(
+                OAUTH_PLATFORM_IDS.map(async (platform) => {
+                    try {
+                        const response = await apiService.getSocialConnectStatus(platform, userId);
+                        return [platform, response?.data || { connected: false, details: {} }];
+                    } catch {
+                        return [platform, { connected: false, details: {}, error: true }];
+                    }
+                })
+            );
+
+            if (!cancelled) {
+                setOauthStatuses(Object.fromEntries(results));
+            }
+        };
+
+        const intervalId = window.setInterval(() => {
+            refreshAllStatuses().catch(() => undefined);
+        }, 5000);
+        const onFocus = () => {
+            refreshAllStatuses().catch(() => undefined);
+        };
+
+        window.addEventListener('focus', onFocus);
+        refreshAllStatuses().catch(() => undefined);
+
+        return () => {
+            cancelled = true;
+            clearInterval(intervalId);
+            window.removeEventListener('focus', onFocus);
         };
     }, [showHandleConfig, user?.id]);
 
@@ -1009,66 +1064,86 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         setCustomRssFeeds((prev) => prev.filter((feed) => feed.id !== feedId));
     };
 
+    const effectiveSnapshot = useMemo(() => {
+        const merged = { ...snapshot };
+        for (const platformId of OAUTH_PLATFORM_IDS) {
+            const key = platformId === 'tiktok' ? 'tikTok' : platformId;
+            const source = snapshot[key] || {};
+            const oauthStatus = oauthStatuses[platformId] || {};
+            if (!source.enabled && (oauthStatus.connected || oauthStatus.isConnected || oauthStatus.active)) {
+                merged[key] = {
+                    ...source,
+                    enabled: true,
+                    username: source.username || oauthStatus.username || oauthStatus.details?.username || '',
+                    profileUrl: source.profileUrl || oauthStatus.details?.profileUrl || oauthStatus.details?.profile_url || '',
+                    feedUrl: source.feedUrl || oauthStatus.details?.feedUrl || oauthStatus.details?.feed_url || '',
+                    designation: source.designation || oauthStatus.details?.designation || ''
+                };
+            }
+        }
+        return merged;
+    }, [snapshot, oauthStatuses]);
+
     const timelineItems = useMemo(() => {
         const items = [];
 
-        if (snapshot.facebook.enabled || snapshot.facebook.resolvedUrl) {
+        if (effectiveSnapshot.facebook.enabled || effectiveSnapshot.facebook.resolvedUrl) {
             items.push({
                 id: 'facebook',
                 platform: 'Facebook',
                 icon: '📘',
                 color: '#93c5fd',
-                username: snapshot.facebook.username,
-                designation: snapshot.facebook.designation,
-                url: snapshot.facebook.resolvedUrl
+                username: effectiveSnapshot.facebook.username,
+                designation: effectiveSnapshot.facebook.designation,
+                url: effectiveSnapshot.facebook.resolvedUrl
             });
         }
 
-        if (snapshot.tikTok.enabled || snapshot.tikTok.resolvedUrl) {
+        if (effectiveSnapshot.tikTok.enabled || effectiveSnapshot.tikTok.resolvedUrl) {
             items.push({
                 id: 'tiktok',
                 platform: 'TikTok',
                 icon: '🎵',
                 color: '#67e8f9',
-                username: snapshot.tikTok.username,
-                designation: snapshot.tikTok.designation,
-                url: snapshot.tikTok.resolvedUrl
+                username: effectiveSnapshot.tikTok.username,
+                designation: effectiveSnapshot.tikTok.designation,
+                url: effectiveSnapshot.tikTok.resolvedUrl
             });
         }
 
-        if (snapshot.instagram.enabled || snapshot.instagram.resolvedUrl) {
+        if (effectiveSnapshot.instagram.enabled || effectiveSnapshot.instagram.resolvedUrl) {
             items.push({
                 id: 'instagram',
                 platform: 'Instagram',
                 icon: '📸',
                 color: '#f9a8d4',
-                username: snapshot.instagram.username,
-                designation: snapshot.instagram.designation,
-                url: snapshot.instagram.resolvedUrl
+                username: effectiveSnapshot.instagram.username,
+                designation: effectiveSnapshot.instagram.designation,
+                url: effectiveSnapshot.instagram.resolvedUrl
             });
         }
 
-        if (snapshot.youtube?.enabled || snapshot.youtube?.resolvedUrl) {
+        if (effectiveSnapshot.youtube?.enabled || effectiveSnapshot.youtube?.resolvedUrl) {
             items.push({
                 id: 'youtube',
                 platform: 'YouTube',
                 icon: '▶️',
                 color: '#f87171',
-                username: snapshot.youtube?.username,
-                designation: snapshot.youtube?.designation,
-                url: snapshot.youtube?.resolvedUrl
+                username: effectiveSnapshot.youtube?.username,
+                designation: effectiveSnapshot.youtube?.designation,
+                url: effectiveSnapshot.youtube?.resolvedUrl
             });
         }
 
-        if (snapshot.reddit?.enabled || snapshot.reddit?.resolvedUrl) {
+        if (effectiveSnapshot.reddit?.enabled || effectiveSnapshot.reddit?.resolvedUrl) {
             items.push({
                 id: 'reddit',
                 platform: 'Reddit',
                 icon: '🤖',
                 color: '#fb923c',
-                username: snapshot.reddit?.username,
-                designation: snapshot.reddit?.designation,
-                url: snapshot.reddit?.resolvedUrl
+                username: effectiveSnapshot.reddit?.username,
+                designation: effectiveSnapshot.reddit?.designation,
+                url: effectiveSnapshot.reddit?.resolvedUrl
             });
         }
 
@@ -1091,7 +1166,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             return items.filter((item) => String(item.id || '').startsWith('rss-'));
         }
         return items.filter((item) => item.id === activePlatform);
-    }, [snapshot, activePlatform, customRssFeeds]);
+    }, [effectiveSnapshot, activePlatform, customRssFeeds]);
 
     const filteredFeedItems = useMemo(() => {
         const query = feedSearch.trim().toLowerCase();
@@ -1122,7 +1197,7 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     }, [feedItems, activePlatform, feedSearch, hideDuplicates, hideProfanity]);
 
     const activeMeta = PLATFORMS.find((p) => p.id === activePlatform) || PLATFORMS[0];
-    const connectedPlatforms = getConnectedPlatforms(snapshot);
+    const connectedPlatforms = getConnectedPlatforms(effectiveSnapshot, oauthStatuses);
     const connectablePlatformCount = PLATFORMS.filter((platform) => platform.id !== 'all' && platform.id !== 'rss').length;
     const previewItemsByPlatform = useMemo(() => {
         const grouped = {};
