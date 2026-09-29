@@ -1934,7 +1934,12 @@ builder.Services.AddHttpClient("KaraokeService", client =>
 {
     client.BaseAddress = new Uri(
         builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
-    client.Timeout = TimeSpan.FromMinutes(10); // stem separation is slow on CPU
+    // Stem separation takes 1-3 min when the service IS running.
+    // Set a short connect timeout via a handler instead; the operation timeout stays long.
+    client.Timeout = TimeSpan.FromMinutes(10);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(5), // fail fast if service is not running
 });
 builder.Services.AddHttpClient("KaraokeSpeechService", client =>
 {

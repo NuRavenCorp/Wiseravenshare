@@ -136,6 +136,12 @@ export default function KaraokePage() {
                 headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
             });
 
+            if (res.status === 503 || res.status === 404) {
+                setBackingStatus("error");
+                setBackingMessage("Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.");
+                return;
+            }
+
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.message || `Error ${res.status}`);

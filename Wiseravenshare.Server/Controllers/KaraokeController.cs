@@ -74,10 +74,10 @@ public sealed class KaraokeController : ControllerBase
         {
             upstreamResponse = await client.PostAsync("/generate-backing", multipart, cancellationToken);
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is OperationCanceledException)
         {
-            _logger.LogError(ex, "Karaoke engine is unreachable.");
-            return StatusCode(503, new { message = "Karaoke service is unavailable. Please try again later." });
+            _logger.LogWarning(ex, "Karaoke engine is unreachable or timed out.");
+            return StatusCode(503, new { message = "Vocal separation service is unavailable. The karaoke engine runs as a separate service and is not active in this environment." });
         }
 
         if (!upstreamResponse.IsSuccessStatusCode)
