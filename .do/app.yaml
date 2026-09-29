@@ -272,6 +272,27 @@ services:
       - key: ReminderNotifications__Email__Password
         value: ${REMINDER_EMAIL_PASSWORD}
         type: SECRET
+      - key: InviteEmail__FromName
+        value: ${REMINDER_EMAIL_FROM_NAME}
+        type: SECRET
+      - key: InviteEmail__FromAddress
+        value: ${REMINDER_EMAIL_FROM_ADDRESS}
+        type: SECRET
+      - key: InviteEmail__SmtpHost
+        value: ${REMINDER_EMAIL_SMTP_HOST}
+        type: SECRET
+      - key: InviteEmail__SmtpPort
+        value: ${REMINDER_EMAIL_SMTP_PORT}
+        type: SECRET
+      - key: InviteEmail__EnableSsl
+        value: ${REMINDER_EMAIL_ENABLE_SSL}
+        type: SECRET
+      - key: InviteEmail__Username
+        value: ${REMINDER_EMAIL_USERNAME}
+        type: SECRET
+      - key: InviteEmail__Password
+        value: ${REMINDER_EMAIL_PASSWORD}
+        type: SECRET
       - key: ReminderNotifications__Sms__TwilioAccountSid
         value: ${TWILIO_ACCOUNT_SID}
         type: SECRET
@@ -309,6 +330,17 @@ services:
         type: SECRET
       - key: Communique__Conversations__ServiceSid
         value: ${TWILIO_CONVERSATIONS_SERVICE_SID}
+        type: SECRET
+      # ── Audio processing microservice ──────────────────────────────────────
+      # Set AudioService__BaseUrl to the internal URL of your Python audio-processor
+      # service (e.g. a DO App Platform worker). Falls back to localhost:8001.
+      - key: AudioService__BaseUrl
+        value: ${AUDIO_SERVICE_BASE_URL}
+        type: SECRET
+      # ── Karaoke engine microservice ─────────────────────────────────────────
+      # Set KaraokeService__BaseUrl to the internal URL of your Python karaoke-engine.
+      - key: KaraokeService__BaseUrl
+        value: ${KARAOKE_SERVICE_BASE_URL}
         type: SECRET
 
 # ── Frontend static site ──────────────────────────────────────────────────────
