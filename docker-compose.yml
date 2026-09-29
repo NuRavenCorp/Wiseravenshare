@@ -195,8 +195,8 @@ services:
       ASPNETCORE_URLS: http://0.0.0.0:10000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:10000,http://localhost:3000}
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
-      JWT_highentropykey: ${JWT_highentropykey:-}
-      Authentication__Jwt__Key: ${Authentication__Jwt__Key:-}
+      JWT_highentropykey: ${JWT_highentropykey:-WRS_Development_JWT_Secret_2026_Change_Me_1234567890}
+      Authentication__Jwt__Key: ${Authentication__Jwt__Key:-WRS_Development_JWT_Secret_2026_Change_Me_1234567890}
       # Database
       ConnectionStrings__DefaultConnection: ${EXTERNAL_POSTGRES_CONNECTION:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare-db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-CHANGE_ME};SSL Mode=Disable;Trust Server Certificate=true}
       # Ollama AI

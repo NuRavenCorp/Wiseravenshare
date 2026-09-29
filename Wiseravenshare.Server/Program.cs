@@ -1935,6 +1935,12 @@ builder.Services.AddHttpClient("KaraokeService", client =>
         builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
     client.Timeout = TimeSpan.FromMinutes(10); // stem separation is slow on CPU
 });
+builder.Services.AddHttpClient("KaraokeSpeechService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeSpeechService:BaseUrl"] ?? "http://localhost:8003");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
@@ -2303,6 +2309,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseForwardedHeaders();
+app.UseWebSockets();
 app.UseHttpsRedirection();
 if (!app.Environment.IsDevelopment())
 {
@@ -2375,15 +2382,36 @@ app.UseMiddleware<UploadMalwareScanMiddleware>();
 app.UseResponseCompression();
 app.UseOutputCache();
 
-var frontendDistPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+var configuredWebRoot = app.Environment.WebRootPath;
+var frontendDistPath = !string.IsNullOrWhiteSpace(configuredWebRoot)
+    ? Path.GetFullPath(configuredWebRoot)
+    : Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+
+if (!Directory.Exists(frontendDistPath))
+{
+    var repoDistPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+    if (Directory.Exists(repoDistPath))
+    {
+        frontendDistPath = repoDistPath;
+    }
+}
+
 var frontendDistExists = Directory.Exists(frontendDistPath);
+var frontendIndexFile = frontendDistExists
+    ? Directory.EnumerateFiles(frontendDistPath, "*", SearchOption.TopDirectoryOnly)
+        .Select(Path.GetFileName)
+        .FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.OrdinalIgnoreCase)) ?? "index.html"
+    : "index.html";
 
 if (frontendDistExists)
 {
     app.UseDefaultFiles(new DefaultFilesOptions
     {
         FileProvider = new PhysicalFileProvider(frontendDistPath),
-        DefaultFileNames = new[] { "index.html" }
+        DefaultFileNames = new[] { frontendIndexFile, "index.html", "Index.html" }
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()
     });
 
     app.UseStaticFiles(new StaticFileOptions
@@ -2415,7 +2443,7 @@ app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
 
 if (frontendDistExists)
 {
-    app.MapFallbackToFile("index.html", new StaticFileOptions
+    app.MapFallbackToFile(frontendIndexFile, new StaticFileOptions
     {
         FileProvider = new PhysicalFileProvider(frontendDistPath)
     });

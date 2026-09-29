@@ -1,0 +1,8 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+numpy>=1.26.0
+pyttsx3>=2.90
+pydantic>=2.0.0
+# sherpa-onnx: install from pre-built wheels for your platform
+# https://github.com/k2-fsa/sherpa-onnx/releases
+# pip install sherpa-onnx
