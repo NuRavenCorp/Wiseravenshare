@@ -10,6 +10,7 @@ services:
       CLIENT_ORIGIN: http://localhost:10000,http://localhost:3000,https://localhost:50513
       AudioService__BaseUrl: http://audio-processor:8001
       KaraokeService__BaseUrl: http://karaoke-engine:8002
+      KaraokeSpeechService__BaseUrl: http://karaoke-speech:8003
     ports:
       - "10000:10000"
 
@@ -48,3 +49,14 @@ services:
   karaoke-engine:
     ports:
       - "8002:8002"
+
+  karaoke-speech:
+    environment:
+      SHERPA_MODEL_DIR: /app/models
+      SHERPA_MODEL_URL: ${SHERPA_MODEL_URL:-}
+      SHERPA_TOKENS_PATH: ${SHERPA_TOKENS_PATH:-}
+      SHERPA_ENCODER_PATH: ${SHERPA_ENCODER_PATH:-}
+      SHERPA_DECODER_PATH: ${SHERPA_DECODER_PATH:-}
+      SHERPA_JOINER_PATH: ${SHERPA_JOINER_PATH:-}
+    ports:
+      - "8003:8003"

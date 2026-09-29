@@ -21,7 +21,7 @@ import { useKaraokeTTS } from '../../hooks/useKaraokeTTS';
 
 const HIGHLIGHT_LOOKAHEAD_MS = 50; // start highlighting slightly early for feel
 
-export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc, songTitle = 'this song', onClose }) {
+export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc, songTitle = 'this song', onClose, authToken = null }) {
     const refWords   = lyrics.trim().split(/\s+/).filter(Boolean);
     const timings    = wordTimings; // [{word, start, end}]
 
@@ -35,7 +35,7 @@ export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc,
     const [transcript,   setLocalTranscript] = useState('');
 
     const stt = useKaraokeSTT();
-    const tts = useKaraokeTTS();
+    const tts = useKaraokeTTS(authToken);
 
     // ── Lyric highlight loop via requestAnimationFrame ─────────────────
     const highlightLoop = useCallback(() => {
@@ -88,7 +88,10 @@ export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc,
         try {
             const res = await fetch('/api/karaoke/speech/score', {
                 method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
                 body:    JSON.stringify({ reference: lyrics, hypothesis, song_title: songTitle }),
             });
             if (res.ok) {
@@ -100,7 +103,7 @@ export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc,
         } catch (err) {
             console.warn('Scoring failed:', err);
         }
-    }, [lyrics, songTitle, stt, tts]);
+    }, [lyrics, songTitle, stt, tts, authToken]);
 
     // Keep local transcript updated from STT hook
     useEffect(() => {
