@@ -557,6 +557,11 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "User id is required to connect a social account." });
         }
 
+        if (!CanManageSocialConnectionForUser(requestedUserId))
+        {
+            return Forbid();
+        }
+
         var normalizedReturnUrl = ResolveOAuthReturnUrl(returnUrl);
         var providerConfig = ReadOAuthProviderConfig(normalizedPlatform);
         if (!providerConfig.IsEnabled)
@@ -608,6 +613,11 @@ public class AuthController : ControllerBase
             return Ok(new { connected = false, details = new { }, message = "User not found for social status check." });
         }
 
+        if (!CanManageSocialConnectionForUser(requestedUserId))
+        {
+            return Forbid();
+        }
+
         var connection = GetSocialConnection(user, normalizedPlatform);
         if (connection is null)
         {
@@ -620,6 +630,7 @@ public class AuthController : ControllerBase
             connected,
             details = new
             {
+                site = string.IsNullOrWhiteSpace(connection.Site) ? normalizedPlatform : connection.Site,
                 username = connection.Username,
                 profileUrl = connection.ProfileUrl,
                 feedUrl = connection.FeedUrl,
@@ -647,6 +658,16 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(requestedUserId))
         {
             return BadRequest(new { message = "User id is required to save social connection details." });
+        }
+
+        if (!CanManageSocialConnectionForUser(requestedUserId))
+        {
+            return Forbid();
+        }
+
+        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
+        {
+            return Forbid();
         }
 
         if (!_userStore.TryGetById(requestedUserId, out var user) || user is null)
@@ -684,9 +705,15 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "User id is required to disconnect social account." });
         }
 
+        if (!CanManageSocialConnectionForUser(requestedUserId))
+        {
+            return Forbid();
+        }
+
         var cleared = new SocialFeedConnection
         {
             Enabled = false,
+            Site = string.Empty,
             Username = string.Empty,
             ProfileUrl = string.Empty,
             FeedUrl = string.Empty,
@@ -702,6 +729,9 @@ public class AuthController : ControllerBase
             "instagram" => new UpdateSocialFeedsRequest { Instagram = cleared },
             "tiktok" => new UpdateSocialFeedsRequest { TikTok = cleared },
             "youtube" => new UpdateSocialFeedsRequest { YouTube = cleared },
+            "twitter" => new UpdateSocialFeedsRequest { Twitter = cleared },
+            "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = cleared },
+            "bluesky" => new UpdateSocialFeedsRequest { Bluesky = cleared },
             _ => null
         };
 
@@ -2929,6 +2959,7 @@ public class AuthController : ControllerBase
             "youtube" => new UpdateSocialFeedsRequest { YouTube = connection },
             "twitter" => new UpdateSocialFeedsRequest { Twitter = connection },
             "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = connection },
+            "bluesky" => new UpdateSocialFeedsRequest { Bluesky = connection },
             _ => null
         };
     }
@@ -2956,6 +2987,7 @@ public class AuthController : ControllerBase
         return new SocialFeedConnection
         {
             Enabled = true,
+            Site = provider,
             Username = identifier,
             ProfileUrl = profileUrl,
             FeedUrl = profileUrl,
@@ -2980,6 +3012,27 @@ public class AuthController : ControllerBase
             ?? string.Empty;
     }
 
+    private bool CanManageSocialConnectionForUser(string requestedUserId)
+    {
+        var normalizedRequested = (requestedUserId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedRequested))
+        {
+            return false;
+        }
+
+        var actorUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("user_id")
+            ?? string.Empty;
+
+        if (string.Equals(actorUserId, normalizedRequested, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return TryGetCurrentActorEmail(out var actorEmail) && IsConfiguredAdminUser(actorEmail);
+    }
+
     private static SocialFeedConnection? GetSocialConnection(UserRecord user, string platform)
     {
         var feeds = user.SocialFeeds ?? new SocialFeedSettings();
@@ -2989,6 +3042,9 @@ public class AuthController : ControllerBase
             "instagram" => feeds.Instagram,
             "tiktok" => feeds.TikTok,
             "youtube" => feeds.YouTube,
+            "twitter" => feeds.Twitter,
+            "linkedin" => feeds.LinkedIn,
+            "bluesky" => feeds.Bluesky,
             _ => null
         };
     }
@@ -3001,6 +3057,7 @@ public class AuthController : ControllerBase
         var next = new SocialFeedConnection
         {
             Enabled = true,
+            Site = platform,
             Username = existing.Username,
             ProfileUrl = existing.ProfileUrl,
             FeedUrl = existing.FeedUrl,

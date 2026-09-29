@@ -55,11 +55,7 @@ public static class AuthAccessPolicy
         var adminScalarValues = (adminSection.Value ?? string.Empty)
             .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var configuredAuthUsers = configuration.GetSection("Authentication:Users").GetChildren()
-            .Select(section => section["Email"] ?? section.Value)
-            .Where(value => !string.IsNullOrWhiteSpace(value));
-
-        return GetConfiguredAdminEmails(adminArray.Concat(adminScalarValues), configuredAuthUsers);
+        return GetConfiguredAdminEmails(adminArray.Concat(adminScalarValues), Array.Empty<string>());
     }
 
     public static bool IsConfiguredAdminEmail(IConfiguration configuration, string? email)

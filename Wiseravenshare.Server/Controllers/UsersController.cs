@@ -15,10 +15,12 @@ public sealed class UsersController : ControllerBase
     private readonly UserStore _userStore;
     private readonly GrowthService _growthService;
     private readonly IWiseCoinService _wiseCoinService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<UsersController> _logger;
 
-    public UsersController(UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger)
+    public UsersController(IConfiguration configuration, UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger)
     {
+        _configuration = configuration;
         _userStore = userStore;
         _growthService = growthService;
         _wiseCoinService = wiseCoinService;
@@ -124,6 +126,11 @@ public sealed class UsersController : ControllerBase
             return Forbid();
         }
 
+        if (!IsConfiguredAdminRequest())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Manual social profile linking is restricted to administrators." });
+        }
+
         try
         {
             var user = _userStore.UpdateSocialFeeds(id, request);
@@ -145,6 +152,14 @@ public sealed class UsersController : ControllerBase
     {
         var subjectId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
         return string.Equals(subjectId, id, StringComparison.Ordinal);
+    }
+
+    private bool IsConfiguredAdminRequest()
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? string.Empty;
+        return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
     }
 
     private async Task TryAwardProfileCompletionBadgeAsync(UserRecord user)

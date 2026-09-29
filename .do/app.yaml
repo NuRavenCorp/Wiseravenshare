@@ -27,7 +27,7 @@ services:
       - key: CLIENT_ORIGIN
         value: ${web.PUBLIC_URL}
       - key: Admin__Emails
-        value: admin@wise-ravens.com
+        value: admin@wiseravenshare.com,gaius@wiseravenshare.com,arnoldspence@wiseravenshare.com
       - key: Authentication__AllowSelfRegistration
         value: "true"
       - key: Authentication__Users__0__Name
@@ -370,7 +370,7 @@ static_sites:
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID
         value: prod_VC3zXy445DbV0w
       - key: VITE_ADMIN_EMAILS
-        value: admin@wise-ravens.com
+        value: admin@wiseravenshare.com,gaius@wiseravenshare.com,arnoldspence@wiseravenshare.com
       # Podcast Pro Stripe price IDs — replace with real price_XXXX from Stripe Dashboard
       - key: VITE_STRIPE_GROWTH_SUITE_MONTHLY_ID
         value: ${STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID}

@@ -712,13 +712,21 @@ public sealed class UserStore
                 : connection.Designation.Trim().ToLowerInvariant())
             : string.Empty;
 
+        var site = string.IsNullOrWhiteSpace(connection.Site)
+            ? normalizedPlatform
+            : NormalizePlatform(connection.Site);
+
         return new SocialFeedConnection
         {
             Enabled = connection.Enabled || hasConnectionData,
+            Site = site,
             Username = username,
             ProfileUrl = profileUrl,
             FeedUrl = feedUrl,
-            Designation = designation
+            Designation = designation,
+            AccessToken = connection.AccessToken ?? string.Empty,
+            RefreshToken = connection.RefreshToken ?? string.Empty,
+            TokenExpiresAt = connection.TokenExpiresAt
         };
     }
 

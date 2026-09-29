@@ -152,4 +152,51 @@ public class UserAvatarPersistenceTests
             }
         }
     }
+
+    [Fact]
+    public void UpdateSocialFeeds_PersistsPlatformSiteAndTokens()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "wrs-social-site-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DATABASE_URL"] = "postgresql://invalid.example.com:5432/wiseravenshare",
+                    ["Persistence:RequireDatabase"] = "true"
+                })
+                .Build();
+
+            var store = new UserStore(new TestWebHostEnvironment { ContentRootPath = tempRoot, EnvironmentName = Environments.Production }, config);
+            var user = store.CreateUser("Alice Raven", "alice@example.com", "P@ssword123", string.Empty, string.Empty, string.Empty, string.Empty);
+
+            var updated = store.UpdateSocialFeeds(user.Id, new UpdateSocialFeedsRequest
+            {
+                TikTok = new SocialFeedConnection
+                {
+                    Enabled = true,
+                    Site = "tiktok",
+                    Username = "@ravencreator",
+                    ProfileUrl = "https://www.tiktok.com/@ravencreator",
+                    FeedUrl = "https://www.tiktok.com/@ravencreator",
+                    AccessToken = "access-token",
+                    RefreshToken = "refresh-token",
+                    TokenExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+                }
+            });
+
+            Assert.Equal("tiktok", updated.SocialFeeds.TikTok.Site);
+            Assert.Equal("access-token", updated.SocialFeeds.TikTok.AccessToken);
+            Assert.Equal("refresh-token", updated.SocialFeeds.TikTok.RefreshToken);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
 }

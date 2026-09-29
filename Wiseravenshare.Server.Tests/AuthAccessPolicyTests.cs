@@ -47,7 +47,7 @@ public class AuthAccessPolicyTests
     }
 
     [Fact]
-    public void IsConfiguredAdminEmail_AllowsAuthenticationUsersFallback()
+    public void IsConfiguredAdminEmail_DoesNotUseAuthenticationUsersFallback()
     {
         var values = new Dictionary<string, string?>
         {
@@ -58,7 +58,7 @@ public class AuthAccessPolicyTests
             .AddInMemoryCollection(values)
             .Build();
 
-        Assert.True(AuthAccessPolicy.IsConfiguredAdminEmail(configuration, "admin2@wise-ravens.com"));
+        Assert.False(AuthAccessPolicy.IsConfiguredAdminEmail(configuration, "admin2@wise-ravens.com"));
     }
 
     [Fact]

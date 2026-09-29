@@ -67,6 +67,7 @@ public sealed class SocialFeedSettings
 public sealed class SocialFeedConnection
 {
     public bool Enabled { get; set; }
+    public string Site { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public string ProfileUrl { get; set; } = string.Empty;
     public string FeedUrl { get; set; } = string.Empty;
