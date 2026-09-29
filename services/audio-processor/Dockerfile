@@ -10,11 +10,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY services/audio-processor/requirements.txt ./
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-COPY main.py ./
+COPY services/audio-processor/main.py ./
 
 EXPOSE 8001
 
