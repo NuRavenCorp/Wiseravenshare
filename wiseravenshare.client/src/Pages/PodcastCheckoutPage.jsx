@@ -1,9 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import './PodcastCheckoutPage.css';
 
+const PLAN_PAYMENT_LINKS = {
+  growth_suite: {
+    monthly: 'https://buy.stripe.com/test_4gM4gAc2KbXjcsgcds5ZC01',
+    annual: 'https://buy.stripe.com/test_aFadRaaYG1iF0Jyb9o5ZC02'
+  },
+  studio_plus: {
+    monthly: 'https://buy.stripe.com/test_aFa9AU4Aid1ndwk91g5ZC03',
+    annual: 'https://buy.stripe.com/test_9B64gA9UC4uRak86T85ZC04'
+  },
+  podcast_pro: {
+    monthly: 'https://buy.stripe.com/test_bJe7sM6IqgdzeAocds5ZC05',
+    annual: 'https://buy.stripe.com/test_8x24gAgj0bXj1NC5P45ZC06'
+  }
+};
+
+const redirectToPaymentLink = (planId, cycle) => {
+  const normalizedPlan = String(planId || '').trim().toLowerCase();
+  const billingCycle = String(cycle || 'monthly').toLowerCase() === 'annual' ? 'annual' : 'monthly';
+  const link = PLAN_PAYMENT_LINKS[normalizedPlan]?.[billingCycle] || '';
+
+  if (!link) {
+    return false;
+  }
+
+  window.location.href = link;
+  return true;
+};
+
 const PodcastCheckoutPage = () => {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [selectedPlan, setSelectedPlan] = useState('growth_suite');
   const [loading, setLoading] = useState(false);
@@ -153,10 +179,16 @@ const PodcastCheckoutPage = () => {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        throw new Error('No checkout URL returned');
+        const redirected = redirectToPaymentLink(selectedPlan, billingCycle);
+        if (!redirected) {
+          throw new Error('No checkout URL returned');
+        }
       }
     } catch (err) {
-      setError(err.message || 'An error occurred. Please try again.');
+      const redirected = redirectToPaymentLink(selectedPlan, billingCycle);
+      if (!redirected) {
+        setError(err.message || 'An error occurred. Please try again.');
+      }
       console.error('Checkout error:', err);
     } finally {
       setLoading(false);

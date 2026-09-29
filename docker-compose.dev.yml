@@ -8,6 +8,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       CLIENT_ORIGIN: http://localhost:10000,http://localhost:3000,https://localhost:50513
+      AudioService__BaseUrl: http://audio-processor:8001
+      KaraokeService__BaseUrl: http://karaoke-engine:8002
     ports:
       - "10000:10000"
 
@@ -36,3 +38,13 @@ services:
 
   minio-init:
     profiles: []  # Remove from optional, make it default
+
+  # Enable audio processing by default in dev
+  audio-processor:
+    ports:
+      - "8001:8001"
+
+  # Enable karaoke backing-track generation by default in dev
+  karaoke-engine:
+    ports:
+      - "8002:8002"

@@ -3,4 +3,4 @@ uvicorn[standard]==0.32.0
 python-multipart==0.0.12
 soundfile==0.12.1
 numpy==2.1.0
-demucs-onnx==0.2.1
+demucs-onnx==0.3.4
