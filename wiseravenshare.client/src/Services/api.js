@@ -649,6 +649,7 @@ api.interceptors.request.use(
         config.baseURL = resolvedBaseUrl;
 
         const token = getAuthToken();
+        config.__authTokenAtRequest = token || '';
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
@@ -676,14 +677,25 @@ api.interceptors.response.use(
         const status = error?.response?.status;
         const requestUrl = String(error?.config?.url || '');
         const hasToken = Boolean(getAuthToken());
+        const requestToken = String(error?.config?.__authTokenAtRequest || '');
+        const currentToken = getAuthToken();
 
         // Access token expired: refresh once, then retry the original request.
         if (status === 401 && !isAuthEndpoint(requestUrl) && error?.config && !error.config.__retryAfterRefresh) {
+            if (requestToken && currentToken && requestToken !== currentToken) {
+                error.config.__retryAfterRefresh = true;
+                error.config.headers = error.config.headers || {};
+                error.config.headers.Authorization = `Bearer ${currentToken}`;
+                error.config.__authTokenAtRequest = currentToken;
+                return api.request(error.config);
+            }
+
             const newToken = await refreshAccessToken();
             if (newToken) {
                 error.config.__retryAfterRefresh = true;
                 error.config.headers = error.config.headers || {};
                 error.config.headers.Authorization = `Bearer ${newToken}`;
+                error.config.__authTokenAtRequest = newToken;
                 return api.request(error.config);
             }
         }
