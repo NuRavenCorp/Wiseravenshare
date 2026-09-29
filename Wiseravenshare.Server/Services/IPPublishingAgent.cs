@@ -477,13 +477,13 @@ Response deadline: {task.OfficeActionDeadline:g}
 /// </summary>
 public class IPPublishingAgentHostedService : BackgroundService
 {
-    private readonly IPPublishingAgent _agent;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<IPPublishingAgentHostedService> _logger;
     private readonly TimeSpan _pollingInterval = TimeSpan.FromMinutes(5);
 
-    public IPPublishingAgentHostedService(IPPublishingAgent agent, ILogger<IPPublishingAgentHostedService> logger)
+    public IPPublishingAgentHostedService(IServiceScopeFactory scopeFactory, ILogger<IPPublishingAgentHostedService> logger)
     {
-        _agent = agent;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -495,6 +495,9 @@ public class IPPublishingAgentHostedService : BackgroundService
         {
             try
             {
+                using var scope = _scopeFactory.CreateScope();
+                var agent = scope.ServiceProvider.GetRequiredService<IPPublishingAgent>();
+
                 // TODO: Query database for filings in "SubmittedToOffice" status
                 // var pendingFilings = await db.CopyrightFilings
                 //     .Where(f => f.Status == RegistrationStatus.SubmittedToOffice)
@@ -502,7 +505,7 @@ public class IPPublishingAgentHostedService : BackgroundService
 
                 // foreach (var filing in pendingFilings)
                 // {
-                //     var task = _agent.PublishCopyrightFiling(...);
+                //     var task = agent.PublishCopyrightFiling(...);
                 //     await _formBot.SubmitFormAsync(task);
                 // }
 
