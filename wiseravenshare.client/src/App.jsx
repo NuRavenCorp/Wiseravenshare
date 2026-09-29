@@ -539,6 +539,8 @@ const App = () => {
             case 'article':
                 return <ArticlePage article={selectedArticle} onBack={() => setCurrentPage(articleBackPage)} />;
             case 'profile':
+                return <SettingsPage onNavigate={setCurrentPage} />;
+            case 'settings':
                 return (
                     <ProfilePage
                         openEditMode={profileEditRequested}
@@ -546,8 +548,6 @@ const App = () => {
                         onNavigate={setCurrentPage}
                     />
                 );
-            case 'settings':
-                return <SettingsPage onNavigate={setCurrentPage} />;
             case 'growth':
                 return isAdminUser
                     ? <GrowthPage />
@@ -814,8 +814,8 @@ const App = () => {
         { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
-        { id: 'settings', label: 'Settings' },
-        { id: 'profile', label: 'Profile' }
+        { id: 'profile', label: 'Settings' },
+        { id: 'settings', label: 'Profile' }
     ];
 
     if (canAccessPlatformAggregator) {
