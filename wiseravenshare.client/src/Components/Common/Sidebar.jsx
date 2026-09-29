@@ -122,6 +122,8 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'canvas', icon: 'fas fa-palette', label: 'Canvas Studio' },
         { id: 'music-rights-studio', icon: 'fas fa-music', label: 'Music Rights' },
         { id: 'podcast-rights-studio', icon: 'fas fa-podcast', label: 'Podcast Rights' },
+        { id: 'podcast-audio-processor', icon: 'fas fa-sliders-h', label: '🎛️ Audio Processor' },
+        { id: 'karaoke', icon: 'fas fa-microphone', label: '🎤 Karaoke Party' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
         { id: 'fm-tuner', icon: 'fas fa-broadcast-tower', label: 'FM Radio' },
         { id: 'music-player', icon: 'fas fa-compact-disc', label: 'Wise-tracks' },

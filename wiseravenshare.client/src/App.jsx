@@ -44,6 +44,8 @@ import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import PodcastCheckoutPage from './Pages/PodcastCheckoutPage';
 import WiseCoinPage from './Pages/WiseCoinPage';
 import GatekeeperDashboard from './Pages/GatekeeperDashboard.jsx';
+import KaraokePage from './Pages/KaraokePage.jsx';
+import PodcastAudioProcessor from './Components/Podcast/PodcastAudioProcessor.jsx';
 import { ErrorBoundary } from './Components/Common/ErrorBoundary';
 import { queueRavensightTab } from './Services/podcastStudioBridge';
 import { EvolutionEngine } from './Components/evolution/EvolutionEngine';
@@ -618,6 +620,10 @@ const App = () => {
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'podcast-checkout':
                 return <PodcastCheckoutPage />;
+            case 'podcast-audio-processor':
+                return <PodcastAudioProcessor />;
+            case 'karaoke':
+                return <KaraokePage />;
             case 'wisecoin':
                 return <WiseCoinPage />;
             case 'privacy':

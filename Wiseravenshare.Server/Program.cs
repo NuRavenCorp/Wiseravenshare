@@ -1923,6 +1923,18 @@ builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("AudioService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["AudioService:BaseUrl"] ?? "http://localhost:8001");
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+builder.Services.AddHttpClient("KaraokeService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
+    client.Timeout = TimeSpan.FromMinutes(10); // stem separation is slow on CPU
+});
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
