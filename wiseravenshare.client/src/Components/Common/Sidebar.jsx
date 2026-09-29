@@ -132,8 +132,8 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
         { id: 'ainews', icon: 'fas fa-newspaper', label: 'AI News' },
         { id: 'ravensight', icon: 'fas fa-video', label: 'Ravensight' },
-        { id: 'settings', icon: 'fas fa-cog', label: 'Settings' },
-        { id: 'profile', icon: 'fas fa-user', label: 'Profile' }
+        { id: 'profile', icon: 'fas fa-cog', label: 'Settings' },
+        { id: 'settings', icon: 'fas fa-user', label: 'Profile' }
     ];
 
     if (isAdminUser) {
