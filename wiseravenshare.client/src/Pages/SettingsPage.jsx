@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FiExternalLink, FiLink, FiLock, FiRefreshCw, FiShield, FiTrendingUp } from 'react-icons/fi';
+import { FiExternalLink, FiLink, FiLock, FiRefreshCw, FiShare2, FiShield, FiTrendingUp } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
@@ -379,6 +379,139 @@ const SettingsPage = ({ onNavigate }) => {
                             );
                         })}
                     </div>
+                </section>
+
+                {/* ── Promote Your Profile on Social ─────────────────────────────── */}
+                <section style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '18px',
+                    background: 'var(--card-bg)',
+                    padding: '18px'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                        <FiShare2 />
+                        <h2 style={{ margin: 0, fontSize: '18px' }}>Promote Your WRS Profile</h2>
+                    </div>
+                    <p style={{ marginTop: 0, color: 'var(--light-color)', fontSize: '14px' }}>
+                        Add your WiseRavenShare profile link to your social bios so your audience can find you here.
+                    </p>
+
+                    {(() => {
+                        const profileSlug = user?.username || user?.handle || user?.id || '';
+                        const profileUrl  = profileSlug
+                            ? `https://wiseravenshare.com/profile/${profileSlug}`
+                            : 'https://wiseravenshare.com';
+
+                        const socialInstructions = [
+                            {
+                                id: 'facebook',
+                                label: 'Facebook',
+                                color: '#93c5fd',
+                                where: 'Page settings → Contact and basic info → Website field',
+                                link: 'https://www.facebook.com/wiseravenshare',
+                            },
+                            {
+                                id: 'instagram',
+                                label: 'Instagram',
+                                color: '#f9a8d4',
+                                where: 'Edit Profile (mobile app) → Links section',
+                                link: 'https://www.instagram.com/wiseravenshare',
+                            },
+                            {
+                                id: 'youtube',
+                                label: 'YouTube',
+                                color: '#f87171',
+                                where: 'YouTube Studio → Customization → Basic Info → Links',
+                                link: 'https://www.youtube.com/@wiseravenshare',
+                            },
+                            {
+                                id: 'tiktok',
+                                label: 'TikTok',
+                                color: '#67e8f9',
+                                where: 'Business Account required → Edit Profile → Website',
+                                link: 'https://www.tiktok.com/@wiseravenshare',
+                            },
+                        ];
+
+                        return (
+                            <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
+                                {/* Copyable profile URL */}
+                                <div style={{
+                                   border: '1px solid rgba(167,139,250,0.4)',
+                                   borderRadius: '12px',
+                                   padding: '14px',
+                                   background: 'rgba(167,139,250,0.06)',
+                                   display: 'flex',
+                                   alignItems: 'center',
+                                   justifyContent: 'space-between',
+                                   gap: '12px',
+                                   flexWrap: 'wrap'
+                                }}>
+                                   <div>
+                                       <div style={{ fontWeight: 700, marginBottom: '4px' }}>Your profile link</div>
+                                       <code style={{ fontSize: '13px', color: '#a78bfa' }}>{profileUrl}</code>
+                                   </div>
+                                   <button
+                                       type="button"
+                                       onClick={() => navigator.clipboard?.writeText(profileUrl)}
+                                       style={{
+                                           background: 'rgba(167,139,250,0.2)',
+                                           border: '1px solid rgba(167,139,250,0.4)',
+                                           borderRadius: '8px',
+                                           color: '#a78bfa',
+                                           padding: '8px 14px',
+                                           cursor: 'pointer',
+                                           fontWeight: 700,
+                                           fontSize: '13px',
+                                           whiteSpace: 'nowrap'
+                                       }}
+                                   >
+                                       Copy Link
+                                   </button>
+                                </div>
+
+                                {/* Per-platform instructions */}
+                                {socialInstructions.map(({ id, label, color, where, link }) => (
+                                   <div key={id} style={{
+                                       border: `1px solid ${color}44`,
+                                       borderRadius: '12px',
+                                       padding: '12px 14px',
+                                       display: 'flex',
+                                       alignItems: 'center',
+                                       justifyContent: 'space-between',
+                                       gap: '12px',
+                                       flexWrap: 'wrap'
+                                   }}>
+                                       <div>
+                                           <div style={{ fontWeight: 700, color, marginBottom: '2px' }}>{label}</div>
+                                           <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{where}</div>
+                                       </div>
+                                       <a
+                                           href={link}
+                                           target="_blank"
+                                           rel="noopener noreferrer"
+                                           style={{
+                                               display: 'inline-flex',
+                                               alignItems: 'center',
+                                               gap: '5px',
+                                               background: `${color}18`,
+                                               border: `1px solid ${color}55`,
+                                               borderRadius: '8px',
+                                               color,
+                                               padding: '7px 12px',
+                                               textDecoration: 'none',
+                                               fontSize: '12px',
+                                               fontWeight: 700,
+                                               whiteSpace: 'nowrap'
+                                           }}
+                                       >
+                                           Open {label} <FiExternalLink size={12} />
+                                       </a>
+                                   </div>
+                                ))}
+                            </div>
+                        );
+                    })()}
                 </section>
 
                 <section style={{
