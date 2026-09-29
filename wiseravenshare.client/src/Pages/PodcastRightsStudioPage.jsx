@@ -74,7 +74,8 @@ const contractBundles = [
         price: '$29',
         cadence: 'Per Guest',
         description: 'Professional guest appearance release forms and consent agreements.',
-        included: ['Standard guest release form', 'Appearance consent document', 'Recording rights confirmation', 'Credit/attribution terms']
+        included: ['Standard guest release form', 'Appearance consent document', 'Recording rights confirmation', 'Credit/attribution terms'],
+        paymentLink: 'https://buy.stripe.com/test_8x2fZid6O4uReAo91g5ZC0d'
     },
     {
         id: 'licensing-kit',
@@ -82,7 +83,8 @@ const contractBundles = [
         price: '$99',
         cadence: 'Per Season',
         description: 'Complete licensing templates for commercial distribution and syndication.',
-        included: ['Commercial licensing agreement', 'Syndication rights templates', 'Sponsorship disclosure guide', 'Episode audit trail']
+        included: ['Commercial licensing agreement', 'Syndication rights templates', 'Sponsorship disclosure guide', 'Episode audit trail'],
+        paymentLink: 'https://buy.stripe.com/test_3cIbJ2c2KaTfeAodhw5ZC0e'
     },
     {
         id: 'full-protection',
@@ -90,7 +92,8 @@ const contractBundles = [
         price: '$249',
         cadence: 'Annual',
         description: 'Everything needed to protect your show: guests, licensing, transcripts, and legal support.',
-        included: ['Unlimited guest releases', 'Full licensing suite', 'Transcript protection agreements', 'Priority Rocket Lawyer support', 'Annual rights audit']
+        included: ['Unlimited guest releases', 'Full licensing suite', 'Transcript protection agreements', 'Priority Rocket Lawyer support', 'Annual rights audit'],
+        paymentLink: 'https://buy.stripe.com/test_28E8wQ0k2gdz8c0cds5ZC0f'
     }
 ];
 
@@ -161,7 +164,7 @@ const mapSavedMediaToEpisode = (item) => {
     };
 };
 
-const MusicRightsStudioPage = ({ user, onNavigate }) => {
+const PodcastRightsStudioPage = ({ user, onNavigate }) => {
     const { getLibrary, saveMedia, updateMedia } = useSavedMedia();
     const [library, setLibrary] = useState(() => {
         try {
@@ -388,9 +391,9 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
 
     const handleStripeCheckout = (contract) => {
         setSelectedContract(contract.id);
-        const rocketLawyerUrl = 'https://www.rocketlawyer.com/podcaster-contracts';
+        const url = contract.paymentLink || 'https://www.rocketlawyer.com/podcaster-contracts';
         if (typeof window !== 'undefined') {
-            window.open(rocketLawyerUrl, '_blank', 'noopener,noreferrer');
+            window.open(url, '_blank', 'noopener,noreferrer');
         }
     };
 
@@ -700,86 +703,87 @@ const MusicRightsStudioPage = ({ user, onNavigate }) => {
                         </div>
                     )}
 
-                    {userHasContent && (
-                        <div
-                            style={{
-                                background: 'var(--card-bg)',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: '16px',
-                                padding: '18px'
-                            }}
-                        >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                                <div>
-                                    <div style={{ fontSize: '12px', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                                        Legal protection
-                                    </div>
-                                    <h3 style={{ margin: '8px 0 0', fontSize: '24px' }}>Secure guest rights & licensing</h3>
+                    {/* Legal protection — always visible */}
+                    <div
+                        style={{
+                            background: 'var(--card-bg)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '16px',
+                            padding: '18px'
+                        }}
+                    >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                            <div>
+                                <div style={{ fontSize: '12px', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                                    Legal protection
                                 </div>
-                                <a
-                                    href="https://www.rocketlawyer.com/podcaster-contracts"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                <h3 style={{ margin: '8px 0 0', fontSize: '24px' }}>Secure guest rights & licensing</h3>
+                            </div>
+                            <a
+                                href="https://www.rocketlawyer.com/podcaster-contracts"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                    fontSize: '12px',
+                                    color: '#67e8f9',
+                                    textDecoration: 'none',
+                                    fontWeight: 600,
+                                    borderBottom: '1px solid #67e8f9'
+                                }}
+                            >
+                                via Rocket Lawyer
+                            </a>
+                        </div>
+
+                        <p style={{ margin: '12px 0 16px', color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px' }}>
+                            Protect guest rights, create licensing agreements, and ensure proper credits are tracked. Powered by Rocket Lawyer templates.
+                        </p>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                            {contractBundles.map((contract) => (
+                                <div
+                                    key={contract.id}
                                     style={{
-                                        fontSize: '12px',
-                                        color: '#67e8f9',
-                                        textDecoration: 'none',
-                                        fontWeight: 600,
-                                        borderBottom: '1px solid #67e8f9'
+                                        border: selectedContract === contract.id ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                                        borderRadius: '14px',
+                                        background: selectedContract === contract.id ? 'rgba(59, 130, 246, 0.08)' : 'rgba(15, 23, 42, 0.45)',
+                                        padding: '14px'
                                     }}
                                 >
-                                    via Rocket Lawyer
-                                </a>
-                            </div>
-
-                            <p style={{ margin: '12px 0 16px', color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px' }}>
-                                Protect guest rights, create licensing agreements, and ensure proper credits are tracked. Powered by Rocket Lawyer templates.
-                            </p>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                                {contractBundles.map((contract) => (
-                                    <div
-                                        key={contract.id}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ fontWeight: 700 }}>{contract.name}</div>
+                                        <span style={{ fontSize: '11px', color: '#86efac', background: 'rgba(34, 197, 94, 0.12)', borderRadius: '999px', padding: '4px 8px' }}>{contract.cadence}</span>
+                                    </div>
+                                    <div style={{ marginTop: '12px', fontSize: '28px', fontWeight: 800 }}>{contract.price}</div>
+                                    <p style={{ margin: '10px 0', color: 'var(--light-color)', fontSize: '13px', lineHeight: 1.5 }}>{contract.description}</p>
+                                    <ul style={{ margin: '0 0 14px', paddingLeft: '18px', color: 'var(--light-color)', lineHeight: 1.8, fontSize: '12px' }}>
+                                        {contract.included.map((item) => (
+                                            <li key={item}>{item}</li>
+                                        ))}
+                                    </ul>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleStripeCheckout(contract)}
                                         style={{
-                                            border: selectedContract === contract.id ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                                            borderRadius: '14px',
-                                            background: selectedContract === contract.id ? 'rgba(59, 130, 246, 0.08)' : 'rgba(15, 23, 42, 0.45)',
-                                            padding: '14px'
+                                            width: '100%',
+                                            border: 'none',
+                                            borderRadius: '999px',
+                                            background: selectedContract === contract.id
+                                                ? 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))'
+                                                : 'rgba(59,130,246,0.15)',
+                                            color: '#fff',
+                                            fontWeight: 700,
+                                            padding: '10px 12px',
+                                            cursor: 'pointer',
+                                            fontSize: '12px'
                                         }}
                                     >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                                            <div style={{ fontWeight: 700 }}>{contract.name}</div>
-                                            <span style={{ fontSize: '11px', color: '#86efac', background: 'rgba(34, 197, 94, 0.12)', borderRadius: '999px', padding: '4px 8px' }}>{contract.cadence}</span>
-                                        </div>
-                                        <div style={{ marginTop: '12px', fontSize: '28px', fontWeight: 800 }}>{contract.price}</div>
-                                        <p style={{ margin: '10px 0', color: 'var(--light-color)', fontSize: '13px', lineHeight: 1.5 }}>{contract.description}</p>
-                                        <ul style={{ margin: '0 0 14px', paddingLeft: '18px', color: 'var(--light-color)', lineHeight: 1.8, fontSize: '12px' }}>
-                                            {contract.included.map((item) => (
-                                                <li key={item}>{item}</li>
-                                            ))}
-                                        </ul>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleStripeCheckout(contract)}
-                                            style={{
-                                                width: '100%',
-                                                border: '1px solid var(--highlight-color)',
-                                                borderRadius: '999px',
-                                                background: 'transparent',
-                                                color: 'var(--text-color)',
-                                                fontWeight: 700,
-                                                padding: '10px 12px',
-                                                cursor: 'pointer',
-                                                fontSize: '12px'
-                                            }}
-                                        >
-                                            {selectedContract === contract.id ? `View ${contractBundles.find((c) => c.id === selectedContract)?.name}` : 'Get Rocket Lawyer Template'}
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                                        {contract.id === 'licensing-kit' ? 'View Episode Licensing Kit →' : 'Get Rocket Lawyer Template →'}
+                                    </button>
+                                </div>
+                            ))}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
         </section>
@@ -800,4 +804,4 @@ const StatBox = ({ label, value }) => (
     </div>
 );
 
-export default MusicRightsStudioPage;
+export default PodcastRightsStudioPage;

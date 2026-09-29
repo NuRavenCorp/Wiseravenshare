@@ -60,3 +60,6 @@ MUSIC_SHARING_IMPLEMENTATION*
 release-artifacts/
 # local oauth credential cache for wiseravenshare.server
 .wiseravenshare/
+# DigitalOcean temp spec files with secrets
+.do.*.yaml
+.do.*.spec.yaml

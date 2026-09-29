@@ -18,6 +18,41 @@ const CONNECTION_PLATFORMS = [
     { id: 'youtube', label: 'YouTube', tone: '#f87171' }
 ];
 
+const EMPTY_LINK_DRAFTS = {
+    facebook: { username: '', profileUrl: '' },
+    tiktok: { username: '', profileUrl: '' },
+    instagram: { username: '', profileUrl: '' },
+    youtube: { username: '', profileUrl: '' }
+};
+
+const normalizeConnectionDraft = (connection) => ({
+    username: String(connection?.username || '').trim(),
+    profileUrl: String(connection?.profileUrl || connection?.feedUrl || '').trim()
+});
+
+const normalizeFeedDrafts = (feeds) => ({
+    facebook: normalizeConnectionDraft(feeds?.facebook || feeds?.Facebook),
+    tiktok: normalizeConnectionDraft(feeds?.tikTok || feeds?.tiktok || feeds?.TikTok),
+    instagram: normalizeConnectionDraft(feeds?.instagram || feeds?.Instagram),
+    youtube: normalizeConnectionDraft(feeds?.youTube || feeds?.youtube || feeds?.YouTube)
+});
+
+const normalizeHttpUrl = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const withScheme = raw.includes('://') ? raw : `https://${raw}`;
+    try {
+        const parsed = new URL(withScheme);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null;
+        }
+        return parsed.toString();
+    } catch {
+        return null;
+    }
+};
+
 const readStoredMetrics = (userId) => {
     if (!userId) {
         return null;
@@ -82,6 +117,9 @@ const SettingsPage = ({ onNavigate }) => {
     const [loading, setLoading] = useState(true);
     const [savingPlatform, setSavingPlatform] = useState('');
     const [statusByPlatform, setStatusByPlatform] = useState({});
+    const [linkDrafts, setLinkDrafts] = useState(EMPTY_LINK_DRAFTS);
+    const [linkSavingPlatform, setLinkSavingPlatform] = useState('');
+    const [linkErrorByPlatform, setLinkErrorByPlatform] = useState({});
     const [adminMetrics, setAdminMetrics] = useState(null);
     const [error, setError] = useState('');
 
@@ -121,6 +159,14 @@ const SettingsPage = ({ onNavigate }) => {
                 };
             });
             setStatusByPlatform(nextStatuses);
+
+            try {
+                const socialFeedsResponse = await apiService.getSocialFeeds(user.id);
+                const socialFeeds = socialFeedsResponse?.data || socialFeedsResponse || {};
+                setLinkDrafts(normalizeFeedDrafts(socialFeeds));
+            } catch {
+                setLinkDrafts(EMPTY_LINK_DRAFTS);
+            }
 
             if (!isAdminUser) {
                 setAdminMetrics(null);
@@ -254,6 +300,65 @@ const SettingsPage = ({ onNavigate }) => {
             addToast(connectError?.message || `Unable to start ${platform} connection.`, 'error');
         } finally {
             setSavingPlatform('');
+        }
+    };
+
+    const handleLinkDraftChange = (platform, key, value) => {
+        setLinkDrafts((prev) => ({
+            ...prev,
+            [platform]: {
+                ...(prev[platform] || { username: '', profileUrl: '' }),
+                [key]: value
+            }
+        }));
+        setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: '' }));
+    };
+
+    const handleSaveLink = async (platform) => {
+        if (!user?.id) {
+            return;
+        }
+
+        const draft = linkDrafts[platform] || { username: '', profileUrl: '' };
+        const username = String(draft.username || '').trim();
+        const normalizedProfileUrl = normalizeHttpUrl(draft.profileUrl);
+
+        if (draft.profileUrl && !normalizedProfileUrl) {
+            setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: 'Enter a valid http(s) profile URL.' }));
+            return;
+        }
+
+        if (!username && !normalizedProfileUrl) {
+            setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: 'Add a username or profile URL to save.' }));
+            return;
+        }
+
+        const connectionPayload = {
+            enabled: true,
+            username,
+            profileUrl: normalizedProfileUrl || '',
+            feedUrl: normalizedProfileUrl || ''
+        };
+
+        const payload =
+            platform === 'facebook' ? { facebook: connectionPayload } :
+            platform === 'tiktok' ? { tikTok: connectionPayload } :
+            platform === 'instagram' ? { instagram: connectionPayload } :
+            { youTube: connectionPayload };
+
+        setLinkSavingPlatform(platform);
+        try {
+            await apiService.updateSocialFeeds(user.id, payload);
+            addToast(`${CONNECTION_PLATFORMS.find((item) => item.id === platform)?.label || 'Social'} link saved.`, 'success');
+            setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: '' }));
+            await loadSettings();
+        } catch (saveError) {
+            setLinkErrorByPlatform((prev) => ({
+                ...prev,
+                [platform]: saveError?.message || 'Unable to save social link right now.'
+            }));
+        } finally {
+            setLinkSavingPlatform('');
         }
     };
 
@@ -458,6 +563,63 @@ const SettingsPage = ({ onNavigate }) => {
                                                 </>
                                             )}
                                         </button>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+                                        <input
+                                            type="text"
+                                            value={linkDrafts[platform.id]?.username || ''}
+                                            onChange={(event) => handleLinkDraftChange(platform.id, 'username', event.target.value)}
+                                            placeholder={`${platform.label} username (optional)`}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                borderRadius: '8px',
+                                                background: 'rgba(255,255,255,0.03)',
+                                                color: 'var(--text-color)',
+                                                padding: '8px 10px',
+                                                fontSize: '12px'
+                                            }}
+                                        />
+                                        <input
+                                            type="url"
+                                            value={linkDrafts[platform.id]?.profileUrl || ''}
+                                            onChange={(event) => handleLinkDraftChange(platform.id, 'profileUrl', event.target.value)}
+                                            placeholder={`${platform.label} profile URL (optional)`}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                borderRadius: '8px',
+                                                background: 'rgba(255,255,255,0.03)',
+                                                color: 'var(--text-color)',
+                                                padding: '8px 10px',
+                                                fontSize: '12px'
+                                            }}
+                                        />
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: 'var(--light-color)' }}>
+                                                Save by app user + URL. Advanced fields remain admin-only.
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSaveLink(platform.id)}
+                                                disabled={linkSavingPlatform === platform.id}
+                                                style={{
+                                                    border: '1px solid var(--border-color)',
+                                                    borderRadius: '999px',
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    color: 'var(--text-color)',
+                                                    padding: '6px 10px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '11px',
+                                                    fontWeight: 700
+                                                }}
+                                            >
+                                                {linkSavingPlatform === platform.id ? 'Saving...' : 'Save Link'}
+                                            </button>
+                                        </div>
+                                        {linkErrorByPlatform[platform.id] && (
+                                            <div style={{ fontSize: '11px', color: '#fca5a5' }}>
+                                                {linkErrorByPlatform[platform.id]}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             );

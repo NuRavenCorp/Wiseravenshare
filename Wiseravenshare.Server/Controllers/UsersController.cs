@@ -126,14 +126,20 @@ public sealed class UsersController : ControllerBase
             return Forbid();
         }
 
+        var effectiveRequest = request;
         if (!IsConfiguredAdminRequest())
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Manual social profile linking is restricted to administrators." });
+            if (!TryBuildSelfServiceSocialFeedRequest(request, out var restrictedRequest, out var validationMessage))
+            {
+                return BadRequest(new { message = validationMessage });
+            }
+
+            effectiveRequest = restrictedRequest;
         }
 
         try
         {
-            var user = _userStore.UpdateSocialFeeds(id, request);
+            var user = _userStore.UpdateSocialFeeds(id, effectiveRequest);
             _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
             await TryAwardProfileCompletionBadgeAsync(user);
             return Ok(user.SocialFeeds);
@@ -160,6 +166,90 @@ public sealed class UsersController : ControllerBase
             ?? User.FindFirstValue("email")
             ?? string.Empty;
         return AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
+    }
+
+    private static bool TryBuildSelfServiceSocialFeedRequest(
+        UpdateSocialFeedsRequest request,
+        out UpdateSocialFeedsRequest restrictedRequest,
+        out string message)
+    {
+        restrictedRequest = new UpdateSocialFeedsRequest();
+
+        if (request.Twitter is not null || request.LinkedIn is not null || request.Bluesky is not null)
+        {
+            message = "Self-service social linking is limited to Facebook, TikTok, Instagram, and YouTube.";
+            return false;
+        }
+
+        if (!TryRestrictConnection(request.Facebook, "facebook", out var facebook, out message)
+            || !TryRestrictConnection(request.TikTok, "tiktok", out var tikTok, out message)
+            || !TryRestrictConnection(request.Instagram, "instagram", out var instagram, out message)
+            || !TryRestrictConnection(request.YouTube, "youtube", out var youTube, out message))
+        {
+            return false;
+        }
+
+        restrictedRequest.Facebook = facebook;
+        restrictedRequest.TikTok = tikTok;
+        restrictedRequest.Instagram = instagram;
+        restrictedRequest.YouTube = youTube;
+        message = string.Empty;
+        return true;
+    }
+
+    private static bool TryRestrictConnection(
+        SocialFeedConnection? input,
+        string platform,
+        out SocialFeedConnection? output,
+        out string message)
+    {
+        output = null;
+        message = string.Empty;
+        if (input is null)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(input.Designation)
+            || !string.IsNullOrWhiteSpace(input.AccessToken)
+            || !string.IsNullOrWhiteSpace(input.RefreshToken)
+            || input.TokenExpiresAt is not null
+            || !string.IsNullOrWhiteSpace(input.Site))
+        {
+            message = "Advanced social fields are restricted to administrators.";
+            return false;
+        }
+
+        var username = (input.Username ?? string.Empty).Trim();
+        var profileUrl = (input.ProfileUrl ?? string.Empty).Trim();
+        var feedUrl = (input.FeedUrl ?? string.Empty).Trim();
+
+        if (!IsHttpUrlOrEmpty(profileUrl) || !IsHttpUrlOrEmpty(feedUrl))
+        {
+            message = "Profile and feed URLs must be valid http(s) addresses.";
+            return false;
+        }
+
+        output = new SocialFeedConnection
+        {
+            Enabled = input.Enabled,
+            Username = username,
+            ProfileUrl = profileUrl,
+            FeedUrl = feedUrl
+        };
+
+        return true;
+    }
+
+    private static bool IsHttpUrlOrEmpty(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
     }
 
     private async Task TryAwardProfileCompletionBadgeAsync(UserRecord user)
