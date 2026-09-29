@@ -226,16 +226,16 @@ const PostCard = ({
 
         try {
             if (typeof onLike === 'function') {
+                // Delegate to parent. Parent re-throws on failure so our catch can rollback.
                 await onLike(post.id);
-                return;
+            } else {
+                const updated = nextLiked
+                    ? await apiService.likePost(post.id)
+                    : await apiService.unlikePost(post.id);
+
+                setIsLiked(Boolean(updated?.isLiked ?? nextLiked));
+                setLikesCount(Number(updated?.likesCount ?? nextCount));
             }
-
-            const updated = nextLiked
-                ? await apiService.likePost(post.id)
-                : await apiService.unlikePost(post.id);
-
-            setIsLiked(Boolean(updated?.isLiked ?? nextLiked));
-            setLikesCount(Number(updated?.likesCount ?? nextCount));
         } catch (error) {
             setIsLiked(previousLiked);
             setLikesCount(previousCount);
@@ -255,15 +255,14 @@ const PostCard = ({
         try {
             if (typeof onRepost === 'function') {
                 await onRepost(post.id);
-                return;
+            } else {
+                const updated = nextReposted
+                    ? await apiService.repostPost(post.id)
+                    : await apiService.unrepostPost(post.id);
+
+                setIsReposted(Boolean(updated?.isReposted ?? nextReposted));
+                setRepostsCountLocal(Number(updated?.repostsCount ?? nextCount));
             }
-
-            const updated = nextReposted
-                ? await apiService.repostPost(post.id)
-                : await apiService.unrepostPost(post.id);
-
-            setIsReposted(Boolean(updated?.isReposted ?? nextReposted));
-            setRepostsCountLocal(Number(updated?.repostsCount ?? nextCount));
         } catch (error) {
             setIsReposted(previousReposted);
             setRepostsCountLocal(previousCount);

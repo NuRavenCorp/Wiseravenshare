@@ -308,118 +308,119 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     };
 
     const handleLike = async (postId) => {
-        try {
-            // Only backend-stored posts (valid UUIDs) can be liked via API.
-            const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId);
-            if (!isValidGuid) {
-                addTruthAlert('info', 'Likes are only available for WiseRaven posts.', null);
-                return;
-            }
+        // Only backend-stored posts (valid UUIDs) can be liked via API.
+        const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId);
+        if (!isValidGuid) {
+            addTruthAlert('info', 'Likes are only available for WiseRaven posts.', null);
+            return;
+        }
 
-            const currentPost = posts.find((post) => post.id === postId);
-            const isCurrentlyLiked = Boolean(currentPost?.isLiked);
+        const currentPost = posts.find((post) => post.id === postId);
+        const isCurrentlyLiked = Boolean(currentPost?.isLiked);
+        const currentCount = Number(currentPost?.likesCount ?? currentPost?.likes ?? 0);
+        const optimisticIsLiked = !isCurrentlyLiked;
+        const optimisticCount = Math.max(0, currentCount + (optimisticIsLiked ? 1 : -1));
 
-            const updated = isCurrentlyLiked
-                ? await apiService.unlikePost(postId)
-                : await apiService.likePost(postId);
-
-            if (!isCurrentlyLiked) {
-                // Track the like interaction for personalization.
-                if (currentPost) {
-                    track('Like', 'Post', postId, {
-                        title: currentPost.content?.slice(0, 100) || '',
-                        tags: extractPostTags(currentPost),
-                    });
-                }
-            }
-
+        // Optimistic update — keep a running tabulation before the server confirms.
+        const applyLikeState = (isLiked, likesCount) => {
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
-                        ? (() => {
-                            const baseCount = Number(post.likesCount ?? post.likes ?? 0);
-                            const resolvedIsLiked = typeof updated?.isLiked === 'boolean'
-                                ? updated.isLiked
-                                : !isCurrentlyLiked;
-                            const resolvedLikesCount = Number.isFinite(Number(updated?.likesCount))
-                                ? Number(updated.likesCount)
-                                : Math.max(0, baseCount + (resolvedIsLiked ? 1 : -1));
-
-                            return {
-                                ...post,
-                                likes: resolvedLikesCount,
-                                likesCount: resolvedLikesCount,
-                                isLiked: resolvedIsLiked
-                            };
-                        })()
+                        ? { ...post, likes: likesCount, likesCount, isLiked }
                         : post
                 );
-
                 try {
-                    const liked = next.filter((p) => p.isLiked);
-                    localStorage.setItem('wiseLikedPosts', JSON.stringify(liked));
+                    localStorage.setItem('wiseLikedPosts', JSON.stringify(next.filter((p) => p.isLiked)));
                     window.dispatchEvent(new Event('wiseraven:likes-updated'));
                 } catch {
                     // Ignore local cache sync failures.
                 }
-
                 return next;
             });
+        };
+
+        applyLikeState(optimisticIsLiked, optimisticCount);
+
+        try {
+            const updated = optimisticIsLiked
+                ? await apiService.likePost(postId)
+                : await apiService.unlikePost(postId);
+
+            // Confirm with server values (keeps count accurate on concurrent edits).
+            const confirmedIsLiked = typeof updated?.isLiked === 'boolean'
+                ? updated.isLiked
+                : optimisticIsLiked;
+            const confirmedCount = Number.isFinite(Number(updated?.likesCount))
+                ? Number(updated.likesCount)
+                : optimisticCount;
+
+            applyLikeState(confirmedIsLiked, confirmedCount);
+
+            if (optimisticIsLiked && currentPost) {
+                track('Like', 'Post', postId, {
+                    title: currentPost.content?.slice(0, 100) || '',
+                    tags: extractPostTags(currentPost),
+                });
+            }
         } catch (error) {
+            // Rollback optimistic update so PostCard can also rollback.
+            applyLikeState(isCurrentlyLiked, currentCount);
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
                 : 'Failed to update like.';
             addTruthAlert('error', message, null);
+            // Re-throw so PostCard's own catch block can rollback its local state.
+            throw error;
         }
     };
 
     const handleRepost = async (postId) => {
-        try {
-            const currentPost = posts.find((post) => post.id === postId);
-            const isCurrentlyReposted = Boolean(currentPost?.isReposted);
+        const currentPost = posts.find((post) => post.id === postId);
+        const isCurrentlyReposted = Boolean(currentPost?.isReposted);
+        const currentCount = Number(currentPost?.repostsCount ?? currentPost?.reposts ?? 0);
+        const optimisticIsReposted = !isCurrentlyReposted;
+        const optimisticCount = Math.max(0, currentCount + (optimisticIsReposted ? 1 : -1));
 
-            const updated = isCurrentlyReposted
-                ? await apiService.unrepostPost(postId)
-                : await apiService.repostPost(postId);
-
+        const applyRepostState = (isReposted, repostsCount) => {
             setPosts((prev) => {
                 const next = prev.map((post) =>
                     post.id === postId
-                        ? (() => {
-                            const baseCount = Number(post.repostsCount ?? post.reposts ?? 0);
-                            const resolvedIsReposted = typeof updated?.isReposted === 'boolean'
-                                ? updated.isReposted
-                                : !isCurrentlyReposted;
-                            const resolvedRepostsCount = Number.isFinite(Number(updated?.repostsCount))
-                                ? Number(updated.repostsCount)
-                                : Math.max(0, baseCount + (resolvedIsReposted ? 1 : -1));
-
-                            return {
-                                ...post,
-                                reposts: resolvedRepostsCount,
-                                repostsCount: resolvedRepostsCount,
-                                isReposted: resolvedIsReposted
-                            };
-                        })()
+                        ? { ...post, reposts: repostsCount, repostsCount, isReposted }
                         : post
                 );
-
                 try {
-                    const reposted = next.filter((p) => p.isReposted);
-                    localStorage.setItem('wiseRepostedPosts', JSON.stringify(reposted));
+                    localStorage.setItem('wiseRepostedPosts', JSON.stringify(next.filter((p) => p.isReposted)));
                     window.dispatchEvent(new Event('wiseraven:reposts-updated'));
                 } catch {
                     // Ignore local cache sync failures.
                 }
-
                 return next;
             });
-            addTruthAlert('success', isCurrentlyReposted ? 'Repost removed.' : 'Repost saved.', null);
+        };
+
+        applyRepostState(optimisticIsReposted, optimisticCount);
+
+        try {
+            const updated = optimisticIsReposted
+                ? await apiService.repostPost(postId)
+                : await apiService.unrepostPost(postId);
+
+            const confirmedIsReposted = typeof updated?.isReposted === 'boolean'
+                ? updated.isReposted
+                : optimisticIsReposted;
+            const confirmedCount = Number.isFinite(Number(updated?.repostsCount))
+                ? Number(updated.repostsCount)
+                : optimisticCount;
+
+            applyRepostState(confirmedIsReposted, confirmedCount);
+            addTruthAlert('success', confirmedIsReposted ? 'Repost saved.' : 'Repost removed.', null);
         } catch (error) {
+            applyRepostState(isCurrentlyReposted, currentCount);
             const message = typeof error?.message === 'string' && error.message.trim().length > 0
                 ? error.message.trim()
                 : 'Failed to update repost.';
             addTruthAlert('error', message, null);
+            throw error;
         }
     };
 
