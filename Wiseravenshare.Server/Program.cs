@@ -2404,10 +2404,26 @@ if (!Directory.Exists(frontendDistPath))
 
 var frontendDistExists = Directory.Exists(frontendDistPath);
 var frontendIndexFile = frontendDistExists
-    ? Directory.EnumerateFiles(frontendDistPath, "*", SearchOption.TopDirectoryOnly)
-        .Select(Path.GetFileName)
-        .FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.OrdinalIgnoreCase)) ?? "index.html"
+    ? ResolvePreferredFrontendIndex(frontendDistPath)
     : "index.html";
+
+static string ResolvePreferredFrontendIndex(string distPath)
+{
+    var fileNames = Directory.EnumerateFiles(distPath, "*", SearchOption.TopDirectoryOnly)
+        .Select(Path.GetFileName)
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .ToArray();
+
+    // Prefer the Vite-emitted lowercase index.html when both casings exist.
+    var exactLower = fileNames.FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.Ordinal));
+    if (!string.IsNullOrWhiteSpace(exactLower))
+    {
+        return exactLower;
+    }
+
+    var caseInsensitive = fileNames.FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.OrdinalIgnoreCase));
+    return string.IsNullOrWhiteSpace(caseInsensitive) ? "index.html" : caseInsensitive;
+}
 
 if (frontendDistExists)
 {

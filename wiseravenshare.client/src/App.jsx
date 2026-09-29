@@ -123,6 +123,14 @@ const resolveInitialPublicPage = () => {
         return 'profile';
     }
 
+    if (normalizedPath === '/collaboration' || normalizedPath.startsWith('/collaboration/')) {
+        return 'collaboration';
+    }
+
+    if (normalizedPath === '/karaoke' || normalizedPath.startsWith('/karaoke/')) {
+        return 'karaoke';
+    }
+
     return 'public-home';
 };
 
@@ -750,6 +758,18 @@ const App = () => {
     );
 
     const renderPublicPage = () => {
+        const protectedPages = new Set([
+            'feed', 'discover', 'bookmarks', 'notifications', 'messages', 'planner',
+            'newsroom-video', 'amateur-journalist', 'canvas', 'team-launchpad',
+            'collaboration', 'truthseeker', 'ainews', 'ai-assistant', 'fm-tuner',
+            'music-player', 'my-library', 'instrument-connector', 'settings', 'profile',
+            'social-feeds', 'facebook-feed', 'tiktok-feed', 'instagram-feed', 'youtube-feed',
+            'ravensight', 'growth', 'revenue', 'team-access-admin', 'feature-release',
+            'site-crawler-audit', 'crawler-metrics', 'music-rights-studio', 'radio-creator',
+            'podcast-rights-studio', 'podcast-checkout', 'podcast-audio-processor', 'karaoke',
+            'wisecoin', 'gatekeeper', 'admin-panel', 'assistant'
+        ]);
+
         if (currentPage === 'privacy') {
             return <PrivacyPolicyPage onBack={() => setCurrentPage('public-home')} />;
         }
@@ -759,6 +779,10 @@ const App = () => {
         }
 
         if (currentPage === 'login') {
+            return <LoginPage onAuth={handleLogin} />;
+        }
+
+        if (protectedPages.has(currentPage)) {
             return <LoginPage onAuth={handleLogin} />;
         }
 
