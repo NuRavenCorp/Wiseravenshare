@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
+import KaraokeScorer from '../Components/Karaoke/KaraokeScorer';
 import './KaraokePage.css';
 
 /* ─── pitch detection ──────────────────────────────────────────────────────── */
@@ -63,6 +64,18 @@ const DEMO_SONGS = [
     { id: 'us-001', title: 'UltraStar Demo Song', artist: 'UltraStar Community (CC)', duration: '3:00', source: 'ultrastar-community' },
 ];
 
+const DEFAULT_REFERENCE_LYRICS =
+    'Tonight we sing together and keep the rhythm strong while every word lands on the beat.';
+
+function buildEstimatedWordTimings(lyrics, wordsPerSecond = 2.8) {
+    const words = lyrics.trim().split(/\s+/).filter(Boolean);
+    const secPerWord = 1 / Math.max(wordsPerSecond, 0.5);
+    return words.map((word, index) => {
+        const start = index * secPerWord;
+        return { word, start, end: start + secPerWord };
+    });
+}
+
 /* ─── karaoke page ─────────────────────────────────────────────────────────── */
 export default function KaraokePage() {
     const { user } = useAuth();
@@ -92,6 +105,8 @@ export default function KaraokePage() {
 
     // service health
     const [health, setHealth] = useState(null);
+    const [showKaraokeScorer, setShowKaraokeScorer] = useState(false);
+    const [referenceLyrics, setReferenceLyrics] = useState(DEFAULT_REFERENCE_LYRICS);
 
     useEffect(() => {
         fetch('/api/karaoke/catalogue')
@@ -432,7 +447,52 @@ export default function KaraokePage() {
                         no latency. Reference vocal pitch analysis (server-side via librosa) can be wired
                         once vocal reference .wav is available from the backing track generator.
                     </div>
+
+                    <div className="karaoke-scoring-note" style={{ marginTop: 16 }}>
+                        <strong>Lyric scoring mode:</strong> stream microphone audio to STT, align words in real time,
+                        and score your lyric accuracy against reference text.
+                    </div>
+
+                    <label style={{ display: 'block', marginTop: 12, fontWeight: 600 }}>
+                        Reference Lyrics
+                    </label>
+                    <textarea
+                        value={referenceLyrics}
+                        onChange={(e) => setReferenceLyrics(e.target.value)}
+                        rows={5}
+                        style={{
+                            width: '100%',
+                            marginTop: 8,
+                            borderRadius: 10,
+                            border: '1px solid #374151',
+                            background: '#111827',
+                            color: '#f3f4f6',
+                            padding: 12,
+                        }}
+                        placeholder="Paste the lyrics you want to score against"
+                    />
+
+                    <div style={{ marginTop: 12 }}>
+                        <button
+                            className="karaoke-btn karaoke-btn-primary"
+                            disabled={!backingUrl || backingUrl === 'catalogue-placeholder' || !referenceLyrics.trim()}
+                            onClick={() => setShowKaraokeScorer(true)}
+                        >
+                            🎯 Launch Lyric Scoring Session
+                        </button>
+                    </div>
                 </div>
+            )}
+
+            {showKaraokeScorer && backingUrl && backingUrl !== 'catalogue-placeholder' && (
+                <KaraokeScorer
+                    lyrics={referenceLyrics}
+                    wordTimings={buildEstimatedWordTimings(referenceLyrics)}
+                    audioSrc={backingUrl}
+                    songTitle={selectedSong?.title || 'Karaoke Session'}
+                    authToken={user?.token || null}
+                    onClose={() => setShowKaraokeScorer(false)}
+                />
             )}
         </div>
     );

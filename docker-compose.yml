@@ -158,6 +158,30 @@ services:
       retries: 5
       start_period: 30s
 
+  karaoke-speech:
+    build:
+      context: ./services/karaoke-speech
+      dockerfile: Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-karaoke-speech
+    restart: unless-stopped
+    environment:
+      SHERPA_MODEL_DIR: ${SHERPA_MODEL_DIR:-/app/models}
+      SHERPA_MODEL_URL: ${SHERPA_MODEL_URL:-}
+      SHERPA_TOKENS_PATH: ${SHERPA_TOKENS_PATH:-}
+      SHERPA_ENCODER_PATH: ${SHERPA_ENCODER_PATH:-}
+      SHERPA_DECODER_PATH: ${SHERPA_DECODER_PATH:-}
+      SHERPA_JOINER_PATH: ${SHERPA_JOINER_PATH:-}
+    expose:
+      - "8003"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   # Main API Server (builds and runs .NET + React app)
   api:
     build:
@@ -176,6 +200,9 @@ services:
         condition: service_healthy
         required: false
       karaoke-engine:
+        condition: service_healthy
+        required: false
+      karaoke-speech:
         condition: service_healthy
         required: false
       ollama:
@@ -207,6 +234,7 @@ services:
       # Media microservices
       AudioService__BaseUrl: ${AUDIO_SERVICE_BASE_URL:-http://audio-processor:8001}
       KaraokeService__BaseUrl: ${KARAOKE_SERVICE_BASE_URL:-http://karaoke-engine:8002}
+      KaraokeSpeechService__BaseUrl: ${KARAOKE_SPEECH_SERVICE_BASE_URL:-http://karaoke-speech:8003}
       # Redis Cache
       Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
       # S3 Blob Storage

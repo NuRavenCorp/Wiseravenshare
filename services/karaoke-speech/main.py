@@ -15,8 +15,12 @@ from __future__ import annotations
 import io
 import logging
 import os
+import tarfile
 import tempfile
 import threading
+import urllib.request
+import zipfile
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -48,10 +52,71 @@ app.add_middleware(
 _recognizer = None
 _recognizer_lock = threading.Lock()
 
-SHERPA_TOKENS   = os.getenv("SHERPA_TOKENS_PATH",   "models/tokens.txt")
-SHERPA_ENCODER  = os.getenv("SHERPA_ENCODER_PATH",  "models/encoder.onnx")
-SHERPA_DECODER  = os.getenv("SHERPA_DECODER_PATH",  "models/decoder.onnx")
-SHERPA_JOINER   = os.getenv("SHERPA_JOINER_PATH",   "models/joiner.onnx")
+MODEL_DIR = Path(os.getenv("SHERPA_MODEL_DIR", "/app/models")).resolve()
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+SHERPA_TOKENS = os.getenv("SHERPA_TOKENS_PATH") or str(MODEL_DIR / "tokens.txt")
+SHERPA_ENCODER = os.getenv("SHERPA_ENCODER_PATH") or str(MODEL_DIR / "encoder.onnx")
+SHERPA_DECODER = os.getenv("SHERPA_DECODER_PATH") or str(MODEL_DIR / "decoder.onnx")
+SHERPA_JOINER = os.getenv("SHERPA_JOINER_PATH") or str(MODEL_DIR / "joiner.onnx")
+
+
+def _download_model_archive(model_url: str, destination_dir: Path) -> None:
+    """Download a Sherpa model archive when a release URL is provided."""
+    if not model_url:
+        return
+
+    archive_name = "sherpa-model.tar.gz"
+    if model_url.lower().endswith(".zip"):
+        archive_name = "sherpa-model.zip"
+    elif model_url.lower().endswith(".tar.bz2"):
+        archive_name = "sherpa-model.tar.bz2"
+    elif model_url.lower().endswith(".tar"):
+        archive_name = "sherpa-model.tar"
+
+    archive_path = destination_dir / archive_name
+    try:
+        log.info("Downloading Sherpa model from %s", model_url)
+        urllib.request.urlretrieve(model_url, archive_path)
+        log.info("Downloaded Sherpa model archive to %s", archive_path)
+
+        if archive_path.suffix.lower() == ".zip":
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                archive.extractall(destination_dir)
+        else:
+            with tarfile.open(archive_path, "r:*") as archive:
+                archive.extractall(destination_dir)
+
+        for expected_name in ("tokens.txt", "encoder.onnx", "decoder.onnx", "joiner.onnx"):
+            matches = list(destination_dir.rglob(expected_name))
+            if not matches:
+                continue
+            if expected_name == "tokens.txt":
+                globals()["SHERPA_TOKENS"] = str(matches[0])
+            elif expected_name == "encoder.onnx":
+                globals()["SHERPA_ENCODER"] = str(matches[0])
+            elif expected_name == "decoder.onnx":
+                globals()["SHERPA_DECODER"] = str(matches[0])
+            elif expected_name == "joiner.onnx":
+                globals()["SHERPA_JOINER"] = str(matches[0])
+    except Exception as exc:
+        log.warning("Sherpa model download failed: %s", exc)
+
+
+def ensure_sherpa_models() -> None:
+    """Resolve the model paths and optionally download a default archive if available."""
+    if all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
+        return
+
+    model_url = os.getenv("SHERPA_MODEL_URL")
+    if model_url:
+        _download_model_archive(model_url, MODEL_DIR)
+
+    if not all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
+        log.warning(
+            "Sherpa model files are missing. STT will stay degraded until model files are downloaded. "
+            "Set SHERPA_MODEL_URL, SHERPA_TOKENS_PATH, SHERPA_ENCODER_PATH, SHERPA_DECODER_PATH, and SHERPA_JOINER_PATH."
+        )
 
 
 def _load_recognizer():
@@ -68,6 +133,7 @@ def _load_recognizer():
             return _recognizer
         try:
             import sherpa_onnx  # type: ignore[import]
+            ensure_sherpa_models()
             if not all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
                 log.warning(
                     "sherpa-onnx model files not found. STT will return empty transcripts until models are downloaded. "
@@ -317,5 +383,6 @@ def health():
 
 
 if __name__ == "__main__":
+    ensure_sherpa_models()
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8003, log_level="info")

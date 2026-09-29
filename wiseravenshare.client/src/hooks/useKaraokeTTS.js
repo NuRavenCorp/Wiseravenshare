@@ -13,8 +13,9 @@ import { useCallback, useRef, useState } from 'react';
 
 const BASE = '/api/karaoke/speech';
 
-async function fetchAndPlayWav(url, onEnd, audioRef) {
-    const res = await fetch(url);
+async function fetchAndPlayWav(url, onEnd, audioRef, authToken) {
+    const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+    const res = await fetch(url, { headers });
     if (!res.ok) {
         const body = await res.text().catch(() => '');
         throw new Error(`TTS request failed (${res.status}): ${body}`);
@@ -33,7 +34,7 @@ async function fetchAndPlayWav(url, onEnd, audioRef) {
     source.start(0);
 }
 
-export function useKaraokeTTS() {
+export function useKaraokeTTS(authToken = null) {
     const [speaking, setSpeaking] = useState(false);
     const [error,    setError]    = useState(null);
     const audioRef = useRef(null);
@@ -56,12 +57,12 @@ export function useKaraokeTTS() {
         setSpeaking(true);
         const url = `${BASE}/announce?text=${encodeURIComponent(text)}&rate=${rate}`;
         try {
-            await fetchAndPlayWav(url, () => setSpeaking(false), audioRef);
+            await fetchAndPlayWav(url, () => setSpeaking(false), audioRef, authToken);
         } catch (err) {
             setError(err.message);
             setSpeaking(false);
         }
-    }, [_stop]);
+    }, [_stop, authToken]);
 
     const scoreFeedback = useCallback(async (score, songTitle = null) => {
         _stop();
@@ -70,12 +71,12 @@ export function useKaraokeTTS() {
         let url = `${BASE}/score-feedback?score=${score}`;
         if (songTitle) url += `&song=${encodeURIComponent(songTitle)}`;
         try {
-            await fetchAndPlayWav(url, () => setSpeaking(false), audioRef);
+            await fetchAndPlayWav(url, () => setSpeaking(false), audioRef, authToken);
         } catch (err) {
             setError(err.message);
             setSpeaking(false);
         }
-    }, [_stop]);
+    }, [_stop, authToken]);
 
     return { announce, scoreFeedback, speaking, error, stop: _stop };
 }
