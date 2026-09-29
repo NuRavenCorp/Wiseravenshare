@@ -1,5 +1,30 @@
 # Docker Quick Start
 
+## Recommended: Conflict-Safe Startup (Auto Evolve)
+
+```powershell
+# Auto-picks a sequential instance name and available host ports
+./scripts/docker-up-evolve.ps1 -WithCache -WithLocalDb
+```
+
+Optional flags:
+- `-WithAi`
+- `-WithStorage`
+- `-WithStripe`
+- `-SkipHealthCheck`
+
+Cleanup older evolved instances while keeping the newest one:
+
+```powershell
+./scripts/docker-clean-evolved.ps1
+```
+
+Also remove the base `wiseravenshare` stack during cleanup:
+
+```powershell
+./scripts/docker-clean-evolved.ps1 -IncludeBase
+```
+
 ## One-Command Start (Local Development)
 
 ```bash

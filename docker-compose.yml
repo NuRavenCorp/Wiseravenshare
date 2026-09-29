@@ -4,7 +4,7 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: wiseravenshare-postgres
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-wiseravenshare-db}
@@ -24,7 +24,7 @@ services:
   # Ollama AI Assistant (optional)
   ollama:
     image: ollama/ollama:latest
-    container_name: wiseravenshare-ollama
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-ollama
     restart: unless-stopped
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
@@ -42,7 +42,7 @@ services:
 
   ollama-init:
     image: ollama/ollama:latest
-    container_name: wiseravenshare-ollama-init
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-ollama-init
     restart: "no"
     depends_on:
       ollama:
@@ -60,7 +60,7 @@ services:
   # Redis Cache (optional)
   redis:
     image: redis:7-alpine
-    container_name: wiseravenshare-redis
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-redis
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
@@ -72,7 +72,7 @@ services:
   # MinIO S3-compatible Object Storage (optional)
   minio:
     image: minio/minio:latest
-    container_name: wiseravenshare-minio
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
@@ -90,7 +90,7 @@ services:
   # MinIO initialization (create buckets)
   minio-init:
     image: minio/mc:latest
-    container_name: wiseravenshare-minio-init
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-minio-init
     profiles: ["with-storage"]
     depends_on:
       - minio
@@ -106,7 +106,7 @@ services:
   # Stripe Webhook Forwarder (optional, for local testing)
   stripe-cli:
     image: stripe/stripe-cli:latest
-    container_name: wiseravenshare-stripe-cli
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-stripe-cli
     restart: unless-stopped
     profiles: ["with-stripe"]
     depends_on:
@@ -118,6 +118,46 @@ services:
     networks:
       - wiseravenshare-net
 
+  # Audio cleanup microservice (FastAPI container)
+  audio-processor:
+    build:
+      context: ./services/audio-processor
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-audio-processor
+    restart: unless-stopped
+    expose:
+      - "8001"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Karaoke backing-track microservice (FastAPI container)
+  karaoke-engine:
+    build:
+      context: ./services/karaoke-engine
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-karaoke-engine
+    restart: unless-stopped
+    expose:
+      - "8002"
+    environment:
+      XDG_CACHE_HOME: /cache
+      TORCH_HOME: /cache/torch
+      HF_HOME: /cache/huggingface
+    volumes:
+      - karaoke-cache:/cache
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # Main API Server (builds and runs .NET + React app)
   api:
     build:
@@ -126,10 +166,16 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:10000}
         VITE_RAVENSIGHT_API_URL: ${VITE_RAVENSIGHT_API_URL:-http://localhost:10000/api/ravensight}
-    container_name: wiseravenshare-api
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-api
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+        required: false
+      audio-processor:
+        condition: service_healthy
+        required: false
+      karaoke-engine:
         condition: service_healthy
         required: false
       ollama:
@@ -149,6 +195,8 @@ services:
       ASPNETCORE_URLS: http://0.0.0.0:10000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:10000,http://localhost:3000}
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      JWT_highentropykey: ${JWT_highentropykey:-}
+      Authentication__Jwt__Key: ${Authentication__Jwt__Key:-}
       # Database
       ConnectionStrings__DefaultConnection: ${EXTERNAL_POSTGRES_CONNECTION:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare-db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-CHANGE_ME};SSL Mode=Disable;Trust Server Certificate=true}
       # Ollama AI
@@ -156,6 +204,9 @@ services:
       Gradient__BaseUrl: ${GRADIENT_BASE_URL:-https://ingress.do-ai.run/v1}
       Gradient__DefaultModel: ${GRADIENT_DEFAULT_MODEL:-gpt-4o-mini}
       Gradient__InferenceKey: ${GRADIENT_INFERENCE_KEY:-}
+      # Media microservices
+      AudioService__BaseUrl: ${AUDIO_SERVICE_BASE_URL:-http://audio-processor:8001}
+      KaraokeService__BaseUrl: ${KARAOKE_SERVICE_BASE_URL:-http://karaoke-engine:8002}
       # Redis Cache
       Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
       # S3 Blob Storage
@@ -186,6 +237,7 @@ volumes:
   postgres-data:
   ollama-models:
   minio-data:
+  karaoke-cache:
 
 networks:
   wiseravenshare-net:
