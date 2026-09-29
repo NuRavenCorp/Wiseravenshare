@@ -21,7 +21,15 @@ import { useKaraokeTTS } from '../../hooks/useKaraokeTTS';
 
 const HIGHLIGHT_LOOKAHEAD_MS = 50; // start highlighting slightly early for feel
 
-export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc, songTitle = 'this song', onClose, authToken = null }) {
+export default function KaraokeScorer({
+    lyrics = '',
+    wordTimings = [],
+    audioSrc,
+    songTitle = 'this song',
+    onClose,
+    authToken = null,
+    embedded = false,
+}) {
     const refWords   = lyrics.trim().split(/\s+/).filter(Boolean);
     const timings    = wordTimings; // [{word, start, end}]
 
@@ -129,13 +137,20 @@ export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc,
 
     // ── Render ─────────────────────────────────────────────────────────
     return (
-        <div style={styles.overlay}>
-            <div style={styles.card}>
-                {/* Header */}
-                <div style={styles.header}>
-                    <span style={styles.title}>🎤 {songTitle}</span>
-                    <button type="button" style={styles.closeBtn} onClick={onClose}>✕</button>
-                </div>
+        <div style={embedded ? styles.embeddedWrap : styles.overlay}>
+            <div style={embedded ? styles.embeddedCard : styles.card}>
+                {!embedded && (
+                    <div style={styles.header}>
+                        <span style={styles.title}>🎤 {songTitle}</span>
+                        <button type="button" style={styles.closeBtn} onClick={onClose}>✕</button>
+                    </div>
+                )}
+
+                {embedded && onClose && (
+                    <div style={styles.inlineActions}>
+                        <button type="button" style={styles.inlineCloseBtn} onClick={onClose}>Close Lyric Scoring</button>
+                    </div>
+                )}
 
                 {/* Hidden audio element */}
                 {audioSrc && (
@@ -231,6 +246,18 @@ export default function KaraokeScorer({ lyrics = '', wordTimings = [], audioSrc,
 
 // ── Styles ────────────────────────────────────────────────────────────
 const styles = {
+    embeddedWrap: {
+        width: '100%',
+        marginTop: 14,
+    },
+    embeddedCard: {
+        background: 'rgba(17, 24, 39, 0.6)',
+        border: '1px solid rgba(148, 163, 184, 0.25)',
+        borderRadius: '14px',
+        padding: '18px',
+        width: '100%',
+        position: 'relative',
+    },
     overlay: {
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
@@ -251,6 +278,21 @@ const styles = {
     closeBtn: {
         background: 'none', border: 'none', color: '#94a3b8',
         fontSize: '20px', cursor: 'pointer',
+    },
+    inlineActions: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        marginBottom: 10,
+    },
+    inlineCloseBtn: {
+        background: 'transparent',
+        color: '#94a3b8',
+        border: '1px solid rgba(148, 163, 184, 0.35)',
+        borderRadius: '8px',
+        padding: '6px 10px',
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontWeight: 600,
     },
     countdown: {
         fontSize: '96px', fontWeight: 900, textAlign: 'center',

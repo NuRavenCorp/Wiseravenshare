@@ -478,21 +478,22 @@ export default function KaraokePage() {
                             disabled={!backingUrl || backingUrl === 'catalogue-placeholder' || !referenceLyrics.trim()}
                             onClick={() => setShowKaraokeScorer(true)}
                         >
-                            🎯 Launch Lyric Scoring Session
+                            🎯 Start Integrated Lyric Scoring
                         </button>
                     </div>
-                </div>
-            )}
 
-            {showKaraokeScorer && backingUrl && backingUrl !== 'catalogue-placeholder' && (
-                <KaraokeScorer
-                    lyrics={referenceLyrics}
-                    wordTimings={buildEstimatedWordTimings(referenceLyrics)}
-                    audioSrc={backingUrl}
-                    songTitle={selectedSong?.title || 'Karaoke Session'}
-                    authToken={user?.token || null}
-                    onClose={() => setShowKaraokeScorer(false)}
-                />
+                    {showKaraokeScorer && backingUrl && backingUrl !== 'catalogue-placeholder' && (
+                        <KaraokeScorer
+                            lyrics={referenceLyrics}
+                            wordTimings={buildEstimatedWordTimings(referenceLyrics)}
+                            audioSrc={backingUrl}
+                            songTitle={selectedSong?.title || 'Karaoke Session'}
+                            authToken={user?.token || null}
+                            embedded
+                            onClose={() => setShowKaraokeScorer(false)}
+                        />
+                    )}
+                </div>
             )}
         </div>
     );
