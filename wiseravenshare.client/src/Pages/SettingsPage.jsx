@@ -365,7 +365,18 @@ const SettingsPage = ({ onNavigate }) => {
     };
 
     if (!user) {
-        return null;
+        return (
+            <div style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                border: '1px solid var(--border-color)',
+                borderRadius: '18px',
+                background: 'var(--card-bg)',
+                color: 'var(--light-color)'
+            }}>
+                Please sign in to view and manage your settings.
+            </div>
+        );
     }
 
     return (
