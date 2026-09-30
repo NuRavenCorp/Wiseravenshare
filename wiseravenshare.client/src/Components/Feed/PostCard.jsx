@@ -21,7 +21,8 @@ const PostCard = ({
     onFollow,
     onBookmark,
     bookmarkLabel = 'Bookmark',
-    onCommentCountChange
+    onCommentCountChange,
+    onBlock
 }) => {
     const [showComments, setShowComments] = useState(false);
     const [commentText, setCommentText] = useState('');
@@ -403,6 +404,30 @@ const PostCard = ({
                         onClick={() => onFollow?.(post.userId)}
                     >
                         {isFollowing ? '✓ Following' : '+ Follow'}
+                    </button>
+                )}
+
+                {onBlock && post.userId && post.userId !== currentUser?.id && (
+                    <button
+                        title="Block this user — removes their posts from your timeline"
+                        style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: '0.72rem',
+                            color: '#6b7280',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            marginLeft: '4px'
+                        }}
+                        onClick={() => {
+                            const handle = displayUser?.handle || displayUser?.name || 'this user';
+                            if (window.confirm(`Block ${handle}? Their posts will no longer appear in your timeline. You can unblock at any time.`)) {
+                                onBlock(post.userId);
+                            }
+                        }}
+                    >
+                        🚫
                     </button>
                 )}
             </div>

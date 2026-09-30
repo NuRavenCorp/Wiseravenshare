@@ -1,6 +1,9 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.Currency;
@@ -17,14 +20,16 @@ public sealed class UsersController : ControllerBase
     private readonly IWiseCoinService _wiseCoinService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<UsersController> _logger;
+    private readonly AppDbContext _dbContext;
 
-    public UsersController(IConfiguration configuration, UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger)
+    public UsersController(IConfiguration configuration, UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger, AppDbContext dbContext)
     {
         _configuration = configuration;
         _userStore = userStore;
         _growthService = growthService;
         _wiseCoinService = wiseCoinService;
         _logger = logger;
+        _dbContext = dbContext;
     }
 
     [HttpGet("{id}")]
@@ -301,5 +306,70 @@ public sealed class UsersController : ControllerBase
             || !string.IsNullOrWhiteSpace(connection.Username)
             || !string.IsNullOrWhiteSpace(connection.ProfileUrl)
             || !string.IsNullOrWhiteSpace(connection.FeedUrl);
+    }
+
+    // ── Block / Unblock endpoints ──────────────────────────────────────────────
+
+    /// <summary>POST /api/users/{id}/block — Block a user. Idempotent.</summary>
+    [HttpPost("{id}/block")]
+    public async Task<IActionResult> BlockUser(string id, CancellationToken cancellationToken)
+    {
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(currentUserId) || !Guid.TryParse(currentUserId, out var blockerId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        if (!Guid.TryParse(id, out var blockedId) || blockedId == blockerId)
+            return BadRequest(new { message = "Invalid target user." });
+
+        var exists = await _dbContext.UserBlocks
+            .AnyAsync(b => b.BlockerId == blockerId && b.BlockedId == blockedId && !b.IsDeleted, cancellationToken);
+        if (!exists)
+        {
+            _dbContext.UserBlocks.Add(new UserBlock { BlockerId = blockerId, BlockedId = blockedId });
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return Ok(new { blocked = true, userId = id });
+    }
+
+    /// <summary>DELETE /api/users/{id}/block — Unblock a user.</summary>
+    [HttpDelete("{id}/block")]
+    public async Task<IActionResult> UnblockUser(string id, CancellationToken cancellationToken)
+    {
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(currentUserId) || !Guid.TryParse(currentUserId, out var blockerId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        if (!Guid.TryParse(id, out var blockedId))
+            return BadRequest(new { message = "Invalid target user." });
+
+        var block = await _dbContext.UserBlocks
+            .FirstOrDefaultAsync(b => b.BlockerId == blockerId && b.BlockedId == blockedId && !b.IsDeleted, cancellationToken);
+
+        if (block is not null)
+        {
+            block.IsDeleted = true;
+            block.DeletedAt = DateTime.UtcNow;
+            block.UpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return Ok(new { blocked = false, userId = id });
+    }
+
+    /// <summary>GET /api/users/me/blocks — List users blocked by the current user.</summary>
+    [HttpGet("me/blocks")]
+    public async Task<IActionResult> GetMyBlocks(CancellationToken cancellationToken)
+    {
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(currentUserId) || !Guid.TryParse(currentUserId, out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        var blocks = await _dbContext.UserBlocks
+            .Where(b => b.BlockerId == userId && !b.IsDeleted)
+            .Select(b => new { userId = b.BlockedId.ToString(), blockedAt = b.CreatedAt })
+            .ToListAsync(cancellationToken);
+
+        return Ok(blocks);
     }
 }

@@ -84,6 +84,11 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     const currentUser = user || { id: 'user1', name: 'Alex Raven', handle: '@alexraven', avatar: 'AR' };
     const localRegion = String(user?.location || '').trim();
 
+    // Persistent block list — seeded from server on mount, kept in sync with SocialGraph localStorage
+    const [blockedUserIds, setBlockedUserIds] = useState(
+        () => new Set(socialGraphService.getBlockedIds(currentUser.id))
+    );
+
     const normalizePost = (post) => normalizeFeedPost(post, currentUser);
     const normalizeLocation = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
     const isLocalPost = (post) => {
@@ -206,7 +211,20 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
             }
         };
 
+        const loadBlocks = async () => {
+            try {
+                const res = await apiService.getMyBlocks();
+                const serverBlocks = Array.isArray(res?.data) ? res.data : [];
+                socialGraphService.seedBlocksFromServer(currentUser.id, serverBlocks);
+            } catch {
+                // Fall back to cached block list already loaded in state initialiser.
+            } finally {
+                setBlockedUserIds(new Set(socialGraphService.getBlockedIds(currentUser.id)));
+            }
+        };
+
         loadFeed();
+        loadBlocks();
 
         socialGraphService.registerUserProfile(currentUser);
         samplePosts.forEach((post) => socialGraphService.registerUserProfile(post.user));
@@ -219,6 +237,22 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
         setFollowing(socialGraphService.getFollowingIds(currentUser.id));
     }, [currentUser.id]);
+
+    const handleBlockUser = async (targetUserId) => {
+        if (!targetUserId || targetUserId === currentUser.id) return;
+        try {
+            await apiService.blockUser(targetUserId);
+            socialGraphService.blockUser(currentUser.id, targetUserId);
+            setBlockedUserIds(new Set(socialGraphService.getBlockedIds(currentUser.id)));
+            // Remove blocked user's posts from the in-memory feed immediately
+            setPosts(prev => prev.filter(p => {
+                const authorId = String(p.userId || p.user?.id || '');
+                return authorId !== String(targetUserId);
+            }));
+        } catch (err) {
+            console.error('Block failed:', err);
+        }
+    };
 
     useEffect(() => {
         writeStoredFeedPosts(posts);
@@ -589,7 +623,13 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
     ];
 
     const rankedFeedPosts = useMemo(() => {
-        const ranked = rankCommunityFirstPosts(posts, {
+        // Filter out posts from blocked users before ranking
+        const visiblePosts = posts.filter(p => {
+            const authorId = String(p.userId || p.user?.id || '');
+            return !authorId || !blockedUserIds.has(authorId);
+        });
+
+        const ranked = rankCommunityFirstPosts(visiblePosts, {
             horizonHours: 18,
             userLocation: localRegion
         });
@@ -610,7 +650,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
 
             return (right.communityFirstScore || 0) - (left.communityFirstScore || 0);
         });
-    }, [posts, feedScope, localRegion]);
+    }, [posts, blockedUserIds, feedScope, localRegion]);
 
 
     useEffect(() => {
@@ -751,6 +791,7 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         onBookmark={handleBookmark}
                         bookmarkLabel={post.isBookmarked ? 'Bookmarked' : 'Bookmark'}
                         onCommentCountChange={handleCommentCountChange}
+                        onBlock={handleBlockUser}
                     />
                 ))}
             </div>

@@ -2,6 +2,7 @@ const GRAPH_KEY = 'wiseSocialGraph';
 const PROFILE_KEY = 'wiseUserProfiles';
 const FOLLOW_EVENTS_KEY = 'wiseFollowEvents';
 const USER_ALIASES_KEY = 'wiseUserAliases';
+const BLOCKED_KEY = 'wiseBlockedUsers';
 
 const defaultGraph = { users: {} };
 
@@ -30,6 +31,8 @@ const loadFollowEvents = () => readJson(FOLLOW_EVENTS_KEY, []);
 const saveFollowEvents = (events) => writeJson(FOLLOW_EVENTS_KEY, events);
 const loadUserAliases = () => readJson(USER_ALIASES_KEY, {});
 const saveUserAliases = (aliases) => writeJson(USER_ALIASES_KEY, aliases);
+const loadBlocked = () => readJson(BLOCKED_KEY, {});
+const saveBlocked = (blocked) => writeJson(BLOCKED_KEY, blocked);
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -515,5 +518,57 @@ export const socialGraphService = {
             },
             isReciprocal
         };
+    },
+
+    // ── Block layer ────────────────────────────────────────────────────────────
+
+    blockUser(currentUserId, targetUserId) {
+        if (!currentUserId || !targetUserId || currentUserId === targetUserId) return false;
+        const blocked = loadBlocked();
+        if (!blocked[currentUserId]) blocked[currentUserId] = [];
+        if (!blocked[currentUserId].includes(targetUserId)) {
+            blocked[currentUserId].push(targetUserId);
+        }
+        saveBlocked(blocked);
+        emitSocialUpdate();
+        return true;
+    },
+
+    unblockUser(currentUserId, targetUserId) {
+        if (!currentUserId || !targetUserId) return false;
+        const blocked = loadBlocked();
+        if (blocked[currentUserId]) {
+            blocked[currentUserId] = blocked[currentUserId].filter(id => id !== targetUserId);
+        }
+        saveBlocked(blocked);
+        emitSocialUpdate();
+        return true;
+    },
+
+    isBlocked(currentUserId, targetUserId) {
+        if (!currentUserId || !targetUserId) return false;
+        const blocked = loadBlocked();
+        return Array.isArray(blocked[currentUserId]) && blocked[currentUserId].includes(targetUserId);
+    },
+
+    getBlockedIds(userId) {
+        if (!userId) return [];
+        const blocked = loadBlocked();
+        return Array.isArray(blocked[userId]) ? [...blocked[userId]] : [];
+    },
+
+    /** Seed the local block cache from server-persisted data on login / refresh. */
+    seedBlocksFromServer(currentUserId, serverBlocks = []) {
+        if (!currentUserId || !Array.isArray(serverBlocks)) return;
+        const blocked = loadBlocked();
+        blocked[currentUserId] = [
+            ...new Set(
+                serverBlocks
+                    .map(b => String(b.userId || b.BlockedId || b.blockedId || b).trim())
+                    .filter(Boolean)
+            )
+        ];
+        saveBlocked(blocked);
+        emitSocialUpdate();
     }
 };

@@ -13,24 +13,83 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
         public async Task<IEnumerable<Post>> GetFeedAsync(Guid userId, int page, int pageSize)
         {
-            // Get posts from followed users and the user's own posts
+            // 1. Users this viewer follows
             var followingIds = await _context.UserFollows
                 .Where(f => f.FollowerId == userId)
                 .Select(f => f.FollowingId)
                 .ToListAsync();
 
-            followingIds.Add(userId);
+            // 2. Authors whose posts the viewer has liked (partial source — up to 10)
+            var likedAuthorIds = await _context.PostLikes
+                .Where(l => l.UserId == userId)
+                .Join(_context.Posts, l => l.PostId, p => p.Id, (l, p) => p.UserId)
+                .Distinct()
+                .Take(10)
+                .ToListAsync();
 
-            return await _dbSet
-                .Where(p => !p.IsDeleted && followingIds.Contains(p.UserId))
+            // 3. Block list (both directions — hide blocked users' content AND content from users who blocked the viewer)
+            var blockedIds = await _context.UserBlocks
+                .Where(b => !b.IsDeleted && (b.BlockerId == userId || b.BlockedId == userId))
+                .Select(b => b.BlockerId == userId ? b.BlockedId : b.BlockerId)
+                .Distinct()
+                .ToListAsync();
+            var blockedSet = new HashSet<Guid>(blockedIds);
+
+            // 4. Build the inclusive set: own posts + followed + partial liked-author (if not blocked)
+            var primaryIds = new HashSet<Guid>(followingIds) { userId };
+            var partialIds = likedAuthorIds
+                .Where(id => !primaryIds.Contains(id) && !blockedSet.Contains(id))
+                .ToHashSet();
+
+            // Remove any primary source that is blocked
+            primaryIds.ExceptWith(blockedSet);
+
+            // Combined allowed authors
+            var allAllowedIds = primaryIds.Concat(partialIds).ToHashSet();
+
+            if (allAllowedIds.Count == 0)
+            {
+                return Enumerable.Empty<Post>();
+            }
+
+            // 5. For partial (liked-author) sources, limit to 2 posts each to avoid domination
+            var primaryPosts = await _dbSet
+                .Where(p => !p.IsDeleted && primaryIds.Contains(p.UserId))
                 .OrderByDescending(p => p.CreatedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
+                .Take(pageSize * page)
                 .Include(p => p.User)
                 .Include(p => p.ReplyTo)
                 .Include(p => p.RepostOf)
                 .Include(p => p.QuoteOf)
                 .ToListAsync();
+
+            IEnumerable<Post> partialPosts = Enumerable.Empty<Post>();
+            if (partialIds.Count > 0)
+            {
+                // Fetch up to 2 recent posts per liked author, total capped
+                partialPosts = await _dbSet
+                    .Where(p => !p.IsDeleted && partialIds.Contains(p.UserId))
+                    .OrderByDescending(p => p.CreatedAt)
+                    .Take(partialIds.Count * 2)
+                    .Include(p => p.User)
+                    .Include(p => p.ReplyTo)
+                    .Include(p => p.RepostOf)
+                    .Include(p => p.QuoteOf)
+                    .ToListAsync();
+
+                // Enforce max 2 per author
+                partialPosts = partialPosts
+                    .GroupBy(p => p.UserId)
+                    .SelectMany(g => g.Take(2));
+            }
+
+            // Merge, sort, paginate
+            return primaryPosts
+                .Concat(partialPosts)
+                .DistinctBy(p => p.Id)
+                .OrderByDescending(p => p.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize);
         }
 
         public async Task<IEnumerable<Post>> GetUserPostsAsync(Guid userId, int page, int pageSize)
