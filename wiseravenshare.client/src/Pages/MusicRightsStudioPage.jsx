@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
+import { getAuthToken } from '../Services/authStorage.js';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
 import '../Styles/MusicRightsStudio.css';
 
@@ -120,7 +121,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const regFileInputRef = useRef(null);
 
   const openRegisterModal = () => {
-    const token = localStorage.getItem('authToken');
+    const token = getAuthToken();
     if (!token || !currentUser) {
       addToast('Please sign in to register a track.', 'warning');
       return;
@@ -293,7 +294,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
 
     setRegistering(true);
     try {
-      const token = localStorage.getItem('authToken');
+      const token = getAuthToken();
       const payload = {
         title:                 regForm.title.trim(),
         artistName:            regForm.artistName.trim(),
@@ -575,7 +576,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   useEffect(() => {
     (async () => {
       try {
-        const token = localStorage.getItem('authToken');
+        const token = getAuthToken();
         if (token) {
           const res = await fetch('/api/ravensight/media/music', {
             headers: { Authorization: `Bearer ${token}` },
@@ -642,7 +643,7 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
       formData.append('destinationFolder', '/wiseravenshare/ravensight/music');
       if (fp) formData.append('fingerprint', fp);
 
-      const token = localStorage.getItem('authToken');
+      const token = getAuthToken();
       const res   = await fetch('/api/ravensight/media/music/save', {
         method:  'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},

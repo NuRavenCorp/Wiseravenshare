@@ -367,6 +367,19 @@ static_sites:
         value: prod_VC3yeDSQcWcgqG
       - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_PROD_ID
         value: prod_VC3zXy445DbV0w
+      # Music Rights Studio — per-interval price IDs for Stripe Checkout
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_PRICE_ID
+        value: price_1UCkLJK4zW843WGuKn0VtxJ0
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_PRICE_ID
+        value: price_1UCkLJK4zW843WGux4J1PhCh
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_PRICE_ID
+        value: price_1UCkLKK4zW843WGuk9vBYhXG
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_PRICE_ID
+        value: price_1UCkLLK4zW843WGuYW2pR70O
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_PRICE_ID
+        value: price_1UCkLMK4zW843WGuq7Oygrot
+      - key: VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_PRICE_ID
+        value: price_1UCkLMK4zW843WGudLWAplR5
       - key: VITE_ADMIN_EMAILS
         value: admin@wiseravenshare.com,gaius@wiseravenshare.com,arnoldspence@wiseravenshare.com
       # Podcast Pro Stripe price IDs — replace with real price_XXXX from Stripe Dashboard
