@@ -125,6 +125,14 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
             .ToListAsync();
     }
 
+    public Task<int> CountUserMediaByTypeAsync(Guid userId, MediaType mediaType)
+    {
+        return _dbSet
+            .AsNoTracking()
+            .Where(x => x.UserId == userId && x.MediaType == mediaType && !x.IsDeleted && x.Status != MediaStatus.Deleted)
+            .CountAsync();
+    }
+
     public async Task LikeAsync(Guid mediaId, Guid userId)
     {
         var existing = await _context.MediaLikes.FirstOrDefaultAsync(x => x.MediaId == mediaId && x.UserId == userId);

@@ -225,8 +225,8 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const LIBRARY_LIMITS = {
     music: 30,
-    photo: 25,
-    video: 10
+    photo: 30,
+    video: 30
 };
 
 const LOCAL_ARCHIVE_STORAGE_KEY = 'wiseLocalMediaArchive';
@@ -550,45 +550,23 @@ const MyLibraryPage = ({ onNavigate }) => {
         addToast('Archive record removed.', 'info');
     };
 
-    const enforceCapacityBeforeUpload = async (incomingType) => {
+    const enforceCapacityBeforeUpload = (incomingType) => {
         const mediaType = String(incomingType || '').toLowerCase();
-        const visibleCounts = {
-            music: musicTracks.filter((item) => !hiddenArchivedIds.music.includes(String(item?.id || ''))).length,
-            photo: photos.filter((item) => !hiddenArchivedIds.photo.includes(String(item?.id || ''))).length,
-            video: videos.filter((item) => !hiddenArchivedIds.video.includes(String(item?.id || ''))).length
+        const counts = {
+            music: musicTracks.length,
+            photo: photos.length,
+            video: videos.length
         };
-        const currentCount = visibleCounts[mediaType] || 0;
-        const limit = LIBRARY_LIMITS[mediaType] || 0;
-        if (limit <= 0 || currentCount < limit) {
-            return true;
-        }
-
-        const items = mediaType === 'music'
-            ? musicTracks.filter((item) => !hiddenArchivedIds.music.includes(String(item?.id || '')))
-            : mediaType === 'photo'
-                ? photos.filter((item) => !hiddenArchivedIds.photo.includes(String(item?.id || '')))
-                : videos.filter((item) => !hiddenArchivedIds.video.includes(String(item?.id || '')));
-
-        const oldest = [...items].sort((left, right) => getMediaDateValue(left) - getMediaDateValue(right))[0];
-        if (!oldest) {
+        const currentCount = counts[mediaType] ?? 0;
+        const limit = LIBRARY_LIMITS[mediaType] ?? 0;
+        if (limit > 0 && currentCount >= limit) {
+            addToast(
+                `${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)} library is full (${limit} items). Delete items to free space before uploading more.`,
+                'error'
+            );
             return false;
         }
-
-        const action = String(window.prompt(
-            `${mediaType.toUpperCase()} library limit reached (${limit}). Type ARCHIVE to move oldest item to local storage folder, DELETE to remove oldest item, or CANCEL to stop upload.`,
-            'ARCHIVE'
-        ) || '').trim().toLowerCase();
-
-        if (action === 'archive') {
-            return archiveMediaItem(oldest);
-        }
-
-        if (action === 'delete') {
-            return await removeMediaItem(oldest, { skipConfirm: true, suppressToast: false });
-        }
-
-        addToast('Upload canceled. No files were changed.', 'info');
-        return false;
+        return true;
     };
 
     const loadLibrary = async () => {
@@ -656,7 +634,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         const description = String(uploadDescription || '').trim();
         const resolvedUploadType = inferUploadTypeFromFile(uploadFile, uploadType);
         const type = resolvedUploadType === 'music' ? 'audio' : resolvedUploadType;
-        const canProceed = await enforceCapacityBeforeUpload(resolvedUploadType);
+        const canProceed = enforceCapacityBeforeUpload(resolvedUploadType);
         if (!canProceed) {
             return;
         }
