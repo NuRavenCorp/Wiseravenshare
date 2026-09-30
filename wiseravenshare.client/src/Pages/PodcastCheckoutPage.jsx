@@ -29,9 +29,9 @@ const redirectToPaymentLink = (planId, cycle) => {
   return true;
 };
 
-const PodcastCheckoutPage = () => {
+const PodcastCheckoutPage = ({ onNavigate, initialPlan }) => {
   const [billingCycle, setBillingCycle] = useState('monthly');
-  const [selectedPlan, setSelectedPlan] = useState('growth_suite');
+  const [selectedPlan, setSelectedPlan] = useState(initialPlan || 'growth_suite');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [catalog, setCatalog] = useState([]);
@@ -205,6 +205,18 @@ const PodcastCheckoutPage = () => {
     <div className="podcast-checkout-page">
       <div className="checkout-container">
         <div className="checkout-header">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('ravensight')}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--light-color)', fontSize: '13px', padding: '0 0 12px 0',
+                display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.75
+              }}
+            >
+              ← Back to Podcast Studio
+            </button>
+          )}
           <h1>Podcast Studio Plans</h1>
           <p>Choose your tier and start your free trial today — no credit card required</p>
         </div>

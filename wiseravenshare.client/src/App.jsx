@@ -72,7 +72,7 @@ const parseAdminEmails = () => {
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean);
 
-    return new Set(['admin@wise-ravens.com', ...fromEnv]);
+    return ['admin@wise-ravens.com', ...fromEnv];
 };
 
 const hasPrivilegedAggregatorRole = (user) => {
@@ -160,7 +160,7 @@ const App = () => {
     const communiqueEnabled = String(import.meta.env.VITE_ENABLE_RAVEN_COMMUNIQUE || '').trim().toLowerCase() === 'true';
     const isAdminUser = useMemo(() => {
         const email = String(user?.email || '').trim().toLowerCase();
-        return email.length > 0 && adminEmails.has(email);
+        return email.length > 0 && adminEmails.includes(email);
     }, [adminEmails, user?.email]);
     const canAccessPlatformAggregator = useMemo(() => {
         return Boolean(user);
@@ -627,7 +627,7 @@ const App = () => {
             case 'podcast-rights-studio':
                 return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'podcast-checkout':
-                return <PodcastCheckoutPage />;
+                return <PodcastCheckoutPage onNavigate={setCurrentPage} />;
             case 'podcast-audio-processor':
                 return <PodcastAudioProcessor />;
             case 'karaoke':
