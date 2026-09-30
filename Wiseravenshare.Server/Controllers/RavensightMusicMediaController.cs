@@ -283,7 +283,23 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
+        // Enforce 30-song free-tier cap. Future: bypass for users with an active music creator plan.
+        const int MusicUploadLimit = 30;
+        var existingTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        if (existingTracks.Count >= MusicUploadLimit)
+        {
+            return StatusCode(StatusCodes.Status409Conflict, new
+            {
+                message = $"Your Wise-tracks library has reached the {MusicUploadLimit}-song limit. Delete a track to free space, or upgrade to a Music Creator Plan for unlimited storage.",
+                limit = MusicUploadLimit,
+                current = existingTracks.Count
+            });
+        }
+
         var userStorageIdentity = ResolveUserStorageIdentity(userId);
+        // Always route music uploads into the user-specific folder regardless of what the client sent.
+        var userMusicFolder = $"users/{userStorageIdentity}/media/music";
+        dto.DestinationFolder = userMusicFolder;
 
         var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, userStorageIdentity, cancellationToken);
         var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)
@@ -299,10 +315,10 @@ public sealed class RavensightMusicMediaController : ControllerBase
                 UserId = userId,
                 MediaType = RavensightMediaType.Music,
                 FileName = track.FileName,
-                RelativePath = track.FileName,
+                RelativePath = $"{userMusicFolder}/{track.FileName}",
                 PublicUrl = mediaUrl.StartsWith("/", StringComparison.Ordinal) ? null : mediaUrl,
                 AbsolutePath = string.Empty,
-                DestinationFolder = dto.DestinationFolder ?? string.Empty,
+                DestinationFolder = userMusicFolder,
                 ContentType = dto.File.ContentType,
                 SizeBytes = track.SizeBytes,
                 SavedAtUtc = savedAtUtc,
@@ -331,8 +347,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
             file = new RavensightSavedMediaDto
             {
                 FileName = track.FileName,
-                RelativePath = string.Empty,
-                DestinationFolder = dto.DestinationFolder ?? string.Empty,
+                RelativePath = $"{userMusicFolder}/{track.FileName}",
+                DestinationFolder = userMusicFolder,
                 ContentType = dto.File.ContentType,
                 SizeBytes = track.SizeBytes,
                 SavedAtUtc = savedAtUtc,
