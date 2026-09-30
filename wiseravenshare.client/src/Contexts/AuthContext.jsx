@@ -116,11 +116,14 @@ export const AuthProvider = ({ children }) => {
         try {
             let token = authService.getToken();
             if (!token) {
-                try {
-                    const refreshed = await authService.refreshSession();
-                    token = refreshed?.token || authService.getToken();
-                } catch {
-                    token = '';
+                const refreshToken = authService.getRefreshToken();
+                if (refreshToken) {
+                    try {
+                        const refreshed = await authService.refreshSession();
+                        token = refreshed?.token || authService.getToken();
+                    } catch {
+                        token = '';
+                    }
                 }
             }
 
