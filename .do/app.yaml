@@ -332,16 +332,14 @@ services:
         value: ${TWILIO_CONVERSATIONS_SERVICE_SID}
         type: SECRET
       # ── Audio processing microservice ──────────────────────────────────────
-      # Set AudioService__BaseUrl to the internal URL of your Python audio-processor
-      # service (e.g. a DO App Platform worker). Falls back to localhost:8001.
+      # Leave blank until the Python services are deployed. ASP.NET Core falls
+      # back to http://localhost:8001 / http://localhost:8002 (appsettings.json).
+      # Once deployed, set AUDIO_SERVICE_BASE_URL and KARAOKE_SERVICE_BASE_URL
+      # as DO App secrets and add type: SECRET here.
       - key: AudioService__BaseUrl
-        value: ${AUDIO_SERVICE_BASE_URL}
-        type: SECRET
-      # ── Karaoke engine microservice ─────────────────────────────────────────
-      # Set KaraokeService__BaseUrl to the internal URL of your Python karaoke-engine.
+        value: ""
       - key: KaraokeService__BaseUrl
-        value: ${KARAOKE_SERVICE_BASE_URL}
-        type: SECRET
+        value: ""
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
