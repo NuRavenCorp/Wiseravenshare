@@ -3,12 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using WiseRavenShare.Server.Application.Services.Assistant;
 using WiseRavenShare.Server.Entities.Assistant;
 using WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant;
+using Wiseravenshare.Server.Filters;
 
 namespace WiseRavenShare.Server.API.Controllers.Assistant;
 
 [ApiController]
 [Route("api/assistant")]
 [Authorize]
+[AiAssistantGate]
 public class AssistantController : ControllerBase
 {
     private readonly IAssistantOrchestrator _orchestrator;

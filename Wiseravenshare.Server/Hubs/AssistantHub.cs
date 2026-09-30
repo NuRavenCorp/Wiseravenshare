@@ -10,22 +10,43 @@ public class AssistantHub : Hub
     private readonly IAssistantOrchestrator _orchestrator;
     private readonly ISpeechToTextService _stt;
     private readonly ITextToSpeechService _tts;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AssistantHub> _logger;
 
     public AssistantHub(
         IAssistantOrchestrator orchestrator,
         ISpeechToTextService stt,
         ITextToSpeechService tts,
+        IConfiguration configuration,
         ILogger<AssistantHub> logger)
     {
         _orchestrator = orchestrator;
         _stt = stt;
         _tts = tts;
+        _configuration = configuration;
         _logger = logger;
+    }
+
+    public override async Task OnConnectedAsync()
+    {
+        if (_configuration.GetValue<bool>("Features:AiAssistantGated"))
+        {
+            await Clients.Caller.SendAsync("error", "The AI Assistant is temporarily unavailable. Please check back later.");
+            Context.Abort();
+            return;
+        }
+
+        await base.OnConnectedAsync();
     }
 
     public async Task SendText(Guid conversationId, string text, bool voiceReply, CancellationToken ct = default)
     {
+        if (_configuration.GetValue<bool>("Features:AiAssistantGated"))
+        {
+            await Clients.Caller.SendAsync("error", "The AI Assistant is temporarily unavailable.");
+            return;
+        }
+
         try
         {
             var userId = Context.User!.GetUserId();
@@ -61,6 +82,12 @@ public class AssistantHub : Hub
 
     public async Task SendAudio(Guid conversationId, string base64Audio, string mimeType, CancellationToken ct = default)
     {
+        if (_configuration.GetValue<bool>("Features:AiAssistantGated"))
+        {
+            await Clients.Caller.SendAsync("error", "The AI Assistant is temporarily unavailable.");
+            return;
+        }
+
         try
         {
             using var ms = new MemoryStream(Convert.FromBase64String(base64Audio));

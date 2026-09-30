@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Wiseravenshare.Server.Filters;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.AiAssistant;
@@ -16,6 +17,7 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Produces("application/json")]
+[AiAssistantGate]
 public class AiAssistantController : ControllerBase
 {
     private readonly IOllamaChatService _defaultChatService;
