@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload, FiTrash2, FiX } from 'react-icons/fi';
+import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload, FiTrash2, FiX, FiCloud } from 'react-icons/fi';
 import { resolveMediaUrl } from '../utils/mediaUtils';
+import MediaLibrary from '../Components/MediaLibrary/MediaLibrary';
 
 // ─── IP Protection Plans ──────────────────────────────────────────────────────
 const PROTECTION_PLANS = [
@@ -1047,12 +1048,30 @@ const MyLibraryPage = ({ onNavigate }) => {
                     <FiShield style={{ marginRight: '6px', display: 'inline' }} />
                     Protect
                 </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('saved')}
+                    style={{
+                        border: activeTab === 'saved' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
+                        background: activeTab === 'saved' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
+                        color: 'var(--text-color)',
+                        borderRadius: '999px',
+                        padding: '8px 14px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                    }}
+                >
+                    <FiCloud style={{ marginRight: '6px', display: 'inline' }} />
+                    Saved Media
+                </button>
             </div>
 
-            {isLoading ? (
+            {isLoading && activeTab !== 'saved' ? (
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px', background: 'var(--card-bg)' }}>
                     Loading your library...
                 </div>
+            ) : activeTab === 'saved' ? (
+                <MediaLibrary />
             ) : (
                 <>
                     {/* All Media View */}
