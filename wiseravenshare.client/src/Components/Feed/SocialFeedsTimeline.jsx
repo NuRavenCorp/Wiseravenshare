@@ -24,10 +24,12 @@ const OAUTH_EXTRA_STEP_HINTS = {
 };
 
 const parseAdminEmails = () => {
-    return String(import.meta.env.VITE_ADMIN_EMAILS || '')
+    const fromEnv = String(import.meta.env.VITE_ADMIN_EMAILS || '')
         .split(',')
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean);
+
+    return new Set(['admin@wise-ravens.com', ...fromEnv]);
 };
 
 const CURATED_TEMPLATES = [
