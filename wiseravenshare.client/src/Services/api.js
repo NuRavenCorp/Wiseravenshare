@@ -1247,7 +1247,7 @@ export const apiService = {
     // Media endpoints
     uploadMedia: async (file, type, options = {}) => {
         const formData = new FormData();
-        formData.append('file', file);
+        // Use 'File' (capital F) to match the server DTO property name exactly.
         formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Uploaded media');
         formData.append('description', options.description || 'Uploaded from Wise-Raven');
@@ -1303,7 +1303,7 @@ export const apiService = {
     },
     uploadMusicTrack: async (file, options = {}) => {
         const formData = new FormData();
-        formData.append('file', file);
+        // Use 'File' (capital F) to match SaveRavensightMusicDto.File exactly.
         formData.append('File', file);
         formData.append('title', options.title || file?.name || 'Untitled track');
         formData.append('artist', options.artist || '');
