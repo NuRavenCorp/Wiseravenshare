@@ -81,12 +81,15 @@ public class SubscriptionService : ISubscriptionService
     // Maps plan keys to their env variable names (monthly + annual) for price ID lookup
     private static readonly (string PlanKey, string[] EnvKeys)[] PlanPriceEnvMap =
     [
-        ("podcast_pro",   ["STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID",   "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"]),
-        ("studio_plus",   ["STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID",   "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID"]),
-        ("growth_suite",  ["STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID",  "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID"]),
-        ("copy_pro",      ["STRIPE_PRICE_COPY_PRO_MONTHLY_ID",      "STRIPE_PRICE_COPY_PRO_ANNUAL_ID"]),
-        ("copy_standard", ["STRIPE_PRICE_COPY_STANDARD_MONTHLY_ID", "STRIPE_PRICE_COPY_STANDARD_ANNUAL_ID"]),
-        ("creator_pro",   ["STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID",   "STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID"]),
+        ("podcast_pro",      ["STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID",                    "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"]),
+        ("studio_plus",      ["STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID",                    "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID"]),
+        ("growth_suite",     ["STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID",                   "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID"]),
+        ("copy_pro",         ["STRIPE_PRICE_COPY_PRO_MONTHLY_ID",                       "STRIPE_PRICE_COPY_PRO_ANNUAL_ID"]),
+        ("copy_standard",    ["STRIPE_PRICE_COPY_STANDARD_MONTHLY_ID",                  "STRIPE_PRICE_COPY_STANDARD_ANNUAL_ID"]),
+        ("creator_pro",      ["STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID",                    "STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID"]),
+        ("rights_basic",     ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_ID",      "STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_ID"]),
+        ("rights_standard",  ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_ID",   "STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_ID"]),
+        ("rights_pro",       ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_ID",        "STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_ID"]),
     ];
 
     public SubscriptionService(
@@ -191,9 +194,12 @@ public class SubscriptionService : ISubscriptionService
     {
         return NormalizePlan(plan) switch
         {
-            "growth_suite" => 14,
-            "studio_plus" => 7,
-            "podcast_pro" => 30,
+            "growth_suite"   => 14,
+            "studio_plus"    => 7,
+            "podcast_pro"    => 30,
+            "rights_basic"   => 14,
+            "rights_standard" => 7,
+            "rights_pro"     => 30,
             _ => 0
         };
     }
@@ -677,6 +683,9 @@ public class SubscriptionService : ISubscriptionService
         if (lower.Contains("copy_pro") || lower.Contains("copy-pro")) return "copy_pro";
         if (lower.Contains("copy_standard") || lower.Contains("copy-standard")) return "copy_standard";
         if (lower.Contains("creator_pro") || lower.Contains("creator-pro")) return "creator_pro";
+        if (lower.Contains("rights_pro") || lower.Contains("rights-pro")) return "rights_pro";
+        if (lower.Contains("rights_standard") || lower.Contains("rights-standard")) return "rights_standard";
+        if (lower.Contains("rights_basic") || lower.Contains("rights-basic")) return "rights_basic";
 
         return string.Empty;
     }
@@ -754,6 +763,52 @@ public class SubscriptionService : ISubscriptionService
                 "monthly-strategy-calls",
                 "custom-episode-templates",
                 "advanced-analytics-export"
+            },
+
+            // ── Music Rights / IP Protection plans ──────────────────────────────────
+            // Basic: Timestamped proof, SHA-256 fingerprint, DMCA template, certificate
+            ["rights_basic"] = new[]
+            {
+                "music-rights-registration",
+                "sha256-fingerprint",
+                "timestamped-proof-of-creation",
+                "dmca-takedown-template",
+                "proof-of-creation-certificate"
+            },
+
+            // Standard: Everything in Basic + infringement monitoring + licensing templates
+            ["rights_standard"] = new[]
+            {
+                "music-rights-registration",
+                "sha256-fingerprint",
+                "timestamped-proof-of-creation",
+                "dmca-takedown-template",
+                "proof-of-creation-certificate",
+                "cross-platform-infringement-monitoring",
+                "automated-takedown-filing",
+                "sync-mechanical-licensing-templates",
+                "revenue-split-tracking",
+                "streaming-royalty-registration"
+            },
+
+            // Pro: Everything in Standard + priority support + advanced registrations
+            ["rights_pro"] = new[]
+            {
+                "music-rights-registration",
+                "sha256-fingerprint",
+                "timestamped-proof-of-creation",
+                "dmca-takedown-template",
+                "proof-of-creation-certificate",
+                "cross-platform-infringement-monitoring",
+                "automated-takedown-filing",
+                "sync-mechanical-licensing-templates",
+                "revenue-split-tracking",
+                "streaming-royalty-registration",
+                "rights-pro-bundle",
+                "priority-ip-support",
+                "legal-consultation-credit",
+                "global-rights-database-registration",
+                "blockchain-timestamp-verification"
             }
         };
 
