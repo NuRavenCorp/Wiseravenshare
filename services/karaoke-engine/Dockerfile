@@ -21,4 +21,4 @@ COPY services/karaoke-engine/main.py ./
 
 EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:8002", "--timeout", "900", "--graceful-timeout", "120", "main:app"]

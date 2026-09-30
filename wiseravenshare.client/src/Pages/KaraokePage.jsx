@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import KaraokeScorer from '../Components/Karaoke/KaraokeScorer';
+import { getAuthToken } from '../Services/authStorage.js';
 import './KaraokePage.css';
 
 /* ─── pitch detection ──────────────────────────────────────────────────────── */
@@ -83,15 +84,20 @@ export default function KaraokePage() {
     // tab: catalogue | upload | sing
     const [tab, setTab] = useState('catalogue');
     const [catalogue, setCatalogue] = useState(DEMO_SONGS);
+    const [catalogueLoading, setCatalogueLoading] = useState(true);
     const [selectedSong, setSelectedSong] = useState(null);
     const [backingUrl, setBackingUrl] = useState(null);
     const [backingStatus, setBackingStatus] = useState('idle'); // idle|generating|ready|error
     const [backingMessage, setBackingMessage] = useState('');
+    const [backingJobId, setBackingJobId] = useState('');
+    const [purchasingSongId, setPurchasingSongId] = useState('');
 
     // upload
     const [uploadFile, setUploadFile] = useState(null);
     const [uploadStatus, setUploadStatus] = useState('idle');
     const uploadRef = useRef(null);
+    const [workspaceInfo, setWorkspaceInfo] = useState(null);
+    const [libraryTracks, setLibraryTracks] = useState([]);
 
     // singing / mic
     const [singing, setSinging] = useState(false);
@@ -107,33 +113,150 @@ export default function KaraokePage() {
     const [health, setHealth] = useState(null);
     const [showKaraokeScorer, setShowKaraokeScorer] = useState(false);
     const [referenceLyrics, setReferenceLyrics] = useState(DEFAULT_REFERENCE_LYRICS);
+    const jobPollTimeoutRef = useRef(null);
 
     useEffect(() => {
-        fetch('/api/karaoke/catalogue')
+        const token = getAuthToken();
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+        fetch('/api/karaoke/catalogue', { headers: authHeaders })
             .then(r => r.ok ? r.json() : Promise.resolve(DEMO_SONGS))
-            .then(data => setCatalogue(data.length ? data : DEMO_SONGS))
-            .catch(() => setCatalogue(DEMO_SONGS));
+            .then(data => setCatalogue(Array.isArray(data) && data.length ? data : DEMO_SONGS))
+            .catch(() => setCatalogue(DEMO_SONGS))
+            .finally(() => setCatalogueLoading(false));
 
         fetch('/api/karaoke/health')
             .then(r => r.json())
             .then(d => setHealth(d.upstream))
             .catch(() => setHealth('offline'));
+
+        if (!token) return;
+
+        fetch('/api/karaoke/workspace', { headers: authHeaders })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => setWorkspaceInfo(data))
+            .catch(() => setWorkspaceInfo(null));
+
+        fetch('/api/karaoke/library', { headers: authHeaders })
+            .then(r => r.ok ? r.json() : { tracks: [] })
+            .then(data => setLibraryTracks(Array.isArray(data?.tracks) ? data.tracks : []))
+            .catch(() => setLibraryTracks([]));
     }, []);
 
+    useEffect(() => () => {
+        if (jobPollTimeoutRef.current) {
+            clearTimeout(jobPollTimeoutRef.current);
+            jobPollTimeoutRef.current = null;
+        }
+    }, []);
+
+    const refreshKaraokeState = async () => {
+        const token = getAuthToken();
+        if (!token) return;
+        const headers = { Authorization: `Bearer ${token}` };
+        try {
+            const [catalogueRes, libraryRes] = await Promise.all([
+                fetch('/api/karaoke/catalogue', { headers }),
+                fetch('/api/karaoke/library', { headers }),
+            ]);
+
+            if (catalogueRes.ok) {
+                const data = await catalogueRes.json();
+                if (Array.isArray(data) && data.length) setCatalogue(data);
+            }
+            if (libraryRes.ok) {
+                const data = await libraryRes.json();
+                setLibraryTracks(Array.isArray(data?.tracks) ? data.tracks : []);
+            }
+        } catch {
+            // Keep existing in-memory state on transient failures.
+        }
+    };
+
     /* ── backing track generation ── */
+    const loadGeneratedJobAudio = async (jobId, token) => {
+        const res = await fetch(`/api/karaoke/jobs/${encodeURIComponent(jobId)}/instrumental`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || 'Generated backing track was not available.');
+        }
+
+        const blob = await res.blob();
+        setBackingUrl(URL.createObjectURL(blob));
+        setBackingStatus('ready');
+        setBackingMessage('✅ Backing track ready — switch to Sing tab!');
+        setTab('sing');
+        setBackingJobId('');
+        await refreshKaraokeState();
+    };
+
+    const pollBackingJob = async (jobId, token) => {
+        try {
+            const res = await fetch(`/api/karaoke/jobs/${encodeURIComponent(jobId)}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+
+            if (!res.ok) {
+                if (res.status === 503 || res.status === 404) {
+                    setBackingStatus('error');
+                    setBackingMessage('Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.');
+                    setBackingJobId('');
+                    return;
+                }
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || `Error ${res.status}`);
+            }
+
+            const data = await res.json();
+            const status = data?.status || 'queued';
+            const pollAfterSeconds = Number(data?.pollAfterSeconds || 3);
+
+            if (status === 'completed') {
+                await loadGeneratedJobAudio(jobId, token);
+                return;
+            }
+
+            if (status === 'failed') {
+                setBackingStatus('error');
+                setBackingMessage(`❌ ${data?.error || 'Backing track generation failed.'}`);
+                setBackingJobId('');
+                return;
+            }
+
+            setBackingStatus('generating');
+            setBackingMessage(`⏳ ${status === 'processing' ? 'Separating vocals' : 'Queued for processing'} — job ${jobId.slice(0, 8)}…`);
+            jobPollTimeoutRef.current = setTimeout(() => {
+                pollBackingJob(jobId, token);
+            }, Math.max(2, pollAfterSeconds) * 1000);
+        } catch (err) {
+            setBackingStatus('error');
+            setBackingMessage(`❌ ${err.message}`);
+            setBackingJobId('');
+        }
+    };
+
     const generateBacking = async (file, songTitle = 'Uploaded Song') => {
         setBackingStatus('generating');
-        setBackingMessage(`Separating vocals from "${songTitle}" — this takes 1–3 min on CPU…`);
+        setBackingMessage(`Queueing "${songTitle}" for vocal separation…`);
         setBackingUrl(null);
+        if (jobPollTimeoutRef.current) {
+            clearTimeout(jobPollTimeoutRef.current);
+            jobPollTimeoutRef.current = null;
+        }
 
         const formData = new FormData();
         formData.append('audioFile', file);
+        formData.append('songTitle', songTitle);
 
         try {
+            const token = getAuthToken();
             const res = await fetch('/api/karaoke/generate-backing', {
                 method: 'POST',
                 body: formData,
-                headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
             });
 
             if (res.status === 503 || res.status === 404) {
@@ -147,10 +270,78 @@ export default function KaraokePage() {
                 throw new Error(err.message || `Error ${res.status}`);
             }
 
+            const data = await res.json();
+            if (!data?.jobId) {
+                throw new Error('Karaoke generation job was not created.');
+            }
+
+            setBackingJobId(data.jobId);
+            setBackingMessage(`⏳ Job ${data.jobId.slice(0, 8)} queued — starting separation now…`);
+            await pollBackingJob(data.jobId, token);
+        } catch (err) {
+            setBackingStatus('error');
+            setBackingMessage(`❌ ${err.message}`);
+            setBackingJobId('');
+        }
+    };
+
+    const purchaseSong = async (song) => {
+        if (!song?.id) return;
+        const token = getAuthToken();
+        if (!token) {
+            setBackingStatus('error');
+            setBackingMessage('Please sign in to unlock premium karaoke songs.');
+            return;
+        }
+
+        setPurchasingSongId(song.id);
+        try {
+            const res = await fetch('/api/karaoke/purchase', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ songId: song.id }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err?.message || 'Could not unlock this song.');
+            }
+
+            await refreshKaraokeState();
+            setBackingMessage(`✅ "${song.title}" unlocked and added to your catalogue access.`);
+        } catch (err) {
+            setBackingStatus('error');
+            setBackingMessage(`❌ ${err.message}`);
+        } finally {
+            setPurchasingSongId('');
+        }
+    };
+
+    const loadPersistedBacking = async (track) => {
+        if (!track?.trackId) return;
+        const token = getAuthToken();
+        if (!token) return;
+
+        try {
+            const res = await fetch(`/api/karaoke/library/${encodeURIComponent(track.trackId)}/instrumental`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+                throw new Error('Stored backing track is unavailable right now.');
+            }
+
             const blob = await res.blob();
+            setSelectedSong({
+                id: `library-${track.trackId}`,
+                title: track.title || 'Saved Upload',
+                artist: 'Your Library',
+            });
             setBackingUrl(URL.createObjectURL(blob));
             setBackingStatus('ready');
-            setBackingMessage('✅ Backing track ready — switch to Sing tab!');
+            setBackingMessage('✅ Loaded saved backing track from your karaoke library.');
             setTab('sing');
         } catch (err) {
             setBackingStatus('error');
@@ -265,8 +456,12 @@ export default function KaraokePage() {
             {tab === 'catalogue' && (
                 <div className="karaoke-section">
                     <p className="karaoke-section-desc">
-                        Select a public-domain / community song to sing — no licence required.
+                        Select from a larger song catalogue. Free songs are instantly available.
+                        Premium songs can be unlocked per user and stay unlocked.
                     </p>
+                    {catalogueLoading && (
+                        <p className="karaoke-message">Loading karaoke catalogue…</p>
+                    )}
                     <div className="karaoke-song-list">
                         {catalogue.map(song => (
                             <div
@@ -279,10 +474,28 @@ export default function KaraokePage() {
                                     <strong>{song.title}</strong>
                                     <span>{song.artist}</span>
                                     {song.duration && <span className="karaoke-song-duration">{song.duration}</span>}
+                                    {song.tier === 'premium' && (
+                                        <span style={{ fontSize: '0.78rem', color: song.unlocked ? '#22c55e' : '#f59e0b' }}>
+                                            {song.unlocked ? 'Unlocked' : `Premium · $${Number(song.priceUsd || 0).toFixed(2)}`}
+                                        </span>
+                                    )}
                                 </div>
                                 <div className={`karaoke-song-source karaoke-source-${song.source?.split('-')[0]}`}>
                                     {song.source}
                                 </div>
+                                {song.tier === 'premium' && !song.unlocked && (
+                                    <button
+                                        className="karaoke-btn karaoke-btn-secondary"
+                                        style={{ marginLeft: 'auto' }}
+                                        disabled={purchasingSongId === song.id}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            purchaseSong(song);
+                                        }}
+                                    >
+                                        {purchasingSongId === song.id ? 'Unlocking…' : 'Unlock'}
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -290,12 +503,18 @@ export default function KaraokePage() {
                     {selectedSong && selectedSong.id !== 'upload' && (
                         <div className="karaoke-selected-actions">
                             <p>Selected: <strong>{selectedSong.title}</strong></p>
+                            {selectedSong.tier === 'premium' && !selectedSong.unlocked && (
+                                <p style={{ fontSize: '0.82rem', color: '#f59e0b', margin: '4px 0 12px' }}>
+                                    Unlock this premium song to use it in your karaoke room.
+                                </p>
+                            )}
                             <p style={{ fontSize: '0.82rem', color: '#9ca3af', margin: '4px 0 12px' }}>
                                 Catalogue songs use pre-processed instrumental files. Upload your own to
                                 separate vocals with htdemucs_ft.
                             </p>
                             <button
                                 className="karaoke-btn karaoke-btn-primary"
+                                disabled={selectedSong.tier === 'premium' && !selectedSong.unlocked}
                                 onClick={() => {
                                     // For catalogue songs, we can't auto-generate — direct to sing with a placeholder
                                     setBackingUrl('catalogue-placeholder');
@@ -357,7 +576,7 @@ export default function KaraokePage() {
 
                     {backingMessage && (
                         <p className={`karaoke-message ${backingStatus === 'error' ? 'error' : ''}`}>
-                            {backingMessage}
+                            {backingMessage} {backingJobId ? <span style={{ opacity: 0.8 }}>(Job: {backingJobId.slice(0, 8)})</span> : null}
                         </p>
                     )}
 
@@ -376,10 +595,38 @@ export default function KaraokePage() {
                         <ol>
                             <li>Your song is sent to the Python FastAPI microservice</li>
                             <li>htdemucs_ft separates it into 4 stems: drums, bass, other, vocals</li>
+                            <li>Per-user folders are created on first use and stems persist for reuse</li>
                             <li>The non-vocal stems are mixed into a single instrumental track</li>
                             <li>You sing along while the backing track plays</li>
                         </ol>
                     </div>
+
+                    {workspaceInfo && (
+                        <div className="karaoke-arch-note" style={{ marginTop: 12 }}>
+                            <strong>Your persistent workspace is active</strong>
+                            <div style={{ fontSize: '0.82rem', color: '#9ca3af', marginTop: 6 }}>
+                                User workspace: <code>{workspaceInfo.userId}</code> · stems are saved by track for ongoing use.
+                            </div>
+                        </div>
+                    )}
+
+                    {libraryTracks.length > 0 && (
+                        <div className="karaoke-arch-note" style={{ marginTop: 12 }}>
+                            <strong>Your karaoke library</strong>
+                            <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                                {libraryTracks.slice(0, 8).map((track) => (
+                                    <button
+                                        key={track.trackId}
+                                        className="karaoke-btn karaoke-btn-secondary"
+                                        style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                                        onClick={() => loadPersistedBacking(track)}
+                                    >
+                                        🎵 {track.title || track.originalFileName || 'Saved track'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
