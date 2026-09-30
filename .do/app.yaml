@@ -340,6 +340,8 @@ services:
         value: ""
       - key: KaraokeService__BaseUrl
         value: ""
+      - key: VideoProcessorService__BaseUrl
+        value: ""
       # ── Music Rights Studio — server-side Stripe price IDs ─────────────────
       # Used by SubscriptionService to resolve plan keys from Stripe webhooks.
       - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_ID

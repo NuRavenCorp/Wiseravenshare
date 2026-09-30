@@ -1947,6 +1947,14 @@ builder.Services.AddHttpClient("KaraokeSpeechService", client =>
         builder.Configuration["KaraokeSpeechService:BaseUrl"] ?? "http://localhost:8003");
     client.Timeout = TimeSpan.FromSeconds(30);
 });
+builder.Services.AddHttpClient("VideoProcessorService", client =>
+{
+    var baseUrl = builder.Configuration["VideoProcessorService:BaseUrl"]
+        ?? builder.Configuration["VideoProcessor__BaseUrl"]
+        ?? "http://localhost:8004";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    client.Timeout = Timeout.InfiniteTimeSpan; // HLS jobs can take several minutes
+});
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaVideo, FaUsers, FaTrash } from 'react-icons/fa';
 import '@flaticon/flaticon-uicons/css/all/all.css';
+import Hls from 'hls.js';
 import { ravensightAPI } from '../../Services/RavensightAPI';
 import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
@@ -9,6 +10,23 @@ import CollaborativeScriptRoom from './CollaborativeScriptRoom';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
 import { useCollaborationHub } from '../../hooks/useCollaborationHub';
+
+const attachHls = (videoEl, src) => {
+    if (!src) return;
+    if (src.endsWith('.m3u8')) {
+        if (Hls.isSupported()) {
+            const hls = new Hls({ startLevel: -1 });
+            hls.loadSource(src);
+            hls.attachMedia(videoEl);
+            videoEl._hlsInstance = hls;
+        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+            // Safari native HLS
+            videoEl.src = src;
+        }
+    } else {
+        videoEl.src = src;
+    }
+};
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -376,6 +394,19 @@ const VideoFeed = ({ onNotification }) => {
         const isSharing = sharingVideoIds.includes(videoIdentity);
         const isSaving = savingVideoIds.includes(videoIdentity);
 
+        const resolvedSrc = resolveMediaUrl(video.videoUrl);
+        useEffect(() => {
+            const el = videoRef.current;
+            if (!el) return;
+            attachHls(el, resolvedSrc);
+            return () => {
+                if (el._hlsInstance) {
+                    el._hlsInstance.destroy();
+                    el._hlsInstance = null;
+                }
+            };
+        }, [resolvedSrc]);
+
         const triggerPlayback = async () => {
             if (!videoRef.current) return false;
 
@@ -498,7 +529,6 @@ const VideoFeed = ({ onNotification }) => {
                     <div style={{ position: 'relative' }} onClick={handlePlayPause}>
                         <video
                             ref={videoRef}
-                            src={resolveMediaUrl(video.videoUrl)}
                             poster={resolveMediaUrl(video.thumbnailUrl)}
                             muted={isMuted}
                             loop

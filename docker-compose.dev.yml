@@ -11,6 +11,7 @@ services:
       AudioService__BaseUrl: http://audio-processor:8001
       KaraokeService__BaseUrl: http://karaoke-engine:8002
       KaraokeSpeechService__BaseUrl: http://karaoke-speech:8003
+      VideoProcessorService__BaseUrl: http://video-processor:8004
     ports:
       - "10000:10000"
 
