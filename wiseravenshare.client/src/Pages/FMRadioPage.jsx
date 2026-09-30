@@ -1010,6 +1010,22 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       onloaderror: (_, err) => {
         setLoadError(`Cannot decode "${trackName}" - ${err || 'unsupported format in this browser'}`);
         setIsPlaying(false);
+
+        // Auto-advance past the unplayable file so it doesn't block the queue.
+        // Destroy the failed Howl instance first.
+        if (howlRef.current) {
+          howlRef.current.unload();
+          howlRef.current = null;
+        }
+        const lib = libraryRef.current;
+        const i   = idxRef.current;
+        const nextIdx = i < lib.length - 1 ? i + 1 : -1;
+        if (nextIdx >= 0 && lib[nextIdx]) {
+          loadTrack(lib[nextIdx], nextIdx, false);
+        } else {
+          // No next track — clear the player so new uploads can load immediately.
+          setCurrentTrack(null);
+        }
       },
     });
 
@@ -1105,11 +1121,17 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     }));
     setLibrary((prev) => {
       const combined = [...prev, ...tracks];
-      if (!currentTrack) loadTrack(combined[0], 0, false);
+      // Auto-load the first new file if:
+      // • no track is currently loaded, OR
+      // • the current track failed to load (loadError is set) — unplayable file is blocking the queue.
+      if (!currentTrack || loadError) {
+        const firstNewIdx = combined.findIndex(t => t.id === tracks[0].id);
+        loadTrack(combined[firstNewIdx] || tracks[0], Math.max(0, firstNewIdx), false);
+      }
       return combined;
     });
     e.target.value = '';
-  }, [currentTrack, loadTrack]);
+  }, [currentTrack, loadError, loadTrack]);
 
   // ── Queue management ──────────────────────────────────────────────────────
   const removeTrack = useCallback((id) => {
