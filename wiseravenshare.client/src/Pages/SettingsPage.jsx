@@ -5,10 +5,12 @@ import { useNotification } from '../Contexts/NotificationContext';
 import { apiService } from '../Services/api';
 
 const parseAdminEmails = () => {
-    return String(import.meta.env.VITE_ADMIN_EMAILS || '')
-        .split(',')
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean);
+    return new Set(
+        String(import.meta.env.VITE_ADMIN_EMAILS || '')
+            .split(',')
+            .map((value) => value.trim().toLowerCase())
+            .filter(Boolean)
+    );
 };
 
 const CONNECTION_PLATFORMS = [
@@ -518,6 +520,9 @@ const SettingsPage = ({ onNavigate }) => {
                         {CONNECTION_PLATFORMS.map((platform) => {
                             const status = statusByPlatform[platform.id] || {};
                             const isConnected = Boolean(status.connected || status.isConnected || status.active || status.enabled);
+                            const statusDetails = status.details || {};
+                            const connectedUrl = String(statusDetails.profileUrl || statusDetails.feedUrl || '').trim();
+                            const connectedUsername = String(statusDetails.username || '').trim();
                             return (
                                 <div
                                     key={platform.id}
@@ -564,6 +569,23 @@ const SettingsPage = ({ onNavigate }) => {
                                             )}
                                         </button>
                                     </div>
+                                    {isConnected && connectedUrl && (
+                                        <a
+                                            href={connectedUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{
+                                                display: 'block',
+                                                marginTop: '8px',
+                                                fontSize: '11px',
+                                                color: platform.tone,
+                                                textDecoration: 'underline',
+                                                wordBreak: 'break-all'
+                                            }}
+                                        >
+                                            Connected profile: {connectedUsername ? `@${connectedUsername} · ` : ''}{connectedUrl}
+                                        </a>
+                                    )}
                                     <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
                                         <input
                                             type="text"
