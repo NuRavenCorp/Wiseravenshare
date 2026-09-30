@@ -92,6 +92,16 @@ const PROTECTION_PLANS = [
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
+const MUSIC_RIGHTS_PLAN_KEYS = new Set(['rights_basic', 'rights_standard', 'rights_pro']);
+const MUSIC_RIGHTS_PRICE_IDS = new Set([
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_PRICE_ID,
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_PRICE_ID,
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_PRICE_ID,
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_PRICE_ID,
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_PRICE_ID,
+  import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_PRICE_ID,
+].filter(Boolean));
+
 const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const { user } = useAuth();
   const { addToast } = useNotification();
@@ -105,6 +115,16 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const [shareMenuOpen,  setShareMenuOpen] = useState(null);
   const [sharingTrackId, setSharingTrackId]= useState(null);
   const [showIPInfo,     setShowIPInfo]    = useState(false);
+
+  // ── Subscription state ────────────────────────────────────────────────────
+  const [subscriptionStatus,  setSubscriptionStatus]  = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const hasActiveRightsPlan = Boolean(
+    subscriptionStatus?.hasActiveSubscription &&
+    (MUSIC_RIGHTS_PLAN_KEYS.has(subscriptionStatus?.planKey) ||
+     MUSIC_RIGHTS_PRICE_IDS.has(subscriptionStatus?.priceId) ||
+     subscriptionStatus?.isAdmin)
+  );
 
   // ── Register Original Track (paid feature) ─────────────────────────────────
   const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -126,7 +146,11 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
       addToast('Please sign in to register a track.', 'warning');
       return;
     }
-    // Always show payment gate first (user selects plan or skips if already paid)
+    // If user has an active plan, skip the payment gate
+    if (hasActiveRightsPlan) {
+      setShowRegisterModal(true);
+      return;
+    }
     setShowPaymentGate(true);
   };
 
@@ -134,6 +158,68 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
     setShowPaymentGate(false);
     setShowRegisterModal(true);
   };
+
+  // ── Load subscription status on mount ────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getAuthToken();
+        if (!token) { setSubscriptionLoading(false); return; }
+        const res = await fetch('/api/billing/subscription', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSubscriptionStatus({
+            hasActiveSubscription: data.hasActiveSubscription ?? data.HasActiveSubscription ?? false,
+            priceId:  data.priceId  ?? data.PriceId  ?? '',
+            planKey:  data.planKey  ?? data.PlanKey  ?? '',
+            isAdmin:  data.isAdmin  ?? data.IsAdmin  ?? false,
+            status:   data.status   ?? data.Status   ?? ''
+          });
+        }
+      } catch { /* non-critical */ }
+      if (!cancelled) setSubscriptionLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Handle return from Stripe checkout ───────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'success') return;
+
+    window.history.replaceState({}, '', window.location.pathname);
+    addToast('Payment confirmed! Activating your IP Protection plan…', 'info');
+
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      try {
+        const token = getAuthToken();
+        const res = await fetch('/api/billing/subscription', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const planKey = data.planKey ?? data.PlanKey ?? '';
+          const priceId = data.priceId ?? data.PriceId ?? '';
+          const active  = (data.hasActiveSubscription ?? data.HasActiveSubscription)
+            && (MUSIC_RIGHTS_PLAN_KEYS.has(planKey) || MUSIC_RIGHTS_PRICE_IDS.has(priceId) || data.isAdmin);
+          if (active) {
+            setSubscriptionStatus({ hasActiveSubscription: true, priceId, planKey, isAdmin: data.isAdmin ?? false, status: data.status ?? '' });
+            setSubscriptionLoading(false);
+            addToast('✅ IP Protection active! Your tracks are now covered. You can register original work below.', 'success');
+            return;
+          }
+        }
+      } catch { /* keep polling */ }
+      if (attempts < 12) { setTimeout(poll, 2500); }
+      else { addToast('⏳ Plan is processing. Features will unlock shortly — refresh if needed.', 'info'); }
+    };
+    setTimeout(poll, 1500);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Web Audio API: analyse first 20 bars (~40 seconds at 120 BPM)
   const analyseFirst20Bars = async (file) => {
@@ -506,18 +592,20 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
       }
 
       const origin = window.location.origin;
-      const successUrl = `${origin}/?subscription=success`;
-      const cancelUrl = `${origin}/?subscription=cancelled`;
+      const successUrl = `${origin}/?checkout=success`;
+      const cancelUrl = `${origin}/?checkout=cancelled`;
 
       // Create Stripe Checkout Session via backend
       const response = await fetch('/api/billing/checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
+          Authorization: `Bearer ${getAuthToken() || ''}`
         },
         body: JSON.stringify({
-          priceId: selectedPriceId,
+          priceId:      selectedPriceId,
+          plan:         plan.id,
+          billingCycle: requestedInterval,
           successUrl,
           cancelUrl
         })

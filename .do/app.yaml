@@ -340,6 +340,20 @@ services:
         value: ""
       - key: KaraokeService__BaseUrl
         value: ""
+      # ── Music Rights Studio — server-side Stripe price IDs ─────────────────
+      # Used by SubscriptionService to resolve plan keys from Stripe webhooks.
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_ID
+        value: price_1UCkLJK4zW843WGuKn0VtxJ0
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_ID
+        value: price_1UCkLJK4zW843WGux4J1PhCh
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_ID
+        value: price_1UCkLKK4zW843WGuk9vBYhXG
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_ID
+        value: price_1UCkLLK4zW843WGuYW2pR70O
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_ID
+        value: price_1UCkLMK4zW843WGuq7Oygrot
+      - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_ID
+        value: price_1UCkLMK4zW843WGudLWAplR5
 
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
