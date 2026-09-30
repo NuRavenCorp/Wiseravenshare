@@ -2745,7 +2745,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             icon: '📊',
             unlockedAction: () => navigateToFeaturePage('feed', 'Opening growth analytics context...'),
             unlockedActionLabel: 'Open analytics →',
-            lockedAction: () => { setSelectedPlan('growth_suite'); setShowPricingModal(true); },
+            lockedAction: () => { if (typeof onNavigate === 'function') { onNavigate('podcast-checkout'); } else { setSelectedPlan('growth_suite'); setShowPricingModal(true); } },
             lockedActionLabel: 'View pricing →'
         },
         {
@@ -2755,7 +2755,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
             icon: '🏗️',
             unlockedAction: () => navigateToFeaturePage('collaboration', 'Opening team workflows...'),
             unlockedActionLabel: 'Open team tools →',
-            lockedAction: () => { setSelectedPlan('studio_plus'); setShowPricingModal(true); },
+            lockedAction: () => { if (typeof onNavigate === 'function') { onNavigate('podcast-checkout'); } else { setSelectedPlan('studio_plus'); setShowPricingModal(true); } },
             lockedActionLabel: 'View pricing →'
         }
     ].map((card) => ({
@@ -2771,9 +2771,13 @@ const PodcastStudioPage = ({ onNavigate }) => {
     );
     const isGuidedStudioLocked = subscriptionStatusLoading || !isGuidedStudioUnlocked;
 
-    const promptGuidedStudioUpgrade = (reason = 'Unlock Guided Studio Flow to continue. Stripe checkout opens with the plan list.') => {
-        setSelectedPlan('podcast_pro');
-        setShowPricingModal(true);
+    const promptGuidedStudioUpgrade = (reason = 'Unlock Guided Studio Flow to continue.') => {
+        if (typeof onNavigate === 'function') {
+            onNavigate('podcast-checkout');
+        } else {
+            setSelectedPlan('podcast_pro');
+            setShowPricingModal(true);
+        }
         setStatus(reason);
     };
 
@@ -3284,7 +3288,7 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                     <button
                                         type="button"
-                                        onClick={() => { setSelectedPlan('podcast_pro'); setShowPricingModal(true); }}
+                                        onClick={() => { if (typeof onNavigate === 'function') { onNavigate('podcast-checkout'); } else { setSelectedPlan('podcast_pro'); setShowPricingModal(true); } }}
                                         style={{
                                             border: '1px solid rgba(248,113,113,0.4)',
                                             background: 'rgba(248,113,113,0.12)',
