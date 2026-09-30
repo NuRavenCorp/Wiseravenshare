@@ -31,6 +31,7 @@ export const useCollaborationHub = () => {
     const hasLiveConnection = () => {
         const connection = connectionRef.current;
         return Boolean(connection)
+            && typeof connection.on === 'function'
             && (connection.state === HubConnectionState.Connected || connection.state === HubConnectionState.Connecting);
     };
 
@@ -43,7 +44,8 @@ export const useCollaborationHub = () => {
             return await connectPromiseRef.current;
         }
 
-        if (!getAuthToken()) {
+        const token = getAuthToken();
+        if (!token) {
             setError('Please sign in to use collaboration rooms.');
             setIsConnected(false);
             throw new Error('Please sign in to use collaboration rooms.');
@@ -53,27 +55,29 @@ export const useCollaborationHub = () => {
             setIsConnecting(true);
             try {
                 let connection = connectionRef.current;
-                if (!connection) {
+                if (!connection || typeof connection.on !== 'function') {
                     connection = createHubConnection(HUB_PATH);
 
-                    for (const eventName of EVENT_NAMES) {
-                        connection.on(eventName, (data) => {
-                            const callbacks = eventCallbacks.current.get(eventName);
-                            if (callbacks) callbacks.forEach((fn) => fn(data));
+                    if (typeof connection.on === 'function') {
+                        for (const eventName of EVENT_NAMES) {
+                            connection.on(eventName, (data) => {
+                                const callbacks = eventCallbacks.current.get(eventName);
+                                if (callbacks) callbacks.forEach((fn) => fn(data));
+                            });
+                        }
+
+                        connection.onreconnecting(() => setIsConnected(false));
+                        connection.onreconnected(() => setIsConnected(true));
+                        connection.onclose(() => {
+                            setIsConnected(false);
+                            startedRef.current = false;
                         });
                     }
-
-                    connection.onreconnecting(() => setIsConnected(false));
-                    connection.onreconnected(() => setIsConnected(true));
-                    connection.onclose(() => {
-                        setIsConnected(false);
-                        startedRef.current = false;
-                    });
 
                     connectionRef.current = connection;
                 }
 
-                if (connection.state === HubConnectionState.Disconnected) {
+                if (connection.state === HubConnectionState.Disconnected && typeof connection.start === 'function') {
                     await connection.start();
                 }
 

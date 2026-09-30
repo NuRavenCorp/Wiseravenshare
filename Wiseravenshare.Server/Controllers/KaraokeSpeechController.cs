@@ -152,6 +152,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     /// Used for: "Next singer in 10 seconds", "Now playing: Bohemian Rhapsody"
     /// </summary>
     [HttpGet("announce")]
+    [AllowAnonymous]
     public async Task<IActionResult> Announce(
         [FromQuery] string text,
         [FromQuery] int rate = 160,
@@ -193,6 +194,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     /// Spoken score feedback after a karaoke performance.
     /// </summary>
     [HttpGet("score-feedback")]
+    [AllowAnonymous]
     public async Task<IActionResult> ScoreFeedback(
         [FromQuery] int score,
         [FromQuery] string? song = null,
@@ -234,6 +236,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     /// Returns accuracy 0–100, label, and spoken feedback text.
     /// </summary>
     [HttpPost("score")]
+    [AllowAnonymous]
     public async Task<IActionResult> ScorePerformance(
         [FromBody] ScorePerformanceRequest body,
         CancellationToken cancellationToken)

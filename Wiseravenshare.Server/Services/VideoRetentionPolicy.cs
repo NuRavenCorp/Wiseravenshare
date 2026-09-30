@@ -2,7 +2,7 @@ namespace Wiseravenshare.Server.Services;
 
 public static class VideoRetentionPolicy
 {
-    public const int TemporaryRetentionDays = 7;
+    public const int TemporaryRetentionDays = 30;
 
     public static string NormalizeStorageMode(string? storageMode, bool isPermanent)
     {
@@ -40,12 +40,7 @@ public static class VideoRetentionPolicy
 
     public static string GetStorageStatus(DateTime createdAtUtc, bool isPermanent, DateTime? nowUtc = null, bool hasActiveSubscription = false)
     {
-        if (IsPermanent(null, isPermanent, hasActiveSubscription))
-        {
-            return "active";
-        }
-
-        if (isPermanent && !hasActiveSubscription)
+        if (isPermanent || IsPermanent(null, isPermanent, hasActiveSubscription))
         {
             return "active";
         }

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../../Contexts/AuthContext';
+import { getAuthToken } from '../../Services/authStorage';
 
 const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4',
     'audio/x-m4a', 'audio/flac', 'audio/x-flac', 'audio/ogg', 'audio/vorbis'];
@@ -63,10 +64,11 @@ export default function PodcastAudioProcessor() {
         formData.append('audioFile', file);
 
         try {
+            const token = getAuthToken();
             const res = await fetch('/api/podcast-audio/process', {
                 method: 'POST',
                 body: formData,
-                headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
             });
 
             if (!res.ok) {

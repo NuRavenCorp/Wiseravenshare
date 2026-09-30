@@ -57,6 +57,7 @@ public sealed class KaraokeController : ControllerBase
     /// The job is processed asynchronously to avoid request gateway timeouts.
     /// </summary>
     [HttpPost("generate-backing")]
+    [AllowAnonymous]
     [RequestSizeLimit(314_572_800)] // 300 MB
     [RequestFormLimits(MultipartBodyLengthLimit = 314_572_800)]
     public async Task<IActionResult> GenerateBackingJob(IFormFile audioFile, CancellationToken cancellationToken)
@@ -98,6 +99,7 @@ public sealed class KaraokeController : ControllerBase
     }
 
     [HttpGet("jobs/{jobId}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetGenerateBackingJobStatus(string jobId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(jobId))
@@ -118,6 +120,7 @@ public sealed class KaraokeController : ControllerBase
     }
 
     [HttpGet("jobs/{jobId}/instrumental")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetGenerateBackingJobInstrumental(string jobId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(jobId))
@@ -166,6 +169,7 @@ public sealed class KaraokeController : ControllerBase
     }
 
     [HttpGet("workspace")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetWorkspace(CancellationToken cancellationToken)
     {
         try
@@ -183,6 +187,7 @@ public sealed class KaraokeController : ControllerBase
     }
 
     [HttpGet("library")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetLibrary(CancellationToken cancellationToken)
     {
         try
@@ -200,6 +205,7 @@ public sealed class KaraokeController : ControllerBase
     }
 
     [HttpGet("library/{trackId}/instrumental")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetLibraryInstrumental(string trackId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(trackId))
