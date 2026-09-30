@@ -63,7 +63,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
                     Genre = ReadMusicMeta(a.MetadataJson, "genre"),
                     MediaUrl = StreamingUrlHelper.ResolveMediaUrl(
                         a.PublicUrl,
-                        StreamingUrlHelper.StreamByFileName(a.FileName)),
+                        StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                            ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
                     FileName = a.FileName,
                     UploadedAt = a.SavedAtUtc.ToString("O"),
                     SizeBytes = a.SizeBytes

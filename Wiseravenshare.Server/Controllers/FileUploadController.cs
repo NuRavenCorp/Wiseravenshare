@@ -21,6 +21,7 @@ public class MediaController : ControllerBase
     private readonly IBlobStorageService _blobStorage;
     private readonly ILogger<MediaController> _logger;
     private readonly OutputCacheInvalidationService _cacheInvalidation;
+    private readonly IMusicLibraryStore? _musicLibraryStore;
     private readonly string _videoStorageFolderName;
     private readonly string _defaultVideoDestination;
     private readonly string _projectFolder;
@@ -34,7 +35,8 @@ public class MediaController : ControllerBase
         IBlobStorageService blobStorage,
         ILogger<MediaController> logger,
         OutputCacheInvalidationService cacheInvalidation,
-        ISocialPlatformService socialPlatformService)
+        ISocialPlatformService socialPlatformService,
+        IMusicLibraryStore? musicLibraryStore = null)
     {
         _environment = environment;
         _youTubeService = youTubeService;
@@ -44,6 +46,7 @@ public class MediaController : ControllerBase
         _blobStorage = blobStorage;
         _logger = logger;
         _cacheInvalidation = cacheInvalidation;
+        _musicLibraryStore = musicLibraryStore;
         _videoStorageFolderName = configuration["Storage:Video:StorageFolderName"]?.Trim();
         if (string.IsNullOrWhiteSpace(_videoStorageFolderName))
         {
@@ -268,6 +271,27 @@ public class MediaController : ControllerBase
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to register {MediaType} upload in catalog for user {UserId}.", isPhoto ? "photo" : "music", catalogUserGuid);
+                }
+
+                if (isAudio && _musicLibraryStore is not null)
+                {
+                    try
+                    {
+                        await _musicLibraryStore.SaveMusicAsync(
+                            catalogUserGuid,
+                            upload.File,
+                            new DTOs.SaveRavensightMusicDto
+                            {
+                                Title = upload.Title ?? Path.GetFileNameWithoutExtension(upload.File.FileName),
+                                DestinationFolder = mediaFolder
+                            },
+                            userIdentity,
+                            cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to register audio upload in bucket store for user {UserId}.", catalogUserGuid);
+                    }
                 }
             }
         }

@@ -163,9 +163,16 @@ public class CrossPlatformCollaborationHub : Hub
             IsDeleted = false
         };
 
-        _dbContext.Conversations.Add(conversation);
+        var conversationEntry = _dbContext.Conversations.Add(conversation);
         // Legacy schema includes a CreatorId FK column in addition to CreatedBy.
-        _dbContext.Entry(conversation).Property("CreatorId").CurrentValue = userId;
+        try
+        {
+            conversationEntry.Property("CreatorId").CurrentValue = userId;
+        }
+        catch
+        {
+            // Ignore if EF model does not track CreatorId as a shadow property.
+        }
         await _dbContext.SaveChangesAsync();
 
         var participant = new ConversationParticipant

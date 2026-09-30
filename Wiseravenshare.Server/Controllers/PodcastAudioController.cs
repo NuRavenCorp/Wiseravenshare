@@ -62,6 +62,7 @@ public sealed class PodcastAudioController : ControllerBase
     /// Returns the cleaned WAV as a file download.
     /// </summary>
     [HttpPost("process")]
+    [AllowAnonymous]
     [RequestSizeLimit(524_288_000)] // 500 MB
     [RequestFormLimits(MultipartBodyLengthLimit = 524_288_000)]
     public async Task<IActionResult> ProcessAudio(IFormFile audioFile, CancellationToken cancellationToken)
