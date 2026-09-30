@@ -1096,7 +1096,15 @@ const MusicPlayerPage = ({ onNavigate }) => {
                   }
 
                   setIsPlayerPlaying(false);
+                  musicPlayIntentRef.current = false;
                   addToast('Audio playback failed for this track.', 'error');
+
+                  // If the failing track is a local preview / ephemeral blob, remove it
+                  // from the library so it doesn't block subsequent uploads.
+                  if (currentTrack && isEphemeralTrack(currentTrack)) {
+                    setMusicLibrary((prev) => prev.filter((t) => t.id !== currentTrack.id));
+                    setCurrentTrack(null);
+                  }
                 }}
               />
 

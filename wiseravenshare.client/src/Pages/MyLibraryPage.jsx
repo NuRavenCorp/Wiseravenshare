@@ -799,7 +799,10 @@ const MyLibraryPage = ({ onNavigate }) => {
     return (
         <section style={{ display: 'grid', gap: '14px' }}>
             {/* Hidden audio engine */}
-            <audio ref={audioRef} preload="metadata" onEnded={() => setIsPlaying(false)} />
+            <audio ref={audioRef} preload="metadata"
+                onEnded={() => setIsPlaying(false)}
+                onError={() => { setIsPlaying(false); }}
+            />
 
             {/* Now-playing bar — visible whenever a track is loaded */}
             {currentTrack && (
