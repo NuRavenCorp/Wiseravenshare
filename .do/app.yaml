@@ -355,6 +355,49 @@ services:
       - key: STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_ID
         value: price_1UCkLMK4zW843WGudLWAplR5
 
+# ── NuRavenCorpLLM service ────────────────────────────────────────────────────
+  - name: llm-api
+    github:
+      repo: NuRavenCorp/Wiseravenshare
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: NuRavenCorpLLM/NuRavenCorpLLM.Server/Dockerfile
+    source_dir: /NuRavenCorpLLM
+    http_port: 8080
+    instance_size_slug: basic-s
+    instance_count: 1
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 30
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:8080
+      - key: ConnectionStrings__DefaultConnection
+        value: ${wiseravenshare-db.DATABASE_URL}
+        type: SECRET
+      - key: FolderKnowledge__RootPath
+        value: /data/sites
+      - key: FolderKnowledge__IncludeSubdirectories
+        value: "true"
+      - key: FolderKnowledge__ScanIntervalMinutes
+        value: "60"
+      - key: FolderKnowledge__MaxFileCharacters
+        value: "200000"
+      - key: OpenAI__ApiKey
+        value: ${OPENAI_API_KEY}
+        type: SECRET
+      - key: AzureAd__TenantId
+        value: ${AZURE_AD_TENANT_ID}
+        type: SECRET
+      - key: AzureAd__ClientId
+        value: ${AZURE_AD_CLIENT_ID}
+        type: SECRET
+
 # ── Frontend static site ──────────────────────────────────────────────────────
 static_sites:
   - name: web
@@ -418,6 +461,12 @@ static_sites:
 
 ingress:
   rules:
+    - match:
+        path:
+          prefix: /llm
+      component:
+        name: llm-api
+        preserve_path_prefix: false
     - match:
         path:
           prefix: /api
