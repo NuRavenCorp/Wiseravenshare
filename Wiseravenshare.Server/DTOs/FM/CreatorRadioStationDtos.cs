@@ -42,6 +42,12 @@ public class CreatorRadioStationDto
     public decimal? SubscriptionPrice { get; set; }
     public bool AllowDonations { get; set; }
     public string? DonationLink { get; set; }
+    // Activation gate
+    public decimal WiseCoinDeposited { get; set; }
+    public bool StripeSetupComplete { get; set; }
+    public string? StripeProductId { get; set; }
+    public DateTime? ActivationGatedAt { get; set; }
+    public bool ActivationCriteriaMet { get; set; }
     public string? ContentRating { get; set; }
     public string? TargetLanguage { get; set; }
     public string? TargetRegion { get; set; }
@@ -267,4 +273,11 @@ public class SimpleRequesterDto
     public string Username { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? AvatarUrl { get; set; }
+}
+
+/// <summary>Sent by the creator after Stripe product/price setup is complete for their station.</summary>
+public class ConfirmRadioStationStripeDto
+{
+    [Required, MaxLength(255)]
+    public string StripeProductId { get; set; } = string.Empty;
 }

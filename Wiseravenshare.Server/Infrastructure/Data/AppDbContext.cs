@@ -808,9 +808,13 @@ public class AppDbContext : DbContext
             entity.Property(x => x.Playlist).HasColumnType("jsonb");
             entity.Property(x => x.Settings).HasColumnType("jsonb");
             entity.Property(x => x.SubscriptionPrice).HasPrecision(18, 2);
+            entity.Property(x => x.WiseCoinDeposited).HasPrecision(18, 4).HasDefaultValue(0m);
+            entity.Property(x => x.StripeProductId).HasMaxLength(255);
             entity.HasIndex(x => x.CreatorId);
             entity.HasIndex(x => new { x.FrequencyKey, x.Band });
             entity.HasIndex(x => new { x.IsLive, x.Status, x.Visibility });
+            entity.HasIndex(x => new { x.Status, x.StripeSetupComplete })
+                .HasFilter("\"Status\" = 1");  // PendingApproval = 1; speeds up agent query
             entity.HasOne(x => x.Creator)
                 .WithMany()
                 .HasForeignKey(x => x.CreatorId)

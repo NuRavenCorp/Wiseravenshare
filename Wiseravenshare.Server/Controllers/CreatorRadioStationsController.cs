@@ -246,6 +246,58 @@ public sealed class CreatorRadioStationsController : ControllerBase
         return Ok(await _service.GetStationAnalyticsAsync(id, userId, cancellationToken));
     }
 
+    /// <summary>
+    /// Creator calls this after completing Stripe product/price setup to confirm Stripe readiness.
+    /// Once all three criteria are met (price set, 100 WSC deposited, Stripe confirmed), the
+    /// activation agent will promote the station to Active automatically.
+    /// </summary>
+    [HttpPost("{id:guid}/confirm-stripe")]
+    [ProducesResponseType(typeof(CreatorRadioStationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ConfirmStripe(Guid id, [FromBody] ConfirmRadioStationStripeDto dto, CancellationToken cancellationToken)
+    {
+        var userId = RequireUserId();
+        try
+        {
+            var station = await _service.ConfirmStripeSetupAsync(id, dto, userId, cancellationToken);
+            return Ok(station);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (BadRequestException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Internal/agent endpoint: processes all PendingApproval stations that have fully met
+    /// the activation criteria and promotes them to Active.
+    /// </summary>
+    [HttpPost("process-activations")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ProcessActivations(CancellationToken cancellationToken)
+    {
+        // Only admins or internal agents should call this.
+        var userId = RequireUserId();
+        var user = HttpContext.User;
+        var isAdmin = user.IsInRole("Admin") || user.IsInRole("Moderator");
+        if (!isAdmin)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Admin access required." });
+        }
+
+        var count = await _service.ProcessPendingActivationsAsync(cancellationToken);
+        return Ok(new { activated = count });
+    }
+
     private Guid RequireUserId()
     {
         var userId = User.GetUserId();
