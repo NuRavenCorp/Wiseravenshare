@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.DTOs.FM;
 using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Entities.FM;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services.Currency;
 
 namespace Wiseravenshare.Server.Services.FM;
 
@@ -27,19 +29,34 @@ public interface ICreatorRadioStationService
     Task<RadioStationRequestDto> CreateRequestAsync(Guid stationId, CreateRadioStationRequestDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<RadioStationShoutoutDto> CreateShoutoutAsync(Guid stationId, CreateRadioStationShoutoutDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<RadioStationAnalyticsDto> GetStationAnalyticsAsync(Guid stationId, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Marks Stripe product setup as complete, moving station closer to activation.</summary>
+    Task<CreatorRadioStationDto> ConfirmStripeSetupAsync(Guid stationId, ConfirmRadioStationStripeDto dto, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Agent-driven: checks activation criteria and promotes PendingApproval stations to Active.</summary>
+    Task<int> ProcessPendingActivationsAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class CreatorRadioStationService : ICreatorRadioStationService
 {
+    private const decimal RadioStationWiseCoinDeposit = 100m;
+
     private readonly AppDbContext _db;
     private readonly IFrequencyIntegrityService _frequencyIntegrity;
     private readonly IIcecastStreamService _icecastStreamService;
+    private readonly IWiseCoinService _wiseCoin;
+    private readonly ILogger<CreatorRadioStationService> _logger;
 
-    public CreatorRadioStationService(AppDbContext db, IFrequencyIntegrityService frequencyIntegrity, IIcecastStreamService icecastStreamService)
+    public CreatorRadioStationService(
+        AppDbContext db,
+        IFrequencyIntegrityService frequencyIntegrity,
+        IIcecastStreamService icecastStreamService,
+        IWiseCoinService wiseCoin,
+        ILogger<CreatorRadioStationService> logger)
     {
         _db = db;
         _frequencyIntegrity = frequencyIntegrity;
         _icecastStreamService = icecastStreamService;
+        _wiseCoin = wiseCoin;
+        _logger = logger;
     }
 
     public async Task<CreatorRadioStationDto> CreateStationAsync(CreateCreatorRadioStationDto dto, Guid creatorId, CancellationToken cancellationToken = default)
@@ -48,6 +65,23 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
         if (creator is null)
         {
             throw new NotFoundException("Creator not found.");
+        }
+
+        // Gate 1: subscription price is mandatory.
+        if (dto.SubscriptionPrice is null or <= 0)
+        {
+            throw new BadRequestException("A subscription price greater than zero is required to create a radio station.");
+        }
+
+        // Gate 2: deduct 100 WiseCoins — confirms creator commitment.
+        var coinResult = await _wiseCoin.SpendWSCAsync(
+            creatorId, RadioStationWiseCoinDeposit, TransactionType.Purchase,
+            "Radio station creation deposit (100 WSC)");
+        if (!coinResult.Success)
+        {
+            throw new BadRequestException(
+                $"Insufficient WiseCoins. You need {RadioStationWiseCoinDeposit} WSC to create a radio station. " +
+                $"Current balance: {coinResult.NewBalance} WSC. {coinResult.ErrorMessage}");
         }
 
         var normalized = await _frequencyIntegrity.NormalizeOrGenerateAvailableAsync(dto.Frequency, dto.Band, creatorId, null, cancellationToken);
@@ -69,19 +103,24 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             StreamUrl = null,
             StreamKey = null,
             CreatorId = creatorId,
-            Status = RadioStationStatus.Draft,
+            // Station is gated until Stripe setup is also confirmed by the agent.
+            Status = RadioStationStatus.PendingApproval,
             Visibility = visibility,
             AllowChat = dto.AllowChat,
             AllowRequests = dto.AllowRequests,
             AllowShoutouts = dto.AllowShoutouts,
             IsProprietaryFrequency = dto.ClaimProprietaryFrequency,
             FrequencyLockedAt = dto.ClaimProprietaryFrequency ? DateTime.UtcNow : null,
-            // Monetization
-            IsMonetized = dto.IsMonetized,
+            // Monetization (price already validated above)
+            IsMonetized = true,
             SubscriptionPrice = dto.SubscriptionPrice,
             AllowDonations = dto.AllowDonations,
             DonationLink = TrimOrNull(dto.DonationLink),
-            // Extended metadata serialised into Settings
+            // Activation gate tracking
+            WiseCoinDeposited = RadioStationWiseCoinDeposit,
+            StripeSetupComplete = false,
+            ActivationGatedAt = DateTime.UtcNow,
+            // Extended metadata
             Settings = BuildSettingsJson(dto),
             CreatedAt = DateTime.UtcNow
         };
@@ -99,6 +138,7 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             await _frequencyIntegrity.ClaimProprietaryFrequencyAsync(station.Id, creatorId, station.Frequency, station.Band, station.FrequencyKey, cancellationToken);
         }
 
+        _logger.LogInformation("Radio station {StationId} created by {CreatorId} — PendingApproval (awaiting Stripe setup)", station.Id, creatorId);
         return await ToDtoAsync(station, creatorId, cancellationToken);
     }
 
@@ -595,6 +635,70 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
         };
     }
 
+    public async Task<CreatorRadioStationDto> ConfirmStripeSetupAsync(Guid stationId, ConfirmRadioStationStripeDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var station = await _db.Set<CreatorRadioStation>()
+            .Include(x => x.Creator)
+            .FirstOrDefaultAsync(x => x.Id == stationId && !x.IsDeleted, cancellationToken);
+        if (station is null)
+        {
+            throw new NotFoundException("Station not found.");
+        }
+
+        await EnsureStationWriteAccessAsync(station, userId, cancellationToken);
+
+        station.StripeSetupComplete = true;
+        station.StripeProductId = dto.StripeProductId.Trim();
+        station.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Stripe setup confirmed for station {StationId} (product {ProductId})", stationId, dto.StripeProductId);
+
+        // Immediately try to activate if all other criteria are already met.
+        if (ActivationCriteriaMet(station))
+        {
+            station.Status = RadioStationStatus.Active;
+            station.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Station {StationId} auto-activated after Stripe confirmation", stationId);
+        }
+
+        return await ToDtoAsync(station, userId, cancellationToken);
+    }
+
+    public async Task<int> ProcessPendingActivationsAsync(CancellationToken cancellationToken = default)
+    {
+        var candidates = await _db.Set<CreatorRadioStation>()
+            .Where(x => !x.IsDeleted
+                && x.Status == RadioStationStatus.PendingApproval
+                && x.SubscriptionPrice > 0
+                && x.WiseCoinDeposited >= RadioStationWiseCoinDeposit
+                && x.StripeSetupComplete)
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+        {
+            return 0;
+        }
+
+        var activated = 0;
+        foreach (var station in candidates)
+        {
+            station.Status = RadioStationStatus.Active;
+            station.UpdatedAt = DateTime.UtcNow;
+            activated++;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Activation agent promoted {Count} radio station(s) to Active", activated);
+        return activated;
+    }
+
+    private static bool ActivationCriteriaMet(CreatorRadioStation station) =>
+        station.SubscriptionPrice > 0
+        && station.WiseCoinDeposited >= RadioStationWiseCoinDeposit
+        && station.StripeSetupComplete;
+
     private async Task<CreatorRadioStationDto> ToDtoAsync(CreatorRadioStation station, Guid userId, CancellationToken cancellationToken)
     {
         var creator = station.Creator;
@@ -657,6 +761,11 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             SubscriptionPrice = station.SubscriptionPrice,
             AllowDonations = station.AllowDonations,
             DonationLink = station.DonationLink,
+            WiseCoinDeposited = station.WiseCoinDeposited,
+            StripeSetupComplete = station.StripeSetupComplete,
+            StripeProductId = station.StripeProductId,
+            ActivationGatedAt = station.ActivationGatedAt,
+            ActivationCriteriaMet = ActivationCriteriaMet(station),
             BrandColor = ReadSettingsString(station.Settings, "brandColor"),
             ContentRating = ReadSettingsString(station.Settings, "contentRating") ?? "General",
             TargetLanguage = ReadSettingsString(station.Settings, "targetLanguage"),

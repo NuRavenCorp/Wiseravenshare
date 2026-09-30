@@ -72,6 +72,16 @@ public class CreatorRadioStation : BaseEntity
     public bool AllowDonations { get; set; }
     public string? DonationLink { get; set; }
 
+    // Activation gate — station remains PendingApproval until all three criteria are met:
+    // SubscriptionPrice > 0 (set at creation), WiseCoinDeposited >= 100, StripeSetupComplete == true
+    public decimal WiseCoinDeposited { get; set; } = 0m;
+    public bool StripeSetupComplete { get; set; } = false;
+
+    [MaxLength(255)]
+    public string? StripeProductId { get; set; }
+
+    public DateTime? ActivationGatedAt { get; set; }
+
     public bool IsProprietaryFrequency { get; set; } = true;
     public DateTime? FrequencyLockedAt { get; set; }
 
