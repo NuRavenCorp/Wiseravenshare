@@ -273,10 +273,21 @@ public sealed class RavensightMusicMediaController : ControllerBase
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SaveMusic([FromForm] SaveRavensightMusicDto dto, CancellationToken cancellationToken)
     {
-        if (dto.File is null || dto.File.Length == 0)
+        // Resilient file resolution: accept both lowercase 'file' and uppercase 'File' field names.
+        var file = dto.File;
+        if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "No music file uploaded." });
+            file = Request.Form.Files.FirstOrDefault(f =>
+                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No music file uploaded. Ensure the multipart field is named 'File'." });
+        }
+
+        dto.File ??= file;
 
         if (!TryResolveUserId(out var userId))
         {
@@ -285,7 +296,17 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         // Enforce 30-song free-tier cap. Future: bypass for users with an active music creator plan.
         const int MusicUploadLimit = 30;
-        var existingTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        IReadOnlyList<UserMusicTrackDto> existingTracks;
+        try
+        {
+            existingTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not retrieve existing track count for user {UserId}; proceeding with upload.", userId);
+            existingTracks = Array.Empty<UserMusicTrackDto>();
+        }
+
         if (existingTracks.Count >= MusicUploadLimit)
         {
             return StatusCode(StatusCodes.Status409Conflict, new

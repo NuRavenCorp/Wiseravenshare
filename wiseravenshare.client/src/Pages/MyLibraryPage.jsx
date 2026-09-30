@@ -646,39 +646,90 @@ const MyLibraryPage = ({ onNavigate }) => {
             return;
         }
 
-        const destinationFolderByType = {
-            music: '/wiseravenshare/music',
-            photo: '/wiseravenshare/photo',
-            video: '/wiseravenshare/video'
-        };
-        const destinationFolder = destinationFolderByType[resolvedUploadType] || '/wiseravenshare/media';
-
         setUploading(true);
         try {
+            let uploadResponse;
             if (resolvedUploadType === 'music') {
-                await apiService.uploadMusicTrack(uploadFile, {
+                uploadResponse = await apiService.uploadMusicTrack(uploadFile, {
                     title,
                     artist: '',
                     album: '',
                     genre: '',
-                    destinationFolder,
                     fingerprint: ''
                 });
             } else {
-                await apiService.uploadMedia(uploadFile, type, {
+                uploadResponse = await apiService.uploadMedia(uploadFile, type, {
                     title,
-                    description,
-                    destinationFolder
+                    description
                 });
             }
 
             addToast(`${resolvedUploadType === 'music' ? 'Music' : resolvedUploadType.charAt(0).toUpperCase() + resolvedUploadType.slice(1)} uploaded successfully.`, 'success');
+
+            // Optimistic update — immediately add item to local state so the user sees it without waiting for the reload.
+            const responseData = uploadResponse?.data || {};
+            const mediaUrl = String(responseData.mediaUrl || responseData.filePath || responseData.file?.MediaUrl || '').trim();
+            const fileName = String(responseData.fileName || responseData.file?.FileName || uploadFile.name || '').trim();
+
+            if (resolvedUploadType === 'music') {
+                const track = responseData.track || {};
+                const optimisticTrack = normalizeTrack({
+                    id: String(track.id || `upload-${Date.now()}`),
+                    title: String(track.title || title),
+                    artist: String(track.artist || ''),
+                    album: String(track.album || ''),
+                    mediaUrl: String(track.mediaUrl || mediaUrl),
+                    fileName: String(track.fileName || fileName),
+                    type: 'music'
+                });
+                if (optimisticTrack) {
+                    setMusicTracks(prev => {
+                        const exists = prev.some(t => t.id === optimisticTrack.id || t.fileName === optimisticTrack.fileName);
+                        return exists ? prev : [optimisticTrack, ...prev];
+                    });
+                }
+            } else if (resolvedUploadType === 'photo') {
+                const optimisticPhoto = normalizePhoto({
+                    id: `upload-${Date.now()}`,
+                    title,
+                    fileName,
+                    imageUrl: mediaUrl,
+                    thumbnailUrl: mediaUrl,
+                    uploadedAt: new Date().toISOString(),
+                    type: 'photo'
+                });
+                if (optimisticPhoto) {
+                    setPhotos(prev => {
+                        const exists = prev.some(p => p.fileName === fileName);
+                        return exists ? prev : [optimisticPhoto, ...prev];
+                    });
+                }
+            } else if (resolvedUploadType === 'video') {
+                const optimisticVideo = normalizeVideo({
+                    id: `upload-${Date.now()}`,
+                    title,
+                    fileName,
+                    videoUrl: mediaUrl,
+                    mediaUrl,
+                    relativePath: '',
+                    createdAt: new Date().toISOString(),
+                    type: 'video'
+                });
+                if (optimisticVideo) {
+                    setVideos(prev => {
+                        const exists = prev.some(v => v.fileName === fileName);
+                        return exists ? prev : [optimisticVideo, ...prev];
+                    });
+                }
+            }
+
             setUploadFile(null);
             setUploadTitle('');
             setUploadDescription('');
             if (uploadInputRef.current) {
                 uploadInputRef.current.value = '';
             }
+            // Trigger server reload to replace optimistic items with canonical server state.
             setLibraryVersion((value) => value + 1);
         } catch (error) {
             addToast(error?.message || 'Upload failed. Please try again.', 'error');
@@ -693,7 +744,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         return () => {
             isMountedRef.current = false;
         };
-    }, [addToast, user?.id, libraryVersion]);
+    }, [user?.id, libraryVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const filteredTracks = useMemo(() => {
         const query = musicSearch.trim().toLowerCase();
