@@ -160,6 +160,9 @@ public class AppDbContext : DbContext
     public DbSet<PodcastSessionDevice> PodcastSessionDevices => Set<PodcastSessionDevice>();
     public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
 
+    // Media Library (user saved photos, videos, music with visibility control)
+    public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -1157,6 +1160,35 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.SessionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Saved Media Library (photos, videos, music with visibility & scheduling)
+        modelBuilder.Entity<SavedMedia>(entity =>
+        {
+            entity.ToTable("SavedMedia");
+            entity.Property(x => x.Title).HasMaxLength(500);
+            entity.Property(x => x.Description).HasColumnType("text");
+            entity.Property(x => x.MediaUrl).HasMaxLength(2048);
+            entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
+            entity.Property(x => x.MediaMetadata).HasColumnType("jsonb");
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.IsDeleted });
+            entity.HasIndex(x => new { x.UserId, x.IsVisibleInFeed });
+            entity.HasIndex(x => new { x.UserId, x.MediaType });
+            entity.HasIndex(x => x.ScheduledPublishAt)
+                .HasFilter("\"ScheduledPublishAt\" IS NOT NULL");
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SourcePost)
+                .WithMany()
+                .HasForeignKey(x => x.SourcePostId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.PublishedPost)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedPostId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

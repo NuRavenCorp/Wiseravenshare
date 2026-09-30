@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -79,6 +80,18 @@ public sealed class RavensightMediaRetentionCleanupService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ravensight retention cleanup cycle failed");
+        }
+
+        // Also process any saved media items due for scheduled publishing.
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var savedMediaService = scope.ServiceProvider.GetRequiredService<ISavedMediaService>();
+            await savedMediaService.CleanupScheduledPublishesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Saved media scheduled-publish cleanup cycle failed");
         }
     }
 }

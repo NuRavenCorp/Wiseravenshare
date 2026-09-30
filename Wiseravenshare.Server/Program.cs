@@ -1811,6 +1811,7 @@ builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.As
 builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantLearningSampleRepository,
     Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantLearningSampleRepository>();
 builder.Services.AddScoped<IPostService, PostService>();
+builder.Services.AddScoped<ISavedMediaService, SavedMediaService>();
 builder.Services.AddScoped<ITruthService, TruthService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Interfaces.IAuthV2Service, AuthV2Service>();
