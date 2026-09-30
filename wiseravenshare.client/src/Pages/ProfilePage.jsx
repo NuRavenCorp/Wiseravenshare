@@ -614,7 +614,20 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigat
         ? socialGraphService.isFollowing(user?.id, focusedProfile.id)
         : false;
 
-    if (!user) return null;
+    if (!user) {
+        return (
+            <div style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                border: '1px solid var(--border-color)',
+                borderRadius: '18px',
+                background: 'var(--card-bg)',
+                color: 'var(--light-color)'
+            }}>
+                Please sign in to view your profile.
+            </div>
+        );
+    }
 
     return (
         <div>
