@@ -27,6 +27,7 @@ public class AppDbContext : DbContext
     public DbSet<TruthClaim> TruthClaims => Set<TruthClaim>();
     public DbSet<AIAgent> Agents => Set<AIAgent>();
     public DbSet<Follow> UserFollows => Set<Follow>();
+    public DbSet<UserBlock> UserBlocks => Set<UserBlock>();
     public DbSet<PostLike> PostLikes => Set<PostLike>();
     public DbSet<PostRepost> PostReposts => Set<PostRepost>();
     public DbSet<PostBookmark> PostBookmarks => Set<PostBookmark>();
@@ -230,6 +231,24 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(f => new { f.FollowerId, f.FollowingId })
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<UserBlock>(entity =>
+        {
+            entity.HasOne(b => b.Blocker)
+                .WithMany()
+                .HasForeignKey(b => b.BlockerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(b => b.Blocked)
+                .WithMany()
+                .HasForeignKey(b => b.BlockedId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(b => new { b.BlockerId, b.BlockedId })
+                .IsUnique();
+
+            entity.HasIndex(b => b.BlockerId);
         });
 
         modelBuilder.Entity<Post>(entity =>

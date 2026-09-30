@@ -1050,6 +1050,39 @@ export const apiService = {
             return { data: [] };
         }
     },
+    blockUser: async (userId) => {
+        try {
+            return await api.post(`/users/${userId}/block`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to block user.');
+            }
+            return { data: { blocked: true, userId, fallback: true } };
+        }
+    },
+    unblockUser: async (userId) => {
+        try {
+            return await api.delete(`/users/${userId}/block`);
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to unblock user.');
+            }
+            return { data: { blocked: false, userId, fallback: true } };
+        }
+    },
+    getMyBlocks: async () => {
+        try {
+            return await api.get('/users/me/blocks');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (!isMissingEndpointStatus(status)) {
+                throw normalizeApiError(error, 'Failed to load blocked users.');
+            }
+            return { data: [] };
+        }
+    },
 
     // Notifications endpoints
     getNotifications: async (params) => {
