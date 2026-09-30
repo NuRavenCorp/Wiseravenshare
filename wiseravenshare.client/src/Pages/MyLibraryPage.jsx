@@ -209,7 +209,7 @@ const normalizePhoto = (photo) => {
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const LIBRARY_LIMITS = {
-    music: 20,
+    music: 30,
     photo: 25,
     video: 10
 };

@@ -8,6 +8,8 @@ import '../Styles/MusicPlayer.css';
 const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 const MUSIC_PLAYER_STATE_CACHE_KEY = 'wiseMusic_playerState';
 const LEGACY_PLAYLISTS_CACHE_KEY = 'wiseMusic_playlists';
+// 30-song free-tier cap. Creators with an active plan get unlimited storage (future billing phase).
+const MUSIC_UPLOAD_LIMIT = 30;
 const FALLBACK_MUSIC_STREAMS = [
   'https://ice6.somafm.com/groovesalad-128-mp3',
   'https://playerservices.streamtheworld.com/api/livestream-redirect/WCBSFMAAC.aac',
@@ -491,12 +493,15 @@ const MusicPlayerPage = ({ onNavigate }) => {
     String(track?.album || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const heroStats = useMemo(() => ([
-    { label: 'Tracks', value: musicLibrary.length },
-    { label: 'Playlists', value: playlists.length },
-    { label: 'Favorites', value: favoriteTrackIds.length },
-    { label: 'Recent plays', value: recentHistory.length }
-  ]), [musicLibrary.length, playlists.length, favoriteTrackIds.length, recentHistory.length]);
+  const heroStats = useMemo(() => {
+    const persistedCount = musicLibrary.filter((t) => !isEphemeralTrack(t)).length;
+    return [
+      { label: 'Tracks', value: `${persistedCount} / ${MUSIC_UPLOAD_LIMIT}` },
+      { label: 'Playlists', value: playlists.length },
+      { label: 'Favorites', value: favoriteTrackIds.length },
+      { label: 'Recent plays', value: recentHistory.length }
+    ];
+  }, [musicLibrary, playlists.length, favoriteTrackIds.length, recentHistory.length]);
 
   const upcomingTracks = useMemo(() => {
     if (!playbackTracks.length) {
@@ -786,17 +791,27 @@ const MusicPlayerPage = ({ onNavigate }) => {
       return;
     }
 
-    setIsUploading(true);
-    setUploadProgress(0);
+  // Enforce 30-song cap. Creators with an unlimited plan bypass this (future phase).
+  const persistedTrackCount = musicLibrary.filter((t) => !isEphemeralTrack(t)).length;
+  if (persistedTrackCount >= MUSIC_UPLOAD_LIMIT) {
+    addToast(
+      `Your Wise-tracks library is full (${MUSIC_UPLOAD_LIMIT} songs). Delete a track to free space, or upgrade to a Creator Plan for unlimited storage.`,
+      'error'
+    );
+    return;
+  }
 
-    const uploadMetadata = {
-      title: uploadTitle || file.name.replace(/\.[^/.]+$/, ''),
-      artist: uploadArtist,
-      album: uploadAlbum,
-      genre: uploadGenre,
-      destinationFolder: '/wiseravenshare/ravensight/music',
-      onProgress: (value) => setUploadProgress(Number(value || 0))
-    };
+  setIsUploading(true);
+  setUploadProgress(0);
+
+  const uploadMetadata = {
+    title: uploadTitle || file.name.replace(/\.[^/.]+$/, ''),
+    artist: uploadArtist,
+    album: uploadAlbum,
+    genre: uploadGenre,
+    // No client-side destinationFolder — backend resolves the user-specific music folder automatically.
+    onProgress: (value) => setUploadProgress(Number(value || 0))
+  };
 
     const commitTrack = (track, persisted) => {
       if (!track) {
