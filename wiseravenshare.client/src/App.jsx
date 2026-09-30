@@ -29,6 +29,24 @@ import AdminPanelPage from './Pages/AdminPanelPage';
 import SiteCrawlerDashboardPage from './Pages/SiteCrawlerDashboardPage';
 import CrawlerMetricsInsightsPage from './Pages/CrawlerMetricsInsightsPage';
 import AssistantPage from './Pages/AssistantPage';
+
+const AiAssistantGatePage = () => (
+    <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '60vh', gap: '16px', textAlign: 'center', padding: '40px 20px'
+    }}>
+        <div style={{ fontSize: '48px' }}>🤖</div>
+        <div style={{ fontWeight: 700, fontSize: '22px' }}>AI Assistant — Coming Soon</div>
+        <div style={{
+            color: 'var(--light-color)', fontSize: '14px', maxWidth: '420px', lineHeight: 1.6,
+            padding: '16px 20px', borderRadius: '12px',
+            border: '1px solid var(--border-color)', background: 'var(--card-bg)'
+        }}>
+            The AI Assistant is temporarily unavailable while we prepare the next generation of features.
+            Check back soon — we'll notify you when it's ready.
+        </div>
+    </div>
+);
 import PrivacyPolicyPage from './Pages/PrivacyPolicyPage';
 import TermsOfServicePage from './Pages/TermsOfServicePage';
 import AmateurJournalistPage from './Pages/AmateurJournalistPage';
@@ -533,7 +551,7 @@ const App = () => {
             case 'truthseeker':
                 return <TruthSeeker />;
             case 'ai-assistant':
-                return <AiAssistantPage addTruthAlert={addTruthAlert} />;
+                return <AiAssistantGatePage />;
             case 'ainews':
                 return <AINews onOpenArticle={(article) => openArticle(article, 'ainews')} />;
             case 'breakingnews':
@@ -583,9 +601,7 @@ const App = () => {
                     ? <CrawlerMetricsInsightsPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'assistant':
-                return isAdminUser
-                    ? <AssistantPage />
-                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
+                return <AiAssistantGatePage />;
             case 'facebook-feed':
             case 'tiktok-feed':
             case 'instagram-feed':
