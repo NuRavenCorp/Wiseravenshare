@@ -68,6 +68,8 @@ public sealed class MediaService : IMediaService
         _logger = logger;
     }
 
+    private const int PerUserTypeLimit = 30;
+
     public async Task<MediaItemDto> UploadMediaAsync(UploadMediaRequest request, Guid userId, CancellationToken cancellationToken = default)
     {
         if (request.File is null || request.File.Length == 0)
@@ -83,6 +85,15 @@ public sealed class MediaService : IMediaService
         var user = await _userRepository.GetByIdAsync(userId) ?? throw new NotFoundException("User not found.");
         var mediaType = ResolveMediaType(request.MediaType, request.File.FileName, request.File.ContentType);
         var visibility = ResolveVisibility(request.Visibility);
+
+        // Enforce per-user, per-type retention limit.
+        var existingCount = await _mediaRepository.CountUserMediaByTypeAsync(userId, mediaType);
+        if (existingCount >= PerUserTypeLimit)
+        {
+            throw new BadRequestException(
+                $"You have reached the {PerUserTypeLimit}-item limit for {mediaType}. " +
+                $"Please delete one or more existing {mediaType.ToString().ToLowerInvariant()} items before uploading more.");
+        }
 
         var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
         var generatedFileName = $"{Guid.NewGuid():N}{extension}";
