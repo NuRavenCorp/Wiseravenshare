@@ -138,7 +138,21 @@ const normalizeVideo = (video) => {
 
     const fileName = String(video.fileName || video.FileName || video.title || 'video').trim();
     const relativePath = String(video.relativePath || video.RelativePath || video.objectKey || video.ObjectKey || '').trim();
+
+    // Prefer HLS manifest URL when present in metadataJson
+    let hlsManifestUrl = '';
+    try {
+        const meta = video.metadataJson || video.MetadataJson;
+        if (meta) {
+            const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta;
+            hlsManifestUrl = String(parsed?.hlsManifestUrl || parsed?.manifestUrl || '').trim();
+        }
+    } catch {
+        // ignore malformed metadata
+    }
+
     const sourceCandidates = [
+        hlsManifestUrl,
         toBlobStreamUrl(relativePath),
         fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '',
         normalizePlaybackUrl(video.videoUrl || ''),

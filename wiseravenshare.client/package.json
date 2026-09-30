@@ -23,6 +23,7 @@
     "@twilio/conversations": "^3.0.1",
     "axios": "^1.18.1",
     "framer-motion": "^13.2.0",
+    "hls.js": "^1.5.20",
     "howler": "^2.2.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

@@ -22,14 +22,16 @@ public sealed class RavensightVideoMediaController : ControllerBase
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RavensightVideoMediaController> _logger;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore, IHttpClientFactory httpClientFactory)
     {
         _videoService = videoService;
         _videoLibraryStore = videoLibraryStore;
         _dbContext = dbContext;
         _logger = logger;
         _mediaCatalogStore = mediaCatalogStore;
+        _httpClientFactory = httpClientFactory;
     }
 
     [HttpGet]
@@ -134,6 +136,27 @@ public sealed class RavensightVideoMediaController : ControllerBase
         {
             _logger.LogWarning(ex, "Video catalog entry failed for user {UserId}; continuing without catalog record.", userId);
         }
+
+        // Fire-and-forget HLS segmentation job — non-blocking
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var hlsClient = _httpClientFactory.CreateClient("VideoProcessorService");
+                var payload = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    object_key = saved.File.RelativePath,
+                    user_id = userId.ToString("N"),
+                    title = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Title
+                });
+                using var content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                await hlsClient.PostAsync("/hls/jobs", content);
+            }
+            catch
+            {
+                // HLS processing is best-effort; the raw video URL remains the fallback.
+            }
+        });
 
         VideoLibraryVideo persistedVideo;
         try

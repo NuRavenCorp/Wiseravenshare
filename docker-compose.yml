@@ -182,6 +182,24 @@ services:
       retries: 5
       start_period: 20s
 
+  # HLS video segmentation microservice (FastAPI container)
+  video-processor:
+    build:
+      context: ./services/video-processor
+      dockerfile: Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-video-processor
+    expose:
+      - "8004"
+    environment:
+      SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT:-https://nyc3.digitaloceanspaces.com}
+      SPACES_REGION: ${DO_SPACES_REGION:-nyc3}
+      SPACES_ACCESS_KEY: ${DO_SPACES_ACCESS_KEY:-}
+      SPACES_SECRET_KEY: ${DO_SPACES_SECRET_KEY:-}
+      SPACES_BUCKET: ${SPACES_BUCKET:-bucket-wrs-01010}
+      SPACES_CDN_BASE_URL: ${DO_CDN_PUBLIC_BASE_URL:-}
+    networks:
+      - wiseravenshare-net
+
   # Main API Server (builds and runs .NET + React app)
   api:
     build:
@@ -204,6 +222,9 @@ services:
         required: false
       karaoke-speech:
         condition: service_healthy
+        required: false
+      video-processor:
+        condition: service_started
         required: false
       ollama:
         condition: service_healthy
@@ -235,6 +256,7 @@ services:
       AudioService__BaseUrl: ${AUDIO_SERVICE_BASE_URL:-http://audio-processor:8001}
       KaraokeService__BaseUrl: ${KARAOKE_SERVICE_BASE_URL:-http://karaoke-engine:8002}
       KaraokeSpeechService__BaseUrl: ${KARAOKE_SPEECH_SERVICE_BASE_URL:-http://karaoke-speech:8003}
+      VideoProcessorService__BaseUrl: http://video-processor:8004
       # Redis Cache
       Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
       # S3 Blob Storage
