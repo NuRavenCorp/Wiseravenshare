@@ -378,6 +378,16 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
     const [customFeedError, setCustomFeedError] = useState('');
     const [showDeveloperApis, setShowDeveloperApis] = useState(false);
     const [providerStatuses, setProviderStatuses] = useState([]);
+
+    // Content Creator Form State
+    const [selectedMediaType, setSelectedMediaType] = useState('video');
+    const [videoFile, setVideoFile] = useState(null);
+    const [videoFileName, setVideoFileName] = useState('');
+    const [sourceUrl, setSourceUrl] = useState('');
+    const [evidenceSummary, setEvidenceSummary] = useState('');
+    const [verificationStatus, setVerificationStatus] = useState('unverified');
+    const [correctionUrl, setCorrectionUrl] = useState('');
+    const [saveToLibrary, setSaveToLibrary] = useState(true);
     const [providerStatusError, setProviderStatusError] = useState('');
     const [oauthStatuses, setOauthStatuses] = useState({});
     const [oauthActionPlatform, setOauthActionPlatform] = useState('');
@@ -2100,6 +2110,214 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                 <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '8px' }}>
                     Live {activeMeta.label} Posts Feed
                 </div>
+
+                {/* Media Type Selector */}
+                <div style={{ 
+                    display: 'flex', 
+                    gap: '8px', 
+                    flexWrap: 'wrap', 
+                    marginBottom: '14px',
+                    padding: '12px',
+                    background: 'rgba(139, 92, 246, 0.08)',
+                    border: '1px solid rgba(139, 92, 246, 0.3)',
+                    borderRadius: '10px'
+                }}>
+                    {[
+                        { id: 'photo', label: 'Photo', icon: '📷' },
+                        { id: 'video', label: 'Video', icon: '🎥' },
+                        { id: 'audio', label: 'Audio', icon: '🎙️' },
+                        { id: 'montage', label: 'Montage', icon: '🎬' },
+                        { id: 'canvas', label: 'Canvas', icon: '🎨' }
+                    ].map(({ id, label, icon }) => (
+                        <button
+                            key={id}
+                            type="button"
+                            onClick={() => setSelectedMediaType(id)}
+                            style={{
+                                border: selectedMediaType === id ? '2px solid #8b5cf6' : '1px solid rgba(139, 92, 246, 0.3)',
+                                background: selectedMediaType === id ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
+                                color: selectedMediaType === id ? '#a78bfa' : 'var(--light-color)',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontWeight: selectedMediaType === id ? 700 : 400,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
+                            }}
+                        >
+                            <span style={{ marginRight: '4px' }}>{icon}</span>
+                            {label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Content Creator Form */}
+                <form
+                    style={{
+                        background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(168, 85, 247, 0.03))',
+                        border: '1px solid rgba(139, 92, 246, 0.2)',
+                        borderRadius: '12px',
+                        padding: '14px',
+                        marginBottom: '16px',
+                        display: 'grid',
+                        gap: '10px'
+                    }}
+                >
+                    <div style={{ fontWeight: 700, fontSize: '13px', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        ✨ {selectedMediaType === 'photo' ? 'Photo' : selectedMediaType === 'video' ? 'Video' : selectedMediaType === 'audio' ? 'Audio' : selectedMediaType === 'montage' ? 'Montage' : 'Canvas'} Content Creator
+                    </div>
+
+                    {/* File Upload */}
+                    <label style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>
+                            {selectedMediaType === 'video' ? '📹 Video File' : selectedMediaType === 'audio' ? '🎵 Audio File' : selectedMediaType === 'photo' ? '📸 Photo File' : 'File Upload'}
+                        </span>
+                        <input
+                            type="file"
+                            onChange={(e) => {
+                                if (e.target.files?.[0]) {
+                                    setVideoFile(e.target.files[0]);
+                                    setVideoFileName(e.target.files[0].name);
+                                }
+                            }}
+                            accept={selectedMediaType === 'audio' ? 'audio/*' : selectedMediaType === 'photo' ? 'image/*' : 'video/*'}
+                            style={{
+                                padding: '8px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                background: '#0b0f14',
+                                color: '#fff',
+                                fontSize: '12px'
+                            }}
+                        />
+                        {videoFileName && (
+                            <div style={{ fontSize: '11px', color: '#a78bfa' }}>
+                                ✓ Selected: {videoFileName}
+                            </div>
+                        )}
+                    </label>
+
+                    {/* Source URL */}
+                    <label style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>🔗 Source URL <span style={{ fontWeight: 400, color: 'var(--light-color)' }}>(optional)</span></span>
+                        <input
+                            type="url"
+                            value={sourceUrl}
+                            onChange={(e) => setSourceUrl(e.target.value)}
+                            placeholder="https://source.example/report"
+                            style={{
+                                padding: '8px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                background: '#0b0f14',
+                                color: '#fff',
+                                fontSize: '12px'
+                            }}
+                        />
+                    </label>
+
+                    {/* Evidence Summary */}
+                    <label style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>📝 Evidence Summary <span style={{ fontWeight: 400, color: 'var(--light-color)' }}>(optional)</span></span>
+                        <textarea
+                            rows={2}
+                            value={evidenceSummary}
+                            onChange={(e) => setEvidenceSummary(e.target.value)}
+                            placeholder="Short evidence note for this post"
+                            style={{
+                                padding: '8px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                background: '#0b0f14',
+                                color: '#fff',
+                                fontSize: '12px',
+                                resize: 'vertical'
+                            }}
+                        />
+                    </label>
+
+                    {/* Verification Status */}
+                    <label style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>✓ Verification Status</span>
+                        <select
+                            value={verificationStatus}
+                            onChange={(e) => setVerificationStatus(e.target.value)}
+                            style={{
+                                padding: '8px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                background: '#0b0f14',
+                                color: '#fff',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <option value="unverified">Unverified</option>
+                            <option value="verified">Verified</option>
+                            <option value="disputed">Disputed</option>
+                            <option value="pending">Pending Review</option>
+                        </select>
+                    </label>
+
+                    {/* Correction Reference URL */}
+                    <label style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>🔍 Correction Reference URL <span style={{ fontWeight: 400, color: 'var(--light-color)' }}>(optional)</span></span>
+                        <input
+                            type="url"
+                            value={correctionUrl}
+                            onChange={(e) => setCorrectionUrl(e.target.value)}
+                            placeholder="https://source.example/correction"
+                            style={{
+                                padding: '8px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                background: '#0b0f14',
+                                color: '#fff',
+                                fontSize: '12px'
+                            }}
+                        />
+                    </label>
+
+                    {/* Save to Library Toggle */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                        <input
+                            type="checkbox"
+                            checked={saveToLibrary}
+                            onChange={(e) => setSaveToLibrary(e.target.checked)}
+                            style={{ cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: 700, color: '#c4b5fd' }}>
+                            📚 Save to My Library
+                        </span>
+                    </label>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            // Reset form
+                            setVideoFile(null);
+                            setVideoFileName('');
+                            setSourceUrl('');
+                            setEvidenceSummary('');
+                            setVerificationStatus('unverified');
+                            setCorrectionUrl('');
+                            setSaveToLibrary(true);
+                        }}
+                        style={{
+                            border: '1px solid rgba(168, 85, 247, 0.3)',
+                            background: 'rgba(168, 85, 247, 0.1)',
+                            color: '#c4b5fd',
+                            borderRadius: '6px',
+                            padding: '8px 12px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            justifySelf: 'start'
+                        }}
+                    >
+                        ✓ Save Content
+                    </button>
+                </form>
 
                 {isLoadingFeed && (
                     <div style={{ fontSize: '12px', color: 'var(--light-color)', marginBottom: '8px' }}>
