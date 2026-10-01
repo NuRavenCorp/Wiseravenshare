@@ -665,11 +665,6 @@ public class AuthController : ControllerBase
             return Forbid();
         }
 
-        if (!TryGetCurrentActorEmail(out var actorEmail) || !IsConfiguredAdminUser(actorEmail))
-        {
-            return Forbid();
-        }
-
         if (!_userStore.TryGetById(requestedUserId, out var user) || user is null)
         {
             return NotFound(new { message = "User not found." });
