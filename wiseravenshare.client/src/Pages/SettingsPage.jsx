@@ -113,7 +113,7 @@ const sumPosts = (posts, selectors) => posts.reduce((total, post) => {
     return total + contribution;
 }, 0);
 
-const SettingsPage = ({ onNavigate }) => {
+const SettingsPage = ({ onNavigate, showConnections }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
     const [loading, setLoading] = useState(true);
@@ -124,6 +124,8 @@ const SettingsPage = ({ onNavigate }) => {
     const [linkErrorByPlatform, setLinkErrorByPlatform] = useState({});
     const [adminMetrics, setAdminMetrics] = useState(null);
     const [error, setError] = useState('');
+
+    const connectionsRef = React.useRef(null);
 
     const adminEmails = useMemo(() => parseAdminEmails(), []);
     const isAdminUser = useMemo(() => {
@@ -281,6 +283,14 @@ const SettingsPage = ({ onNavigate }) => {
     useEffect(() => {
         loadSettings();
     }, [loadSettings]);
+
+    useEffect(() => {
+        if (showConnections && connectionsRef.current) {
+            setTimeout(() => {
+                connectionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+        }
+    }, [showConnections]);
 
     const handleConnect = async (platform) => {
         if (!user?.id) {
@@ -527,7 +537,7 @@ const SettingsPage = ({ onNavigate }) => {
                     </div>
                 </section>
 
-                <section style={{
+                <section ref={connectionsRef} style={{
                     border: '1px solid var(--border-color)',
                     borderRadius: '18px',
                     background: 'var(--card-bg)',

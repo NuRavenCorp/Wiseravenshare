@@ -557,6 +557,8 @@ const App = () => {
                 return <ArticlePage article={selectedArticle} onBack={() => setCurrentPage(articleBackPage)} />;
             case 'profile':
                 return <SettingsPage onNavigate={setCurrentPage} />;
+            case 'setup':
+                return <SettingsPage onNavigate={setCurrentPage} showConnections={true} />;
             case 'settings':
                 return (
                     <ProfilePage
@@ -829,6 +831,7 @@ const App = () => {
         { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
+        { id: 'setup', label: '⚙️ Set Up' },
         { id: 'profile', label: 'Settings' },
         { id: 'settings', label: 'Profile' }
     ];
