@@ -1577,6 +1577,19 @@ export const apiService = {
             }
         }),
 
+    // Billing / Subscription endpoints
+    getSubscriptionStatus: async () => {
+        try {
+            return await api.get('/billing/subscription');
+        } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            if (status === 404 || status === 405) {
+                return { data: { hasActiveSubscription: false, status: 'inactive', planKey: null } };
+            }
+            throw normalizeApiError(error, 'Failed to load subscription status.');
+        }
+    },
+
     // Moderation and anti-spam endpoints
     checkModeration: (content) => api.post('/growth/moderation/check', { content }),
     submitModerationReport: (targetType, targetId, reason, details = '') =>
