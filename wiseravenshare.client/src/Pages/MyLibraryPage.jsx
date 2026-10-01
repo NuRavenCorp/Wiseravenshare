@@ -739,6 +739,18 @@ const MyLibraryPage = ({ onNavigate }) => {
         };
     }, [user?.id, libraryVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    useEffect(() => {
+       const handleLibraryUpdate = (event) => {
+           const detail = event?.detail || {};
+           if (detail.mediaType === 'video' && detail.action === 'add') {
+               setLibraryVersion((value) => value + 1);
+           }
+       };
+
+       window.addEventListener('wiseraven:library-updated', handleLibraryUpdate);
+       return () => window.removeEventListener('wiseraven:library-updated', handleLibraryUpdate);
+    }, []);
+
     const filteredTracks = useMemo(() => {
         const query = musicSearch.trim().toLowerCase();
         const visibleTracks = musicTracks.filter((track) => !hiddenArchivedIds.music.includes(String(track?.id || '')));

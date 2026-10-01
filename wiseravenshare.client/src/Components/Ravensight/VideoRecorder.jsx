@@ -294,6 +294,13 @@ const VideoRecorder = ({ onNotification, canDirectUpload = true, subscriptionPri
             }
 
             onNotification(libraryOnly ? 'Video saved to library!' : 'Video uploaded successfully!', 'success');
+            
+            if (libraryOnly) {
+                window.dispatchEvent(new CustomEvent('wiseraven:library-updated', { 
+                    detail: { mediaType: 'video', action: 'add' } 
+                }));
+            }
+            
             resetRecording();
         } catch (error) {
             console.error('Upload error:', error);
