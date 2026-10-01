@@ -1231,7 +1231,22 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigat
                 </div>
             </div>
 
-            <SocialFeedsTimeline user={user} compact />
+            {isAdminUser ? (
+                <SocialFeedsTimeline user={user} compact />
+            ) : (
+                <div style={{
+                    marginBottom: '20px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '12px',
+                    padding: '14px',
+                    background: 'rgba(255,255,255,0.03)',
+                    color: 'var(--light-color)',
+                    fontSize: '13px',
+                    lineHeight: 1.6
+                }}>
+                    Social feed aggregation is admin only. Your connected profile links stay visible above, and you can manage or copy them in Settings.
+                </div>
+            )}
 
             {isAdminUser && (
                 <div style={{

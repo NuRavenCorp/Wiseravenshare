@@ -3873,12 +3873,12 @@ const PodcastStudioPage = ({ onNavigate }) => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => navigateToFeaturePage('social-feeds', 'Opening Social Feeds...')}
+                                    onClick={() => navigateToFeaturePage('settings', 'Opening Settings to manage social URLs...')}
                                     style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
                                 >
                                     <span style={{ fontSize: '18px' }}>📡</span>
-                                    <span>Cross-post to social feeds</span>
-                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Post →</span>
+                                    <span>Manage social URLs</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.7 }}>Open →</span>
                                 </button>
                             </div>
                         </div>
