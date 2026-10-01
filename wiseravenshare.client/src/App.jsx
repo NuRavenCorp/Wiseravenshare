@@ -246,6 +246,7 @@ const App = () => {
         const handleOpenSocialAggregator = (event) => {
             if (!isAdminUser) {
                 addToast('Social feed aggregation is admin only. Use Settings or Profile to manage social URLs.', 'info');
+                setCurrentPage('settings');
                 return;
             }
 
@@ -605,7 +606,7 @@ const App = () => {
             case 'social-feeds':
                 return isAdminUser
                     ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
-                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Social feed aggregation is restricted to admin users.</div>;
+                    : <SettingsPage onNavigate={setCurrentPage} />;
             case 'ravensight':
                 return <RavensightVideo onNavigate={navigateFromRavensight} />;
             case 'newsroom-video':
@@ -976,4 +977,3 @@ const App = () => {
 };
 
 export default App;
-
