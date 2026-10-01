@@ -364,6 +364,20 @@ const SettingsPage = ({ onNavigate }) => {
         }
     };
 
+    const handleCopyLink = async (platform, url) => {
+        const copyText = String(url || '').trim();
+        if (!copyText) {
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(copyText);
+            addToast(`${CONNECTION_PLATFORMS.find((item) => item.id === platform)?.label || 'Social'} URL copied.`, 'success');
+        } catch {
+            addToast('Unable to copy the URL right now.', 'error');
+        }
+    };
+
     if (!user) {
         return (
             <div style={{
@@ -521,10 +535,10 @@ const SettingsPage = ({ onNavigate }) => {
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
                         <FiLink />
-                        <h2 style={{ margin: 0, fontSize: '18px' }}>Connections</h2>
+                        <h2 style={{ margin: 0, fontSize: '18px' }}>Connections & Social URLs</h2>
                     </div>
                     <p style={{ marginTop: 0, color: 'var(--light-color)', fontSize: '14px' }}>
-                        Social and service connections are managed here instead of scattered across the app.
+                        Connect your accounts here, then copy the profile URLs you want to share from your profile page.
                     </p>
 
                     <div style={{ display: 'grid', gap: '10px', marginTop: '14px' }}>
@@ -581,21 +595,36 @@ const SettingsPage = ({ onNavigate }) => {
                                         </button>
                                     </div>
                                     {isConnected && connectedUrl && (
-                                        <a
-                                            href={connectedUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            style={{
-                                                display: 'block',
-                                                marginTop: '8px',
-                                                fontSize: '11px',
-                                                color: platform.tone,
-                                                textDecoration: 'underline',
-                                                wordBreak: 'break-all'
-                                            }}
-                                        >
-                                            Connected profile: {connectedUsername ? `@${connectedUsername} · ` : ''}{connectedUrl}
-                                        </a>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                            <a
+                                                href={connectedUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                    fontSize: '11px',
+                                                    color: platform.tone,
+                                                    textDecoration: 'underline',
+                                                    wordBreak: 'break-all'
+                                                }}
+                                            >
+                                                Connected profile: {connectedUsername ? `@${connectedUsername} · ` : ''}{connectedUrl}
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleCopyLink(platform.id, connectedUrl)}
+                                                style={{
+                                                    border: '1px solid var(--border-color)',
+                                                    borderRadius: '999px',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: 'var(--text-color)',
+                                                    padding: '4px 10px',
+                                                    fontSize: '11px',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Copy URL
+                                            </button>
+                                        </div>
                                     )}
                                     <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
                                         <input

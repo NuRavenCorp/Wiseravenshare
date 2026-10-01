@@ -966,7 +966,22 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                 <OnboardingCard onNavigate={onNavigate} />
                 <ShortFormFeed posts={rankedFeedPosts} />
                 <VideoFeedMini posts={rankedFeedPosts} />
-                <SocialFeedsTimeline user={currentUser} initialPlatform={initialPlatform} />
+                {isAdminUser ? (
+                    <SocialFeedsTimeline user={currentUser} initialPlatform={initialPlatform} />
+                ) : (
+                    <div style={{
+                        marginTop: '16px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '12px',
+                        padding: '14px',
+                        background: 'rgba(56, 189, 248, 0.06)',
+                        color: 'var(--light-color)',
+                        fontSize: '13px',
+                        lineHeight: 1.6
+                    }}>
+                        Social feed aggregation is admin only. Use <strong>Settings</strong> or <strong>Profile</strong> to manage your social URLs and copy the links you want to share.
+                    </div>
+                )}
             </div>
         </div>
     );

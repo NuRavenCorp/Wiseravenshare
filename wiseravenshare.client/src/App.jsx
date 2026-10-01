@@ -180,10 +180,6 @@ const App = () => {
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.includes(email);
     }, [adminEmails, user?.email]);
-    const canAccessPlatformAggregator = useMemo(() => {
-        return Boolean(user);
-    }, [user]);
-
     useEffect(() => {
         if (currentPage !== 'profile') {
             return;
@@ -248,8 +244,8 @@ const App = () => {
 
     useEffect(() => {
         const handleOpenSocialAggregator = (event) => {
-            if (!canAccessPlatformAggregator) {
-                addToast('Platform aggregator is restricted to admin and priveledged users.', 'info');
+            if (!isAdminUser) {
+                addToast('Social feed aggregation is admin only. Use Settings or Profile to manage social URLs.', 'info');
                 return;
             }
 
@@ -273,7 +269,7 @@ const App = () => {
         return () => {
             window.removeEventListener('wiseraven:open-social-aggregator', handleOpenSocialAggregator);
         };
-    }, [addToast, canAccessPlatformAggregator]);
+    }, [addToast, isAdminUser]);
 
     useEffect(() => {
         if (!isAuthenticated) {
@@ -607,9 +603,9 @@ const App = () => {
             case 'instagram-feed':
             case 'youtube-feed':
             case 'social-feeds':
-                return canAccessPlatformAggregator
+                return isAdminUser
                     ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
-                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Platform aggregator access is limited to admin and priveledged users.</div>;
+                    : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Social feed aggregation is restricted to admin users.</div>;
             case 'ravensight':
                 return <RavensightVideo onNavigate={navigateFromRavensight} />;
             case 'newsroom-video':
@@ -836,7 +832,7 @@ const App = () => {
         { id: 'settings', label: 'Profile' }
     ];
 
-    if (canAccessPlatformAggregator) {
+    if (isAdminUser) {
         navItems.splice(2, 0, { id: 'social-feeds', label: 'Social Feeds' });
     }
 
@@ -980,5 +976,4 @@ const App = () => {
 };
 
 export default App;
-
 
