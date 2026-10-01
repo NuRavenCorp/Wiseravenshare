@@ -345,7 +345,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
 
                                     <button
                                         type="button"
-                                        onClick={() => onNavigate('settings')}
+                                        onClick={() => onNavigate('setup')}
                                         style={{
                                             fontSize: '0.75rem',
                                             color: item.color,
