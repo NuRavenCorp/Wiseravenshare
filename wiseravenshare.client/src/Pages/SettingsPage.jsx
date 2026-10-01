@@ -124,6 +124,7 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
     const [linkErrorByPlatform, setLinkErrorByPlatform] = useState({});
     const [adminMetrics, setAdminMetrics] = useState(null);
     const [error, setError] = useState('');
+    const [subscription, setSubscription] = useState(null);
 
     const connectionsRef = React.useRef(null);
 
@@ -170,6 +171,13 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                 setLinkDrafts(normalizeFeedDrafts(socialFeeds));
             } catch {
                 setLinkDrafts(EMPTY_LINK_DRAFTS);
+            }
+
+            try {
+                const subResponse = await apiService.getSubscriptionStatus();
+                setSubscription(subResponse?.data || null);
+            } catch {
+                setSubscription(null);
             }
 
             if (!isAdminUser) {
@@ -452,72 +460,108 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                     </p>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                        {/* Growth Suite */}
-                        <div style={{ border: '1px solid rgba(99,102,241,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(99,102,241,0.06)' }}>
-                            <div style={{ fontWeight: 800, fontSize: '14px', color: '#a5b4fc', marginBottom: '4px' }}>WRS Growth Suite</div>
-                            <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$39<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
-                            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $390/yr · 14-day free trial</div>
-                            <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
-                                Analytics, audience insights, trending content dashboard
+                        {subscription?.hasActiveSubscription ? (
+                            /* Active subscription banner — hide plan cards */
+                            <div style={{ gridColumn: '1 / -1', border: '1px solid rgba(34,197,94,0.4)', borderRadius: '12px', padding: '18px', background: 'rgba(34,197,94,0.08)', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '28px' }}>✅</span>
+                                <div>
+                                    <div style={{ fontWeight: 800, fontSize: '15px', color: '#86efac' }}>
+                                        You&apos;re subscribed
+                                        {subscription.planKey ? ` — ${
+                                            subscription.planKey === 'growth_suite' ? 'WRS Growth Suite' :
+                                            subscription.planKey === 'studio_plus' ? 'WRS Studio Plus' :
+                                            subscription.planKey === 'podcast_pro' ? 'Podcast Pro Bundle' :
+                                            subscription.planKey.replace(/_/g, ' ')
+                                        }` : ''}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                                        Status: <span style={{ color: '#86efac' }}>{subscription.status || 'active'}</span>
+                                        {subscription.currentPeriodEnd && (
+                                            <> &nbsp;·&nbsp; Renews {new Date(subscription.currentPeriodEnd).toLocaleDateString()}</>
+                                        )}
+                                        {subscription.cancelAtPeriodEnd && (
+                                            <> &nbsp;·&nbsp; <span style={{ color: '#fbbf24' }}>Cancels at period end</span></>
+                                        )}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate?.('podcast-checkout')}
+                                    style={{ marginLeft: 'auto', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-color)', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                                >
+                                    Manage Billing
+                                </button>
                             </div>
-                            <a
-                                href="https://buy.stripe.com/test_aFa8wQc2K6CZ1NC1yO5ZC07"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
-                            >
-                                Start Free Trial →
-                            </a>
-                        </div>
+                        ) : (
+                            <>
+                                {/* Growth Suite */}
+                                <div style={{ border: '1px solid rgba(99,102,241,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(99,102,241,0.06)' }}>
+                                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#a5b4fc', marginBottom: '4px' }}>WRS Growth Suite</div>
+                                    <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$39<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $390/yr · 14-day free trial</div>
+                                    <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
+                                        Analytics, audience insights, trending content dashboard
+                                    </div>
+                                    <a
+                                        href="https://buy.stripe.com/test_aFa8wQc2K6CZ1NC1yO5ZC07"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
+                                    >
+                                        Start Free Trial →
+                                    </a>
+                                </div>
 
-                        {/* Studio Plus */}
-                        <div style={{ border: '1px solid rgba(139,92,246,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(139,92,246,0.06)' }}>
-                            <div style={{ fontWeight: 800, fontSize: '14px', color: '#c4b5fd', marginBottom: '4px' }}>WRS Studio Plus</div>
-                            <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$79<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
-                            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $790/yr · 7-day free trial</div>
-                            <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
-                                Team workflows, unlimited reviewers, permission-based editing
-                            </div>
-                            <a
-                                href="https://buy.stripe.com/test_6oU4gAfeW5yVdwkelA5ZC09"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
-                            >
-                                Start Free Trial →
-                            </a>
-                        </div>
+                                {/* Studio Plus */}
+                                <div style={{ border: '1px solid rgba(139,92,246,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(139,92,246,0.06)' }}>
+                                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#c4b5fd', marginBottom: '4px' }}>WRS Studio Plus</div>
+                                    <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$79<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $790/yr · 7-day free trial</div>
+                                    <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
+                                        Team workflows, unlimited reviewers, permission-based editing
+                                    </div>
+                                    <a
+                                        href="https://buy.stripe.com/test_6oU4gAfeW5yVdwkelA5ZC09"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
+                                    >
+                                        Start Free Trial →
+                                    </a>
+                                </div>
 
-                        {/* Podcast Pro Bundle */}
-                        <div style={{ border: '1px solid rgba(236,72,153,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(236,72,153,0.06)', position: 'relative' }}>
-                            <div style={{ position: 'absolute', top: '-10px', left: '12px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#1f2937', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em' }}>BEST VALUE</div>
-                            <div style={{ fontWeight: 800, fontSize: '14px', color: '#f9a8d4', marginBottom: '4px' }}>Podcast Pro Bundle</div>
-                            <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$149<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
-                            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $1,490/yr · 30-day free trial</div>
-                            <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
-                                Everything in Growth + Studio Plus + priority support
-                            </div>
-                            <a
-                                href="https://buy.stripe.com/test_bJebJ2eaS8L7fEs0uK5ZC0b"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #ec4899, #db2777)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
-                            >
-                                Start Free Trial →
-                            </a>
-                        </div>
+                                {/* Podcast Pro Bundle */}
+                                <div style={{ border: '1px solid rgba(236,72,153,0.3)', borderRadius: '12px', padding: '14px', background: 'rgba(236,72,153,0.06)', position: 'relative' }}>
+                                    <div style={{ position: 'absolute', top: '-10px', left: '12px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#1f2937', padding: '2px 8px', borderRadius: '999px', fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em' }}>BEST VALUE</div>
+                                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#f9a8d4', marginBottom: '4px' }}>Podcast Pro Bundle</div>
+                                    <div style={{ fontSize: '22px', fontWeight: 900, color: '#e2e8f0', marginBottom: '4px' }}>$149<span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px' }}>or $1,490/yr · 30-day free trial</div>
+                                    <div style={{ fontSize: '11px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
+                                        Everything in Growth + Studio Plus + priority support
+                                    </div>
+                                    <a
+                                        href="https://buy.stripe.com/test_bJebJ2eaS8L7fEs0uK5ZC0b"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ display: 'block', textAlign: 'center', background: 'linear-gradient(135deg, #ec4899, #db2777)', color: 'white', borderRadius: '8px', padding: '9px 0', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}
+                                    >
+                                        Start Free Trial →
+                                    </a>
+                                </div>
 
-                        {/* See all plans CTA */}
-                        <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '14px', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
-                            <div style={{ fontSize: '13px', color: '#94a3b8', textAlign: 'center' }}>Compare all plans, toggle annual/monthly, and see full feature lists.</div>
-                            <button
-                                type="button"
-                                onClick={() => onNavigate?.('podcast-checkout')}
-                                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-color)', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                            >
-                                View All Plans <FiExternalLink size={12} />
-                            </button>
-                        </div>
+                                {/* See all plans CTA */}
+                                <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '14px', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
+                                    <div style={{ fontSize: '13px', color: '#94a3b8', textAlign: 'center' }}>Compare all plans, toggle annual/monthly, and see full feature lists.</div>
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate?.('podcast-checkout')}
+                                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-color)', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        View All Plans <FiExternalLink size={12} />
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </section>
 
