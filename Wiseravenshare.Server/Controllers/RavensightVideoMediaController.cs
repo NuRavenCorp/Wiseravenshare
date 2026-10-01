@@ -205,11 +205,11 @@ public sealed class RavensightVideoMediaController : ControllerBase
             mediaUrl,
             video = persistedVideo,
             persistenceStatus,
-            mediaAssetId = mediaRecord.Id,
+            mediaAssetId = mediaRecord?.Id,
             retention = new
             {
                 days = (int?)null,
-                expiresAtUtc = mediaRecord.ExpiresAtUtc,
+                expiresAtUtc = mediaRecord?.ExpiresAtUtc,
                 warning = (string?)null,
                 localFolderPermissionGranted = preference?.LocalFolderPermissionGranted ?? false,
                 localFolderIdentityKey = preference?.FolderIdentityKey
