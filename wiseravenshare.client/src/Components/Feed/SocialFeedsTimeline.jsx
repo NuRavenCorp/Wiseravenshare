@@ -1270,23 +1270,39 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
                         Connected Accounts: {connectedPlatforms.length}/{connectablePlatformCount}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {connectedPlatforms.length > 0 ? connectedPlatforms.map((platform) => (
-                            <span
-                                key={platform.id}
-                                style={{
-                                    fontSize: '11px',
-                                    borderRadius: '999px',
-                                    border: `1px solid ${platform.color}`,
-                                    color: platform.color,
-                                    padding: '3px 8px',
-                                    fontWeight: 600
-                                }}
-                            >
-                                {platform.icon} {platform.label} connected
-                            </span>
-                        )) : (
+                        {connectedPlatforms.length > 0 ? connectedPlatforms.map((platform) => {
+                            const platformItem = timelineItems.find(item => item.id === platform.id);
+                            const hasUrl = platformItem?.url;
+                            return (
+                                <a
+                                    key={platform.id}
+                                    href={hasUrl ? platformItem.url : '#'}
+                                    target={hasUrl ? '_blank' : undefined}
+                                    rel={hasUrl ? 'noopener noreferrer' : undefined}
+                                    onClick={(e) => !hasUrl && e.preventDefault()}
+                                    style={{
+                                        fontSize: '11px',
+                                        borderRadius: '999px',
+                                        border: `1px solid ${platform.color}`,
+                                        color: platform.color,
+                                        padding: '3px 8px',
+                                        fontWeight: 600,
+                                        cursor: hasUrl ? 'pointer' : 'default',
+                                        textDecoration: 'none',
+                                        display: 'inline-block',
+                                        transition: 'all 0.2s ease',
+                                        opacity: hasUrl ? 1 : 0.7,
+                                        transform: hasUrl ? 'none' : 'none',
+                                        ':hover': hasUrl ? { opacity: 1, transform: 'scale(1.05)' } : {}
+                                    }}
+                                    title={hasUrl ? `Visit ${platform.label}` : `No profile URL configured for ${platform.label}`}
+                                >
+                                    {platform.icon} {platform.label} {hasUrl ? '→' : '✓'}
+                                </a>
+                            );
+                        }) : (
                             <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>
-                                No connected accounts yet. Use “⚙️ Connect Accounts” to run OAuth and add handles.
+                                No connected accounts yet. Use "⚙️ Connect Accounts" to run OAuth and add handles.
                             </span>
                         )}
                     </div>
