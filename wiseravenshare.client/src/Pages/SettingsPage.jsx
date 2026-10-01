@@ -14,10 +14,10 @@ const parseAdminEmails = () => {
 };
 
 const CONNECTION_PLATFORMS = [
-    { id: 'facebook', label: 'Facebook', tone: '#93c5fd' },
-    { id: 'tiktok', label: 'TikTok', tone: '#67e8f9' },
-    { id: 'instagram', label: 'Instagram', tone: '#f9a8d4' },
-    { id: 'youtube', label: 'YouTube', tone: '#f87171' }
+    { id: 'facebook', label: 'Facebook', tone: '#93c5fd', siteUrl: 'https://www.facebook.com' },
+    { id: 'tiktok', label: 'TikTok', tone: '#67e8f9', siteUrl: 'https://www.tiktok.com' },
+    { id: 'instagram', label: 'Instagram', tone: '#f9a8d4', siteUrl: 'https://www.instagram.com' },
+    { id: 'youtube', label: 'YouTube', tone: '#f87171', siteUrl: 'https://www.youtube.com' }
 ];
 
 const EMPTY_LINK_DRAFTS = {
@@ -292,26 +292,10 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
         }
     }, [showConnections]);
 
-    const handleConnect = async (platform) => {
-        if (!user?.id) {
-            return;
-        }
-
-        setSavingPlatform(platform);
-        try {
-            const response = await apiService.startSocialConnect(platform, user.id);
-            const payload = response?.data || {};
-            const redirectUrl = payload.authorizationUrl || payload.redirectUrl || payload.url || payload.connectUrl;
-            if (redirectUrl) {
-                window.location.assign(redirectUrl);
-                return;
-            }
-
-            addToast(payload.message || `${platform} connection started.`, 'info');
-        } catch (connectError) {
-            addToast(connectError?.message || `Unable to start ${platform} connection.`, 'error');
-        } finally {
-            setSavingPlatform('');
+    const handleConnect = (platformId) => {
+        const platform = CONNECTION_PLATFORMS.find((p) => p.id === platformId);
+        if (platform?.siteUrl) {
+            window.open(platform.siteUrl, '_blank', 'noopener,noreferrer');
         }
     };
 
@@ -578,7 +562,6 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                         <button
                                             type="button"
                                             onClick={() => handleConnect(platform.id)}
-                                            disabled={savingPlatform === platform.id}
                                             style={{
                                                 border: '1px solid var(--border-color)',
                                                 borderRadius: '999px',
@@ -591,17 +574,8 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                                 gap: '6px'
                                             }}
                                         >
-                                            {savingPlatform === platform.id ? (
-                                                <>
-                                                    <FiRefreshCw />
-                                                    Working
-                                                </>
-                                            ) : (
-                                                <>
-                                                    {isConnected ? 'Manage' : 'Connect'}
-                                                    <FiExternalLink />
-                                                </>
-                                            )}
+                                            {isConnected ? 'Manage' : 'Connect'}
+                                            <FiExternalLink />
                                         </button>
                                     </div>
                                     {isConnected && connectedUrl && (
