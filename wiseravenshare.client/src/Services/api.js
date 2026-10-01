@@ -1314,11 +1314,42 @@ export const apiService = {
             formData.append('fingerprint', options.fingerprint);
         }
 
-        try {
-            return await api.post('/ravensight/media/music/save', formData);
-        } catch (error) {
-            throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
+        // Use axios.post directly (not the api instance) so the default
+        // Content-Type: application/json header is NOT applied. In axios 1.x,
+        // if Content-Type is application/json, FormData is converted to JSON
+        // and the file bytes are lost. Letting the browser set the multipart
+        // boundary automatically is the correct approach for file uploads.
+        const token = getAuthToken();
+        const candidateUrls = buildMediaUploadUrls('audio');
+        let lastError = null;
+
+        for (const url of candidateUrls) {
+            try {
+                const response = await axios.post(url, formData, {
+                    headers: {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {})
+                    },
+                    onUploadProgress: (progressEvent) => {
+                        if (typeof options.onProgress === 'function') {
+                            const total = progressEvent.total || progressEvent.loaded || 1;
+                            options.onProgress(Math.round((progressEvent.loaded * 100) / total));
+                        }
+                    }
+                });
+                return response;
+            } catch (error) {
+                lastError = error;
+                const status = error?.response?.status;
+                if (status && status !== 404 && status !== 405) {
+                    throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
+                }
+            }
         }
+
+        throw normalizeApiError(
+            lastError || new Error('Music upload failed.'),
+            'Failed to upload music track. Please try again.'
+        );
     },
     getMusicLibrary: async () => {
         try {

@@ -345,10 +345,10 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
         };
 
         const payload =
-            platform === 'facebook' ? { facebook: connectionPayload } :
-            platform === 'tiktok' ? { tikTok: connectionPayload } :
-            platform === 'instagram' ? { instagram: connectionPayload } :
-            { youTube: connectionPayload };
+            platform === 'facebook' ? { Facebook: connectionPayload } :
+            platform === 'tiktok' ? { TikTok: connectionPayload } :
+            platform === 'instagram' ? { Instagram: connectionPayload } :
+            { YouTube: connectionPayload };
 
         setLinkSavingPlatform(platform);
         try {
