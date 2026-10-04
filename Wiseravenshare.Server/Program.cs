@@ -1925,6 +1925,12 @@ builder.Services.AddSingleton<PodcastVideoBridgeStateService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<RavensightMediaCatalogStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
+
+// ── Python microservice orchestrator ──────────────────────────────────────────
+// Manages venv creation, pip install, and process supervision for all Python
+// services (audio-processor :8001, karaoke-engine :8002, karaoke-speech :8003).
+// Disable via appsettings: "PythonServices": { "Enabled": false }
+builder.Services.AddHostedService<PythonServiceOrchestrator>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient("AudioService", client =>
 {
