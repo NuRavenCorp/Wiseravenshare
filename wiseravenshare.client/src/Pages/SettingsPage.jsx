@@ -55,6 +55,42 @@ const normalizeHttpUrl = (value) => {
     }
 };
 
+const toProfileSlug = (user) => {
+    const direct = String(user?.username || user?.handle || '').trim();
+    if (direct) {
+        return direct;
+    }
+
+    const fromName = String(user?.name || user?.displayName || '').trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    if (fromName) {
+        return fromName;
+    }
+
+    return String(user?.id || '').trim();
+};
+
+const resolvePlatformProfileUrl = (platformId, username) => {
+    const cleaned = String(username || '').trim().replace(/^@/, '');
+    if (!cleaned) {
+        return '';
+    }
+
+    if (platformId === 'facebook') {
+        return `https://www.facebook.com/${cleaned}`;
+    }
+    if (platformId === 'instagram') {
+        return `https://www.instagram.com/${cleaned}`;
+    }
+    if (platformId === 'youtube') {
+        return cleaned.startsWith('UC')
+            ? `https://www.youtube.com/channel/${cleaned}`
+            : `https://www.youtube.com/@${cleaned}`;
+    }
+    return `https://www.tiktok.com/@${cleaned}`;
+};
+
 const readStoredMetrics = (userId) => {
     if (!userId) {
         return null;
@@ -733,7 +769,7 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                     </p>
 
                     {(() => {
-                        const profileSlug = user?.username || user?.handle || user?.id || '';
+                        const profileSlug = toProfileSlug(user);
                         const profileUrl  = profileSlug
                             ? `https://wiseravenshare.com/profile/${profileSlug}`
                             : 'https://wiseravenshare.com';
@@ -744,28 +780,28 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                 label: 'Facebook',
                                 color: '#93c5fd',
                                 where: 'Page settings → Contact and basic info → Website field',
-                                link: 'https://www.facebook.com/wiseravenshare',
+                                fallbackLink: 'https://www.facebook.com',
                             },
                             {
                                 id: 'instagram',
                                 label: 'Instagram',
                                 color: '#f9a8d4',
                                 where: 'Edit Profile (mobile app) → Links section',
-                                link: 'https://www.instagram.com/wiseravenshare',
+                                fallbackLink: 'https://www.instagram.com',
                             },
                             {
                                 id: 'youtube',
                                 label: 'YouTube',
                                 color: '#f87171',
                                 where: 'YouTube Studio → Customization → Basic Info → Links',
-                                link: 'https://www.youtube.com/@wiseravenshare',
+                                fallbackLink: 'https://www.youtube.com',
                             },
                             {
                                 id: 'tiktok',
                                 label: 'TikTok',
                                 color: '#67e8f9',
                                 where: 'Business Account required → Edit Profile → Website',
-                                link: 'https://www.tiktok.com/@wiseravenshare',
+                                fallbackLink: 'https://www.tiktok.com',
                             },
                         ];
 
@@ -807,7 +843,23 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                 </div>
 
                                 {/* Per-platform instructions */}
-                                {socialInstructions.map(({ id, label, color, where, link }) => (
+                                {socialInstructions.map(({ id, label, color, where, fallbackLink }) => {
+                                    const draft = linkDrafts[id] || {};
+                                    const status = statusByPlatform[id] || {};
+                                    const details = status.details || {};
+                                    const savedUsername = String(draft.username || details.username || '').trim();
+                                    const savedUrlRaw = String(
+                                        draft.profileUrl
+                                        || details.profileUrl
+                                        || details.feedUrl
+                                        || resolvePlatformProfileUrl(id, savedUsername)
+                                        || ''
+                                    ).trim();
+                                    const normalizedSavedUrl = normalizeHttpUrl(savedUrlRaw);
+                                    const openUrl = normalizedSavedUrl || fallbackLink;
+                                    const hasSavedDestination = Boolean(normalizedSavedUrl);
+
+                                    return (
                                    <div key={id} style={{
                                        border: `1px solid ${color}44`,
                                        borderRadius: '12px',
@@ -821,9 +873,14 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                        <div>
                                            <div style={{ fontWeight: 700, color, marginBottom: '2px' }}>{label}</div>
                                            <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{where}</div>
+                                           <div style={{ fontSize: '11px', color: hasSavedDestination ? '#86efac' : '#94a3b8', marginTop: '4px' }}>
+                                               {hasSavedDestination
+                                                   ? `Using saved destination${savedUsername ? ` (@${savedUsername.replace(/^@/, '')})` : ''}`
+                                                   : 'No saved profile URL yet — opens platform home'}
+                                           </div>
                                        </div>
                                        <a
-                                           href={link}
+                                           href={openUrl}
                                            target="_blank"
                                            rel="noopener noreferrer"
                                            style={{
@@ -844,7 +901,8 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                                            Open {label} <FiExternalLink size={12} />
                                        </a>
                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         );
                     })()}

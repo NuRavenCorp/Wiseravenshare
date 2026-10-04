@@ -114,21 +114,38 @@ export default function KaraokePage() {
     const [showKaraokeScorer, setShowKaraokeScorer] = useState(false);
     const [referenceLyrics, setReferenceLyrics] = useState(DEFAULT_REFERENCE_LYRICS);
     const jobPollTimeoutRef = useRef(null);
+    const karaokeServiceReachableRef = useRef(false);
 
     useEffect(() => {
         const token = getAuthToken();
         const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
         fetch('/api/karaoke/catalogue', { headers: authHeaders })
-            .then(r => r.ok ? r.json() : Promise.resolve(DEMO_SONGS))
+            .then((r) => {
+                karaokeServiceReachableRef.current = r.ok;
+                return r.ok ? r.json() : Promise.resolve(DEMO_SONGS);
+            })
             .then(data => setCatalogue(Array.isArray(data) && data.length ? data : DEMO_SONGS))
             .catch(() => setCatalogue(DEMO_SONGS))
             .finally(() => setCatalogueLoading(false));
 
-        fetch('/api/karaoke/health')
-            .then(r => r.json())
-            .then(d => setHealth(d.upstream))
-            .catch(() => setHealth('offline'));
+        fetch('/api/karaoke/health', { headers: authHeaders })
+            .then(async (response) => {
+                if (!response.ok) {
+                    setHealth(response.status >= 500 ? 'degraded' : 'offline');
+                    return;
+                }
+
+                const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+                if (!contentType.includes('application/json')) {
+                    setHealth('ok');
+                    return;
+                }
+
+                const payload = await response.json().catch(() => null);
+                setHealth(payload?.upstream ? String(payload.upstream).toLowerCase() : 'ok');
+            })
+            .catch(() => setHealth(karaokeServiceReachableRef.current ? 'degraded' : 'offline'));
 
         if (!token) return;
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { socialGraphService } from '../../Services/SocialGraph';
+import { apiService } from '../../Services/api';
 import WiseRavenLogo from './WiseRavenLogo';
 
 const parseAdminEmails = () => {
@@ -41,6 +42,7 @@ const normalizeConnection = (connection, platform) => {
     return {
         enabled: Boolean(connection?.enabled || username || profileUrl || feedUrl),
         username,
+        profileUrl,
         resolvedUrl: feedUrl || profileUrl || fallbackUrl
     };
 };
@@ -89,6 +91,9 @@ const isImageSource = (value) => {
 
 const Sidebar = ({ onNavigate, currentPage, user }) => {
     const [counts, setCounts] = useState({ followers: 0, following: 0 });
+    const [feedDrafts, setFeedDrafts] = useState({});
+    const [savingPlatform, setSavingPlatform] = useState('');
+    const [saveErrors, setSaveErrors] = useState({});
     const adminEmails = parseAdminEmails();
     const isAdminUser = adminEmails.has(String(user?.email || '').trim().toLowerCase());
 
@@ -160,39 +165,158 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
 
     const hasImageAvatar = isImageSource(profile.avatar);
 
-    const feeds = hasConfiguredFeeds(user?.socialFeeds)
-        ? (user?.socialFeeds || {})
-        : readCachedFeeds();
+    const userFeeds = user?.socialFeeds || {};
+    const cachedFeeds = readCachedFeeds();
+    const feeds = hasConfiguredFeeds(userFeeds)
+        ? { ...userFeeds, ...cachedFeeds }
+        : cachedFeeds;
     const socialFeedItems = [
         {
             id: 'facebook-feed',
+            platformKey: 'facebook',
+            payloadKey: 'Facebook',
             label: 'Facebook Feed',
             icon: 'fab fa-facebook',
             color: '#93c5fd',
+            siteUrl: 'https://www.facebook.com',
             connection: normalizeConnection(getConnection(feeds, 'facebook', 'Facebook'), 'facebook')
         },
         {
             id: 'tiktok-feed',
+            platformKey: 'tiktok',
+            payloadKey: 'TikTok',
             label: 'TikTok Feed',
             icon: 'fab fa-tiktok',
             color: '#67e8f9',
+            siteUrl: 'https://www.tiktok.com',
             connection: normalizeConnection(getConnection(feeds, 'tikTok', 'tiktok', 'TikTok'), 'tiktok')
         },
         {
             id: 'instagram-feed',
+            platformKey: 'instagram',
+            payloadKey: 'Instagram',
             label: 'Instagram Feed',
             icon: 'fab fa-instagram',
             color: '#f9a8d4',
+            siteUrl: 'https://www.instagram.com',
             connection: normalizeConnection(getConnection(feeds, 'instagram', 'Instagram'), 'instagram')
         },
         {
             id: 'youtube-feed',
+            platformKey: 'youtube',
+            payloadKey: 'YouTube',
             label: 'YouTube Feed',
             icon: 'fab fa-youtube',
             color: '#f87171',
+            siteUrl: 'https://www.youtube.com',
             connection: normalizeConnection(getConnection(feeds, 'youtube', 'YouTube'), 'youtube')
         },
     ];
+
+    useEffect(() => {
+        setFeedDrafts({
+            facebook: {
+                username: socialFeedItems[0]?.connection?.username || '',
+                profileUrl: socialFeedItems[0]?.connection?.profileUrl || socialFeedItems[0]?.connection?.resolvedUrl || ''
+            },
+            tiktok: {
+                username: socialFeedItems[1]?.connection?.username || '',
+                profileUrl: socialFeedItems[1]?.connection?.profileUrl || socialFeedItems[1]?.connection?.resolvedUrl || ''
+            },
+            instagram: {
+                username: socialFeedItems[2]?.connection?.username || '',
+                profileUrl: socialFeedItems[2]?.connection?.profileUrl || socialFeedItems[2]?.connection?.resolvedUrl || ''
+            },
+            youtube: {
+                username: socialFeedItems[3]?.connection?.username || '',
+                profileUrl: socialFeedItems[3]?.connection?.profileUrl || socialFeedItems[3]?.connection?.resolvedUrl || ''
+            }
+        });
+    }, [user?.id, user?.socialFeeds]);
+
+    const handleDraftChange = (platformKey, field, value) => {
+        setFeedDrafts((prev) => ({
+            ...prev,
+            [platformKey]: {
+                ...(prev[platformKey] || {}),
+                [field]: value
+            }
+        }));
+    };
+
+    const normalizeHttpUrl = (value) => {
+        const trimmed = String(value || '').trim();
+        if (!trimmed) return '';
+        const candidate = trimmed.includes('://') ? trimmed : `https://${trimmed}`;
+        try {
+            const parsed = new URL(candidate);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+            return parsed.toString();
+        } catch {
+            return '';
+        }
+    };
+
+    const handleSaveLink = async (item) => {
+        if (!user?.id) {
+            return;
+        }
+
+        const draft = feedDrafts[item.platformKey] || {};
+        const username = String(draft.username || '').trim();
+        const profileUrlInput = String(draft.profileUrl || '').trim();
+        const profileUrl = normalizeHttpUrl(profileUrlInput);
+
+        if (!username && !profileUrl) {
+            setSaveErrors((prev) => ({ ...prev, [item.platformKey]: 'Add a username or profile URL to save.' }));
+            return;
+        }
+
+        if (profileUrlInput && !profileUrl) {
+            setSaveErrors((prev) => ({ ...prev, [item.platformKey]: 'Enter a valid http(s) profile URL.' }));
+            return;
+        }
+
+        const payload = {
+            [item.payloadKey]: {
+                enabled: true,
+                username,
+                profileUrl,
+                feedUrl: profileUrl
+            }
+        };
+
+        setSavingPlatform(item.platformKey);
+        try {
+            await apiService.updateSocialFeeds(user.id, payload);
+
+            const existingUserRaw = localStorage.getItem('user_data');
+            let existingUser = {};
+            try {
+                existingUser = existingUserRaw ? JSON.parse(existingUserRaw) : {};
+            } catch {
+                existingUser = {};
+            }
+            const existingFeeds = existingUser?.socialFeeds || {};
+            const itemFeedKey = item.payloadKey.charAt(0).toLowerCase() + item.payloadKey.slice(1);
+            const nextFeeds = {
+                ...existingFeeds,
+                [itemFeedKey]: payload[item.payloadKey]
+            };
+
+            localStorage.setItem('wiseSocialFeeds', JSON.stringify(nextFeeds));
+            localStorage.setItem('user_data', JSON.stringify({ ...existingUser, socialFeeds: nextFeeds }));
+            window.dispatchEvent(new Event('wiseraven:social-updated'));
+            setSaveErrors((prev) => ({ ...prev, [item.platformKey]: '' }));
+        } catch (error) {
+            setSaveErrors((prev) => ({
+                ...prev,
+                [item.platformKey]: error?.message || 'Unable to save social link right now.'
+            }));
+        } finally {
+            setSavingPlatform('');
+        }
+    };
 
     return (
         <aside className="left-column">
@@ -327,6 +451,7 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                 <div style={{ display: 'grid', gap: '8px' }}>
                     {socialFeedItems.map((item) => {
                         const isActive = item.connection.enabled && item.connection.resolvedUrl;
+                        const draft = feedDrafts[item.platformKey] || { username: '', profileUrl: '' };
                         return (
                             <div
                                 key={item.id}
@@ -342,26 +467,98 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
                                         <i className={item.icon} style={{ color: item.color }}></i>
                                         <span style={{ fontSize: '0.85rem' }}>{item.label}</span>
                                     </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => onNavigate('setup')}
-                                        style={{
-                                            fontSize: '0.75rem',
-                                            color: item.color,
-                                            background: 'transparent',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            padding: 0
-                                        }}
-                                    >
-                                        {isActive ? 'Manage' : 'Set up'}
-                                    </button>
                                 </div>
 
-                                {item.connection.username && (
-                                    <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--light-color)' }}>
-                                        @{item.connection.username}
+                                {isActive ? (
+                                    <div style={{ marginTop: '6px', display: 'grid', gap: '6px' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#86efac', fontWeight: 600 }}>Connected</div>
+                                        {item.connection.username && (
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--light-color)' }}>
+                                                @{item.connection.username}
+                                            </div>
+                                        )}
+                                        {item.connection.resolvedUrl && (
+                                            <a
+                                                href={item.connection.resolvedUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                style={{ fontSize: '0.75rem', color: item.color, textDecoration: 'none' }}
+                                            >
+                                                Open profile ↗
+                                            </a>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div style={{ marginTop: '6px', display: 'grid', gap: '6px' }}>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--light-color)' }}>Not connected</div>
+                                        <button
+                                            type="button"
+                                            onClick={() => window.open(item.siteUrl, '_blank', 'noopener,noreferrer')}
+                                            style={{
+                                                fontSize: '0.75rem',
+                                                color: item.color,
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                padding: 0,
+                                                textAlign: 'left'
+                                            }}
+                                        >
+                                            Connect
+                                        </button>
+                                        <input
+                                            type="text"
+                                            value={draft.username}
+                                            onChange={(event) => handleDraftChange(item.platformKey, 'username', event.target.value)}
+                                            placeholder={`${item.label.replace(' Feed', '')} username (optional)`}
+                                            style={{
+                                                padding: '6px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                color: 'var(--text-color)',
+                                                fontSize: '0.75rem'
+                                            }}
+                                        />
+                                        <input
+                                            type="url"
+                                            value={draft.profileUrl}
+                                            onChange={(event) => handleDraftChange(item.platformKey, 'profileUrl', event.target.value)}
+                                            placeholder={`${item.label.replace(' Feed', '')} profile URL (optional)`}
+                                            style={{
+                                                padding: '6px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                color: 'var(--text-color)',
+                                                fontSize: '0.75rem'
+                                            }}
+                                        />
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--light-color)', lineHeight: 1.3 }}>
+                                            Save by app user + URL. Advanced fields remain admin-only.
+                                        </div>
+                                        <button
+                                            type="button"
+                                            disabled={savingPlatform === item.platformKey}
+                                            onClick={() => handleSaveLink(item)}
+                                            style={{
+                                                justifySelf: 'start',
+                                                fontSize: '0.75rem',
+                                                color: item.color,
+                                                background: 'transparent',
+                                                border: `1px solid ${item.color}`,
+                                                borderRadius: '999px',
+                                                cursor: savingPlatform === item.platformKey ? 'not-allowed' : 'pointer',
+                                                padding: '4px 10px'
+                                            }}
+                                        >
+                                            {savingPlatform === item.platformKey ? 'Saving…' : 'Save Link'}
+                                        </button>
+                                        {saveErrors[item.platformKey] && (
+                                            <div style={{ fontSize: '0.7rem', color: '#fca5a5' }}>
+                                                {saveErrors[item.platformKey]}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
