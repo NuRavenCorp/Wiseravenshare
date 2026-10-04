@@ -1081,6 +1081,7 @@
   display: none;
 }
 
+.add-to-playlist-menu.is-open .playlist-dropdown,
 .add-to-playlist-menu:hover .playlist-dropdown {
   display: block;
 }
