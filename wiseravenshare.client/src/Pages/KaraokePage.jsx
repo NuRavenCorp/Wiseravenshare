@@ -111,6 +111,7 @@ export default function KaraokePage() {
 
     // service health
     const [health, setHealth] = useState(null);
+    const [isOfflineMode, setIsOfflineMode] = useState(false);
     const [showKaraokeScorer, setShowKaraokeScorer] = useState(false);
     const [referenceLyrics, setReferenceLyrics] = useState(DEFAULT_REFERENCE_LYRICS);
     const jobPollTimeoutRef = useRef(null);
@@ -145,7 +146,11 @@ export default function KaraokePage() {
                 const payload = await response.json().catch(() => null);
                 setHealth(payload?.upstream ? String(payload.upstream).toLowerCase() : 'ok');
             })
-            .catch(() => setHealth(karaokeServiceReachableRef.current ? 'degraded' : 'offline'));
+            .catch(() => {
+            const h = karaokeServiceReachableRef.current ? 'degraded' : 'offline';
+            setHealth(h);
+            if (h === 'offline') setIsOfflineMode(true);
+        });
 
         if (!token) return;
 
@@ -265,8 +270,9 @@ export default function KaraokePage() {
 
             if (!res.ok) {
                 if (res.status === 503 || res.status === 404) {
+                    setIsOfflineMode(true);
                     setBackingStatus('error');
-                    setBackingMessage('Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.');
+                    setBackingMessage('⚠️ Vocal separation service offline. Upload your file and click Skip Separation to sing with original audio.');
                     setBackingJobId('');
                     return;
                 }
@@ -332,11 +338,22 @@ export default function KaraokePage() {
                 }
             );
 
-            if (!res) throw new Error('Upload request failed after all retries.');
+            if (!res) {
+                // All retries exhausted — fall back to offline mode (no vocal separation)
+                setIsOfflineMode(true);
+                setBackingStatus('ready');
+                setBackingMessage('⚠️ Vocal separation service unreachable — singing with original audio (vocals not removed). Pitch scoring still works.');
+                setBackingUrl(URL.createObjectURL(file));
+                setTab('sing');
+                return;
+            }
 
-            if (res.status === 503 || res.status === 404) {
-                setBackingStatus('error');
-                setBackingMessage('Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.');
+            if (res.status === 503 || res.status === 404 || res.status === 504) {
+                setIsOfflineMode(true);
+                setBackingStatus('ready');
+                setBackingMessage('⚠️ Vocal separation offline — using original audio. Pitch scoring still works.');
+                setBackingUrl(URL.createObjectURL(file));
+                setTab('sing');
                 return;
             }
 
@@ -661,6 +678,29 @@ export default function KaraokePage() {
                     >
                         {backingStatus === 'generating' ? '⏳ Separating vocals…' : '🎼 Generate Karaoke Track'}
                     </button>
+
+                    {/* Offline mode: skip separation and sing with original audio */}
+                    {(isOfflineMode || health === 'offline' || health === 'unreachable') && uploadFile && backingStatus !== 'ready' && (
+                        <div className="karaoke-arch-note" style={{ borderLeft: '3px solid #f59e0b', marginTop: 12 }}>
+                            <strong>⚠️ Vocal separation service offline</strong>
+                            <p style={{ fontSize: '0.83rem', color: '#9ca3af', margin: '6px 0 10px' }}>
+                                The Python htdemucs engine is not running. You can still sing along using the original audio (vocals included).
+                            </p>
+                            <button
+                                className="karaoke-btn karaoke-btn-secondary"
+                                onClick={() => {
+                                    setIsOfflineMode(true);
+                                    setBackingStatus('ready');
+                                    setBackingMessage('🎵 Offline mode — singing with original audio (vocals not removed).');
+                                    const u = URL.createObjectURL(uploadFile);
+                                    setBackingUrl(u);
+                                    setTab('sing');
+                                }}
+                            >
+                                🎤 Skip separation — Sing with original audio
+                            </button>
+                        </div>
+                    )}
 
                     {/* architecture note */}
                     <div className="karaoke-arch-note">
