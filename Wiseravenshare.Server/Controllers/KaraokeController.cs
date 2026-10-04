@@ -60,12 +60,14 @@ public sealed class KaraokeController : ControllerBase
     [AllowAnonymous]
     [RequestSizeLimit(314_572_800)] // 300 MB
     [RequestFormLimits(MultipartBodyLengthLimit = 314_572_800)]
+    [Microsoft.AspNetCore.Http.Timeouts.RequestTimeout("KaraokeUploadPolicy")]
     public async Task<IActionResult> GenerateBackingJob(IFormFile audioFile, CancellationToken cancellationToken)
     {
         if (audioFile is null || audioFile.Length == 0)
             return BadRequest(new { message = "Please attach an audio file." });
 
-        using var client = _httpClientFactory.CreateClient("KaraokeService");
+        // Use the upload-specific client which has an infinite operation timeout.
+        using var client = _httpClientFactory.CreateClient("KaraokeServiceUpload");
         using var multipart = new MultipartFormDataContent();
         await using var stream = audioFile.OpenReadStream();
 

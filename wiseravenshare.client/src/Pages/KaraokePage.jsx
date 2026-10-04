@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import KaraokeScorer from '../Components/Karaoke/KaraokeScorer';
 import { getAuthToken } from '../Services/authStorage.js';
@@ -210,11 +210,58 @@ export default function KaraokePage() {
         await refreshKaraokeState();
     };
 
-    const pollBackingJob = async (jobId, token) => {
+    // Retry helper — same pattern as the Python wheel fallback:
+    // try primary, on 504/502 back off and retry, eventually surface a clear message.
+    const fetchWithRetry = async (url, options, maxAttempts = 4, onRetry = null) => {
+        const RETRYABLE = new Set([502, 504]);
+        let lastRes = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const res = await fetch(url, options);
+                if (RETRYABLE.has(res.status) && attempt < maxAttempts) {
+                    const waitMs = Math.min(3000 * attempt, 12000);
+                    if (onRetry) onRetry(res.status, attempt, maxAttempts - 1, waitMs);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    lastRes = res;
+                    continue;
+                }
+                return res;
+            } catch (err) {
+                if (attempt < maxAttempts) {
+                    const waitMs = Math.min(3000 * attempt, 12000);
+                    if (onRetry) onRetry('network', attempt, maxAttempts - 1, waitMs);
+                    await new Promise(r => setTimeout(r, waitMs));
+                } else {
+                    throw err;
+                }
+            }
+        }
+        return lastRes;
+    };
+
+    const pollBackingJob = async (jobId, token, pollRetries = 0) => {
+        const MAX_POLL_504_RETRIES = 5;
         try {
+            const token2 = token || '';
             const res = await fetch(`/api/karaoke/jobs/${encodeURIComponent(jobId)}`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                headers: token2 ? { Authorization: `Bearer ${token2}` } : {},
             });
+
+            // 504/502 on poll = gateway hiccup, not a job failure — retry with backoff
+            if (res.status === 504 || res.status === 502) {
+                if (pollRetries < MAX_POLL_504_RETRIES) {
+                    const waitMs = Math.min(5000 * (pollRetries + 1), 20000);
+                    setBackingMessage(`⏳ Gateway timeout checking status — retrying in ${waitMs / 1000}s… (${pollRetries + 1}/${MAX_POLL_504_RETRIES})`);
+                    jobPollTimeoutRef.current = setTimeout(() => {
+                        pollBackingJob(jobId, token, pollRetries + 1);
+                    }, waitMs);
+                    return;
+                }
+                setBackingStatus('error');
+                setBackingMessage('⚠️ Gateway kept timing out on status checks. The job may still be running — refresh and check your library in a few minutes.');
+                setBackingJobId('');
+                return;
+            }
 
             if (!res.ok) {
                 if (res.status === 503 || res.status === 404) {
@@ -246,7 +293,7 @@ export default function KaraokePage() {
             setBackingStatus('generating');
             setBackingMessage(`⏳ ${status === 'processing' ? 'Separating vocals' : 'Queued for processing'} — job ${jobId.slice(0, 8)}…`);
             jobPollTimeoutRef.current = setTimeout(() => {
-                pollBackingJob(jobId, token);
+                pollBackingJob(jobId, token, 0);
             }, Math.max(2, pollAfterSeconds) * 1000);
         } catch (err) {
             setBackingStatus('error');
@@ -257,7 +304,7 @@ export default function KaraokePage() {
 
     const generateBacking = async (file, songTitle = 'Uploaded Song') => {
         setBackingStatus('generating');
-        setBackingMessage(`Queueing "${songTitle}" for vocal separation…`);
+        setBackingMessage(`Uploading "${songTitle}" for vocal separation…`);
         setBackingUrl(null);
         if (jobPollTimeoutRef.current) {
             clearTimeout(jobPollTimeoutRef.current);
@@ -270,15 +317,26 @@ export default function KaraokePage() {
 
         try {
             const token = getAuthToken();
-            const res = await fetch('/api/karaoke/generate-backing', {
-                method: 'POST',
-                body: formData,
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
-            });
+            // fetchWithRetry: on 504 during upload (gateway timeout forwarding to Python),
+            // back off and retry — mirrors the Python wheel fallback resilience pattern.
+            const res = await fetchWithRetry(
+                '/api/karaoke/generate-backing',
+                {
+                    method: 'POST',
+                    body: formData,
+                    headers: token ? { Authorization: `Bearer ${token}` } : {}
+                },
+                4,
+                (code, attempt, total, waitMs) => {
+                    setBackingMessage(`⏳ Gateway timeout (${code}) uploading — retry ${attempt}/${total} in ${waitMs / 1000}s…`);
+                }
+            );
+
+            if (!res) throw new Error('Upload request failed after all retries.');
 
             if (res.status === 503 || res.status === 404) {
-                setBackingStatus("error");
-                setBackingMessage("Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.");
+                setBackingStatus('error');
+                setBackingMessage('Vocal separation service is not active in this environment. Use demo songs or enter lyrics manually.');
                 return;
             }
 
@@ -288,13 +346,11 @@ export default function KaraokePage() {
             }
 
             const data = await res.json();
-            if (!data?.jobId) {
-                throw new Error('Karaoke generation job was not created.');
-            }
+            if (!data?.jobId) throw new Error('Karaoke generation job was not created.');
 
             setBackingJobId(data.jobId);
             setBackingMessage(`⏳ Job ${data.jobId.slice(0, 8)} queued — starting separation now…`);
-            await pollBackingJob(data.jobId, token);
+            await pollBackingJob(data.jobId, token, 0);
         } catch (err) {
             setBackingStatus('error');
             setBackingMessage(`❌ ${err.message}`);
