@@ -120,10 +120,29 @@ export const useSavedMedia = () => {
   const getLibraryStats = useCallback(async () => {
     const items = await getLibrary(1, 1000);
     const list = Array.isArray(items) ? items : (items?.items || items?.data || []);
+    const totalItems = list.length;
+    const visibleItemsCount = list.filter((item) => item?.isVisibleInFeed === true).length;
+    const hiddenItemsCount = list.filter((item) => item?.isVisibleInFeed === false).length;
+    const publishedCount = list.filter((item) => String(item?.status || '').toLowerCase() === 'published').length;
+    const scheduledCount = list.filter((item) => String(item?.status || '').toLowerCase() === 'scheduled').length;
+    const totalSizeBytes = list.reduce((sum, item) => sum + Number(item?.fileSizeBytes || item?.fileSize || item?.sizeBytes || 0), 0);
+    const typeOf = (item) => String(item?.mediaType || item?.type || '').trim().toLowerCase();
+
     return {
-      total: list.length,
-      visible: list.filter((item) => item?.isVisibleInFeed === true).length,
-      hidden: list.filter((item) => item?.isVisibleInFeed === false).length
+      totalItems,
+      total: totalItems,
+      visibleItemsCount,
+      visible: visibleItemsCount,
+      hiddenItemsCount,
+      hidden: hiddenItemsCount,
+      publishedCount,
+      scheduledCount,
+      totalSizeBytes,
+      photoCount: list.filter((item) => typeOf(item) === 'photo').length,
+      videoCount: list.filter((item) => typeOf(item) === 'video').length,
+      musicCount: list.filter((item) => typeOf(item) === 'music').length,
+      audioCount: list.filter((item) => typeOf(item) === 'audio').length,
+      podcastCount: list.filter((item) => typeOf(item) === 'podcast').length
     };
   }, [getLibrary]);
 

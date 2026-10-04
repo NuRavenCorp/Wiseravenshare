@@ -89,6 +89,7 @@ const MusicPlayerPage = ({ onNavigate }) => {
   const [showNewPlaylistForm, setShowNewPlaylistForm] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [showPlaylistMenu, setShowPlaylistMenu] = useState(null);
+  const [showAddToPlaylistMenu, setShowAddToPlaylistMenu] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadArtist, setUploadArtist] = useState('');
@@ -388,8 +389,24 @@ const MusicPlayerPage = ({ onNavigate }) => {
         apiService.getMusicPlayerState()
       ]);
 
+      // Robustly unwrap all possible server response shapes:
+      //  - bare array  → [{ id, title, mediaUrl, … }]
+      //  - { data: [] } or { tracks: [] } or { items: [] }
+      //  - single track object (upload response shape: { track:{…}, file:{…}, … })
+      const unwrapLibraryPayload = (data) => {
+        if (Array.isArray(data)) return data;
+        if (!data || typeof data !== 'object') return [];
+        if (Array.isArray(data.tracks)) return data.tracks;
+        if (Array.isArray(data.items)) return data.items;
+        if (Array.isArray(data.data)) return data.data;
+        // Single-track upload shape
+        const candidate = data.track || data.file;
+        if (candidate && typeof candidate === 'object') return [candidate];
+        return [];
+      };
+
       const tracks = libraryResult.status === 'fulfilled'
-        ? (Array.isArray(libraryResult.value?.data) ? libraryResult.value.data : [])
+        ? unwrapLibraryPayload(libraryResult.value?.data)
           .map(normalizeTrack)
           .filter(Boolean)
         : cachedTracks;
@@ -669,6 +686,16 @@ const MusicPlayerPage = ({ onNavigate }) => {
     });
     addToast('Track added to playlist!', 'success');
   };
+
+  useEffect(() => {
+    const handleDocumentClick = () => {
+      setShowPlaylistMenu(null);
+      setShowAddToPlaylistMenu(null);
+    };
+
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, []);
 
   const handleDeletePlaylist = (playlistId) => {
     if (confirm('Delete this playlist?')) {
@@ -1228,9 +1255,14 @@ const MusicPlayerPage = ({ onNavigate }) => {
                   </button>
                   <button
                     className="playlist-menu-btn"
-                    onClick={() => setShowPlaylistMenu(
-                      showPlaylistMenu === playlist.id ? null : playlist.id
-                    )}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowAddToPlaylistMenu(null);
+                      setShowPlaylistMenu(
+                        showPlaylistMenu === playlist.id ? null : playlist.id
+                      );
+                    }}
                     title="Playlist options"
                     aria-label="Playlist options"
                   >
@@ -1406,13 +1438,21 @@ const MusicPlayerPage = ({ onNavigate }) => {
                   )}
 
                   {!activePlaylist && playlists.length > 0 && (
-                    <div className="add-to-playlist-menu">
+                    <div
+                      className={`add-to-playlist-menu ${showAddToPlaylistMenu === track.id ? 'is-open' : ''}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <button
                         className="add-btn"
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setShowPlaylistMenu(null);
+                          setShowAddToPlaylistMenu((current) => (current === track.id ? null : track.id));
                         }}
                         title="Add to playlist"
+                        aria-label="Add to playlist"
+                        aria-expanded={showAddToPlaylistMenu === track.id}
                       >
                         <FiPlus />
                       </button>
@@ -1420,9 +1460,11 @@ const MusicPlayerPage = ({ onNavigate }) => {
                         {playlists.map(p => (
                           <button
                             key={p.id}
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleAddToPlaylist(track.id, p.id);
+                              setShowAddToPlaylistMenu(null);
                             }}
                             className="dropdown-item"
                           >

@@ -8,6 +8,8 @@ public interface IMediaRepository : IRepository<MediaItem>
     Task<MediaItem?> GetWithDetailsAsync(Guid mediaId);
     Task<IReadOnlyList<MediaItem>> GetUserMediaAsync(Guid userId, int page, int pageSize);
     Task<IReadOnlyList<MediaItem>> SearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId);
+    Task<int> CountUserMediaAsync(Guid userId);
+    Task<int> CountSearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId);
     Task<int> CountUserMediaByTypeAsync(Guid userId, MediaType mediaType);
     Task LikeAsync(Guid mediaId, Guid userId);
     Task UnlikeAsync(Guid mediaId, Guid userId);

@@ -153,7 +153,7 @@ const buildMediaUploadUrls = (type = '') => {
     }
 
     const endpoints = [];
-    const routes = ['/media/upload', '/fileupload/upload'];
+    const genericRoutes = ['/media/upload', '/fileupload/upload'];
     const ravensightRoutes = [];
 
     if (type === 'video') {
@@ -161,12 +161,20 @@ const buildMediaUploadUrls = (type = '') => {
     } else if (type === 'photo') {
         ravensightRoutes.push('/ravensight/media/photos/save');
     } else if (type === 'audio') {
+        // Music must land in bucket_objects (the dedicated music store) so getMusicLibrary
+        // can find all tracks on every page load. Put the Ravensight music route first.
         ravensightRoutes.push('/ravensight/media/music/save');
     }
 
+    // For audio/music, prioritise the Ravensight route over generic routes.
+    // For all other types keep the original order (generic first).
+    const orderedRoutes = type === 'audio'
+        ? [...ravensightRoutes, ...genericRoutes]
+        : [...genericRoutes, ...ravensightRoutes];
+
     for (const base of bases) {
         if (!base) continue;
-        for (const route of [...ravensightRoutes, ...routes]) {
+        for (const route of orderedRoutes) {
             endpoints.push(`${base}${route}`);
         }
     }
@@ -1276,6 +1284,7 @@ export const apiService = {
 
         const candidateUrls = buildMediaUploadUrls(type);
         let lastError = null;
+        let prioritizedError = null;
 
         for (const url of candidateUrls) {
             try {
@@ -1292,14 +1301,20 @@ export const apiService = {
                 lastError = error;
                 const status = error?.response?.status;
 
-                // Preserve validation/auth failures from the first attempted route.
-                if (status && status !== 404 && status !== 405) {
+                // Auth failures should fail fast.
+                if (status === 401 || status === 403) {
                     throw error;
+                }
+
+                // Endpoint-specific validation failures are common across legacy upload routes.
+                // Continue probing fallback routes and keep the first concrete error for reporting.
+                if (!prioritizedError && status && status !== 404 && status !== 405) {
+                    prioritizedError = error;
                 }
             }
         }
 
-        throw lastError || new Error('Media upload failed.');
+        throw prioritizedError || lastError || new Error('Media upload failed.');
     },
     uploadMusicTrack: async (file, options = {}) => {
         const formData = new FormData();
@@ -1322,6 +1337,7 @@ export const apiService = {
         const token = getAuthToken();
         const candidateUrls = buildMediaUploadUrls('audio');
         let lastError = null;
+        let prioritizedError = null;
 
         for (const url of candidateUrls) {
             try {
@@ -1340,14 +1356,18 @@ export const apiService = {
             } catch (error) {
                 lastError = error;
                 const status = error?.response?.status;
-                if (status && status !== 404 && status !== 405) {
+                if (status === 401 || status === 403) {
                     throw normalizeApiError(error, 'Failed to upload music track. Please try again.');
+                }
+
+                if (!prioritizedError && status && status !== 404 && status !== 405) {
+                    prioritizedError = error;
                 }
             }
         }
 
         throw normalizeApiError(
-            lastError || new Error('Music upload failed.'),
+            prioritizedError || lastError || new Error('Music upload failed.'),
             'Failed to upload music track. Please try again.'
         );
     },

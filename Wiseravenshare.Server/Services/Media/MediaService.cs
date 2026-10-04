@@ -16,7 +16,9 @@ public interface IMediaService
     Task<MediaItemDto> UpdateMediaAsync(Guid mediaId, UpdateMediaRequest request, Guid userId);
     Task<bool> DeleteMediaAsync(Guid mediaId, Guid userId);
     Task<IEnumerable<MediaItemDto>> GetUserMediaAsync(Guid userId, int page, int pageSize);
+    Task<int> GetUserMediaCountAsync(Guid userId);
     Task<IEnumerable<MediaItemDto>> SearchMediaAsync(MediaSearchRequest searchRequest, Guid userId);
+    Task<int> SearchMediaCountAsync(MediaSearchRequest searchRequest, Guid userId);
     Task<MediaStreamDto> GetMediaStreamAsync(Guid mediaId, long? startByte = null, long? endByte = null);
     Task<MediaItemDto> LikeMediaAsync(Guid mediaId, Guid userId);
     Task<bool> UnlikeMediaAsync(Guid mediaId, Guid userId);
@@ -256,6 +258,11 @@ public sealed class MediaService : IMediaService
         return list;
     }
 
+    public Task<int> GetUserMediaCountAsync(Guid userId)
+    {
+        return _mediaRepository.CountUserMediaAsync(userId);
+    }
+
     public async Task<IEnumerable<MediaItemDto>> SearchMediaAsync(MediaSearchRequest searchRequest, Guid userId)
     {
         var mediaItems = await _mediaRepository.SearchAsync(searchRequest, userId);
@@ -266,6 +273,11 @@ public sealed class MediaService : IMediaService
         }
 
         return list;
+    }
+
+    public Task<int> SearchMediaCountAsync(MediaSearchRequest searchRequest, Guid userId)
+    {
+        return _mediaRepository.CountSearchAsync(searchRequest, userId);
     }
 
     public async Task<MediaStreamDto> GetMediaStreamAsync(Guid mediaId, long? startByte = null, long? endByte = null)
