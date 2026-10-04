@@ -8,6 +8,16 @@ import './MediaStats.css';
 const MediaStats = ({ stats }) => {
   if (!stats) return null;
 
+  const getCount = (...keys) => {
+    for (const key of keys) {
+      const value = stats?.[key];
+      if (Number.isFinite(Number(value))) {
+        return Number(value);
+      }
+    }
+    return 0;
+  };
+
   const formatBytes = (bytes) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -20,57 +30,57 @@ const MediaStats = ({ stats }) => {
     <div className="media-stats">
       <div className="stat-card">
         <div className="stat-label">📊 Total Items</div>
-        <div className="stat-value">{stats.totalItems}</div>
+        <div className="stat-value">{getCount('totalItems', 'total')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">👁️ Visible</div>
-        <div className="stat-value">{stats.visibleItemsCount}</div>
+        <div className="stat-value">{getCount('visibleItemsCount', 'visible')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🙈 Hidden</div>
-        <div className="stat-value">{stats.hiddenItemsCount}</div>
+        <div className="stat-value">{getCount('hiddenItemsCount', 'hidden')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">📤 Published</div>
-        <div className="stat-value">{stats.publishedCount}</div>
+        <div className="stat-value">{getCount('publishedCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">⏱️ Scheduled</div>
-        <div className="stat-value">{stats.scheduledCount}</div>
+        <div className="stat-value">{getCount('scheduledCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">💾 Total Size</div>
-        <div className="stat-value">{formatBytes(stats.totalSizeBytes)}</div>
+        <div className="stat-value">{formatBytes(getCount('totalSizeBytes'))}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🖼️ Photos</div>
-        <div className="stat-value">{stats.photoCount}</div>
+        <div className="stat-value">{getCount('photoCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🎥 Videos</div>
-        <div className="stat-value">{stats.videoCount}</div>
+        <div className="stat-value">{getCount('videoCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🎵 Music</div>
-        <div className="stat-value">{stats.musicCount}</div>
+        <div className="stat-value">{getCount('musicCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🎧 Audio</div>
-        <div className="stat-value">{stats.audioCount}</div>
+        <div className="stat-value">{getCount('audioCount')}</div>
       </div>
 
       <div className="stat-card">
         <div className="stat-label">🎙️ Podcasts</div>
-        <div className="stat-value">{stats.podcastCount}</div>
+        <div className="stat-value">{getCount('podcastCount')}</div>
       </div>
     </div>
   );

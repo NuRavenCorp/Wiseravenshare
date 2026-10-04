@@ -11,37 +11,18 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
     {
     }
 
-    public Task<MediaItem?> GetWithDetailsAsync(Guid mediaId)
+    private IQueryable<MediaItem> BuildUserMediaQuery(Guid userId)
     {
         return _dbSet
-            .Include(x => x.User)
-            .Include(x => x.Comments)
-            .Include(x => x.Tags)
-            .ThenInclude(x => x.MediaTag)
-            .FirstOrDefaultAsync(x => x.Id == mediaId && !x.IsDeleted);
-    }
-
-    public async Task<IReadOnlyList<MediaItem>> GetUserMediaAsync(Guid userId, int page, int pageSize)
-    {
-        var safePage = Math.Max(1, page);
-        var safePageSize = Math.Clamp(pageSize, 1, 100);
-
-        return await _dbSet
             .AsNoTracking()
             .Include(x => x.User)
             .Include(x => x.Tags)
             .ThenInclude(x => x.MediaTag)
-            .Where(x => x.UserId == userId && !x.IsDeleted && x.Status != MediaStatus.Deleted)
-            .OrderByDescending(x => x.CreatedAt)
-            .Skip((safePage - 1) * safePageSize)
-            .Take(safePageSize)
-            .ToListAsync();
+            .Where(x => x.UserId == userId && !x.IsDeleted && x.Status != MediaStatus.Deleted);
     }
 
-    public async Task<IReadOnlyList<MediaItem>> SearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId)
+    private IQueryable<MediaItem> BuildSearchQuery(MediaSearchRequest searchRequest, Guid requestingUserId)
     {
-        var safePage = Math.Max(1, searchRequest.Page);
-        var safePageSize = Math.Clamp(searchRequest.PageSize, 1, 100);
         var query = _dbSet
             .AsNoTracking()
             .Include(x => x.User)
@@ -104,6 +85,37 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
             }
         }
 
+        return query;
+    }
+
+    public Task<MediaItem?> GetWithDetailsAsync(Guid mediaId)
+    {
+        return _dbSet
+            .Include(x => x.User)
+            .Include(x => x.Comments)
+            .Include(x => x.Tags)
+            .ThenInclude(x => x.MediaTag)
+            .FirstOrDefaultAsync(x => x.Id == mediaId && !x.IsDeleted);
+    }
+
+    public async Task<IReadOnlyList<MediaItem>> GetUserMediaAsync(Guid userId, int page, int pageSize)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+        return await BuildUserMediaQuery(userId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync();
+    }
+
+    public async Task<IReadOnlyList<MediaItem>> SearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId)
+    {
+        var safePage = Math.Max(1, searchRequest.Page);
+        var safePageSize = Math.Clamp(searchRequest.PageSize, 1, 100);
+        var query = BuildSearchQuery(searchRequest, requestingUserId);
+
         var sortBy = searchRequest.SortBy?.Trim();
         var descending = string.Equals(searchRequest.SortOrder, "desc", StringComparison.OrdinalIgnoreCase);
 
@@ -123,6 +135,16 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
             .Skip((safePage - 1) * safePageSize)
             .Take(safePageSize)
             .ToListAsync();
+    }
+
+    public Task<int> CountUserMediaAsync(Guid userId)
+    {
+        return BuildUserMediaQuery(userId).CountAsync();
+    }
+
+    public Task<int> CountSearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId)
+    {
+        return BuildSearchQuery(searchRequest, requestingUserId).CountAsync();
     }
 
     public Task<int> CountUserMediaByTypeAsync(Guid userId, MediaType mediaType)

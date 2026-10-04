@@ -121,7 +121,7 @@ public sealed class MediaLibraryController : ControllerBase
     }
 
     [HttpGet("mine")]
-    [ProducesResponseType(typeof(IEnumerable<MediaItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedMediaResultDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyMedia([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var userId = User.GetUserId();
@@ -131,11 +131,18 @@ public sealed class MediaLibraryController : ControllerBase
         }
 
         var media = await _mediaService.GetUserMediaAsync(userId, page, pageSize);
-        return Ok(media);
+        var totalCount = await _mediaService.GetUserMediaCountAsync(userId);
+        return Ok(new PagedMediaResultDto
+        {
+            Items = media.ToList(),
+            TotalCount = totalCount,
+            Page = Math.Max(1, page),
+            PageSize = Math.Clamp(pageSize, 1, 100)
+        });
     }
 
     [HttpPost("search")]
-    [ProducesResponseType(typeof(IEnumerable<MediaItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedMediaResultDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SearchMedia([FromBody] MediaSearchRequest request)
     {
         var userId = User.GetUserId();
@@ -145,7 +152,14 @@ public sealed class MediaLibraryController : ControllerBase
         }
 
         var media = await _mediaService.SearchMediaAsync(request, userId);
-        return Ok(media);
+        var totalCount = await _mediaService.SearchMediaCountAsync(request, userId);
+        return Ok(new PagedMediaResultDto
+        {
+            Items = media.ToList(),
+            TotalCount = totalCount,
+            Page = Math.Max(1, request.Page),
+            PageSize = Math.Clamp(request.PageSize, 1, 100)
+        });
     }
 
     [HttpGet("{mediaId:guid}/stream")]

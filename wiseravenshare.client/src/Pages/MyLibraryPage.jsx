@@ -134,6 +134,40 @@ const normalizeTrack = (track) => {
     };
 };
 
+const normalizeMusicCollection = (payload) => {
+    if (Array.isArray(payload)) {
+        return payload.map(normalizeTrack).filter(Boolean);
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const source =
+        (Array.isArray(payload.tracks) && payload.tracks)
+        || (Array.isArray(payload.items) && payload.items)
+        || (Array.isArray(payload.data) && payload.data)
+        || null;
+
+    if (source) {
+        return source.map(normalizeTrack).filter(Boolean);
+    }
+
+    const singleTrack = payload.track || payload.file || payload.song || payload.music || payload;
+    const normalized = normalizeTrack({
+        ...singleTrack,
+        id: singleTrack?.id || payload.mediaAssetId || payload.fileName || singleTrack?.fileName || '',
+        title: singleTrack?.title || payload.title || payload.fileName || singleTrack?.fileName || 'Untitled',
+        artist: singleTrack?.artist || payload.artist || '',
+        album: singleTrack?.album || payload.album || '',
+        mediaUrl: singleTrack?.mediaUrl || payload.mediaUrl || payload.filePath || payload.publicUrl || '',
+        url: singleTrack?.url || payload.mediaUrl || payload.filePath || payload.publicUrl || '',
+        fileName: singleTrack?.fileName || payload.fileName || ''
+    });
+
+    return normalized ? [normalized] : [];
+};
+
 const normalizeVideo = (video) => {
     if (!video || typeof video !== 'object') return null;
 
@@ -351,7 +385,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         setCurrentTrack(track);
         setIsPlaying(true);
-        onNavigate?.('radio-creator');
+        onNavigate?.('music-player');
     };
 
     const togglePlayPause = () => {
@@ -583,9 +617,9 @@ const MyLibraryPage = ({ onNavigate }) => {
             if (!isMountedRef.current) return;
 
             const nextTracks = musicResult.status === 'fulfilled'
-                ? asArray(musicResult.value?.data?.data ?? musicResult.value?.data)
-                    .map(normalizeTrack)
-                    .filter(Boolean)
+                ? normalizeMusicCollection(musicResult.value?.data?.items
+                    ?? musicResult.value?.data?.tracks
+                    ?? musicResult.value?.data)
                 : [];
             const nextVideos = videoResult.status === 'fulfilled'
                 ? asArray(

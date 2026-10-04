@@ -59,8 +59,9 @@ const MediaLibrary = () => {
           });
       }
 
-      setMediaItems(response.items || []);
-      setTotalCount(response.totalCount || 0);
+      const items = Array.isArray(response) ? response : (response.items || response.data || []);
+      setMediaItems(items);
+      setTotalCount(response.totalCount || response.total || items.length || response.length || 0);
     } catch (err) {
       console.error('Error loading media:', err);
     }
