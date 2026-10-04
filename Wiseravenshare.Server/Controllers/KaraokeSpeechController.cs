@@ -234,6 +234,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     /// <summary>
     /// Score a karaoke performance: compare STT transcript against reference lyrics.
     /// Returns accuracy 0–100, label, and spoken feedback text.
+    /// Falls back to a local Levenshtein word-error-rate scorer when the Python service is unavailable.
     /// </summary>
     [HttpPost("score")]
     [AllowAnonymous]
@@ -267,9 +268,66 @@ public sealed class KaraokeSpeechController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Karaoke scoring failed.");
-            return StatusCode(503, new { message = "Speech service unavailable.", error = ex.Message });
+            // Python speech service unavailable — fall back to local word-error-rate scorer.
+            _logger.LogWarning(ex, "Karaoke speech service unavailable; using local Levenshtein fallback scorer.");
+            return LocalLevenshteinScore(body.Reference, body.Hypothesis ?? string.Empty, body.SongTitle);
         }
+    }
+
+    /// <summary>
+    /// Local fallback scorer: word-level Levenshtein / word-error-rate.
+    /// Returns the same shape as the Python scorer so the client works identically.
+    /// </summary>
+    private static IActionResult LocalLevenshteinScore(string reference, string hypothesis, string? songTitle)
+    {
+        var refWords = Tokenise(reference);
+        var hypWords = Tokenise(hypothesis);
+
+        var distance = WordLevenshtein(refWords, hypWords);
+        var total    = Math.Max(1, refWords.Length);
+        var wer      = (double)distance / total;                // 0 = perfect, 1+ = bad
+        var accuracy = (int)Math.Round(Math.Max(0.0, 1.0 - wer) * 100);
+
+        var label = accuracy switch
+        {
+            >= 90 => "Excellent",
+            >= 75 => "Great",
+            >= 55 => "Good",
+            >= 35 => "Keep practising",
+            _     => "Try again"
+        };
+
+        var feedback = accuracy >= 70
+            ? $"Great job on '{songTitle ?? "that song"}'! You scored {accuracy}%."
+            : $"You scored {accuracy}% on '{songTitle ?? "that song"}'. Keep practising!";
+
+        return new JsonResult(new
+        {
+            accuracy,
+            label,
+            feedback,
+            fallback = true,  // lets client show "scored locally" indicator
+            wordErrorRate = Math.Round(wer, 3)
+        });
+    }
+
+    private static string[] Tokenise(string text) =>
+        text.ToLowerInvariant()
+            .Split([' ', '\t', '\r', '\n', ',', '.', '!', '?', ';', ':', '"', '\''],
+                   StringSplitOptions.RemoveEmptyEntries);
+
+    private static int WordLevenshtein(string[] a, string[] b)
+    {
+        int m = a.Length, n = b.Length;
+        var dp = new int[m + 1, n + 1];
+        for (var i = 0; i <= m; i++) dp[i, 0] = i;
+        for (var j = 0; j <= n; j++) dp[0, j] = j;
+        for (var i = 1; i <= m; i++)
+            for (var j = 1; j <= n; j++)
+                dp[i, j] = a[i - 1] == b[j - 1]
+                    ? dp[i - 1, j - 1]
+                    : 1 + Math.Min(dp[i - 1, j - 1], Math.Min(dp[i - 1, j], dp[i, j - 1]));
+        return dp[m, n];
     }
 }
 
