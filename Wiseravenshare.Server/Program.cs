@@ -1943,6 +1943,16 @@ builder.Services.AddHttpClient("KaraokeService", client =>
 {
     ConnectTimeout = TimeSpan.FromSeconds(5), // fail fast if service is not running
 });
+// Dedicated client for the file-upload leg: generous timeout; connect still fails fast.
+builder.Services.AddHttpClient("KaraokeServiceUpload", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
+    client.Timeout = Timeout.InfiniteTimeSpan; // file upload + enqueue can take time on cold start
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(10), // slightly more generous for cold starts
+});
 builder.Services.AddHttpClient("KaraokeSpeechService", client =>
 {
     client.BaseAddress = new Uri(
@@ -2076,6 +2086,12 @@ builder.Services.AddRequestTimeouts(options =>
     options.Policies.Add("StreamingPolicy", new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
     {
         Timeout = Timeout.InfiniteTimeSpan
+    });
+    // Karaoke backing-track generation: file upload + Python enqueue can take several minutes
+    // on a cold-start or large file. Polling endpoints are fast so they stay on the default.
+    options.Policies.Add("KaraokeUploadPolicy", new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = TimeSpan.FromMinutes(15)
     });
 });
 
