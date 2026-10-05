@@ -1872,8 +1872,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
-        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 TRACK PLAYER</button>
         <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
+        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 MUSIC PLAYER</button>
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
@@ -1881,7 +1881,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
-          <div className="wr-deck-label">◄◄ TRACK PLAYER · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
+          <div className="wr-deck-label">◄◄ MUSIC PLAYER · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
 
           <div className="wr-viz-wrap">
             <canvas ref={canvasRef} className="wr-canvas" width={800} height={72} />
@@ -2124,8 +2124,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         <div className="mod-logo">🎧 WiseRaven</div>
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
-          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Track Player</button>
           <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
+          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Music Player</button>
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>
       </div>
@@ -2383,7 +2383,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             </button>
             <button className="mod-ctrl" onClick={stop} title="Stop">⏹</button>
             <button className="mod-ctrl sm" onClick={skipNext} disabled={!library.length} title="Next">⏭</button>
-            <button className="mod-pill" onClick={() => setTab('cassette')} title="Open track player">Open Player</button>
+            <button className="mod-pill" onClick={() => setTab('cassette')} title="Open music player">Open Player</button>
           </div>
         </div>
       )}

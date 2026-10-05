@@ -805,7 +805,7 @@ function InstrumentConnectorPage({ onNavigate }) {
       if (typeof onNavigate === 'function') {
         onNavigate('radio-creator');
       } else {
-        window.location.href = '/music-player?source=instrument';
+        window.location.href = '/fm-tuner?source=instrument';
       }
     } catch (err) {
       console.error('Error exporting:', err);
