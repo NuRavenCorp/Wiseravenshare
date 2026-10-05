@@ -1,84 +1,56 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiMusic, FiVideo, FiPlay, FiImage, FiFile, FiShield, FiCheck, FiAward, FiUpload, FiTrash2, FiX, FiCloud } from 'react-icons/fi';
-import { resolveMediaUrl } from '../utils/mediaUtils';
-import MediaLibrary from '../Components/MediaLibrary/MediaLibrary';
-
-// ─── IP Protection Plans ──────────────────────────────────────────────────────
-const PROTECTION_PLANS = [
-    {
-        id: 'basic',
-        name: 'Basic Protection',
-        price: '$4.99 / mo',
-        color: '#22c55e',
-        features: [
-            'Timestamped proof of creation',
-            'SHA-256 cryptographic fingerprint',
-            'WiseRavenShare rights registration',
-            'DMCA takedown template',
-        ],
-    },
-    {
-        id: 'standard',
-        name: 'Standard Protection',
-        price: '$14.99 / mo',
-        badge: 'Popular',
-        color: '#3b82f6',
-        features: [
-            'Everything in Basic',
-            'Cross-platform monitoring (FB, TikTok, YouTube)',
-            'Automated takedown support',
-            'Licensing agreement templates',
-            'Revenue split tracking',
-        ],
-    },
-    {
-        id: 'pro',
-        name: 'Pro Protection',
-        price: '$29.99 / mo',
-        badge: 'Best Value',
-        color: '#a855f7',
-        features: [
-            'Everything in Standard',
-            'PRO registration guidance (ASCAP/BMI)',
-            'Master + publishing documentation',
-            'Priority legal support',
-            'Custom licensing templates',
-            'Dedicated IP advisor',
-        ],
-    },
-];
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    FiAlertCircle,
+    FiCheckCircle,
+    FiClock,
+    FiCopy,
+    FiExternalLink,
+    FiFolder,
+    FiHardDrive,
+    FiImage,
+    FiMusic,
+    FiPlay,
+    FiRefreshCw,
+    FiSearch,
+    FiTrash2,
+    FiUpload,
+    FiVideo
+} from 'react-icons/fi';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
-import { ravensightAPI } from '../Services/RavensightAPI';
 
-const TRACK_PLAYER_HANDOFF_KEY = 'wr_track_player_handoff';
-const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const COMPACT_GUID_REGEX = /^[0-9a-f]{32}$/i;
+const MUSIC_HANDOFF_KEY = 'wr_track_player_handoff';
 
-const inferUploadTypeFromFile = (file, fallback = 'photo') => {
-    const mime = String(file?.type || '').toLowerCase();
-    const fileName = String(file?.name || '').toLowerCase();
+const TAB_OPTIONS = [
+    { id: 'all', label: 'All' },
+    { id: 'music', label: 'Music' },
+    { id: 'photo', label: 'Photos' },
+    { id: 'video', label: 'Videos' }
+];
 
-    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(fileName)) {
-        return 'music';
-    }
-
-    if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(fileName)) {
-        return 'video';
-    }
-
-    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|svg)$/i.test(fileName)) {
-        return 'photo';
-    }
-
-    return fallback;
+const LIMITS = {
+    music: 30,
+    photo: 30,
+    video: 30
 };
 
-const normalizePlaybackUrl = (value = '') => {
+const formatBytes = (value) => {
+    const bytes = Number(value) || 0;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+};
+
+const formatDate = (value) => {
+    const date = new Date(value || '');
+    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+};
+
+const normalizeUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
-
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
         try {
             const parsed = new URL(raw);
@@ -87,1495 +59,886 @@ const normalizePlaybackUrl = (value = '') => {
             return raw;
         }
     }
-
-    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('/') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
     if (raw.startsWith('api/')) return `/${raw}`;
     if (/^https?:\/\//i.test(raw)) return raw;
-    if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
     return '';
 };
 
-const toBlobStreamUrl = (relativePath = '') => {
-    const normalized = String(relativePath || '')
-        .trim()
-        .replace(/\\/g, '/')
-        .replace(/^\/+/, '');
+const blobUrlFromPath = (relativePath = '') => {
+    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
     if (!normalized) return '';
-
-    const encoded = normalized
-        .split('/')
-        .filter(Boolean)
-        .map((segment) => encodeURIComponent(segment))
-        .join('/');
-
-    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
+    return `/api/videostreaming/blob/${normalized.split('/').filter(Boolean).map(encodeURIComponent).join('/')}`;
 };
 
-const normalizeTrack = (track) => {
-    if (!track || typeof track !== 'object') return null;
-    const mediaUrl = String(
-        track.mediaUrl
-        || track.url
-        || track.fileUrl
-        || track.publicUrl
-        || track.MediaUrl
-        || track.Url
-        || ''
-    ).trim();
+const inferTypeFromFile = (file) => {
+    const mime = String(file?.type || '').toLowerCase();
+    const name = String(file?.name || '').toLowerCase();
+    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(name)) return 'music';
+    if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(name)) return 'video';
+    return 'photo';
+};
+
+const normalizeMusic = (item) => {
+    const fileName = String(item?.fileName || item?.FileName || '').trim();
+    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
+    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.url || item?.MediaUrl || item?.Url || '') || blobUrlFromPath(relativePath) || '';
 
     return {
-        id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
-        title: String(track.title || track.Title || 'Untitled').trim(),
-        artist: String(track.artist || track.Artist || '').trim(),
-        album: String(track.album || track.Album || '').trim(),
+        id: String(item?.id || item?.Id || fileName || `music-${Date.now()}`),
+        type: 'music',
+        title: String(item?.title || item?.Title || fileName || 'Untitled track').trim(),
+        artist: String(item?.artist || item?.Artist || '').trim(),
+        album: String(item?.album || item?.Album || '').trim(),
+        genre: String(item?.genre || item?.Genre || '').trim(),
+        fileName,
+        relativePath,
         mediaUrl,
-        url: mediaUrl,
-        type: 'music'
+        sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
+        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        source: 'spaces'
     };
 };
 
-const normalizeMusicCollection = (payload) => {
+const normalizePhoto = (item) => {
+    const fileName = String(item?.fileName || item?.FileName || '').trim();
+    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
+    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.imageUrl || item?.url || item?.MediaUrl || '') || blobUrlFromPath(relativePath) || '';
+
+    return {
+        id: String(item?.id || item?.Id || fileName || `photo-${Date.now()}`),
+        type: 'photo',
+        title: String(item?.title || item?.Title || fileName || 'Untitled photo').trim(),
+        description: String(item?.description || item?.Description || '').trim(),
+        fileName,
+        relativePath,
+        mediaUrl,
+        thumbnailUrl: mediaUrl,
+        sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
+        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        source: 'spaces'
+    };
+};
+
+const normalizeVideo = (item) => {
+    const fileName = String(item?.fileName || item?.FileName || '').trim();
+    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
+    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.videoUrl || item?.url || item?.MediaUrl || '') || blobUrlFromPath(relativePath) || '';
+
+    return {
+        id: String(item?.id || item?.Id || fileName || `video-${Date.now()}`),
+        type: 'video',
+        title: String(item?.title || item?.Title || fileName || 'Untitled video').trim(),
+        description: String(item?.description || item?.Description || '').trim(),
+        fileName,
+        relativePath,
+        mediaUrl,
+        thumbnailUrl: normalizeUrl(item?.thumbnailUrl || item?.ThumbnailUrl || '') || mediaUrl,
+        sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
+        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        source: 'spaces'
+    };
+};
+
+const readList = (payload, keys = ['items', 'data', 'tracks', 'videos', 'photos']) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    for (const key of keys) {
+        if (Array.isArray(payload[key])) return payload[key];
+    }
+    return [];
+};
+
+const getListMeta = (payload) => {
     if (Array.isArray(payload)) {
-        return payload.map(normalizeTrack).filter(Boolean);
+        return { total: payload.length };
     }
 
-    if (!payload || typeof payload !== 'object') {
-        return [];
+    if (payload && typeof payload === 'object') {
+        return {
+            total: Number(payload.total || payload.totalCount || payload.count || payload.items?.length || payload.data?.length || 0),
+            persistenceStatus: payload.persistenceStatus || 'ready'
+        };
     }
 
-    const source =
-        (Array.isArray(payload.tracks) && payload.tracks)
-        || (Array.isArray(payload.items) && payload.items)
-        || (Array.isArray(payload.data) && payload.data)
-        || null;
-
-    if (source) {
-        return source.map(normalizeTrack).filter(Boolean);
-    }
-
-    const singleTrack = payload.track || payload.file || payload.song || payload.music || payload;
-    const normalized = normalizeTrack({
-        ...singleTrack,
-        id: singleTrack?.id || payload.mediaAssetId || payload.fileName || singleTrack?.fileName || '',
-        title: singleTrack?.title || payload.title || payload.fileName || singleTrack?.fileName || 'Untitled',
-        artist: singleTrack?.artist || payload.artist || '',
-        album: singleTrack?.album || payload.album || '',
-        mediaUrl: singleTrack?.mediaUrl || payload.mediaUrl || payload.filePath || payload.publicUrl || '',
-        url: singleTrack?.url || payload.mediaUrl || payload.filePath || payload.publicUrl || '',
-        fileName: singleTrack?.fileName || payload.fileName || ''
-    });
-
-    return normalized ? [normalized] : [];
-};
-
-const normalizeVideo = (video) => {
-    if (!video || typeof video !== 'object') return null;
-
-    const fileName = String(video.fileName || video.FileName || video.title || 'video').trim();
-    const relativePath = String(video.relativePath || video.RelativePath || video.objectKey || video.ObjectKey || '').trim();
-
-    // Prefer HLS manifest URL when present in metadataJson
-    let hlsManifestUrl = '';
-    try {
-        const meta = video.metadataJson || video.MetadataJson;
-        if (meta) {
-            const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta;
-            hlsManifestUrl = String(parsed?.hlsManifestUrl || parsed?.manifestUrl || '').trim();
-        }
-    } catch {
-        // ignore malformed metadata
-    }
-
-    const sourceCandidates = [
-        hlsManifestUrl,
-        toBlobStreamUrl(relativePath),
-        fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '',
-        normalizePlaybackUrl(video.videoUrl || ''),
-        normalizePlaybackUrl(video.mediaUrl || ''),
-        normalizePlaybackUrl(video.filePath || ''),
-        normalizePlaybackUrl(video.publicUrl || ''),
-        normalizePlaybackUrl(video.thumbnailUrl || ''),
-        normalizePlaybackUrl(video.posterUrl || '')
-    ].filter(Boolean).map((url) => resolveMediaUrl(url) || url);
-
-    const videoUrl = sourceCandidates[0] || '';
-    const thumbnailUrl = sourceCandidates[1] || sourceCandidates[0] || '';
-
-    return {
-        id: String(video.id || video.videoId || ''),
-        title: String(video.title || 'Untitled video').trim(),
-        description: String(video.description || '').trim(),
-        videoUrl,
-        mediaUrl: videoUrl,
-        thumbnailUrl,
-        relativePath,
-        fileName,
-        createdAt: String(video.createdAt || video.uploadedAt || ''),
-        type: 'video'
-    };
-};
-
-const normalizePhoto = (photo) => {
-    if (!photo || typeof photo !== 'object') return null;
-
-    const relativePath = String(
-        photo.relativePath
-        || photo.RelativePath
-        || photo.objectKey
-        || photo.ObjectKey
-        || ''
-    ).trim();
-    const fileName = String(photo.fileName || photo.FileName || '').trim();
-
-    const sourceCandidates = [
-        toBlobStreamUrl(relativePath),
-        fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '',
-        normalizePlaybackUrl(photo.thumbnailUrl || photo.ThumbnailUrl || ''),
-        normalizePlaybackUrl(photo.mediaUrl || photo.MediaUrl || ''),
-        normalizePlaybackUrl(photo.imageUrl || photo.ImageUrl || ''),
-        normalizePlaybackUrl(photo.url || photo.Url || ''),
-        normalizePlaybackUrl(photo.fileUrl || photo.FileUrl || ''),
-        normalizePlaybackUrl(photo.publicUrl || photo.PublicUrl || '')
-    ].filter(Boolean).map((url) => resolveMediaUrl(url) || url);
-
-    const imageUrl = sourceCandidates[0] || '';
-    const thumbnailUrl = sourceCandidates[1] || sourceCandidates[0] || '';
-
-    return {
-        id: String(photo.id || `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`),
-        title: String(photo.title || photo.fileName || 'Untitled photo').trim(),
-        description: String(photo.description || '').trim(),
-        fileName,
-        relativePath,
-        imageUrl,
-        thumbnailUrl,
-        url: imageUrl,
-        uploadedAt: String(photo.uploadedAt || photo.createdAt || new Date().toISOString()),
-        type: 'photo'
-    };
-};
-
-const asArray = (value) => (Array.isArray(value) ? value : []);
-
-const LIBRARY_LIMITS = {
-    music: 30,
-    photo: 30,
-    video: 30
-};
-
-const LOCAL_ARCHIVE_STORAGE_KEY = 'wiseLocalMediaArchive';
-const LOCAL_ARCHIVE_HIDDEN_KEY = 'wiseLocalMediaArchiveHiddenIds';
-
-const readJsonLocal = (key, fallback) => {
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : fallback;
-    } catch {
-        return fallback;
-    }
-};
-
-const writeJsonLocal = (key, value) => {
-    try {
-        localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-        // Best effort local persistence.
-    }
-};
-
-const normalizeArchiveStore = (value) => {
-    const source = value && typeof value === 'object' ? value : {};
-    return {
-        music: Array.isArray(source.music) ? source.music : [],
-        photo: Array.isArray(source.photo) ? source.photo : [],
-        video: Array.isArray(source.video) ? source.video : []
-    };
-};
-
-const getMediaDateValue = (item) => {
-    const candidates = [item?.uploadedAt, item?.createdAt, item?.updatedAt, item?.archivedAt];
-    for (const candidate of candidates) {
-        const parsed = new Date(candidate || '').getTime();
-        if (Number.isFinite(parsed) && parsed > 0) {
-            return parsed;
-        }
-    }
-    return 0;
-};
-
-const makeArchiveEntry = (item, mediaType) => {
-    const type = String(mediaType || '').trim().toLowerCase();
-    const sourceUrl = String(item?.mediaUrl || item?.videoUrl || item?.imageUrl || item?.url || '').trim();
-    const title = String(item?.title || `${type} item`).trim() || `${type} item`;
-    return {
-        id: `archive-${type}-${item?.id || Date.now()}-${Date.now()}`,
-        mediaId: String(item?.id || '').trim(),
-        type,
-        title,
-        description: String(item?.description || '').trim(),
-        sourceUrl,
-        thumbnailUrl: String(item?.thumbnailUrl || item?.imageUrl || '').trim(),
-        folderPath: `/wiseravenshare/local/${type}`,
-        archivedAt: new Date().toISOString()
-    };
+    return { total: 0, persistenceStatus: 'ready' };
 };
 
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
-    const [activeTab, setActiveTab] = useState('all');
-    const [isLoading, setIsLoading] = useState(true);
-    const [musicTracks, setMusicTracks] = useState([]);
-    const [videos, setVideos] = useState([]);
-    const [photos, setPhotos] = useState([]);
-    const [musicSearch, setMusicSearch] = useState('');
-    const [videoSearch, setVideoSearch] = useState('');
-    const [photoSearch, setPhotoSearch] = useState('');
-    const [currentTrack, setCurrentTrack] = useState(null);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [photoLightbox, setPhotoLightbox] = useState(null);
-    const [playingVideoId, setPlayingVideoId] = useState(null);
-    const [removingMediaId, setRemovingMediaId] = useState('');
-    const audioRef = useRef(null);
-    const isMountedRef = useRef(true);
     const uploadInputRef = useRef(null);
-    const [selectedPlanId, setSelectedPlanId] = useState(null);
-    const [libraryVersion, setLibraryVersion] = useState(0);
-    const [uploadType, setUploadType] = useState('photo');
+
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [activeTab, setActiveTab] = useState('all');
+    const [query, setQuery] = useState('');
+    const [uploadType, setUploadType] = useState('music');
     const [uploadFile, setUploadFile] = useState(null);
     const [uploadTitle, setUploadTitle] = useState('');
     const [uploadDescription, setUploadDescription] = useState('');
+    const [uploadArtist, setUploadArtist] = useState('');
+    const [uploadAlbum, setUploadAlbum] = useState('');
+    const [uploadGenre, setUploadGenre] = useState('');
     const [uploading, setUploading] = useState(false);
-    const [localArchive, setLocalArchive] = useState(() => normalizeArchiveStore(readJsonLocal(LOCAL_ARCHIVE_STORAGE_KEY, {})));
-    const [hiddenArchivedIds, setHiddenArchivedIds] = useState(() => normalizeArchiveStore(readJsonLocal(LOCAL_ARCHIVE_HIDDEN_KEY, {})));
+    const [progress, setProgress] = useState(0);
+    const [music, setMusic] = useState([]);
+    const [photos, setPhotos] = useState([]);
+    const [videos, setVideos] = useState([]);
+    const [error, setError] = useState('');
 
-    useEffect(() => {
-        writeJsonLocal(LOCAL_ARCHIVE_STORAGE_KEY, localArchive);
-    }, [localArchive]);
-
-    useEffect(() => {
-        writeJsonLocal(LOCAL_ARCHIVE_HIDDEN_KEY, hiddenArchivedIds);
-    }, [hiddenArchivedIds]);
-
-    const playTrack = (track) => {
-        if (!track) {
-            return;
-        }
-
-        const payload = {
-            source: 'my-library',
-            requestedAtUtc: new Date().toISOString(),
-            track: {
-                id: String(track.id || '').trim(),
-                title: String(track.title || '').trim(),
-                artist: String(track.artist || '').trim(),
-                album: String(track.album || '').trim(),
-                fileName: String(track.fileName || track.title || '').trim(),
-                mediaUrl: String(track.mediaUrl || track.url || '').trim(),
-                url: String(track.mediaUrl || track.url || '').trim(),
-                relativePath: String(track.relativePath || '').trim()
-            }
-        };
+    const loadLibrary = useCallback(async () => {
+        setError('');
+        if (!refreshing) setLoading(true);
 
         try {
-            localStorage.setItem(TRACK_PLAYER_HANDOFF_KEY, JSON.stringify(payload));
-        } catch {
-            // If storage write fails, continue and still navigate so user can load manually.
-        }
-
-        setCurrentTrack(track);
-        setIsPlaying(true);
-        onNavigate?.('fm-tuner');
-    };
-
-    const togglePlayPause = () => {
-        if (!currentTrack) return;
-        setIsPlaying((prev) => !prev);
-    };
-
-    // Sync the audio element with currentTrack + isPlaying state.
-    useEffect(() => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (!currentTrack?.mediaUrl) { audio.pause(); return; }
-        if (audio.src !== currentTrack.mediaUrl) {
-            audio.src = currentTrack.mediaUrl;
-            audio.load();
-        }
-        if (isPlaying) { audio.play().catch(() => {}); }
-        else { audio.pause(); }
-    }, [currentTrack, isPlaying]);
-    const handleProtectTrack = (planId) => {
-        if (!currentTrack) {
-            addToast('Please select a music track first', 'info');
-            return;
-        }
-        setSelectedPlanId(planId);
-        addToast(`Selected ${PROTECTION_PLANS.find(p => p.id === planId)?.name || 'plan'} for: ${currentTrack.title}`, 'success');
-    };
-
-    const openPhotoLightbox = (photo) => {
-        const source = String(photo?.imageUrl || photo?.thumbnailUrl || photo?.url || '').trim();
-        if (!source) {
-            addToast('This photo does not have a visible source URL yet.', 'warning');
-            return;
-        }
-
-        setPhotoLightbox({
-            id: String(photo?.id || ''),
-            src: source,
-            title: String(photo?.title || 'Photo')
-        });
-    };
-
-    const handleRemoveMedia = async (item, event) => {
-        event?.preventDefault?.();
-        event?.stopPropagation?.();
-
-        await removeMediaItem(item, { skipConfirm: false, suppressToast: false });
-    };
-
-    const removeMediaItem = async (item, { skipConfirm = false, suppressToast = false } = {}) => {
-        const mediaId = String(item?.id || '').trim();
-        const mediaType = String(item?.type || '').toLowerCase();
-        if (!mediaId) {
-            addToast('Unable to remove this media because the id is missing.', 'error');
-            return false;
-        }
-
-        const mediaTitle = String(item?.title || `this ${mediaType || 'media item'}`).trim() || `this ${mediaType || 'media item'}`;
-        if (!skipConfirm) {
-            const confirmed = window.confirm(`Remove "${mediaTitle}" from your library? This cannot be undone.`);
-            if (!confirmed) {
-                return false;
-            }
-        }
-
-        setRemovingMediaId(mediaId);
-        try {
-            if (mediaType === 'photo') {
-                try {
-                    await apiService.deletePhotoLibraryItem(mediaId);
-                } catch (error) {
-                    const status = Number(error?.status || error?.response?.status || 0);
-                    if ((status === 404 || status === 400) && GUID_REGEX.test(mediaId)) {
-                        await apiService.deleteSavedMediaItem(mediaId);
-                    } else {
-                        throw error;
-                    }
-                }
-                setPhotos((previous) => previous.filter((entry) => entry.id !== mediaId));
-                setPhotoLightbox((previous) => (previous?.id === mediaId ? null : previous));
-                setHiddenArchivedIds((previous) => ({ ...previous, photo: previous.photo.filter((id) => id !== mediaId) }));
-                setLocalArchive((previous) => ({ ...previous, photo: previous.photo.filter((entry) => entry.mediaId !== mediaId) }));
-            } else if (mediaType === 'video') {
-                try {
-                    await apiService.deleteVideoLibraryItem(mediaId);
-                } catch (error) {
-                    const status = Number(error?.status || error?.response?.status || 0);
-                    if ((status === 404 || status === 400) && GUID_REGEX.test(mediaId)) {
-                        await apiService.deleteSavedMediaItem(mediaId);
-                    } else {
-                        throw error;
-                    }
-                }
-                setVideos((previous) => previous.filter((entry) => entry.id !== mediaId));
-                setPlayingVideoId((previous) => (previous === mediaId ? null : previous));
-                setHiddenArchivedIds((previous) => ({ ...previous, video: previous.video.filter((id) => id !== mediaId) }));
-                setLocalArchive((previous) => ({ ...previous, video: previous.video.filter((entry) => entry.mediaId !== mediaId) }));
-            } else if (mediaType === 'music') {
-                try {
-                    await apiService.deleteMusicLibraryItem(mediaId);
-                } catch (error) {
-                    const status = Number(error?.status || error?.response?.status || 0);
-                    const canFallback = status === 404 || status === 400 || status === 405;
-                    if (canFallback && (GUID_REGEX.test(mediaId) || COMPACT_GUID_REGEX.test(mediaId))) {
-                        await apiService.deleteSavedMediaItem(mediaId);
-                    } else {
-                        throw error;
-                    }
-                }
-                setMusicTracks((previous) => {
-                    const next = previous.filter((entry) => entry.id !== mediaId);
-                    if (currentTrack?.id === mediaId) {
-                        setCurrentTrack(next[0] || null);
-                        setIsPlaying(false);
-                    }
-                    return next;
-                });
-                setHiddenArchivedIds((previous) => ({ ...previous, music: previous.music.filter((id) => id !== mediaId) }));
-                setLocalArchive((previous) => ({ ...previous, music: previous.music.filter((entry) => entry.mediaId !== mediaId) }));
-            } else {
-                throw new Error('Unsupported media type for removal.');
-            }
-
-            if (!suppressToast) {
-                addToast(`Removed ${mediaTitle} from your library.`, 'success');
-            }
-            
-            // Broadcast library update to other pages
-            window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
-              detail: { mediaType, action: 'delete', mediaId }
-            }));
-            
-            return true;
-        } catch (error) {
-            if (!suppressToast) {
-                addToast(error?.message || 'Failed to remove media.', 'error');
-            }
-            return false;
-        } finally {
-            setRemovingMediaId('');
-        }
-    };
-
-    const archiveMediaItem = (item) => {
-        const mediaId = String(item?.id || '').trim();
-        const mediaType = String(item?.type || '').toLowerCase();
-        if (!mediaId || !['music', 'photo', 'video'].includes(mediaType)) {
-            addToast('Unable to archive this item.', 'error');
-            return false;
-        }
-
-        const archiveEntry = makeArchiveEntry(item, mediaType);
-        setLocalArchive((previous) => ({
-            ...previous,
-            [mediaType]: [archiveEntry, ...(previous[mediaType] || []).filter((entry) => entry.mediaId !== mediaId)].slice(0, 400)
-        }));
-        setHiddenArchivedIds((previous) => ({
-            ...previous,
-            [mediaType]: Array.from(new Set([...(previous[mediaType] || []), mediaId]))
-        }));
-
-        if (mediaType === 'music' && currentTrack?.id === mediaId) {
-            setCurrentTrack(null);
-            setIsPlaying(false);
-        }
-        if (mediaType === 'video' && playingVideoId === mediaId) {
-            setPlayingVideoId(null);
-        }
-        if (mediaType === 'photo' && photoLightbox?.id === mediaId) {
-            setPhotoLightbox(null);
-        }
-
-        addToast(`Moved to local archive folder /wiseravenshare/local/${mediaType}.`, 'success');
-        return true;
-    };
-
-    const restoreArchivedItem = (entry) => {
-        const mediaType = String(entry?.type || '').toLowerCase();
-        const mediaId = String(entry?.mediaId || '').trim();
-        if (!mediaType || !mediaId) {
-            return;
-        }
-
-        setHiddenArchivedIds((previous) => ({
-            ...previous,
-            [mediaType]: (previous[mediaType] || []).filter((id) => id !== mediaId)
-        }));
-        addToast(`${entry?.title || 'Item'} restored to active library.`, 'success');
-    };
-
-    const removeArchiveRecord = (entry) => {
-        const mediaType = String(entry?.type || '').toLowerCase();
-        const archiveId = String(entry?.id || '').trim();
-        if (!mediaType || !archiveId) {
-            return;
-        }
-
-        setLocalArchive((previous) => ({
-            ...previous,
-            [mediaType]: (previous[mediaType] || []).filter((item) => item.id !== archiveId)
-        }));
-        addToast('Archive record removed.', 'info');
-    };
-
-    const enforceCapacityBeforeUpload = (incomingType) => {
-        const mediaType = String(incomingType || '').toLowerCase();
-        const counts = {
-            music: musicTracks.length,
-            photo: photos.length,
-            video: videos.length
-        };
-        const currentCount = counts[mediaType] ?? 0;
-        const limit = LIBRARY_LIMITS[mediaType] ?? 0;
-        if (limit > 0 && currentCount >= limit) {
-            addToast(
-                `${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)} library is full (${limit} items). Delete items to free space before uploading more.`,
-                'error'
-            );
-            return false;
-        }
-        return true;
-    };
-
-    const loadLibrary = async () => {
-        setIsLoading(true);
-        try {
-            const [musicResult, videoResult, photoResult] = await Promise.allSettled([
+            const [musicResult, photoResult, videoResult] = await Promise.allSettled([
                 apiService.getMusicLibrary(),
-                apiService.getVideoLibrary
-                    ? apiService.getVideoLibrary()
-                    : ravensightAPI.getUserVideos(user?.id || null),
-                apiService.getPhotoLibrary ? apiService.getPhotoLibrary() : Promise.resolve({ data: [] })
+                apiService.getPhotoLibrary(),
+                apiService.getVideoLibrary()
             ]);
 
-            if (!isMountedRef.current) return;
-
-            const nextTracks = musicResult.status === 'fulfilled'
-                ? normalizeMusicCollection(musicResult.value?.data?.items
-                    ?? musicResult.value?.data?.tracks
-                    ?? musicResult.value?.data)
+            const musicItems = musicResult.status === 'fulfilled'
+                ? readList(musicResult.value?.data, ['items', 'tracks', 'data']).map(normalizeMusic)
                 : [];
-            const nextVideos = videoResult.status === 'fulfilled'
-                ? asArray(
-                    videoResult.value?.data?.videos
-                    ?? videoResult.value?.videos
-                    ?? videoResult.value?.data
-                )
-                    .map(normalizeVideo)
-                    .filter(Boolean)
+            const photoItems = photoResult.status === 'fulfilled'
+                ? readList(photoResult.value?.data, ['data', 'items', 'photos']).map(normalizePhoto)
                 : [];
-            const nextPhotos = photoResult.status === 'fulfilled'
-                ? asArray(
-                    photoResult.value?.data?.data
-                    ?? photoResult.value?.photos
-                    ?? photoResult.value?.data
-                )
-                    .map(normalizePhoto)
-                    .filter(Boolean)
+            const videoItems = videoResult.status === 'fulfilled'
+                ? readList(videoResult.value?.data, ['videos', 'items', 'data']).map(normalizeVideo)
                 : [];
 
-            setMusicTracks(nextTracks);
-            setVideos(nextVideos);
-            setPhotos(nextPhotos);
-            if (nextTracks.length > 0) {
-                setCurrentTrack(nextTracks[0]);
-            } else {
-                setCurrentTrack(null);
-            }
-        } catch (error) {
-            addToast(error?.message || 'Unable to load your library.', 'error');
+            setMusic(musicItems.filter(Boolean));
+            setPhotos(photoItems.filter(Boolean));
+            setVideos(videoItems.filter(Boolean));
+        } catch (loadError) {
+            const message = loadError?.message || 'Unable to load the media library.';
+            setError(message);
+            addToast(message, 'error');
         } finally {
-            if (isMountedRef.current) {
-                setIsLoading(false);
-            }
+            setLoading(false);
+            setRefreshing(false);
         }
-    };
+    }, [addToast, refreshing]);
+
+    useEffect(() => {
+        void loadLibrary();
+    }, [loadLibrary, user?.id]);
+
+    const allItems = useMemo(() => [...music, ...photos, ...videos], [music, photos, videos]);
+    const filteredItems = useMemo(() => {
+        const term = query.trim().toLowerCase();
+        const tabFilter = activeTab === 'all' ? null : activeTab;
+        return allItems.filter((item) => {
+            if (tabFilter && item.type !== tabFilter) return false;
+            if (!term) return true;
+            return [
+                item.title,
+                item.artist,
+                item.album,
+                item.genre,
+                item.description,
+                item.fileName,
+                item.relativePath
+            ].some((value) => String(value || '').toLowerCase().includes(term));
+        });
+    }, [activeTab, allItems, query]);
+
+    const stats = useMemo(() => {
+        const totalSize = allItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
+        return {
+            total: allItems.length,
+            music: music.length,
+            photo: photos.length,
+            video: videos.length,
+            totalSize
+        };
+    }, [allItems.length, music.length, photos.length, videos.length, allItems]);
+
+    const uploadLimitReached = useMemo(() => {
+        const counts = { music: music.length, photo: photos.length, video: videos.length };
+        return LIMITS[uploadType] && counts[uploadType] >= LIMITS[uploadType];
+    }, [music.length, photos.length, videos.length, uploadType]);
+
+    const updateItemLists = useCallback((type, nextItem) => {
+        if (!nextItem) return;
+        if (type === 'music') setMusic((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'photo') setPhotos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'video') setVideos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+    }, []);
 
     const handleUpload = async (event) => {
         event.preventDefault();
+
         if (!uploadFile) {
-            addToast('Choose a file to upload first.', 'info');
+            addToast('Choose a file first.', 'info');
             return;
         }
 
-        const title = String(uploadTitle || uploadFile.name || 'Uploaded media').trim();
-        const description = String(uploadDescription || '').trim();
-        const resolvedUploadType = inferUploadTypeFromFile(uploadFile, uploadType);
-        const type = resolvedUploadType === 'music' ? 'audio' : resolvedUploadType;
-        const canProceed = enforceCapacityBeforeUpload(resolvedUploadType);
-        if (!canProceed) {
+        if (uploadLimitReached) {
+            addToast(`${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Delete an item first.`, 'error');
             return;
         }
+
+        const title = String(uploadTitle || uploadFile.name || 'Untitled media').trim();
+        const destinationFolder = `wiseravenshare/media/${uploadType}`;
 
         setUploading(true);
+        setProgress(0);
+
         try {
-            let uploadResponse;
-            if (resolvedUploadType === 'music') {
-                uploadResponse = await apiService.uploadMusicTrack(uploadFile, {
+            let response;
+            if (uploadType === 'music') {
+                response = await apiService.uploadMusicTrack(uploadFile, {
                     title,
-                    artist: '',
-                    album: '',
-                    genre: '',
-                    fingerprint: ''
+                    artist: uploadArtist,
+                    album: uploadAlbum,
+                    genre: uploadGenre,
+                    destinationFolder,
+                    onProgress: setProgress
                 });
             } else {
-                uploadResponse = await apiService.uploadMedia(uploadFile, type, {
+                response = await apiService.uploadMedia(uploadFile, uploadType, {
                     title,
-                    description
+                    description: uploadDescription,
+                    destinationFolder,
+                    caption: uploadDescription,
+                    onProgress: setProgress
                 });
             }
 
-            addToast(`${resolvedUploadType === 'music' ? 'Music' : resolvedUploadType.charAt(0).toUpperCase() + resolvedUploadType.slice(1)} uploaded successfully.`, 'success');
+            const data = response?.data || response || {};
+            const mediaUrl = String(data.mediaUrl || data.filePath || data.url || data.file?.mediaUrl || '').trim();
+            const relativePath = String(data.relativePath || data.file?.relativePath || data.objectKey || '').trim();
 
-            // Optimistic update — immediately add item to local state so the user sees it without waiting for the reload.
-            const responseData = uploadResponse?.data || {};
-            const mediaUrl = String(responseData.mediaUrl || responseData.filePath || responseData.file?.MediaUrl || '').trim();
-            const fileName = String(responseData.fileName || responseData.file?.FileName || uploadFile.name || '').trim();
+            const nextItem = uploadType === 'music'
+                ? normalizeMusic({
+                    id: data.track?.id || data.id || `music-${Date.now()}`,
+                    title: data.track?.title || title,
+                    artist: data.track?.artist || uploadArtist,
+                    album: data.track?.album || uploadAlbum,
+                    genre: data.track?.genre || uploadGenre,
+                    fileName: data.track?.fileName || uploadFile.name,
+                    relativePath: data.track?.relativePath || relativePath,
+                    mediaUrl: data.track?.mediaUrl || mediaUrl,
+                    sizeBytes: uploadFile.size,
+                    uploadedAt: new Date().toISOString()
+                })
+                : uploadType === 'photo'
+                    ? normalizePhoto({
+                        id: data.id || `photo-${Date.now()}`,
+                        title,
+                        description: uploadDescription,
+                        fileName: data.fileName || uploadFile.name,
+                        relativePath: relativePath || data.relativePath,
+                        mediaUrl,
+                        sizeBytes: uploadFile.size,
+                        uploadedAt: new Date().toISOString()
+                    })
+                    : normalizeVideo({
+                        id: data.id || `video-${Date.now()}`,
+                        title,
+                        description: uploadDescription,
+                        fileName: data.fileName || uploadFile.name,
+                        relativePath: relativePath || data.relativePath,
+                        mediaUrl,
+                        sizeBytes: uploadFile.size,
+                        uploadedAt: new Date().toISOString()
+                    });
 
-            if (resolvedUploadType === 'music') {
-                const track = responseData.track || {};
-                const optimisticTrack = normalizeTrack({
-                    id: String(track.id || `upload-${Date.now()}`),
-                    title: String(track.title || title),
-                    artist: String(track.artist || ''),
-                    album: String(track.album || ''),
-                    mediaUrl: String(track.mediaUrl || mediaUrl),
-                    fileName: String(track.fileName || fileName),
-                    type: 'music'
-                });
-                if (optimisticTrack) {
-                    setMusicTracks(prev => {
-                        const exists = prev.some(t => t.id === optimisticTrack.id || t.fileName === optimisticTrack.fileName);
-                        return exists ? prev : [optimisticTrack, ...prev];
-                    });
-                }
-            } else if (resolvedUploadType === 'photo') {
-                const optimisticPhoto = normalizePhoto({
-                    id: `upload-${Date.now()}`,
-                    title,
-                    fileName,
-                    imageUrl: mediaUrl,
-                    thumbnailUrl: mediaUrl,
-                    uploadedAt: new Date().toISOString(),
-                    type: 'photo'
-                });
-                if (optimisticPhoto) {
-                    setPhotos(prev => {
-                        const exists = prev.some(p => p.fileName === fileName);
-                        return exists ? prev : [optimisticPhoto, ...prev];
-                    });
-                }
-            } else if (resolvedUploadType === 'video') {
-                const optimisticVideo = normalizeVideo({
-                    id: `upload-${Date.now()}`,
-                    title,
-                    fileName,
-                    videoUrl: mediaUrl,
-                    mediaUrl,
-                    relativePath: '',
-                    createdAt: new Date().toISOString(),
-                    type: 'video'
-                });
-                if (optimisticVideo) {
-                    setVideos(prev => {
-                        const exists = prev.some(v => v.fileName === fileName);
-                        return exists ? prev : [optimisticVideo, ...prev];
-                    });
-                }
-            }
+            updateItemLists(uploadType, nextItem);
 
             setUploadFile(null);
             setUploadTitle('');
             setUploadDescription('');
+            setUploadArtist('');
+            setUploadAlbum('');
+            setUploadGenre('');
+            setProgress(0);
             if (uploadInputRef.current) {
                 uploadInputRef.current.value = '';
             }
-            
-            // Broadcast library update to other pages (MusicPlayer, etc.)
-            window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
-              detail: { mediaType: resolvedUploadType, action: 'add' }
-            }));
-            
-            // Trigger server reload to replace optimistic items with canonical server state.
-            setLibraryVersion((value) => value + 1);
-        } catch (error) {
-            addToast(error?.message || 'Upload failed. Please try again.', 'error');
+
+            addToast(`${title} uploaded to Spaces.`, 'success');
+            await loadLibrary();
+        } catch (uploadError) {
+            addToast(uploadError?.message || 'Upload failed.', 'error');
         } finally {
             setUploading(false);
         }
     };
 
-    useEffect(() => {
-        isMountedRef.current = true;
-        void loadLibrary();
-        return () => {
-            isMountedRef.current = false;
-        };
-    }, [user?.id, libraryVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    const handleDelete = async (item) => {
+        const confirmed = window.confirm(`Delete "${item.title}" from the media library?`);
+        if (!confirmed) return;
 
-    useEffect(() => {
-       const handleLibraryUpdate = (event) => {
-           const detail = event?.detail || {};
-           // Reload library on any media type add/delete
-           if (detail.action === 'add' || detail.action === 'delete') {
-               setLibraryVersion((value) => value + 1);
-           }
-       };
+        try {
+            if (item.type === 'music') {
+                await apiService.deleteMusicLibraryItem(item.id);
+                setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
+            } else if (item.type === 'photo') {
+                await apiService.deletePhotoLibraryItem(item.id);
+                setPhotos((prev) => prev.filter((entry) => entry.id !== item.id));
+            } else if (item.type === 'video') {
+                await apiService.deleteVideoLibraryItem(item.id);
+                setVideos((prev) => prev.filter((entry) => entry.id !== item.id));
+            }
 
-       window.addEventListener('wiseraven:library-updated', handleLibraryUpdate);
-       return () => window.removeEventListener('wiseraven:library-updated', handleLibraryUpdate);
-    }, []);
+            addToast('Media removed.', 'success');
+        } catch (deleteError) {
+            addToast(deleteError?.message || 'Failed to delete media.', 'error');
+        }
+    };
 
-    const filteredTracks = useMemo(() => {
-        const query = musicSearch.trim().toLowerCase();
-        const visibleTracks = musicTracks.filter((track) => !hiddenArchivedIds.music.includes(String(track?.id || '')));
-        if (!query) return visibleTracks;
-        return visibleTracks.filter((track) =>
-            String(track.title || '').toLowerCase().includes(query)
-            || String(track.artist || '').toLowerCase().includes(query)
-            || String(track.album || '').toLowerCase().includes(query)
+    const handlePlayMusic = (track) => {
+        try {
+            localStorage.setItem(MUSIC_HANDOFF_KEY, JSON.stringify({
+                source: 'my-library',
+                requestedAtUtc: new Date().toISOString(),
+                track: {
+                    id: track.id,
+                    title: track.title,
+                    artist: track.artist,
+                    album: track.album,
+                    fileName: track.fileName,
+                    mediaUrl: track.mediaUrl,
+                    url: track.mediaUrl,
+                    relativePath: track.relativePath
+                }
+            }));
+        } catch {
+            // Best effort handoff.
+        }
+
+        onNavigate?.('fm-tuner');
+    };
+
+    const handleCopy = async (value) => {
+        const text = String(value || '').trim();
+        if (!text) return;
+
+        try {
+            await navigator.clipboard.writeText(text);
+            addToast('Copied media URL.', 'success');
+        } catch {
+            addToast('Unable to copy media URL.', 'error');
+        }
+    };
+
+    const renderedItems = filteredItems.map((item) => {
+        const preview = item.type === 'photo'
+            ? (item.thumbnailUrl || item.mediaUrl)
+            : item.type === 'video'
+                ? (item.thumbnailUrl || item.mediaUrl)
+                : '';
+
+        return (
+            <article key={`${item.type}-${item.id}`} style={cardStyle}>
+                <div style={thumbStyle}>
+                    {preview ? (
+                        item.type === 'video'
+                            ? <video src={preview} style={mediaPreviewStyle} muted />
+                            : <img src={preview} alt={item.title} style={mediaPreviewStyle} />
+                    ) : (
+                        <div style={iconPlaceholderStyle}>
+                            {item.type === 'music' ? <FiMusic /> : item.type === 'photo' ? <FiImage /> : <FiVideo />}
+                        </div>
+                    )}
+                </div>
+
+                <div style={bodyStyle}>
+                    <div style={titleRowStyle}>
+                        <strong style={titleStyle}>{item.title}</strong>
+                        <span style={pillStyle}>{item.type}</span>
+                    </div>
+                    {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
+                    {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
+                    {item.description ? <div style={descriptionStyle}>{item.description}</div> : null}
+
+                    <div style={metaGridStyle}>
+                        <span><FiFolder style={metaIconStyle} /> {item.relativePath || 'Spaces managed'}</span>
+                        <span><FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}</span>
+                        <span><FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}</span>
+                        <span>{item.fileName || 'Unknown file'}</span>
+                    </div>
+
+                    <div style={actionsStyle}>
+                        {item.type === 'music' ? (
+                            <button type="button" style={primaryButtonStyle} onClick={() => handlePlayMusic(item)}>
+                                <FiPlay /> Play
+                            </button>
+                        ) : (
+                            <button type="button" style={secondaryButtonStyle} onClick={() => window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')}>
+                                <FiExternalLink /> Open
+                            </button>
+                        )}
+
+                        <button type="button" style={secondaryButtonStyle} onClick={() => handleCopy(item.mediaUrl)}>
+                            <FiCopy /> Copy URL
+                        </button>
+
+                        <button type="button" style={dangerButtonStyle} onClick={() => handleDelete(item)}>
+                            <FiTrash2 /> Delete
+                        </button>
+                    </div>
+                </div>
+            </article>
         );
-    }, [musicTracks, musicSearch, hiddenArchivedIds.music]);
-
-    const filteredVideos = useMemo(() => {
-        const query = videoSearch.trim().toLowerCase();
-        const visibleVideos = videos.filter((video) => !hiddenArchivedIds.video.includes(String(video?.id || '')));
-        if (!query) return visibleVideos;
-        return visibleVideos.filter((video) =>
-            String(video.title || '').toLowerCase().includes(query)
-            || String(video.description || '').toLowerCase().includes(query)
-        );
-    }, [videos, videoSearch, hiddenArchivedIds.video]);
-
-    const filteredPhotos = useMemo(() => {
-        const query = photoSearch.trim().toLowerCase();
-        const visiblePhotos = photos.filter((photo) => !hiddenArchivedIds.photo.includes(String(photo?.id || '')));
-        if (!query) return visiblePhotos;
-        return visiblePhotos.filter((photo) =>
-            String(photo.title || '').toLowerCase().includes(query)
-            || String(photo.description || '').toLowerCase().includes(query)
-        );
-    }, [photos, photoSearch, hiddenArchivedIds.photo]);
-
-    const allMediaItems = useMemo(() => 
-        [...filteredTracks, ...filteredVideos, ...filteredPhotos], 
-        [filteredTracks, filteredVideos, filteredPhotos]
-    );
-
-    const totalItems = useMemo(() => ({
-        all: allMediaItems.length,
-        music: filteredTracks.length,
-        photos: filteredPhotos.length,
-        videos: filteredVideos.length
-    }), [allMediaItems, filteredTracks.length, filteredPhotos.length, filteredVideos.length]);
-
-    const archiveCounts = useMemo(() => ({
-        music: localArchive.music.length,
-        photo: localArchive.photo.length,
-        video: localArchive.video.length,
-        all: localArchive.music.length + localArchive.photo.length + localArchive.video.length
-    }), [localArchive]);
+    });
 
     return (
-        <section style={{ display: 'grid', gap: '14px' }}>
-            {/* Hidden audio engine */}
-            <audio ref={audioRef} preload="metadata"
-                onEnded={() => setIsPlaying(false)}
-                onError={() => { setIsPlaying(false); }}
-            />
+        <div style={pageStyle}>
+            <section style={heroStyle}>
+                <div>
+                    <div style={eyebrowStyle}>DigitalOcean Spaces + metadata</div>
+                    <h1 style={headingStyle}>Media Library</h1>
+                    <p style={subheadingStyle}>
+                        Upload once, store in Spaces, and organize everything through metadata instead of scanning buckets.
+                    </p>
+                </div>
 
-            {/* Now-playing bar — visible whenever a track is loaded */}
-            {currentTrack && (
-                <div style={{
-                    position: 'sticky', top: '72px', zIndex: 20,
-                    display: 'flex', alignItems: 'center', gap: '12px',
-                    padding: '10px 14px',
-                    background: 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(168,85,247,0.18))',
-                    border: '1px solid rgba(168,85,247,0.4)',
-                    borderRadius: '12px',
-                    backdropFilter: 'blur(10px)'
-                }}>
-                    <button type="button" onClick={togglePlayPause}
-                        style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: 'linear-gradient(135deg, #3b82f6, #a855f7)', color: '#fff', cursor: 'pointer', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {isPlaying ? '⏸' : '▶'}
-                    </button>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack.title}</div>
-                        {currentTrack.artist && <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.55)' }}>{currentTrack.artist}</div>}
-                    </div>
-                    <FiMusic style={{ color: isPlaying ? '#a855f7' : 'rgba(255,255,255,0.3)', fontSize: '18px', flexShrink: 0 }} />
+                <div style={summaryGridStyle}>
+                    <div style={summaryCardStyle}><strong>{stats.total}</strong><span>Total files</span></div>
+                    <div style={summaryCardStyle}><strong>{stats.music}</strong><span>Music</span></div>
+                    <div style={summaryCardStyle}><strong>{stats.photo}</strong><span>Photos</span></div>
+                    <div style={summaryCardStyle}><strong>{stats.video}</strong><span>Videos</span></div>
+                    <div style={summaryCardStyle}><strong>{formatBytes(stats.totalSize)}</strong><span>Total size</span></div>
                 </div>
-            )}
+            </section>
 
-            {/* Photo lightbox */}
-            {photoLightbox && (
-                <div onClick={() => setPhotoLightbox(null)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
-                    <button
-                        type="button"
-                        aria-label="Close photo preview"
-                        onClick={() => setPhotoLightbox(null)}
-                        style={{ position: 'absolute', top: '20px', right: '20px', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(15,23,42,0.8)', color: '#fff', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
-                    >
-                        <FiX />
-                    </button>
-                    <img
-                        src={photoLightbox.src}
-                        alt={photoLightbox.title}
-                        onClick={(event) => event.stopPropagation()}
-                        onError={(event) => {
-                            event.currentTarget.style.display = 'none';
-                        }}
-                        style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 8px 40px rgba(0,0,0,0.8)', cursor: 'default' }}
-                    />
-                </div>
-            )}
-            <div style={{ border: '1px solid var(--border-color)', borderRadius: '14px', padding: '16px', background: 'var(--card-bg)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '20px' }}>
-                    <FiBookOpen /> My Media Library
-                </div>
-                <div style={{ marginTop: '6px', color: 'var(--light-color)', fontSize: '13px' }}>
-                    All your uploaded photos, music, videos, and more in one unified library.
-                </div>
-                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--light-color)' }}>
-                    Capacity limits: Music {LIBRARY_LIMITS.music}, Photos {LIBRARY_LIMITS.photo}, Videos {LIBRARY_LIMITS.video}. When full, you will be prompted to archive or delete.
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-                        Photos ({totalItems.photos})
-                    </span>
-                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-                        Music ({totalItems.music})
-                    </span>
-                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-                        Videos ({totalItems.videos})
-                    </span>
-                    <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-                        Local Archive ({archiveCounts.all})
-                    </span>
-                </div>
-                <form onSubmit={handleUpload} style={{ display: 'grid', gap: '10px', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
-                        <select
-                            value={uploadType}
-                            onChange={(event) => setUploadType(event.target.value)}
-                            style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
-                        >
-                            <option value="photo">Photo</option>
-                            <option value="music">Music</option>
-                            <option value="video">Video</option>
-                        </select>
-                        <input
-                            ref={uploadInputRef}
-                            type="file"
-                            accept="image/*,audio/*,video/*,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.weba,.mp4,.mov,.webm,.mkv,.avi,.m4v"
-                            onChange={(event) => {
-                                const file = event.target.files?.[0] || null;
-                                setUploadFile(file);
-                                if (file) {
-                                    setUploadType(inferUploadTypeFromFile(file, uploadType));
-                                }
-                            }}
-                            style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
-                        />
-                    </div>
-                    <input
-                        type="text"
-                        value={uploadTitle}
-                        onChange={(event) => setUploadTitle(event.target.value)}
-                        placeholder={`${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} title`}
-                        style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
-                    />
-                    <textarea
-                        value={uploadDescription}
-                        onChange={(event) => setUploadDescription(event.target.value)}
-                        placeholder="Optional description"
-                        rows={2}
-                        style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-color)' }}
-                    />
-                    <button
-                        type="submit"
-                        disabled={uploading || !uploadFile}
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '10px 14px',
-                            background: uploading ? 'rgba(148,163,184,0.35)' : 'linear-gradient(135deg, #3b82f6, #a855f7)',
-                            color: '#fff',
-                            cursor: uploading || !uploadFile ? 'not-allowed' : 'pointer',
-                            fontWeight: 700
-                        }}
-                    >
+            <section style={layoutStyle}>
+                <aside style={panelStyle}>
+                    <div style={panelHeaderStyle}>
                         <FiUpload />
-                        {uploading ? 'Uploading…' : 'Upload to Library'}
-                    </button>
-                </form>
-            </div>
+                        <strong>Upload to Spaces</strong>
+                    </div>
+                    <form onSubmit={handleUpload} style={formStyle}>
+                        <label style={fieldStyle}>
+                            Type
+                            <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} style={inputStyle}>
+                                <option value="music">Music</option>
+                                <option value="photo">Photo</option>
+                                <option value="video">Video</option>
+                            </select>
+                        </label>
 
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('all')}
-                    style={{
-                        border: activeTab === 'all' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'all' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiFile style={{ marginRight: '6px', display: 'inline' }} />
-                    All ({totalItems.all})
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('photos')}
-                    style={{
-                        border: activeTab === 'photos' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'photos' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiImage style={{ marginRight: '6px', display: 'inline' }} />
-                    Photos ({totalItems.photos})
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('music')}
-                    style={{
-                        border: activeTab === 'music' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'music' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiMusic style={{ marginRight: '6px', display: 'inline' }} />
-                    Music ({totalItems.music})
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('videos')}
-                    style={{
-                        border: activeTab === 'videos' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'videos' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiVideo style={{ marginRight: '6px', display: 'inline' }} />
-                    Videos ({totalItems.videos})
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('archive')}
-                    style={{
-                        border: activeTab === 'archive' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'archive' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiFile style={{ marginRight: '6px', display: 'inline' }} />
-                    Archive ({archiveCounts.all})
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('protect')}
-                    style={{
-                        border: activeTab === 'protect' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'protect' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiShield style={{ marginRight: '6px', display: 'inline' }} />
-                    Protect
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('saved')}
-                    style={{
-                        border: activeTab === 'saved' ? '1px solid var(--highlight-color)' : '1px solid var(--border-color)',
-                        background: activeTab === 'saved' ? 'rgba(255,255,255,0.08)' : 'var(--card-bg)',
-                        color: 'var(--text-color)',
-                        borderRadius: '999px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px'
-                    }}
-                >
-                    <FiCloud style={{ marginRight: '6px', display: 'inline' }} />
-                    Saved Media
-                </button>
-            </div>
-
-            {isLoading && activeTab !== 'saved' ? (
-                <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px', background: 'var(--card-bg)' }}>
-                    Loading your library...
-                </div>
-            ) : activeTab === 'saved' ? (
-                <MediaLibrary />
-            ) : (
-                <>
-                    {/* All Media View */}
-                    {activeTab === 'all' && (
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
-                            {allMediaItems.length === 0 ? (
-                                <div style={{ color: 'var(--light-color)', fontSize: '13px', textAlign: 'center', padding: '20px' }}>
-                                    📦 Your library is empty. Start by uploading photos, music, or videos!
-                                </div>
-                            ) : (
-                                <div style={{ display: 'grid', gap: '8px' }}>
-                                    {allMediaItems.map((item) => (
-                                        <div key={item.id}
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={() => {
-                                                if (item.type === 'music') playTrack(item);
-                                                else if (item.type === 'photo') openPhotoLightbox(item);
-                                                else if (item.type === 'video') setPlayingVideoId((id) => id === item.id ? null : item.id);
-                                            }}
-                                            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.click()}
-                                            style={{
-                                                textAlign: 'left',
-                                                border: `1px solid ${(item.type === 'music' && currentTrack?.id === item.id) || playingVideoId === item.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
-                                                borderRadius: '10px',
-                                                background: (item.type === 'music' && currentTrack?.id === item.id) ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.03)',
-                                                color: 'var(--text-color)',
-                                                padding: '10px',
-                                                cursor: 'pointer',
-                                                display: 'grid',
-                                                gap: '8px'
-                                            }}
-                                        >
-                                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                                {item.type === 'photo' && (item.imageUrl || item.url) && (
-                                                    <img
-                                                        src={item.thumbnailUrl || item.imageUrl || item.url}
-                                                        alt={item.title}
-                                                        onError={(event) => {
-                                                            event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="120"%3E%3Crect fill="%23202b3d" width="120" height="120"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
-                                                        }}
-                                                        style={{ width: '60px', height: '60px', borderRadius: '6px', objectFit: 'contain', background: 'rgba(15,23,42,0.75)' }}
-                                                    />
-                                                )}
-                                                {item.type === 'music' && <FiMusic style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
-                                                {item.type === 'video' && <FiVideo style={{ fontSize: '32px', color: 'var(--highlight-color)' }} />}
-                                                <div style={{ flex: 1 }}>
-                                                    <div><strong>{item.title}</strong> <span style={{ fontSize: '11px', color: 'var(--light-color)' }}>({item.type})</span></div>
-                                                    {(item.artist || item.description) && (
-                                                        <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                            {item.artist || item.description}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <FiPlay style={{ color: 'var(--light-color)', flexShrink: 0 }} />
-                                                {(item.type === 'photo' || item.type === 'video' || item.type === 'music') && (
-                                                    <button
-                                                        type="button"
-                                                        title={`Remove ${item.type}`}
-                                                        aria-label={`Remove ${item.title}`}
-                                                        disabled={removingMediaId === item.id}
-                                                        onClick={(event) => handleRemoveMedia(item, event)}
-                                                        style={{ marginLeft: '8px', border: '1px solid rgba(248,113,113,0.45)', background: removingMediaId === item.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingMediaId === item.id ? 'not-allowed' : 'pointer' }}
-                                                    >
-                                                        <FiTrash2 />
-                                                    </button>
-                                                )}
-                                            </div>
-                                            {/* Inline video for All tab */}
-                                            {item.type === 'video' && playingVideoId === item.id && item.videoUrl && (
-                                                <video src={item.videoUrl} controls autoPlay
-                                                    style={{ width: '100%', maxHeight: '340px', borderRadius: '8px', background: '#000' }}
-                                                    onClick={(e) => e.stopPropagation()} />
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Photos View */}
-                    {activeTab === 'photos' && (
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
+                        <label style={fieldStyle}>
+                            File
                             <input
-                                type="search"
-                                value={photoSearch}
-                                onChange={(event) => setPhotoSearch(event.target.value)}
-                                placeholder="Search photos by title or description"
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border-color)',
-                                    background: 'rgba(255,255,255,0.03)',
-                                    color: 'var(--text-color)'
+                                ref={uploadInputRef}
+                                type="file"
+                                accept="image/*,video/*,audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.mp4,.mov,.webm,.mkv,.avi"
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0] || null;
+                                    setUploadFile(file);
+                                    if (file && !uploadTitle) {
+                                        setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+                                    }
+                                    if (file) {
+                                        setUploadType(inferTypeFromFile(file));
+                                    }
                                 }}
+                                style={inputStyle}
                             />
+                        </label>
 
-                            {filteredPhotos.length === 0 ? (
-                                <div style={{ color: 'var(--light-color)', fontSize: '13px', textAlign: 'center', padding: '40px' }}>
-                                    📸 No photos yet. Upload your first photo to get started!
-                                </div>
-                            ) : (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
-                                    {filteredPhotos.map((photo) => (
-                                        <div
-                                            key={photo.id}
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={() => openPhotoLightbox(photo)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === 'Enter' || event.key === ' ') {
-                                                    event.preventDefault();
-                                                    openPhotoLightbox(photo);
-                                                }
-                                            }}
-                                            style={{
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: '10px',
-                                                background: 'rgba(255,255,255,0.03)',
-                                                overflow: 'hidden',
-                                                cursor: 'zoom-in',
-                                                padding: 0,
-                                                textAlign: 'left',
-                                                transition: 'transform 0.15s, border-color 0.15s',
-                                                position: 'relative'
-                                            }}
-                                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.borderColor = 'var(--highlight-color)'; }}
-                                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
-                                        >
-                                            <button
-                                                type="button"
-                                                title="Remove photo"
-                                                aria-label={`Remove ${photo.title}`}
-                                                disabled={removingMediaId === photo.id}
-                                                onClick={(event) => handleRemoveMedia(photo, event)}
-                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 2, border: '1px solid rgba(248,113,113,0.55)', background: removingMediaId === photo.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingMediaId === photo.id ? 'not-allowed' : 'pointer' }}
-                                            >
-                                                <FiTrash2 />
-                                            </button>
-                                            <div style={{ width: '100%', height: '150px', background: 'rgba(15,23,42,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                <img
-                                                    src={photo.thumbnailUrl || photo.imageUrl || photo.url}
-                                                    alt={photo.title}
-                                                    onError={(event) => {
-                                                        event.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%23202b3d" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%2394a3b8" font-size="16"%3ENo Preview%3C/text%3E%3C/svg%3E';
-                                                    }}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                                                />
-                                            </div>
-                                            <div style={{ padding: '8px', fontSize: '12px' }}>
-                                                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                    {photo.title}
-                                                </div>
-                                                {photo.description && (
-                                                    <div style={{ color: 'var(--light-color)', fontSize: '11px', marginTop: '2px' }}>
-                                                        {photo.description}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                        <label style={fieldStyle}>
+                            Title
+                            <input value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="File title" style={inputStyle} />
+                        </label>
+
+                        {uploadType === 'music' ? (
+                            <>
+                                <label style={fieldStyle}>Artist<input value={uploadArtist} onChange={(e) => setUploadArtist(e.target.value)} style={inputStyle} /></label>
+                                <label style={fieldStyle}>Album<input value={uploadAlbum} onChange={(e) => setUploadAlbum(e.target.value)} style={inputStyle} /></label>
+                                <label style={fieldStyle}>Genre<input value={uploadGenre} onChange={(e) => setUploadGenre(e.target.value)} style={inputStyle} /></label>
+                            </>
+                        ) : (
+                            <label style={fieldStyle}>
+                                Description
+                                <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} rows={3} style={inputStyle} />
+                            </label>
+                        )}
+
+                        <button type="submit" disabled={uploading || !uploadFile} style={uploadButtonStyle}>
+                            {uploading ? <><FiRefreshCw className="spin" /> Uploading {progress}%</> : <><FiUpload /> Upload</>}
+                        </button>
+                    </form>
+
+                    <div style={noteStyle}>
+                        Permanent persistence comes from Spaces; the database only tracks metadata, ownership, and URLs.
+                    </div>
+                </aside>
+
+                <main style={mainStyle}>
+                    <div style={toolbarStyle}>
+                        <div style={tabsStyle}>
+                            {TAB_OPTIONS.map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.id)}
+                                    style={activeTab === tab.id ? activeTabStyle : tabStyle}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
                         </div>
-                    )}
 
-                    {/* Music View */}
-                    {activeTab === 'music' && (
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
+                        <div style={searchWrapStyle}>
+                            <FiSearch style={{ opacity: 0.7 }} />
                             <input
-                                type="search"
-                                value={musicSearch}
-                                onChange={(event) => setMusicSearch(event.target.value)}
-                                placeholder="Search music by title, artist, or album"
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border-color)',
-                                    background: 'rgba(255,255,255,0.03)',
-                                    color: 'var(--text-color)'
-                                }}
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                placeholder="Search by title, file name, path, artist..."
+                                style={searchInputStyle}
                             />
-
-                            {filteredTracks.length === 0 ? (
-                                <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
-                                    No music tracks found.
-                                </div>
-                            ) : (
-                                <div style={{ display: 'grid', gap: '8px' }}>
-                                    {filteredTracks.map((track) => (
-                                        <div
-                                            key={track.id}
-                                            style={{
-                                                textAlign: 'left',
-                                                border: `1px solid ${currentTrack?.id === track.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
-                                                borderRadius: '10px',
-                                                background: currentTrack?.id === track.id ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.03)',
-                                                color: 'var(--text-color)',
-                                                padding: '10px',
-                                                display: 'grid',
-                                                gap: '8px'
-                                            }}
-                                        >
-                                            <button
-                                                type="button"
-                                                onClick={() => playTrack(track)}
-                                                style={{ background: 'transparent', border: 'none', color: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' }}
-                                            >
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                                                    <strong>{track.title || 'Untitled'}</strong>
-                                                    <span style={{ fontSize: '18px', color: 'var(--highlight-color)', flexShrink: 0 }}>
-                                                        {currentTrack?.id === track.id && isPlaying ? '⏸' : '▶'}
-                                                    </span>
-                                                </div>
-                                                <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                    {track.artist || 'Unknown artist'}{track.album ? ` • ${track.album}` : ''}
-                                                </div>
-                                            </button>
-                                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                                <button
-                                                    type="button"
-                                                    title="Remove music"
-                                                    aria-label={`Remove ${track.title || 'track'}`}
-                                                    disabled={removingMediaId === track.id}
-                                                    onClick={(event) => handleRemoveMedia(track, event)}
-                                                    style={{ border: '1px solid rgba(248,113,113,0.45)', background: removingMediaId === track.id ? 'rgba(248,113,113,0.25)' : 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 8px', cursor: removingMediaId === track.id ? 'not-allowed' : 'pointer' }}
-                                                >
-                                                    <FiTrash2 />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            <button type="button" onClick={() => { setRefreshing(true); void loadLibrary(); }} style={refreshButtonStyle}>
+                                <FiRefreshCw className={refreshing ? 'spin' : ''} />
+                            </button>
                         </div>
-                    )}
+                    </div>
 
-                    {activeTab === 'videos' && (
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
-                            <input
-                                type="search"
-                                value={videoSearch}
-                                onChange={(event) => setVideoSearch(event.target.value)}
-                                placeholder="Search videos by title or description"
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border-color)',
-                                    background: 'rgba(255,255,255,0.03)',
-                                    color: 'var(--text-color)'
-                                }}
-                            />
+                    {error ? (
+                        <div style={errorStyle}><FiAlertCircle /> {error}</div>
+                    ) : null}
 
-                            {filteredVideos.length === 0 ? (
-                                <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
-                                    No saved videos found.
-                                </div>
-                            ) : (
-                                <div style={{ display: 'grid', gap: '8px' }}>
-                                    {filteredVideos.map((video) => (
-                                        <div
-                                            key={video.id}
-                                            style={{
-                                                border: `1px solid ${playingVideoId === video.id ? 'var(--highlight-color)' : 'var(--border-color)'}`,
-                                                borderRadius: '10px',
-                                                background: 'rgba(255,255,255,0.03)',
-                                                overflow: 'hidden',
-                                                position: 'relative'
-                                            }}
-                                        >
-                                            <button
-                                                type="button"
-                                                title="Remove video"
-                                                aria-label={`Remove ${video.title || 'video'}`}
-                                                disabled={removingMediaId === video.id}
-                                                onClick={(event) => handleRemoveMedia(video, event)}
-                                                style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 3, border: '1px solid rgba(248,113,113,0.55)', background: removingMediaId === video.id ? 'rgba(248,113,113,0.4)' : 'rgba(15,23,42,0.7)', color: '#fecaca', borderRadius: '8px', padding: '6px', cursor: removingMediaId === video.id ? 'not-allowed' : 'pointer' }}
-                                            >
-                                                <FiTrash2 />
-                                            </button>
-                                            {/* Collapsed row — tap to expand player */}
-                                            <button type="button"
-                                                onClick={() => setPlayingVideoId((id) => id === video.id ? null : video.id)}
-                                                style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-color)', padding: '12px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                <span style={{ fontSize: '20px', color: 'var(--highlight-color)', flexShrink: 0 }}>
-                                                    {playingVideoId === video.id ? '⏸' : '▶'}
-                                                </span>
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{video.title || 'Untitled video'}</div>
-                                                    {video.description && (
-                                                        <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--light-color)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{video.description}</div>
-                                                    )}
-                                                </div>
-                                            </button>
-                                            {/* Inline player — expands when row is active */}
-                                            {playingVideoId === video.id && video.videoUrl && (
-                                                <video src={video.videoUrl} controls autoPlay
-                                                    style={{ width: '100%', maxHeight: '420px', display: 'block', background: '#000' }}
-                                                    onEnded={() => setPlayingVideoId(null)} />
-                                            )}
-                                            {playingVideoId === video.id && !video.videoUrl && (
-                                                <div style={{ padding: '14px', fontSize: '12px', color: 'var(--light-color)' }}>
-                                                    No playable URL for this video.
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                    {loading ? (
+                        <div style={emptyStyle}>Loading library...</div>
+                    ) : filteredItems.length === 0 ? (
+                        <div style={emptyStyle}>
+                            <FiCheckCircle size={24} />
+                            <strong>No media found</strong>
+                            <span>Upload photos, videos, or music to populate your library.</span>
                         </div>
+                    ) : (
+                        <div style={gridStyle}>{renderedItems}</div>
                     )}
-
-                    {/* Music Rights Protection View */}
-                    {activeTab === 'protect' && (
-                        <div style={{ display: 'grid', gap: '16px' }}>
-                            {!currentTrack ? (
-                                <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px', background: 'var(--card-bg)', textAlign: 'center', color: 'var(--light-color)' }}>
-                                    🎵 Select a music track from the Music tab to protect your intellectual property
-                                </div>
-                            ) : (
-                                <>
-                                    <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                            <FiMusic style={{ fontSize: '24px', color: 'var(--highlight-color)' }} />
-                                            <div>
-                                                <div style={{ fontWeight: 700 }}>{currentTrack.title}</div>
-                                                {currentTrack.artist && (
-                                                    <div style={{ fontSize: '13px', color: 'var(--light-color)' }}>
-                                                        by {currentTrack.artist}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div style={{ fontSize: '12px', color: 'var(--light-color)', marginTop: '8px' }}>
-                                            Protect your music with IP registration, proof-of-creation, monitoring, and legal support.
-                                        </div>
-                                    </div>
-
-                                    {/* Protection Plans Grid */}
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-                                        {PROTECTION_PLANS.map((plan) => (
-                                            <div
-                                                key={plan.id}
-                                                style={{
-                                                    border: selectedPlanId === plan.id ? `2px solid ${plan.color}` : '1px solid var(--border-color)',
-                                                    borderRadius: '12px',
-                                                    padding: '16px',
-                                                    background: 'var(--card-bg)',
-                                                    position: 'relative'
-                                                }}
-                                            >
-                                                {plan.badge && (
-                                                    <div style={{
-                                                        position: 'absolute',
-                                                        top: '-12px',
-                                                        right: '12px',
-                                                        background: plan.color,
-                                                        color: '#000',
-                                                        padding: '4px 10px',
-                                                        borderRadius: '999px',
-                                                        fontSize: '11px',
-                                                        fontWeight: 700
-                                                    }}>
-                                                        {plan.badge}
-                                                    </div>
-                                                )}
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                                    <FiAward style={{ fontSize: '18px', color: plan.color }} />
-                                                    <div style={{ fontWeight: 700, fontSize: '16px' }}>{plan.name}</div>
-                                                </div>
-                                                <div style={{ fontSize: '18px', fontWeight: 700, color: plan.color, marginBottom: '12px' }}>
-                                                    {plan.price}
-                                                </div>
-                                                <div style={{ display: 'grid', gap: '6px', marginBottom: '12px' }}>
-                                                    {plan.features.map((feature, idx) => (
-                                                        <div key={idx} style={{ display: 'flex', gap: '8px', fontSize: '13px', color: 'var(--light-color)' }}>
-                                                            <FiCheck style={{ color: plan.color, flexShrink: 0, marginTop: '2px' }} />
-                                                            <span>{feature}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleProtectTrack(plan.id)}
-                                                    style={{
-                                                        width: '100%',
-                                                        border: `1px solid ${plan.color}`,
-                                                        background: selectedPlanId === plan.id ? plan.color : 'transparent',
-                                                        color: selectedPlanId === plan.id ? '#000' : 'var(--text-color)',
-                                                        padding: '10px',
-                                                        borderRadius: '8px',
-                                                        cursor: 'pointer',
-                                                        fontWeight: 600,
-                                                        transition: 'all 0.2s'
-                                                    }}
-                                                >
-                                                    {selectedPlanId === plan.id ? '✓ Selected' : 'Select Plan'}
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.03)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--light-color)', lineHeight: '1.6' }}>
-                                            <strong>What's included:</strong> Proof-of-creation timestamping, SHA-256 fingerprinting, cross-platform monitoring, DMCA support, and licensing templates. All plans help protect your music rights and provide documentation for registration with PROs like ASCAP, BMI, and SESAC.
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    )}
-
-                    {activeTab === 'archive' && (
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', background: 'var(--card-bg)', display: 'grid', gap: '12px' }}>
-                            <div style={{ fontSize: '13px', color: 'var(--light-color)' }}>
-                                Local archive stores folder path + retrieval URL metadata for on-demand access.
-                            </div>
-                            {archiveCounts.all === 0 ? (
-                                <div style={{ color: 'var(--light-color)', fontSize: '13px' }}>
-                                    No archived media yet.
-                                </div>
-                            ) : (
-                                <div style={{ display: 'grid', gap: '8px' }}>
-                                    {[...localArchive.music, ...localArchive.photo, ...localArchive.video].map((entry) => (
-                                        <div key={entry.id} style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '8px' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                                                <div>
-                                                    <strong>{entry.title}</strong>
-                                                    <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{entry.type} · {entry.folderPath}</div>
-                                                </div>
-                                                <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
-                                                    {new Date(entry.archivedAt).toLocaleString()}
-                                                </div>
-                                            </div>
-                                            <div style={{ fontSize: '12px', color: '#93c5fd', overflowWrap: 'anywhere' }}>
-                                                URL: {entry.sourceUrl || 'Unavailable'}
-                                            </div>
-                                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => restoreArchivedItem(entry)}
-                                                    style={{ border: '1px solid var(--border-color)', background: 'rgba(56,189,248,0.16)', color: 'var(--text-color)', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer' }}
-                                                >
-                                                    Restore to active
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeArchiveRecord(entry)}
-                                                    style={{ border: '1px solid rgba(248,113,113,0.45)', background: 'rgba(248,113,113,0.12)', color: '#fca5a5', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer' }}
-                                                >
-                                                    Remove archive record
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </>
-            )}
-        </section>
+                </main>
+            </section>
+        </div>
     );
+};
+
+const pageStyle = {
+    display: 'grid',
+    gap: '16px',
+    padding: '16px 0 24px'
+};
+
+const heroStyle = {
+    display: 'grid',
+    gap: '14px',
+    padding: '20px',
+    border: '1px solid var(--border-color)',
+    borderRadius: '18px',
+    background: 'linear-gradient(180deg, rgba(59,130,246,0.10), rgba(168,85,247,0.08))'
+};
+
+const eyebrowStyle = {
+    fontSize: '12px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+    opacity: 0.75
+};
+
+const headingStyle = {
+    margin: '6px 0 0',
+    fontSize: '34px',
+    lineHeight: 1.1
+};
+
+const subheadingStyle = {
+    margin: '8px 0 0',
+    maxWidth: '780px',
+    color: 'var(--light-color)',
+    lineHeight: 1.6
+};
+
+const summaryGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+    gap: '10px'
+};
+
+const summaryCardStyle = {
+    border: '1px solid var(--border-color)',
+    borderRadius: '14px',
+    padding: '12px',
+    background: 'var(--card-bg)',
+    display: 'grid',
+    gap: '4px'
+};
+
+const layoutStyle = {
+    display: 'grid',
+    gridTemplateColumns: '320px minmax(0, 1fr)',
+    gap: '16px',
+    alignItems: 'start'
+};
+
+const panelStyle = {
+    border: '1px solid var(--border-color)',
+    borderRadius: '18px',
+    padding: '16px',
+    background: 'var(--card-bg)',
+    display: 'grid',
+    gap: '14px'
+};
+
+const panelHeaderStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '16px'
+};
+
+const formStyle = {
+    display: 'grid',
+    gap: '10px'
+};
+
+const fieldStyle = {
+    display: 'grid',
+    gap: '6px',
+    fontSize: '13px'
+};
+
+const inputStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: '10px',
+    border: '1px solid var(--border-color)',
+    background: 'rgba(255,255,255,0.03)',
+    color: 'var(--text-color)',
+    padding: '10px 12px'
+};
+
+const uploadButtonStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    border: 'none',
+    borderRadius: '10px',
+    padding: '12px 14px',
+    color: '#fff',
+    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+    cursor: 'pointer',
+    fontWeight: 700
+};
+
+const noteStyle = {
+    padding: '12px',
+    borderRadius: '12px',
+    border: '1px solid var(--border-color)',
+    background: 'rgba(59,130,246,0.08)',
+    color: 'var(--light-color)',
+    fontSize: '13px',
+    lineHeight: 1.5
+};
+
+const mainStyle = {
+    minWidth: 0,
+    display: 'grid',
+    gap: '14px'
+};
+
+const toolbarStyle = {
+    display: 'grid',
+    gap: '12px'
+};
+
+const tabsStyle = {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px'
+};
+
+const tabStyle = {
+    border: '1px solid var(--border-color)',
+    borderRadius: '999px',
+    padding: '8px 14px',
+    background: 'rgba(255,255,255,0.03)',
+    color: 'var(--text-color)',
+    cursor: 'pointer'
+};
+
+const activeTabStyle = {
+    ...tabStyle,
+    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+    color: '#fff',
+    borderColor: 'transparent'
+};
+
+const searchWrapStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '10px 12px',
+    borderRadius: '14px',
+    border: '1px solid var(--border-color)',
+    background: 'var(--card-bg)'
+};
+
+const searchInputStyle = {
+    width: '100%',
+    border: 'none',
+    outline: 'none',
+    background: 'transparent',
+    color: 'var(--text-color)'
+};
+
+const refreshButtonStyle = {
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--text-color)',
+    cursor: 'pointer',
+    display: 'grid',
+    placeItems: 'center'
+};
+
+const gridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '14px'
+};
+
+const cardStyle = {
+    border: '1px solid var(--border-color)',
+    borderRadius: '18px',
+    background: 'var(--card-bg)',
+    overflow: 'hidden',
+    display: 'grid'
+};
+
+const thumbStyle = {
+    aspectRatio: '16 / 9',
+    background: 'rgba(255,255,255,0.03)',
+    display: 'grid',
+    placeItems: 'center',
+    overflow: 'hidden'
+};
+
+const mediaPreviewStyle = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+};
+
+const iconPlaceholderStyle = {
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    placeItems: 'center',
+    fontSize: '42px',
+    color: 'rgba(255,255,255,0.35)'
+};
+
+const bodyStyle = {
+    display: 'grid',
+    gap: '10px',
+    padding: '14px'
+};
+
+const titleRowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '10px'
+};
+
+const titleStyle = {
+    fontSize: '16px',
+    lineHeight: 1.3
+};
+
+const pillStyle = {
+    padding: '4px 8px',
+    borderRadius: '999px',
+    background: 'rgba(59,130,246,0.12)',
+    color: 'var(--light-color)',
+    fontSize: '12px',
+    textTransform: 'uppercase'
+};
+
+const mutedStyle = {
+    color: 'var(--light-color)',
+    fontSize: '13px'
+};
+
+const descriptionStyle = {
+    color: 'var(--light-color)',
+    fontSize: '13px',
+    lineHeight: 1.5
+};
+
+const metaGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    gap: '4px',
+    fontSize: '12px',
+    color: 'var(--light-color)'
+};
+
+const metaIconStyle = {
+    verticalAlign: 'middle',
+    marginRight: '4px'
+};
+
+const actionsStyle = {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px'
+};
+
+const secondaryButtonStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    border: '1px solid var(--border-color)',
+    borderRadius: '10px',
+    padding: '8px 10px',
+    background: 'rgba(255,255,255,0.03)',
+    color: 'var(--text-color)',
+    cursor: 'pointer'
+};
+
+const primaryButtonStyle = {
+    ...secondaryButtonStyle,
+    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+    color: '#fff',
+    borderColor: 'transparent'
+};
+
+const dangerButtonStyle = {
+    ...secondaryButtonStyle,
+    background: 'rgba(239,68,68,0.10)',
+    color: '#fca5a5',
+    borderColor: 'rgba(239,68,68,0.30)'
+};
+
+const errorStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '12px 14px',
+    borderRadius: '12px',
+    background: 'rgba(239,68,68,0.10)',
+    border: '1px solid rgba(239,68,68,0.28)',
+    color: '#fecaca'
+};
+
+const emptyStyle = {
+    display: 'grid',
+    placeItems: 'center',
+    gap: '8px',
+    padding: '32px',
+    border: '1px dashed var(--border-color)',
+    borderRadius: '18px',
+    color: 'var(--light-color)',
+    background: 'rgba(255,255,255,0.02)'
 };
 
 export default MyLibraryPage;
