@@ -512,6 +512,12 @@ const MyLibraryPage = ({ onNavigate }) => {
             if (!suppressToast) {
                 addToast(`Removed ${mediaTitle} from your library.`, 'success');
             }
+            
+            // Broadcast library update to other pages
+            window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
+              detail: { mediaType, action: 'delete', mediaId }
+            }));
+            
             return true;
         } catch (error) {
             if (!suppressToast) {
@@ -756,6 +762,12 @@ const MyLibraryPage = ({ onNavigate }) => {
             if (uploadInputRef.current) {
                 uploadInputRef.current.value = '';
             }
+            
+            // Broadcast library update to other pages (MusicPlayer, etc.)
+            window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
+              detail: { mediaType: resolvedUploadType, action: 'add' }
+            }));
+            
             // Trigger server reload to replace optimistic items with canonical server state.
             setLibraryVersion((value) => value + 1);
         } catch (error) {
@@ -776,7 +788,8 @@ const MyLibraryPage = ({ onNavigate }) => {
     useEffect(() => {
        const handleLibraryUpdate = (event) => {
            const detail = event?.detail || {};
-           if (detail.mediaType === 'video' && detail.action === 'add') {
+           // Reload library on any media type add/delete
+           if (detail.action === 'add' || detail.action === 'delete') {
                setLibraryVersion((value) => value + 1);
            }
        };

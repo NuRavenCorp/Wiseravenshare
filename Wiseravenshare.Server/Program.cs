@@ -1,4 +1,4 @@
-using Wiseravenshare.Server.Services;
+﻿using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.External.DeepSeekService;
 using Wiseravenshare.Server.Services.Truth;
 using Npgsql;
@@ -1903,7 +1903,7 @@ else if (aiProvider is "deepseek")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
-else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local")
+else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local" or "nuravencorp" or "nuravencorp-llm" or "nrc-llm")
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
 }
