@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  python-orchestrator:
+    build: .
+    container_name: wrs-python-orchestrator
+    ports:
+      - "8888:8888"
+    environment:
+      PYTHON_ORCHESTRATOR_HOST: 0.0.0.0
+      PYTHON_ORCHESTRATOR_PORT: 8888
+      PYTHON_TEMP_DIR: /tmp/wiseravenshare
+      PYTHON_ENV: production
+      Storage__Blob__BucketName: ${Storage__Blob__BucketName:-bucket-wrs-01010}
+      Storage__Blob__Endpoint: ${Storage__Blob__Endpoint:-https://nyc3.digitaloceanspaces.com}
+      Storage__Blob__AccessKey__Id: ${Storage__Blob__AccessKey__Id}
+      Storage__Blob__SecretKey: ${Storage__Blob__SecretKey}
+    volumes:
+      - /tmp/wiseravenshare:/tmp/wiseravenshare
+    restart: unless-stopped
+    networks:
+      - wiseravenshare-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  wiseravenshare-network:
+    driver: bridge
