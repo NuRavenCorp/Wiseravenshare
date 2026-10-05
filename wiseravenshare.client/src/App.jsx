@@ -810,6 +810,7 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'fm-tuner', label: '📻 FM Radio' },
+        { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'setup', label: '⚙️ Set Up' },
         { id: 'profile', label: 'Settings' },
