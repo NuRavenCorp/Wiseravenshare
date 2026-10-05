@@ -864,6 +864,12 @@ const MusicPlayerPage = ({ onNavigate }) => {
         return;
       }
 
+      // Auto-play persisted (server-confirmed) tracks. Local previews don't auto-play
+      // because their blob: URL is ephemeral and won't survive page navigation.
+      if (persisted && !isEphemeralTrack(track)) {
+        musicPlayIntentRef.current = true;
+      }
+
       setMusicLibrary((prev) => {
         const next = [track, ...prev.filter((item) => item.id !== track.id)];
         safeWriteJson(MUSIC_LIBRARY_CACHE_KEY, next.filter((item) => !isEphemeralTrack(item)));
@@ -919,6 +925,10 @@ const MusicPlayerPage = ({ onNavigate }) => {
         window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
           detail: { mediaType: 'music', action: 'add', trackId: track.id }
         }));
+
+        // Reload from server to sync count and ensure the track is genuinely persisted.
+        // Do this in the background so the UI responds immediately.
+        setTimeout(() => loadMusicLibrary(), 1500);
         
         return;
       }

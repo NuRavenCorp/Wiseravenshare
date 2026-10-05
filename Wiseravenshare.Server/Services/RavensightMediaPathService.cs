@@ -18,7 +18,7 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
     {
         [RavensightMediaType.Video] = new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".mov", ".webm" },
         [RavensightMediaType.Photo] = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif" },
-        [RavensightMediaType.Music] = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".m4a", ".aac" }
+        [RavensightMediaType.Music] = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg" }
     };
 
     private readonly IWebHostEnvironment _environment;
@@ -99,6 +99,13 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
                     {
                         _logger.LogWarning(ex, "Failed uploading {MediaType} {FileName} to blob storage", mediaType, fileName);
                     }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Blob storage is not configured. {MediaType} file {FileName} saved to local disk only at {Path}. " +
+                        "Files will be lost on container restart. Set Storage:Blob:BucketName, Storage:Blob:AccessKey, and Storage:Blob:SecretKey.",
+                        mediaType, fileName, fullPath);
                 }
 
                 return new RavensightSavedMediaFile
