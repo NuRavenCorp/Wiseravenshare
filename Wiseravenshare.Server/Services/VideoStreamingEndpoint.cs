@@ -106,12 +106,18 @@ public class VideoStreamingController : ControllerBase
             foreach (var destination in defaultDestinations)
             {
                 var destinationParts = destination.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
                 candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
                 candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
                 candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
             }
         }
 
+        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "Buckets", "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "Buckets", "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "Buckets", "MediaStorage", safeFileName));
         candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName));
         candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName));
         candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName));
@@ -124,6 +130,9 @@ public class VideoStreamingController : ControllerBase
         var searchRoots = new List<string>();
         foreach (var storageFolderName in storageFolderNames)
         {
+            searchRoots.Add(Path.Combine(_environment.ContentRootPath, "Buckets", storageFolderName));
+            searchRoots.Add(Path.Combine(AppContext.BaseDirectory, "Buckets", storageFolderName));
+            searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "Buckets", storageFolderName));
             searchRoots.Add(Path.Combine(_environment.ContentRootPath, storageFolderName));
             searchRoots.Add(Path.Combine(AppContext.BaseDirectory, storageFolderName));
             searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName));
