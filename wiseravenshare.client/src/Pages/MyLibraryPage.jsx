@@ -186,6 +186,7 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [photos, setPhotos] = useState([]);
     const [videos, setVideos] = useState([]);
     const [error, setError] = useState('');
+    const [selectedItem, setSelectedItem] = useState(null);
 
     const loadLibrary = useCallback(async () => {
         setError('');
@@ -243,6 +244,12 @@ const MyLibraryPage = ({ onNavigate }) => {
             ].some((value) => String(value || '').toLowerCase().includes(term));
         });
     }, [activeTab, allItems, query]);
+
+    useEffect(() => {
+        if (selectedItem && !allItems.some((item) => item.id === selectedItem.id && item.type === selectedItem.type)) {
+            setSelectedItem(null);
+        }
+    }, [allItems, selectedItem]);
 
     const stats = useMemo(() => {
         const totalSize = allItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
@@ -426,31 +433,29 @@ const MyLibraryPage = ({ onNavigate }) => {
     };
 
     const renderedItems = filteredItems.map((item) => {
-        const preview = item.type === 'photo'
-            ? (item.thumbnailUrl || item.mediaUrl)
-            : item.type === 'video'
-                ? (item.thumbnailUrl || item.mediaUrl)
-                : '';
-
         return (
-            <article key={`${item.type}-${item.id}`} style={cardStyle}>
+            <article
+                key={`${item.type}-${item.id}`}
+                style={{
+                    ...cardStyle,
+                    cursor: 'pointer',
+                    outline: selectedItem?.id === item.id && selectedItem?.type === item.type ? '2px solid rgba(59,130,246,0.8)' : 'none'
+                }}
+                onDoubleClick={() => setSelectedItem(item)}
+                title="Double-click to render this file"
+            >
                 <div style={thumbStyle}>
-                    {preview ? (
-                        item.type === 'video'
-                            ? <video src={preview} style={mediaPreviewStyle} muted />
-                            : <img src={preview} alt={item.title} style={mediaPreviewStyle} />
-                    ) : (
-                        <div style={iconPlaceholderStyle}>
-                            {item.type === 'music' ? <FiMusic /> : item.type === 'photo' ? <FiImage /> : <FiVideo />}
-                        </div>
-                    )}
+                    <div style={iconPlaceholderStyle}>
+                        {item.type === 'music' ? <FiMusic /> : item.type === 'photo' ? <FiImage /> : <FiVideo />}
+                    </div>
                 </div>
 
                 <div style={bodyStyle}>
                     <div style={titleRowStyle}>
-                        <strong style={titleStyle}>{item.title}</strong>
+                        <strong style={titleStyle}>{item.fileName || item.title}</strong>
                         <span style={pillStyle}>{item.type}</span>
                     </div>
+                    {item.title && item.title !== item.fileName ? <div style={mutedStyle}>{item.title}</div> : null}
                     {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
                     {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
                     {item.description ? <div style={descriptionStyle}>{item.description}</div> : null}
@@ -614,8 +619,62 @@ const MyLibraryPage = ({ onNavigate }) => {
                     ) : (
                         <div style={gridStyle}>{renderedItems}</div>
                     )}
+
+                    <section style={previewStyle}>
+                        <div style={previewHeaderStyle}>
+                            <strong>Render preview</strong>
+                            <span>Double-click a file card to render it here.</span>
+                        </div>
+                        <div style={previewFrameStyle}>
+                            {selectedItem ? renderPreview(selectedItem) : (
+                                <div style={previewEmptyStyle}>
+                                    <FiExternalLink size={24} />
+                                    <span>No file selected yet.</span>
+                                </div>
+                            )}
+                        </div>
+                    </section>
                 </main>
             </section>
+        </div>
+    );
+};
+
+const renderPreview = (item) => {
+    const source = item?.mediaUrl || '';
+    if (!source) {
+        return (
+            <div style={previewEmptyStyle}>
+                <FiAlertCircle size={24} />
+                <span>That file does not have a renderable URL yet.</span>
+            </div>
+        );
+    }
+
+    if (item.type === 'photo') {
+        return <img src={source} alt={item.title || item.fileName} style={previewMediaStyle} />;
+    }
+
+    if (item.type === 'video') {
+        return <video src={source} controls style={previewMediaStyle} />;
+    }
+
+    if (item.type === 'music') {
+        return (
+            <div style={previewAudioWrapStyle}>
+                <audio src={source} controls style={previewAudioStyle} />
+                <div style={previewCaptionStyle}>
+                    <strong>{item.fileName || item.title}</strong>
+                    {item.artist ? <span>{item.artist}</span> : null}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={previewEmptyStyle}>
+            <FiFolder size={24} />
+            <span>{item.fileName || item.title}</span>
         </div>
     );
 };
@@ -803,6 +862,65 @@ const gridStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
     gap: '14px'
+};
+
+const previewStyle = {
+    display: 'grid',
+    gap: '12px',
+    border: '1px solid var(--border-color)',
+    borderRadius: '18px',
+    padding: '16px',
+    background: 'var(--card-bg)'
+};
+
+const previewHeaderStyle = {
+    display: 'grid',
+    gap: '4px',
+    color: 'var(--light-color)',
+    fontSize: '13px'
+};
+
+const previewFrameStyle = {
+    minHeight: '180px',
+    display: 'grid',
+    placeItems: 'center',
+    border: '1px dashed var(--border-color)',
+    borderRadius: '16px',
+    padding: '12px',
+    background: 'rgba(255,255,255,0.02)'
+};
+
+const previewMediaStyle = {
+    maxWidth: '100%',
+    maxHeight: '360px',
+    borderRadius: '12px'
+};
+
+const previewAudioWrapStyle = {
+    width: '100%',
+    display: 'grid',
+    gap: '10px',
+    justifyItems: 'center'
+};
+
+const previewAudioStyle = {
+    width: '100%',
+    maxWidth: '520px'
+};
+
+const previewCaptionStyle = {
+    display: 'grid',
+    gap: '4px',
+    textAlign: 'center',
+    color: 'var(--light-color)'
+};
+
+const previewEmptyStyle = {
+    display: 'grid',
+    placeItems: 'center',
+    gap: '10px',
+    textAlign: 'center',
+    color: 'var(--light-color)'
 };
 
 const cardStyle = {
