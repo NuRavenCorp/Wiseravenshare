@@ -41,13 +41,21 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         _logger = logger;
 
         _enabled = bool.TryParse(configuration["Storage:Blob:Enabled"], out var enabled) ? enabled : true;
-        _bucketName = configuration["Storage:Blob:BucketName"]?.Trim();
-        _accessKey = configuration["Storage:Blob:AccessKey"]?.Trim() ?? configuration["Storage__Blob__AccessKey"]?.Trim();
-        _secretKey = configuration["Storage:Blob:SecretKey"]?.Trim() ?? configuration["Storage__Blob__SecretKey"]?.Trim();
-        _endpoint = configuration["Storage:Blob:Endpoint"]?.Trim() ?? configuration["Storage__Blob__Endpoint"]?.Trim();
-        _region = configuration["Storage:Blob:Region"]?.Trim() ?? configuration["Storage__Blob__Region"]?.Trim();
-        _cdnPublicBaseUrl = configuration["Storage:Blob:CdnPublicBaseUrl"]?.Trim() ?? configuration["Storage__Blob__CdnPublicBaseUrl"]?.Trim();
-        _publicBaseUrl = configuration["Storage:Blob:PublicBaseUrl"]?.Trim() ?? configuration["Storage__Blob__PublicBaseUrl"]?.Trim();
+        _bucketName = ResolveFirstConfiguredValue(configuration, "Storage:Blob:BucketName", "Storage__Blob__BucketName");
+        _accessKey = ResolveFirstConfiguredValue(
+            configuration,
+            "Storage:Blob:AccessKey",
+            "Storage__Blob__AccessKey",
+            "Storage:Blob:AccessKey:Id",
+            "Storage__Blob__AccessKey__Id",
+            "Storage:Blob:AccessKeyId",
+            "Storage__Blob__AccessKeyId",
+            "Storage__Blob__AccessKeId");
+        _secretKey = ResolveFirstConfiguredValue(configuration, "Storage:Blob:SecretKey", "Storage__Blob__SecretKey");
+        _endpoint = ResolveFirstConfiguredValue(configuration, "Storage:Blob:Endpoint", "Storage__Blob__Endpoint");
+        _region = ResolveFirstConfiguredValue(configuration, "Storage:Blob:Region", "Storage__Blob__Region");
+        _cdnPublicBaseUrl = ResolveFirstConfiguredValue(configuration, "Storage:Blob:CdnPublicBaseUrl", "Storage__Blob__CdnPublicBaseUrl");
+        _publicBaseUrl = ResolveFirstConfiguredValue(configuration, "Storage:Blob:PublicBaseUrl", "Storage__Blob__PublicBaseUrl");
     }
 
     public bool IsConfigured => _enabled && !string.IsNullOrWhiteSpace(_bucketName) && !string.IsNullOrWhiteSpace(_accessKey) && !string.IsNullOrWhiteSpace(_secretKey);
@@ -298,5 +306,19 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         }
 
         return uri.Host.Contains("cloudflarestorage.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveFirstConfiguredValue(IConfiguration configuration, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = configuration[key]?.Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }
