@@ -109,6 +109,8 @@ ORDER BY created_at DESC;";
                 Fingerprint = ReadMetadataString(metadata, "fingerprint", null),
                 MediaUrl = mediaUrl,
                 FileName = storedFileName,
+                RelativePath = objectKey.Replace('\\', '/').Trim('/'),
+                ObjectKey = objectKey,
                 UploadedAt = reader.GetDateTime(7).ToString("O"),
                 SizeBytes = reader.GetInt64(4)
             });
@@ -157,6 +159,8 @@ ORDER BY created_at DESC;";
             Fingerprint = Convert.ToString(metadata["fingerprint"]),
             MediaUrl = Convert.ToString(metadata["mediaUrl"]) ?? ResolveMediaUrl(saved.PublicUrl, saved.RelativePath, saved.FileName),
             FileName = saved.FileName,
+            RelativePath = saved.RelativePath.Replace('\\', '/').Trim('/'),
+            ObjectKey = saved.RelativePath,
             UploadedAt = saved.SavedAtUtc.ToString("O"),
             SizeBytes = saved.SizeBytes
         };

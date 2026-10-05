@@ -58,6 +58,8 @@ public sealed class UserMusicTrackDto
     public string? Fingerprint { get; set; }
     public string MediaUrl { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public string ObjectKey { get; set; } = string.Empty;
     public string UploadedAt { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
 }

@@ -161,8 +161,13 @@ const MusicPlayerPage = ({ onNavigate }) => {
       ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}`
       : '';
 
-    // Prefer stable API streams over potentially expired/local-only URLs.
-    const mediaUrl = blobStreamUrl || fileNameStreamUrl || directUrl;
+    // The server already computes the canonical streaming URL (blob proxy or CDN).
+    // Trust it as the primary source. Only fall back to computed paths when directUrl is absent
+    // or is an external URL that may have expired (the blob proxy is already handled server-side).
+    const isRelativeApiUrl = directUrl.startsWith('/') || directUrl.startsWith('api/');
+    const mediaUrl = isRelativeApiUrl
+      ? (directUrl || blobStreamUrl || fileNameStreamUrl)
+      : (blobStreamUrl || directUrl || fileNameStreamUrl);
 
     return {
       id: String(track.id || track.Id || `track-${Date.now()}-${Math.random().toString(16).slice(2)}`),
@@ -335,6 +340,20 @@ const MusicPlayerPage = ({ onNavigate }) => {
         clearTimeout(persistTimeoutRef.current);
       }
     };
+  }, []);
+
+  // Listen for library updates from other pages (MyLibrary, etc.)
+  useEffect(() => {
+    const handleLibraryUpdate = (event) => {
+      const detail = event?.detail || {};
+      if (detail.action === 'add' || detail.action === 'delete') {
+        // Reload music library when external changes occur
+        loadMusicLibrary();
+      }
+    };
+
+    window.addEventListener('wiseraven:library-updated', handleLibraryUpdate);
+    return () => window.removeEventListener('wiseraven:library-updated', handleLibraryUpdate);
   }, []);
 
   const loadMusicLibrary = async () => {
@@ -877,11 +896,30 @@ const MusicPlayerPage = ({ onNavigate }) => {
 
     try {
       const response = await apiService.uploadMusicTrack(file, uploadMetadata);
-      const track = normalizeTrack(response?.data?.track || response?.data?.file || response?.data || null);
+      // The response has both `track` (metadata) and `file` (has relativePath/objectKey).
+      // Merge them so normalizeTrack gets the full picture.
+      const rawData = response?.data || {};
+      const rawTrack = rawData.track || rawData.file || rawData;
+      const rawFile = rawData.file || {};
+      const merged = {
+        ...rawFile,
+        ...rawTrack,
+        // Guarantee relativePath is populated from whichever sub-object has it
+        relativePath: rawTrack.relativePath || rawTrack.RelativePath || rawFile.relativePath || rawFile.RelativePath || '',
+        objectKey: rawTrack.objectKey || rawTrack.ObjectKey || rawFile.objectKey || rawFile.ObjectKey || rawFile.relativePath || '',
+        mediaUrl: rawTrack.mediaUrl || rawTrack.MediaUrl || rawFile.mediaUrl || rawFile.MediaUrl || rawData.mediaUrl || '',
+      };
+      const track = normalizeTrack(merged);
 
       if (track) {
         commitTrack(track, true);
         resetUploadForm();
+        
+        // Broadcast library update so other pages (MyLibrary, etc.) reload
+        window.dispatchEvent(new CustomEvent('wiseraven:library-updated', {
+          detail: { mediaType: 'music', action: 'add', trackId: track.id }
+        }));
+        
         return;
       }
 
