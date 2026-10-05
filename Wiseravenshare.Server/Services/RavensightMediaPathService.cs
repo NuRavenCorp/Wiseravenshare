@@ -69,6 +69,9 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
         var fileName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
         var candidateFolders = new List<string>
         {
+            Path.Combine(new[] { _environment.ContentRootPath, "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { AppContext.BaseDirectory, "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { _environment.ContentRootPath, rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { AppContext.BaseDirectory, rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", rootFolder }.Concat(destinationParts).ToArray())
@@ -183,6 +186,9 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
 
         var candidateFolders = new List<string>
         {
+            Path.Combine(new[] { _environment.ContentRootPath, "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { AppContext.BaseDirectory, "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
+            Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", "Buckets", rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { _environment.ContentRootPath, rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { AppContext.BaseDirectory, rootFolder }.Concat(destinationParts).ToArray()),
             Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", rootFolder }.Concat(destinationParts).ToArray())

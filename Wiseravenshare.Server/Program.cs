@@ -1632,6 +1632,7 @@ var requireDatabase = builder.Configuration.GetValue("Persistence:RequireDatabas
 var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
 var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "bucket-wrs-01010";
 var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
+var configuredBucketsRoot = Path.Combine(builder.Environment.ContentRootPath, "Buckets");
 var cacheConnection = builder.Configuration["Cache:ConnectionString"];
 var useRedisCache = builder.Configuration.GetValue("Cache:UseRedis", false);
 
@@ -2240,6 +2241,14 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     try
     {
+        Directory.CreateDirectory(configuredBucketsRoot);
+        Directory.CreateDirectory(Path.Combine(configuredBucketsRoot, configuredProjectFolder));
+        app.Logger.LogInformation(
+            "Bucket persistence root registered at {BucketsRoot} for bucket {BucketName} and project {ProjectFolder}.",
+            configuredBucketsRoot,
+            configuredBucketName,
+            configuredProjectFolder);
+
         await EnsureDatabaseSchemaAsync(dbContext, app.Logger);
     }
     catch (Exception ex)
@@ -2690,7 +2699,6 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
-
 
 
 
