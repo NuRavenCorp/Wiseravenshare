@@ -52,27 +52,35 @@ public sealed class RavensightMusicMediaController : ControllerBase
             var catalogAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 200, cancellationToken);
             catalogTracks = catalogAssets
                 .Where(a => !bucketFileNames.Contains(a.FileName))
-                .Select(a => new UserMusicTrackDto
+                .Select(a =>
                 {
-                    Id = a.Id,
-                    Title = ReadMusicMeta(a.MetadataJson, "title") is { Length: > 0 } t
-                        ? t
-                        : System.IO.Path.GetFileNameWithoutExtension(a.FileName),
-                    Artist = ReadMusicMeta(a.MetadataJson, "artist"),
-                    Album = ReadMusicMeta(a.MetadataJson, "album"),
-                    Genre = ReadMusicMeta(a.MetadataJson, "genre"),
-                    MediaUrl = StreamingUrlHelper.ResolveMediaUrl(
-                        a.PublicUrl,
-                        StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
-                            ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
-                    FileName = a.FileName,
-                    UploadedAt = a.SavedAtUtc.ToString("O"),
-                    SizeBytes = a.SizeBytes
+                    // StreamByBlobPath returns "" (not null) when path is empty, so ?? won't trigger.
+                    // Use IsNullOrWhiteSpace check to properly fall back to filename streaming.
+                    var blobPath = StreamingUrlHelper.StreamByBlobPath(a.RelativePath);
+                    var streamPath = string.IsNullOrWhiteSpace(blobPath)
+                        ? StreamingUrlHelper.StreamByFileName(a.FileName)
+                        : blobPath;
+                    return new UserMusicTrackDto
+                    {
+                        Id = a.Id,
+                        Title = ReadMusicMeta(a.MetadataJson, "title") is { Length: > 0 } t
+                            ? t
+                            : System.IO.Path.GetFileNameWithoutExtension(a.FileName),
+                        Artist = ReadMusicMeta(a.MetadataJson, "artist"),
+                        Album = ReadMusicMeta(a.MetadataJson, "album"),
+                        Genre = ReadMusicMeta(a.MetadataJson, "genre"),
+                        MediaUrl = StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, streamPath),
+                        RelativePath = a.RelativePath,
+                        ObjectKey = a.RelativePath,
+                        FileName = a.FileName,
+                        UploadedAt = a.SavedAtUtc.ToString("O"),
+                        SizeBytes = a.SizeBytes
+                    };
                 });
         }
-        catch
+        catch (Exception ex)
         {
-            // Catalog unavailable — serve what bucket has
+            _logger.LogWarning(ex, "Catalog query failed for user {UserId} during GetUserMusic; serving bucket tracks only.", userId);
         }
 
         return Ok(bucketTracks.Concat(catalogTracks).ToList());
@@ -290,6 +298,14 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         dto.File ??= file;
 
+        // Return explicit 400 for unsupported formats instead of a 500 from the service layer.
+        var fileExtension = Path.GetExtension(file.FileName)?.ToLowerInvariant();
+        var allowedExtensions = new[] { ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg" };
+        if (string.IsNullOrWhiteSpace(fileExtension) || !allowedExtensions.Contains(fileExtension))
+        {
+            return BadRequest(new { message = $"Unsupported audio format '{fileExtension}'. Supported formats: MP3, WAV, M4A, AAC, FLAC, OGG." });
+        }
+
         if (!TryResolveUserId(out var userId))
         {
             return Unauthorized(new { message = "Unable to determine current user." });
@@ -337,7 +353,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
                 UserId = userId,
                 MediaType = RavensightMediaType.Music,
                 FileName = track.FileName,
-                RelativePath = $"{userMusicFolder}/{track.FileName}",
+                // Use the actual blob object key so catalog streaming URLs match bucket_objects.
+                RelativePath = string.IsNullOrWhiteSpace(track.ObjectKey) ? $"{userMusicFolder}/{track.FileName}" : track.ObjectKey,
                 PublicUrl = mediaUrl.StartsWith("/", StringComparison.Ordinal) ? null : mediaUrl,
                 AbsolutePath = string.Empty,
                 DestinationFolder = userMusicFolder,

@@ -79,32 +79,40 @@ public static class StoragePathResolver
 
     public static string EnsureUserScopedDestination(string destinationFolder, string userStorageIdentity, string? projectFolder = null)
     {
-        var normalizedDestination = NormalizeFolderPath(destinationFolder);
+        // Normalize each PATH SEGMENT individually (not the whole path) to preserve slashes.
+        // Calling NormalizeFolderPath on the full path replaces '/' with '-', corrupting blob keys.
+        var destSegments = (destinationFolder ?? string.Empty)
+            .Replace('\\', '/')
+            .Trim('/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => NormalizeFolderPath(s, s))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
+
         var normalizedIdentity = NormalizeFolderPath(userStorageIdentity, "anonymous");
         var normalizedProject = string.IsNullOrWhiteSpace(projectFolder)
             ? string.Empty
             : NormalizeFolderPath(projectFolder);
 
-        if (normalizedDestination.Equals(normalizedIdentity, StringComparison.OrdinalIgnoreCase)
-            || normalizedDestination.StartsWith($"{normalizedIdentity}/", StringComparison.OrdinalIgnoreCase)
-            || normalizedDestination.Contains($"/{normalizedIdentity}/", StringComparison.OrdinalIgnoreCase)
-            || normalizedDestination.EndsWith($"/{normalizedIdentity}", StringComparison.OrdinalIgnoreCase))
+        // Already scoped if any segment in the path matches the user identity
+        if (destSegments.Any(seg => seg.Equals(normalizedIdentity, StringComparison.OrdinalIgnoreCase)))
         {
-            return normalizedDestination;
+            return string.Join('/', destSegments);
         }
 
+        // If destination starts with the project folder, inject identity right after it
         if (!string.IsNullOrWhiteSpace(normalizedProject)
-            && normalizedDestination.StartsWith(normalizedProject + "/", StringComparison.OrdinalIgnoreCase))
+            && destSegments.Length > 0
+            && destSegments[0].Equals(normalizedProject, StringComparison.OrdinalIgnoreCase))
         {
-            var remainder = normalizedDestination[normalizedProject.Length..].Trim('/');
-            return string.IsNullOrWhiteSpace(remainder)
-                ? $"{normalizedProject}/{normalizedIdentity}"
-                : $"{normalizedProject}/{normalizedIdentity}/{remainder}";
+            return string.Join('/', new[] { normalizedProject, normalizedIdentity }
+                .Concat(destSegments.Skip(1)));
         }
 
-        return string.IsNullOrWhiteSpace(normalizedDestination)
+        // Otherwise prepend identity to the existing destination
+        return destSegments.Length == 0
             ? normalizedIdentity
-            : $"{normalizedIdentity}/{normalizedDestination}";
+            : string.Join('/', new[] { normalizedIdentity }.Concat(destSegments));
     }
 
     private static string? InferSiteSlugFromPath(string contentRootPath)

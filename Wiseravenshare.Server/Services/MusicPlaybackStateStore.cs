@@ -41,6 +41,9 @@ public sealed class MusicPlaybackStateStore : IMusicPlaybackStateStore
     };
 
     private readonly string _connectionString;
+    // Guard so DDL runs at most once per process lifetime.
+    private static volatile bool _schemaEnsured;
+    private static readonly SemaphoreSlim _schemaLock = new(1, 1);
 
     public MusicPlaybackStateStore(IConfiguration configuration)
     {
@@ -197,8 +200,21 @@ DO UPDATE SET state = EXCLUDED.state, updated_at = NOW();";
 
     private async Task EnsureTableAsync(CancellationToken cancellationToken)
     {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        if (_schemaEnsured || string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return;
+        }
+
+        await _schemaLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_schemaEnsured)
+            {
+                return;
+            }
+
+            await using var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
 
         const string sql = @"
 CREATE SCHEMA IF NOT EXISTS app_data;
@@ -229,7 +245,13 @@ END;
 $$;";
 
         await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            _schemaEnsured = true;
+        }
+        finally
+        {
+            _schemaLock.Release();
+        }
     }
 
     private static MusicPlayerStateDto MapRequest(MusicPlayerStateUpsertRequest request)
