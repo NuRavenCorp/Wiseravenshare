@@ -1,220 +1,503 @@
 // wiseravenshare.client/src/Components/MediaLibrary/MediaLibrary.jsx
-import React, { useState, useEffect } from 'react';
+
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef
+} from 'react';
+
 import './MediaLibrary.css';
+
 import MediaGrid from './MediaGrid';
 import MediaUpload from './MediaUpload';
 import MediaFilters from './MediaFilters';
 import MediaStats from './MediaStats';
 import MediaPagination from './MediaPagination';
+
 import { useSavedMedia } from '../../hooks/useSavedMedia';
 
-/**
- * Main Media Library component
- * Displays user's saved media with filtering, sorting, and management options
- */
+const STORAGE_KEY = 'media-library-state';
+
 const MediaLibrary = () => {
-  const { 
-    getLibrary, 
-    getLibraryStats, 
-    deleteMedia, 
+  const {
+    getLibrary,
+    getLibraryStats,
+    getVisibleMedia,
+    getHiddenMedia,
+    getScheduledMedia,
+    deleteMedia,
     toggleVisibility,
     bulkToggleVisibility,
-    loading, 
-    error 
+    loading,
+    error
   } = useSavedMedia();
+
+  const requestRef = useRef(0);
 
   const [mediaItems, setMediaItems] = useState([]);
   const [stats, setStats] = useState(null);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
-  const [selectedItems, setSelectedItems] = useState(new Set());
+
+  const [selectedItems, setSelectedItems] = useState(
+    new Set()
+  );
+
   const [filterType, setFilterType] = useState(null);
-  const [visibilityFilter, setVisibilityFilter] = useState(null);
-  const [activeTab, setActiveTab] = useState('all'); // all, visible, hidden, scheduled
+  const [visibilityFilter, setVisibilityFilter] =
+    useState(null);
+
+  const [activeTab, setActiveTab] =
+    useState('all');
+
+  const [refreshKey, setRefreshKey] =
+    useState(0);
+
+  // Restore previous state
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(
+        STORAGE_KEY
+      );
+
+      if (!saved) return;
+
+      const state = JSON.parse(saved);
+
+      setCurrentPage(state.currentPage || 1);
+      setPageSize(state.pageSize || 20);
+      setFilterType(state.filterType || null);
+      setVisibilityFilter(
+        state.visibilityFilter || null
+      );
+      setActiveTab(state.activeTab || 'all');
+    } catch (err) {
+      console.error(
+        'Failed to restore library state',
+        err
+      );
+    }
+  }, []);
+
+  // Persist state
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        currentPage,
+        pageSize,
+        filterType,
+        visibilityFilter,
+        activeTab
+      })
+    );
+  }, [
+    currentPage,
+    pageSize,
+    filterType,
+    visibilityFilter,
+    activeTab
+  ]);
+
+  // Clear selections when changing views
+  useEffect(() => {
+    setSelectedItems(new Set());
+  }, [
+    currentPage,
+    activeTab,
+    filterType,
+    visibilityFilter
+  ]);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await getLibraryStats();
+      setStats(data);
+    } catch (err) {
+      console.error(
+        'Error loading stats:',
+        err
+      );
+    }
+  }, [getLibraryStats]);
+
+  const loadMedia = useCallback(async () => {
+    const requestId =
+      ++requestRef.current;
+
+    try {
+      let response;
+
+      switch (activeTab) {
+        case 'visible':
+          response =
+            await getVisibleMedia(
+              currentPage,
+              pageSize
+            );
+          break;
+
+        case 'hidden':
+          response =
+            await getHiddenMedia(
+              currentPage,
+              pageSize
+            );
+          break;
+
+        case 'scheduled':
+          response =
+            await getScheduledMedia(
+              currentPage,
+              pageSize
+            );
+          break;
+
+        default:
+          response =
+            await getLibrary(
+              currentPage,
+              pageSize,
+              {
+                mediaType:
+                  filterType,
+                onlyVisible:
+                  visibilityFilter
+              }
+            );
+      }
+
+      if (
+        requestId !==
+        requestRef.current
+      ) {
+        return;
+      }
+
+      const items = Array.isArray(
+        response
+      )
+        ? response
+        : response?.items ||
+          response?.data ||
+          [];
+
+      setMediaItems(items);
+
+      setTotalCount(
+        response?.totalCount ??
+          response?.total ??
+          items.length
+      );
+    } catch (err) {
+      console.error(
+        'Error loading media:',
+        err
+      );
+    }
+  }, [
+    activeTab,
+    currentPage,
+    pageSize,
+    filterType,
+    visibilityFilter,
+    getLibrary,
+    getVisibleMedia,
+    getHiddenMedia,
+    getScheduledMedia
+  ]);
 
   useEffect(() => {
     loadMedia();
     loadStats();
-  }, [currentPage, pageSize, filterType, visibilityFilter, activeTab]);
+  }, [
+    loadMedia,
+    loadStats,
+    refreshKey
+  ]);
 
-  const loadMedia = async () => {
-    try {
-      let response;
-      
-      switch (activeTab) {
-        case 'visible':
-          response = await getVisibleMedia(currentPage, pageSize);
-          break;
-        case 'hidden':
-          response = await getHiddenMedia(currentPage, pageSize);
-          break;
-        case 'scheduled':
-          response = await getScheduledMedia(currentPage, pageSize);
-          break;
-        default:
-          response = await getLibrary(currentPage, pageSize, {
-            mediaType: filterType,
-            onlyVisible: visibilityFilter
-          });
-      }
+  const refreshLibrary =
+    useCallback(() => {
+      setRefreshKey(
+        prev => prev + 1
+      );
+    }, []);
 
-      const items = Array.isArray(response) ? response : (response.items || response.data || []);
-      setMediaItems(items);
-      setTotalCount(response.totalCount || response.total || items.length || response.length || 0);
-    } catch (err) {
-      console.error('Error loading media:', err);
-    }
-  };
+  const handleDeleteMedia =
+    useCallback(
+      async (mediaId) => {
+        if (
+          !window.confirm(
+            'Delete this media item?'
+          )
+        ) {
+          return;
+        }
 
-  const loadStats = async () => {
-    try {
-      const statsData = await getLibraryStats();
-      setStats(statsData);
-    } catch (err) {
-      console.error('Error loading stats:', err);
-    }
-  };
+        try {
+          await deleteMedia(mediaId);
 
-  const handleDeleteMedia = async (mediaId) => {
-    if (!window.confirm('Are you sure you want to delete this media?')) return;
+          setMediaItems(prev =>
+            prev.filter(
+              item =>
+                item.id !== mediaId
+            )
+          );
 
-    try {
-      await deleteMedia(mediaId);
-      setMediaItems(mediaItems.filter(item => item.id !== mediaId));
-      loadStats();
-    } catch (err) {
-      console.error('Error deleting media:', err);
-    }
-  };
+          refreshLibrary();
+        } catch (err) {
+          console.error(
+            'Delete failed:',
+            err
+          );
+        }
+      },
+      [deleteMedia, refreshLibrary]
+    );
 
-  const handleToggleVisibility = async (mediaId, currentVisibility) => {
-    try {
-      await toggleVisibility(mediaId, !currentVisibility);
-      setMediaItems(mediaItems.map(item => 
-        item.id === mediaId 
-          ? { ...item, isVisibleInFeed: !currentVisibility }
-          : item
-      ));
-      loadStats();
-    } catch (err) {
-      console.error('Error toggling visibility:', err);
-    }
-  };
+  const handleToggleVisibility =
+    useCallback(
+      async (
+        mediaId,
+        currentVisibility
+      ) => {
+        try {
+          await toggleVisibility(
+            mediaId,
+            !currentVisibility
+          );
 
-  const handleBulkToggleVisibility = async (isVisible) => {
-    if (selectedItems.size === 0) {
-      alert('Please select media items first');
-      return;
-    }
+          setMediaItems(prev =>
+            prev.map(item =>
+              item.id === mediaId
+                ? {
+                    ...item,
+                    isVisibleInFeed:
+                      !currentVisibility
+                  }
+                : item
+            )
+          );
 
-    try {
-      await bulkToggleVisibility(Array.from(selectedItems), isVisible);
-      setMediaItems(mediaItems.map(item =>
-        selectedItems.has(item.id)
-          ? { ...item, isVisibleInFeed: isVisible }
-          : item
-      ));
-      setSelectedItems(new Set());
-      loadStats();
-    } catch (err) {
-      console.error('Error in bulk toggle:', err);
-    }
-  };
+          loadStats();
+        } catch (err) {
+          console.error(
+            'Visibility update failed:',
+            err
+          );
+        }
+      },
+      [toggleVisibility, loadStats]
+    );
 
-  const handleSelectItem = (mediaId) => {
-    const newSelected = new Set(selectedItems);
-    if (newSelected.has(mediaId)) {
-      newSelected.delete(mediaId);
-    } else {
-      newSelected.add(mediaId);
-    }
-    setSelectedItems(newSelected);
-  };
+  const handleBulkToggleVisibility =
+    useCallback(
+      async (isVisible) => {
+        if (
+          selectedItems.size === 0
+        ) {
+          return;
+        }
 
-  const handleSelectAll = () => {
-    if (selectedItems.size === mediaItems.length) {
-      setSelectedItems(new Set());
-    } else {
-      setSelectedItems(new Set(mediaItems.map(item => item.id)));
-    }
-  };
+        try {
+          await bulkToggleVisibility(
+            Array.from(
+              selectedItems
+            ),
+            isVisible
+          );
 
-  const handleMediaUploaded = () => {
-    setCurrentPage(1);
-    loadMedia();
-    loadStats();
-  };
+          setMediaItems(prev =>
+            prev.map(item =>
+              selectedItems.has(
+                item.id
+              )
+                ? {
+                    ...item,
+                    isVisibleInFeed:
+                      isVisible
+                  }
+                : item
+            )
+          );
+
+          setSelectedItems(
+            new Set()
+          );
+
+          refreshLibrary();
+        } catch (err) {
+          console.error(
+            'Bulk update failed:',
+            err
+          );
+        }
+      },
+      [
+        selectedItems,
+        bulkToggleVisibility,
+        refreshLibrary
+      ]
+    );
+
+  const handleSelectItem =
+    useCallback((mediaId) => {
+      setSelectedItems(prev => {
+        const next =
+          new Set(prev);
+
+        if (next.has(mediaId)) {
+          next.delete(mediaId);
+        } else {
+          next.add(mediaId);
+        }
+
+        return next;
+      });
+    }, []);
+
+  const handleSelectAll =
+    useCallback(() => {
+      setSelectedItems(prev => {
+        if (
+          prev.size ===
+          mediaItems.length
+        ) {
+          return new Set();
+        }
+
+        return new Set(
+          mediaItems.map(
+            item => item.id
+          )
+        );
+      });
+    }, [mediaItems]);
+
+  const handleMediaUploaded =
+    useCallback(() => {
+      setCurrentPage(1);
+      refreshLibrary();
+    }, [refreshLibrary]);
 
   return (
     <div className="media-library">
       <div className="media-library-header">
         <h1>📚 Media Library</h1>
-        <p className="subtitle">Organize, hide, and manage your media collection</p>
+
+        <p className="subtitle">
+          Organize, hide, and manage
+          your media collection
+        </p>
       </div>
 
-      {stats && <MediaStats stats={stats} />}
+      {stats && (
+        <MediaStats stats={stats} />
+      )}
 
       <div className="media-library-content">
-        {/* Left Sidebar - Upload */}
         <div className="media-library-sidebar">
-          <MediaUpload onMediaUploaded={handleMediaUploaded} />
+          <MediaUpload
+            onMediaUploaded={
+              handleMediaUploaded
+            }
+          />
         </div>
 
-        {/* Main Content */}
         <div className="media-library-main">
-          {/* Tabs */}
           <div className="media-tabs">
-            <button 
-              className={`tab ${activeTab === 'all' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
-            >
-              All Media
-            </button>
-            <button 
-              className={`tab ${activeTab === 'visible' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('visible'); setCurrentPage(1); }}
-            >
-              Visible
-            </button>
-            <button 
-              className={`tab ${activeTab === 'hidden' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('hidden'); setCurrentPage(1); }}
-            >
-              Hidden
-            </button>
-            <button 
-              className={`tab ${activeTab === 'scheduled' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('scheduled'); setCurrentPage(1); }}
-            >
-              Scheduled
-            </button>
+            {[
+              'all',
+              'visible',
+              'hidden',
+              'scheduled'
+            ].map(tab => (
+              <button
+                key={tab}
+                className={`tab ${
+                  activeTab === tab
+                    ? 'active'
+                    : ''
+                }`}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setCurrentPage(1);
+                }}
+              >
+                {tab
+                  .charAt(0)
+                  .toUpperCase() +
+                  tab.slice(1)}
+              </button>
+            ))}
           </div>
 
-          {/* Filters and Toolbar */}
           <div className="media-toolbar">
-            <MediaFilters 
-              filterType={filterType}
-              onFilterTypeChange={(type) => { setFilterType(type); setCurrentPage(1); }}
-              onClearFilters={() => { setFilterType(null); setVisibilityFilter(null); setCurrentPage(1); }}
+            <MediaFilters
+              filterType={
+                filterType
+              }
+              visibilityFilter={
+                visibilityFilter
+              }
+              onFilterTypeChange={(
+                type
+              ) => {
+                setFilterType(type);
+                setCurrentPage(1);
+              }}
+              onVisibilityChange={(
+                visible
+              ) => {
+                setVisibilityFilter(
+                  visible
+                );
+                setCurrentPage(1);
+              }}
+              onClearFilters={() => {
+                setFilterType(
+                  null
+                );
+                setVisibilityFilter(
+                  null
+                );
+                setCurrentPage(1);
+              }}
             />
 
-            {selectedItems.size > 0 && (
+            {selectedItems.size >
+              0 && (
               <div className="bulk-actions">
-                <span className="selection-count">{selectedItems.size} selected</span>
-                <button 
+                <span className="selection-count">
+                  {
+                    selectedItems.size
+                  }{' '}
+                  selected
+                </span>
+
+                <button
                   className="btn-action btn-show"
-                  onClick={() => handleBulkToggleVisibility(true)}
-                  title="Show selected items in feed"
+                  onClick={() =>
+                    handleBulkToggleVisibility(
+                      true
+                    )
+                  }
                 >
-                  👁️ Show ({selectedItems.size})
+                  👁️ Show
                 </button>
-                <button 
+
+                <button
                   className="btn-action btn-hide"
-                  onClick={() => handleBulkToggleVisibility(false)}
-                  title="Hide selected items from feed"
+                  onClick={() =>
+                    handleBulkToggleVisibility(
+                      false
+                    )
+                  }
                 >
-                  🙈 Hide ({selectedItems.size})
+                  🙈 Hide
                 </button>
               </div>
             )}
@@ -227,32 +510,60 @@ const MediaLibrary = () => {
           )}
 
           {loading ? (
-            <div className="loading">Loading media...</div>
-          ) : mediaItems.length === 0 ? (
+            <div className="loading">
+              Loading media...
+            </div>
+          ) : mediaItems.length ===
+            0 ? (
             <div className="empty-state">
-              <p>📭 No media found</p>
-              <p className="hint">Upload or save media to get started</p>
+              <p>
+                📭 No media found
+              </p>
+
+              <p className="hint">
+                Upload or save media
+                to get started
+              </p>
             </div>
           ) : (
             <>
-              {/* Media Grid */}
-              <MediaGrid 
+              <MediaGrid
                 items={mediaItems}
-                selectedItems={selectedItems}
-                onSelectItem={handleSelectItem}
-                onSelectAll={handleSelectAll}
-                onToggleVisibility={handleToggleVisibility}
-                onDelete={handleDeleteMedia}
-                selectAllChecked={selectedItems.size === mediaItems.length && mediaItems.length > 0}
+                selectedItems={
+                  selectedItems
+                }
+                onSelectItem={
+                  handleSelectItem
+                }
+                onSelectAll={
+                  handleSelectAll
+                }
+                onToggleVisibility={
+                  handleToggleVisibility
+                }
+                onDelete={
+                  handleDeleteMedia
+                }
+                selectAllChecked={
+                  mediaItems.length >
+                    0 &&
+                  selectedItems.size ===
+                    mediaItems.length
+                }
               />
 
-              {/* Pagination */}
-              <MediaPagination 
-                currentPage={currentPage}
+              <MediaPagination
+                currentPage={
+                  currentPage
+                }
                 pageSize={pageSize}
-                totalCount={totalCount}
-                onPageChange={setCurrentPage}
-                onPageSizeChange={(size) => {
+                totalCount={
+                  totalCount
+                }
+                onPageChange={
+                  setCurrentPage
+                }
+                onPageSizeChange={size => {
                   setPageSize(size);
                   setCurrentPage(1);
                 }}
