@@ -37,7 +37,6 @@ import CanvasPage from './Pages/CanvasPage';
 import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
-import MusicPlayerPage from './Pages/MusicPlayerPage';
 import FMRadioPage from './Pages/FMRadioPage';
 import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
@@ -611,7 +610,7 @@ const App = () => {
             case 'music-rights-studio':
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <MusicPlayerPage onNavigate={setCurrentPage} />;
+                return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="cassette" />;
             case 'fm-tuner':
                 return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="radio" />;
             case 'radio-creator':
@@ -760,7 +759,7 @@ const App = () => {
             'feed', 'discover', 'bookmarks', 'notifications', 'messages', 'planner',
             'newsroom-video', 'amateur-journalist', 'canvas', 'team-launchpad',
             'collaboration', 'truthseeker', 'ainews', 'ai-assistant', 'fm-tuner',
-            'music-player', 'my-library', 'instrument-connector', 'settings', 'profile',
+            'my-library', 'instrument-connector', 'settings', 'profile',
             'social-feeds', 'facebook-feed', 'tiktok-feed', 'instagram-feed', 'youtube-feed',
             'ravensight', 'growth', 'revenue', 'team-access-admin', 'feature-release',
             'site-crawler-audit', 'crawler-metrics', 'music-rights-studio', 'radio-creator',
@@ -811,7 +810,6 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'fm-tuner', label: '📻 FM Radio' },
-        { id: 'music-player', label: '📼 Wise-tracks' },
         { id: 'my-library', label: '📚 My Library' },
         { id: 'instrument-connector', label: '🎸 Instrument Connector' },
         { id: 'setup', label: '⚙️ Set Up' },

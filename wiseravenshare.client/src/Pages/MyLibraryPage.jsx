@@ -385,7 +385,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         setCurrentTrack(track);
         setIsPlaying(true);
-        onNavigate?.('music-player');
+        onNavigate?.('fm-tuner');
     };
 
     const togglePlayPause = () => {

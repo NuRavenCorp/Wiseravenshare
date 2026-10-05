@@ -818,8 +818,8 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
           <button className="btn-outline" onClick={() => setShowIPInfo(!showIPInfo)}>
             <FiInfo /> How IP Protection Works
           </button>
-          <button className="btn-outline" onClick={() => onNavigate('music-player')}>
-            <FiPlay /> Open Studio Player
+          <button className="btn-outline" onClick={() => onNavigate('fm-tuner')}>
+            <FiPlay /> Open FM Music Player
           </button>
           <button className="btn-primary" style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', border: 'none' }} onClick={openRegisterModal}>
             🛡️ Register Original Track
