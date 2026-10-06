@@ -13,11 +13,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY services/karaoke-engine/requirements.txt ./
+COPY requirements.txt ./
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-COPY services/karaoke-engine/main.py ./
+COPY main.py ./
 
 EXPOSE 8002
 
