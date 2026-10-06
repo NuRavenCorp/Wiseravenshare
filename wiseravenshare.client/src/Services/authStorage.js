@@ -1,8 +1,10 @@
 const AUTH_TOKEN_KEY = 'wr_auth_token';
 const ADMIN_PASS_TOKEN_KEY = 'admin_pass_token';
-const LEGACY_TOKEN_KEYS = ['auth_token', 'ws.accessToken', 'wise-raven-token', 'token'];
+const LEGACY_TOKEN_KEYS = ['auth_token', 'ws.accessToken', 'wise-raven-token', 'token', 'accessToken'];
 const AUTH_COOKIE_NAME = 'wr_auth_token';
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const AUTH_SYNC_STORAGE_KEY = 'wr_auth_token_sync';
+const AUTH_SYNC_EVENT_NAME = 'wiseraven:auth-token-changed';
 
 const resolveCookieDomainFlag = (host) => {
     const value = String(host || '').toLowerCase();
@@ -130,7 +132,31 @@ const syncTokenAcrossStorage = (token) => {
     } else {
         clearCookie();
     }
+
+    const win = getWindow();
+    if (storage) {
+        try {
+            storage.setItem(
+                AUTH_SYNC_STORAGE_KEY,
+                JSON.stringify({
+                    at: Date.now(),
+                    hasToken: Boolean(tokenValue)
+                })
+            );
+        } catch {
+            // Ignore storage sync failures.
+        }
+    }
+
+    try {
+        win?.dispatchEvent(new CustomEvent(AUTH_SYNC_EVENT_NAME, { detail: { hasToken: Boolean(tokenValue) } }));
+    } catch {
+        // Ignore event dispatch failures.
+    }
 };
+
+export const AUTH_SYNC_EVENT = AUTH_SYNC_EVENT_NAME;
+export const AUTH_SYNC_STORAGE_KEY_NAME = AUTH_SYNC_STORAGE_KEY;
 
 export const getAuthToken = () => {
     const storage = getStorage();

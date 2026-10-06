@@ -1,5 +1,6 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { authService } from '../Services/Auth.jsx';
+import { AUTH_SYNC_EVENT, AUTH_SYNC_STORAGE_KEY_NAME } from '../Services/authStorage.js';
 import { socialGraphService } from '../Services/SocialGraph';
 import { compressAvatarImage } from '../utils/avatarUtils';
 
@@ -79,9 +80,26 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        checkAuth();
+    const syncUserFromStorage = useCallback(() => {
+        const token = authService.getToken();
+        if (!token) {
+            setUser(null);
+            return false;
+        }
+
+        const cachedUser = authService.getUser();
+        if (!cachedUser) {
+            return false;
+        }
+
+        setUser(normalizeUser(cachedUser));
+        return true;
     }, []);
+
+    useEffect(() => {
+        syncUserFromStorage();
+        checkAuth();
+    }, [syncUserFromStorage]);
 
     useEffect(() => {
         const handleAuthExpired = () => {
@@ -92,6 +110,37 @@ export const AuthProvider = ({ children }) => {
         window.addEventListener('wiseraven:auth-expired', handleAuthExpired);
         return () => window.removeEventListener('wiseraven:auth-expired', handleAuthExpired);
     }, []);
+
+    useEffect(() => {
+        const watchedKeys = new Set([
+            'wr_auth_token',
+            'auth_token',
+            'ws.accessToken',
+            'wise-raven-token',
+            'token',
+            'accessToken',
+            'user_data',
+            AUTH_SYNC_STORAGE_KEY_NAME
+        ]);
+
+        const handleStorageSync = (event) => {
+            if (!event?.key || !watchedKeys.has(event.key)) {
+                return;
+            }
+            syncUserFromStorage();
+        };
+
+        const handleAuthSync = () => {
+            syncUserFromStorage();
+        };
+
+        window.addEventListener('storage', handleStorageSync);
+        window.addEventListener(AUTH_SYNC_EVENT, handleAuthSync);
+        return () => {
+            window.removeEventListener('storage', handleStorageSync);
+            window.removeEventListener(AUTH_SYNC_EVENT, handleAuthSync);
+        };
+    }, [syncUserFromStorage]);
 
     const clearAuthState = () => {
         authService.clearToken();

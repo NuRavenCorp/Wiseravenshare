@@ -1,61 +1,47 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { storage } from '../utils/storage';
 
 function resolveDefault(defaultValue) {
   return typeof defaultValue === 'function' ? defaultValue() : defaultValue;
 }
 
-/**
- * useState that persists to localStorage (or any Storage-like object).
- * Handles SSR, JSON parse errors, and cross-tab sync via storage event.
- */
 export function usePersistedState(key, defaultValue, options = {}) {
-  const storage = useMemo(() => {
-    if (Object.prototype.hasOwnProperty.call(options, 'storage')) {
-      return options.storage;
-    }
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    return window.localStorage;
-  }, [options]);
-
+  const { deserialize = JSON.parse } = options;
   const [state, setState] = useState(() => {
-    if (!storage) {
-      return resolveDefault(defaultValue);
-    }
-    try {
-      const raw = storage.getItem(key);
-      return raw != null ? JSON.parse(raw) : resolveDefault(defaultValue);
-    } catch {
-      return resolveDefault(defaultValue);
-    }
+    const fallback = resolveDefault(defaultValue);
+    const storedValue = storage.get(key, fallback);
+    return storedValue == null ? fallback : storedValue;
   });
+  const first = useRef(true);
 
   useEffect(() => {
-    if (!storage) return;
-    try {
-      storage.setItem(key, JSON.stringify(state));
-    } catch (err) {
-      console.warn(`[usePersistedState] Failed to persist "${key}"`, err);
+    if (first.current) {
+      first.current = false;
+      return;
     }
-  }, [key, state, storage]);
+
+    storage.set(key, state);
+  }, [key, state]);
 
   useEffect(() => {
-    if (!storage || typeof window === 'undefined') return undefined;
+    if (typeof window === 'undefined') return undefined;
 
-    const onStorage = (event) => {
+    const handler = (event) => {
       if (event.key !== key || event.newValue == null) return;
       try {
-        setState(JSON.parse(event.newValue));
+        if (deserialize === JSON.parse) {
+          setState(JSON.parse(event.newValue));
+        } else {
+          setState(deserialize(event.newValue));
+        }
       } catch {
-        // Ignore malformed external writes.
+        // Ignore malformed cross-tab values.
       }
     };
 
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [key, storage]);
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, [deserialize, key]);
 
   return [state, setState];
 }
-

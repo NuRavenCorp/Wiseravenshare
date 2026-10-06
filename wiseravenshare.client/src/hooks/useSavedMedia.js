@@ -1,51 +1,121 @@
-// wiseravenshare.client/src/hooks/useSavedMedia.js
-import { useState, useCallback } from 'react';
-import axios from 'axios';
+import { useCallback, useState } from 'react';
+import api from '../Services/api.js';
 
-const API_BASE_URL = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') || '/api';
-const MEDIA_LIBRARY_BASE = `${API_BASE_URL}/media-library`;
+const SAVED_MEDIA_BASE = '/SavedMedia';
 
-/**
- * Custom hook for managing saved media operations
- */
+const MEDIA_TYPE_LOOKUP = {
+  0: 'photo',
+  1: 'video',
+  2: 'music',
+  3: 'audio',
+  4: 'podcast',
+  5: 'document',
+};
+
+const normalizeMediaType = (value) => {
+  if (typeof value === 'number' && MEDIA_TYPE_LOOKUP[value]) {
+    return MEDIA_TYPE_LOOKUP[value];
+  }
+
+  return String(value || '').trim().toLowerCase();
+};
+
+const toSavedMediaType = (value) => {
+  switch (normalizeMediaType(value)) {
+    case 'photo':
+    case 'image':
+      return 'Photo';
+    case 'video':
+      return 'Video';
+    case 'music':
+      return 'Music';
+    case 'audio':
+      return 'Audio';
+    case 'podcast':
+      return 'Podcast';
+    case 'document':
+      return 'Document';
+    default:
+      return '';
+  }
+};
+
+const normalizeSavedMediaItem = (item) => {
+  const metadata = item?.mediaMetadata || {};
+  const mediaType = normalizeMediaType(item?.mediaType);
+
+  return {
+    ...item,
+    id: item?.id,
+    title: item?.title || '',
+    name: item?.title || '',
+    description: item?.description || '',
+    mediaType,
+    type: mediaType,
+    mediaUrl: item?.mediaUrl || '',
+    thumbnailUrl: item?.thumbnailUrl || '',
+    isVisibleInFeed: Boolean(item?.isVisibleInFeed),
+    status: item?.scheduledPublishAt
+      ? 'scheduled'
+      : item?.isPublished
+        ? 'published'
+        : 'saved',
+    fileSizeBytes: Number(item?.fileSizeBytes || 0),
+    sizeBytes: Number(item?.fileSizeBytes || 0),
+    durationSeconds: Number(item?.durationSeconds || 0),
+    width: Number(metadata?.width || 0) || null,
+    height: Number(metadata?.height || 0) || null,
+    tags: Array.isArray(item?.tags) ? item.tags : [],
+    createdAt: item?.createdAt || null,
+    updatedAt: item?.updatedAt || null,
+    scheduledPublishAt: item?.scheduledPublishAt || null,
+  };
+};
+
+const sortItems = (items, sortBy = 'createdAt', sortDir = 'desc') => {
+  const direction = String(sortDir || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+  const list = Array.isArray(items) ? [...items] : [];
+
+  list.sort((left, right) => {
+    if (sortBy === 'title') {
+      return String(left?.title || '').localeCompare(String(right?.title || '')) * direction;
+    }
+
+    if (sortBy === 'sizeBytes' || sortBy === 'fileSizeBytes') {
+      return (Number(left?.sizeBytes || left?.fileSizeBytes || 0) - Number(right?.sizeBytes || right?.fileSizeBytes || 0)) * direction;
+    }
+
+    const leftDate = left?.[sortBy] ? new Date(left[sortBy]).getTime() : 0;
+    const rightDate = right?.[sortBy] ? new Date(right[sortBy]).getTime() : 0;
+    return (leftDate - rightDate) * direction;
+  });
+
+  return list;
+};
+
 export const useSavedMedia = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const getAuthToken = useCallback(() => {
-    const accessToken = localStorage.getItem('accessToken');
-    const legacyToken = localStorage.getItem('token');
-    return accessToken || legacyToken || '';
-  }, []);
-
   const apiCall = useCallback(async (method, endpoint, data = null) => {
     setLoading(true);
     setError(null);
+
     try {
-      const token = getAuthToken();
-      const config = {
+      const response = await api({
         method,
-        url: `${MEDIA_LIBRARY_BASE}${endpoint}`,
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (data) {
-        config.data = data;
-      }
-
-      const response = await axios(config);
-      return response.data;
+        url: `${SAVED_MEDIA_BASE}${endpoint}`,
+        data,
+      });
+      return response?.data;
     } catch (err) {
-      const errorMessage = err.response?.data?.message || err.message || 'An error occurred';
+      const errorMessage = err?.response?.data?.message || err?.message || 'An error occurred';
       setError(errorMessage);
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [getAuthToken]);
+  }, []);
 
   const saveMedia = useCallback(async (mediaData) => {
     const mediaUrl = String(mediaData?.mediaUrl || '').trim().toLowerCase();
@@ -55,103 +125,127 @@ export const useSavedMedia = () => {
       throw err;
     }
 
-    return apiCall('POST', '/save', mediaData);
+    const response = await apiCall('POST', '/save', {
+      title: mediaData?.title || mediaData?.name || 'Untitled media',
+      description: mediaData?.description || null,
+      mediaType: toSavedMediaType(mediaData?.mediaType || mediaData?.type),
+      mediaUrl: mediaData?.mediaUrl || '',
+      thumbnailUrl: mediaData?.thumbnailUrl || null,
+      mediaMetadata: mediaData?.mediaMetadata || null,
+      isVisibleInFeed: Boolean(mediaData?.isVisibleInFeed),
+      tags: Array.isArray(mediaData?.tags) ? mediaData.tags : [],
+      fileSizeBytes: Number(mediaData?.fileSizeBytes || mediaData?.sizeBytes || 0) || null,
+      durationSeconds: Number(mediaData?.durationSeconds || 0) || null,
+      scheduledPublishAt: mediaData?.scheduledPublishAt || null,
+      sourcePostId: mediaData?.sourcePostId || null,
+    });
+
+    return normalizeSavedMediaItem(response);
   }, [apiCall]);
 
   const getMedia = useCallback(async (mediaId) => {
-    return apiCall('GET', `/${mediaId}`);
+    const response = await apiCall('GET', `/${mediaId}`);
+    return normalizeSavedMediaItem(response);
   }, [apiCall]);
 
   const getLibrary = useCallback(async (page = 1, pageSize = 20, filters = {}) => {
-    const query = new URLSearchParams({
+    const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pageSize)
+      pageSize: String(pageSize),
     });
 
-    // The server owns filtering through the search endpoint; apply it when requested.
-    if (filters && Object.keys(filters).length > 0) {
-      return apiCall('POST', '/search', {
-        ...filters,
-        page,
-        pageSize
-      });
+    const mediaType = toSavedMediaType(filters?.mediaType);
+    if (mediaType) {
+      params.set('mediaType', mediaType);
     }
 
-    return apiCall('GET', `/mine?${query.toString()}`);
+    let endpoint = `/library?${params.toString()}`;
+    if (filters?.scheduledOnly) {
+      endpoint = `/library/scheduled?${params.toString()}`;
+    } else if (filters?.onlyVisible === true) {
+      endpoint = `/library/visible?${params.toString()}`;
+    } else if (filters?.onlyVisible === false) {
+      endpoint = `/library/hidden?${params.toString()}`;
+    } else if (filters?.tag) {
+      endpoint = `/library/tag/${encodeURIComponent(filters.tag)}?${params.toString()}`;
+    }
+
+    const response = await apiCall('GET', endpoint);
+    const items = Array.isArray(response?.items) ? response.items.map(normalizeSavedMediaItem) : [];
+    const sortedItems = sortItems(items, filters?.sortBy, filters?.sortDir);
+    const totalCount = response?.totalCount ?? sortedItems.length;
+
+    return {
+      ...response,
+      items: sortedItems,
+      data: sortedItems,
+      totalCount,
+      total: totalCount,
+    };
   }, [apiCall]);
 
-  const getHiddenMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('POST', '/search', { isVisibleInFeed: false, page, pageSize });
-  }, [apiCall]);
+  const getHiddenMedia = useCallback((page = 1, pageSize = 20) => {
+    return getLibrary(page, pageSize, { onlyVisible: false });
+  }, [getLibrary]);
 
-  const getVisibleMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('POST', '/search', { isVisibleInFeed: true, page, pageSize });
-  }, [apiCall]);
+  const getVisibleMedia = useCallback((page = 1, pageSize = 20) => {
+    return getLibrary(page, pageSize, { onlyVisible: true });
+  }, [getLibrary]);
 
-  const getTaggedMedia = useCallback(async (tag, page = 1, pageSize = 20) => {
-    return apiCall('POST', '/search', { tag, page, pageSize });
-  }, [apiCall]);
+  const getTaggedMedia = useCallback((tag, page = 1, pageSize = 20) => {
+    return getLibrary(page, pageSize, { tag });
+  }, [getLibrary]);
 
-  const getScheduledMedia = useCallback(async (page = 1, pageSize = 20) => {
-    return apiCall('POST', '/search', { scheduledOnly: true, page, pageSize });
-  }, [apiCall]);
+  const getScheduledMedia = useCallback((page = 1, pageSize = 20) => {
+    return getLibrary(page, pageSize, { scheduledOnly: true });
+  }, [getLibrary]);
 
   const updateMedia = useCallback(async (mediaId, updateData) => {
-    return apiCall('PUT', `/${mediaId}`, updateData);
+    const response = await apiCall('PUT', `/${mediaId}`, {
+      title: updateData?.title,
+      description: updateData?.description,
+      thumbnailUrl: updateData?.thumbnailUrl,
+      isVisibleInFeed: updateData?.isVisibleInFeed,
+      tags: Array.isArray(updateData?.tags) ? updateData.tags : undefined,
+      scheduledPublishAt: updateData?.scheduledPublishAt,
+      mediaMetadata: updateData?.mediaMetadata,
+    });
+
+    return normalizeSavedMediaItem(response);
   }, [apiCall]);
 
-  const toggleVisibility = useCallback(async (mediaId, isVisible) => {
-    return apiCall('PUT', `/${mediaId}`, { isVisibleInFeed: isVisible });
+  const toggleVisibility = useCallback((mediaId, isVisible) => {
+    return apiCall('PATCH', `/${mediaId}/toggle-visibility`, {
+      mediaId,
+      isVisibleInFeed: isVisible,
+    });
   }, [apiCall]);
 
-  const bulkToggleVisibility = useCallback(async (mediaIds, isVisible) => {
-    const ids = Array.isArray(mediaIds) ? mediaIds : [];
-    return Promise.all(ids.map((id) => apiCall('PUT', `/${id}`, { isVisibleInFeed: isVisible })));
+  const bulkToggleVisibility = useCallback((mediaIds, isVisible) => {
+    return apiCall('PATCH', '/bulk/toggle-visibility', {
+      mediaIds: Array.isArray(mediaIds) ? mediaIds : [],
+      isVisibleInFeed: isVisible,
+    });
   }, [apiCall]);
 
-  const deleteMedia = useCallback(async (mediaId) => {
+  const deleteMedia = useCallback((mediaId) => {
     return apiCall('DELETE', `/${mediaId}`);
   }, [apiCall]);
 
-  const publishMedia = useCallback(async (publishData) => {
-    return apiCall('POST', '/search', { ...publishData, publishedOnly: true });
+  const publishMedia = useCallback((publishData) => {
+    return apiCall('POST', '/publish', publishData);
   }, [apiCall]);
 
-  const getLibraryStats = useCallback(async () => {
-    const items = await getLibrary(1, 1000);
-    const list = Array.isArray(items) ? items : (items?.items || items?.data || []);
-    const totalItems = list.length;
-    const visibleItemsCount = list.filter((item) => item?.isVisibleInFeed === true).length;
-    const hiddenItemsCount = list.filter((item) => item?.isVisibleInFeed === false).length;
-    const publishedCount = list.filter((item) => String(item?.status || '').toLowerCase() === 'published').length;
-    const scheduledCount = list.filter((item) => String(item?.status || '').toLowerCase() === 'scheduled').length;
-    const totalSizeBytes = list.reduce((sum, item) => sum + Number(item?.fileSizeBytes || item?.fileSize || item?.sizeBytes || 0), 0);
-    const typeOf = (item) => String(item?.mediaType || item?.type || '').trim().toLowerCase();
-
-    return {
-      totalItems,
-      total: totalItems,
-      visibleItemsCount,
-      visible: visibleItemsCount,
-      hiddenItemsCount,
-      hidden: hiddenItemsCount,
-      publishedCount,
-      scheduledCount,
-      totalSizeBytes,
-      photoCount: list.filter((item) => typeOf(item) === 'photo').length,
-      videoCount: list.filter((item) => typeOf(item) === 'video').length,
-      musicCount: list.filter((item) => typeOf(item) === 'music').length,
-      audioCount: list.filter((item) => typeOf(item) === 'audio').length,
-      podcastCount: list.filter((item) => typeOf(item) === 'podcast').length
-    };
-  }, [getLibrary]);
-
-  const addTag = useCallback(async (mediaId, tag) => {
-    return apiCall('PUT', `/${mediaId}`, { addTag: tag });
+  const getLibraryStats = useCallback(() => {
+    return apiCall('GET', '/library/stats');
   }, [apiCall]);
 
-  const removeTag = useCallback(async (mediaId, tag) => {
-    return apiCall('PUT', `/${mediaId}`, { removeTag: tag });
+  const addTag = useCallback((mediaId, tag) => {
+    return apiCall('POST', `/${mediaId}/tags/${encodeURIComponent(tag)}`);
+  }, [apiCall]);
+
+  const removeTag = useCallback((mediaId, tag) => {
+    return apiCall('DELETE', `/${mediaId}/tags/${encodeURIComponent(tag)}`);
   }, [apiCall]);
 
   return {
@@ -171,6 +265,6 @@ export const useSavedMedia = () => {
     publishMedia,
     getLibraryStats,
     addTag,
-    removeTag
+    removeTag,
   };
 };
