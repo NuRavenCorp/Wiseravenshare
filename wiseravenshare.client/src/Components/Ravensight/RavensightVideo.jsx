@@ -190,10 +190,11 @@ const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
     };
 };
 
-const VALID_TABS = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
-
 const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
-    const [activeTab, setActiveTab] = useState(() => (VALID_TABS.has(initialTab) ? initialTab : 'record')); // record, feed, upload, library, podcast, subscribe
+    const [activeTab, setActiveTab] = useState(() => {
+        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        return allowedTabs.has(initialTab) ? initialTab : 'record';
+    }); // record, feed, upload, library, podcast, subscribe
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
     const [billingSync, setBillingSync] = useState({
@@ -250,13 +251,15 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
 
     useEffect(() => {
         const queuedTab = consumeRavensightTab();
-        if (VALID_TABS.has(queuedTab)) {
+        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        if (allowedTabs.has(queuedTab)) {
             setActiveTab(queuedTab);
         }
     }, []);
 
     useEffect(() => {
-        if (VALID_TABS.has(initialTab)) {
+        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        if (allowedTabs.has(initialTab)) {
             setActiveTab(initialTab);
         }
     }, [initialTab]);
