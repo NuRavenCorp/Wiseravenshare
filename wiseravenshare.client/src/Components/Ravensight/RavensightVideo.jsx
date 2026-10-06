@@ -4,6 +4,7 @@ import VideoRecorder from './VideoRecorder';
 import VideoFeed from './VideoFeed';
 import VideoUploader from './VideoUploader';
 import VideoLibrary from './VideoLibrary';
+import MultiCameraMonitor from './MultiCameraMonitor';
 import WiseRavenLogo from '../Common/WiseRavenLogo';
 import PodcastStudioPage from '../../Pages/PodcastStudioPage';
 import { consumeRavensightTab } from '../../Services/podcastStudioBridge';
@@ -192,9 +193,9 @@ const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
 
 const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
     const [activeTab, setActiveTab] = useState(() => {
-        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        const allowedTabs = new Set(['record', 'multicam', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
         return allowedTabs.has(initialTab) ? initialTab : 'record';
-    }); // record, feed, upload, library, podcast, subscribe
+    }); // record, multicam, feed, upload, library, podcast, subscribe
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
     const [billingSync, setBillingSync] = useState({
@@ -251,14 +252,14 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
 
     useEffect(() => {
         const queuedTab = consumeRavensightTab();
-        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        const allowedTabs = new Set(['record', 'multicam', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
         if (allowedTabs.has(queuedTab)) {
             setActiveTab(queuedTab);
         }
     }, []);
 
     useEffect(() => {
-        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+        const allowedTabs = new Set(['record', 'multicam', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
         if (allowedTabs.has(initialTab)) {
             setActiveTab(initialTab);
         }
@@ -631,6 +632,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
 
     const tabs = [
         { id: 'record', label: '🎥 Record Video', icon: '🎥' },
+        { id: 'multicam', label: '📷 Multi-Cam', icon: '📷' },
         { id: 'feed', label: '📺 Video Feed', icon: '📺' },
         { id: 'upload', label: '📤 Upload to YouTube/TikTok', icon: '📤' },
         { id: 'library', label: '📚 My Library', icon: '📚' },
@@ -794,6 +796,9 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                         canDirectUpload={isAdminAllAccess || Boolean(subscription?.isActive)}
                         subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
+                )}
+                {activeTab === 'multicam' && (
+                    <MultiCameraMonitor />
                 )}
                 {activeTab === 'feed' && (
                     <VideoFeed onNotification={addNotification} />

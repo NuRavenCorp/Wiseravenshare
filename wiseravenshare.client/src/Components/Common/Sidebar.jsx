@@ -131,7 +131,6 @@ const Sidebar = ({ onNavigate, currentPage, user }) => {
         { id: 'karaoke', icon: 'fas fa-microphone', label: '🎤 Karaoke Party' },
         { id: 'team-launchpad', icon: 'fas fa-people-arrows', label: 'Team Launchpad' },
         { id: 'fm-tuner', icon: 'fas fa-broadcast-tower', label: 'FM Radio' },
-        { id: 'my-library', icon: 'fas fa-book-open', label: 'My Library' },
         { id: 'collaboration', icon: 'fas fa-users', label: 'Collaborate' },
         { id: 'truthseeker', icon: 'fas fa-shield-alt', label: 'Truth Seeker' },
         { id: 'ai-assistant', icon: 'fas fa-robot', label: 'Raven Assistant' },
