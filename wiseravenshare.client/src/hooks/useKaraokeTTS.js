@@ -80,3 +80,4 @@ export function useKaraokeTTS(authToken = null) {
 
     return { announce, scoreFeedback, speaking, error, stop: _stop };
 }
+
