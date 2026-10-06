@@ -19,8 +19,7 @@ import {
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
-
-const MUSIC_HANDOFF_KEY = 'wr_track_player_handoff';
+import { queueTrackForFmRadio, persistMusicLibrary } from '../Services/fmTrackBridge';
 
 const TAB_OPTIONS = [
     { id: 'all', label: 'All' },
@@ -212,6 +211,9 @@ const MyLibraryPage = ({ onNavigate }) => {
             setMusic(musicItems.filter(Boolean));
             setPhotos(photoItems.filter(Boolean));
             setVideos(videoItems.filter(Boolean));
+
+            // Keep the FM radio cassette deck in sync with the durable library.
+            persistMusicLibrary(musicItems.filter(Boolean));
         } catch (loadError) {
             const message = loadError?.message || 'Unable to load the media library.';
             setError(message);
@@ -382,7 +384,11 @@ const MyLibraryPage = ({ onNavigate }) => {
         try {
             if (item.type === 'music') {
                 await apiService.deleteMusicLibraryItem(item.id);
-                setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
+                setMusic((prev) => {
+                    const next = prev.filter((entry) => entry.id !== item.id);
+                    persistMusicLibrary(next);
+                    return next;
+                });
             } else if (item.type === 'photo') {
                 await apiService.deletePhotoLibraryItem(item.id);
                 setPhotos((prev) => prev.filter((entry) => entry.id !== item.id));
@@ -398,25 +404,12 @@ const MyLibraryPage = ({ onNavigate }) => {
     };
 
     const handlePlayMusic = (track) => {
-        try {
-            localStorage.setItem(MUSIC_HANDOFF_KEY, JSON.stringify({
-                source: 'my-library',
-                requestedAtUtc: new Date().toISOString(),
-                track: {
-                    id: track.id,
-                    title: track.title,
-                    artist: track.artist,
-                    album: track.album,
-                    fileName: track.fileName,
-                    mediaUrl: track.mediaUrl,
-                    url: track.mediaUrl,
-                    relativePath: track.relativePath
-                }
-            }));
-        } catch {
-            // Best effort handoff.
+        // Media library music: proprietary/original tracks shaped with the FM radio
+        // graphic equalizer. Default to vocal clarity for mastering review.
+        if (!queueTrackForFmRadio(track, { source: 'media-library', enhancementPreset: 'vocal' })) {
+            addToast('Could not queue this track for the FM radio player.', 'error');
+            return;
         }
-
         onNavigate?.('fm-tuner');
     };
 
@@ -453,7 +446,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <div style={bodyStyle}>
                     <div style={titleRowStyle}>
                         <strong style={titleStyle}>{item.fileName || item.title}</strong>
-                        <span style={pillStyle}>{item.type}</span>
+                        <span style={pillStyle}>{item.type === 'music' ? 'music-library' : item.type}</span>
                     </div>
                     {item.title && item.title !== item.fileName ? <div style={mutedStyle}>{item.title}</div> : null}
                     {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
@@ -469,8 +462,8 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                     <div style={actionsStyle}>
                         {item.type === 'music' ? (
-                            <button type="button" style={primaryButtonStyle} onClick={() => handlePlayMusic(item)}>
-                                <FiPlay /> Play
+                            <button type="button" style={primaryButtonStyle} onClick={() => handlePlayMusic(item)} title="Play in FM Radio with the graphic equalizer">
+                                <FiPlay /> Play in FM
                             </button>
                         ) : (
                             <button type="button" style={secondaryButtonStyle} onClick={() => window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')}>
@@ -495,7 +488,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         <div style={pageStyle}>
             <section style={heroStyle}>
                 <div>
-                    <div style={eyebrowStyle}>DigitalOcean Spaces + metadata</div>
+                    <div style={eyebrowStyle}>Music Library · DigitalOcean Spaces + metadata</div>
                     <h1 style={headingStyle}>Media Library</h1>
                     <p style={subheadingStyle}>
                         Upload once, store in Spaces, and organize everything through metadata instead of scanning buckets.
@@ -515,7 +508,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <aside style={panelStyle}>
                     <div style={panelHeaderStyle}>
                         <FiUpload />
-                        <strong>Upload to Spaces</strong>
+                        <strong>Upload to Music Library</strong>
                     </div>
                     <form onSubmit={handleUpload} style={formStyle}>
                         <label style={fieldStyle}>
@@ -571,7 +564,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                     </form>
 
                     <div style={noteStyle}>
-                        Permanent persistence comes from Spaces; the database only tracks metadata, ownership, and URLs.
+                        This library is for proprietary, original music only. Upload once to Spaces, then shape your sound with the FM Radio graphic equalizer; the database tracks metadata, ownership, and URLs.
                     </div>
                 </aside>
 

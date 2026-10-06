@@ -93,6 +93,8 @@ const PROTECTION_PLANS = [
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const MUSIC_RIGHTS_PLAN_KEYS = new Set(['rights_basic', 'rights_standard', 'rights_pro']);
+const MUSIC_LIBRARY_CACHE_KEY = 'wr_music_library_cache';
+const LEGACY_MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 const MUSIC_RIGHTS_PRICE_IDS = new Set([
   import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_PRICE_ID,
   import.meta.env.VITE_STRIPE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_PRICE_ID,
@@ -678,7 +680,8 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
             return;
           }
         } else {
-          const stored = localStorage.getItem('wiseMusic_library');
+          const stored = localStorage.getItem(MUSIC_LIBRARY_CACHE_KEY)
+            || localStorage.getItem(LEGACY_MUSIC_LIBRARY_CACHE_KEY);
           if (stored) {
             const tracks = JSON.parse(stored).map(normalizeMusicTrack).filter(Boolean);
             setMusicLibrary(tracks);
@@ -689,8 +692,12 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   }, []);
 
   useEffect(() => {
-    if (musicLibrary.length > 0)
-      localStorage.setItem('wiseMusic_library', JSON.stringify(musicLibrary));
+    if (musicLibrary.length > 0) {
+      const payload = JSON.stringify(musicLibrary);
+      localStorage.setItem(MUSIC_LIBRARY_CACHE_KEY, payload);
+      // Backward compatibility for legacy consumers during migration.
+      localStorage.setItem(LEGACY_MUSIC_LIBRARY_CACHE_KEY, payload);
+    }
   }, [musicLibrary]);
 
   // ── File select ────────────────────────────────────────────────────────────
