@@ -3,7 +3,7 @@ WiseRavenShare Karaoke Speech Service
 Runs on port 8003 alongside karaoke-engine (8002) and audio-processor (8001).
 
 Endpoints:
-  WS  /ws/stt           – streaming STT via sherpa-onnx; returns word timestamps
+  WS  /ws/stt           – streaming STT via sherpa-onnx with faster-whisper fallback; returns word timestamps
   GET /tts/announce     – spoken queue/countdown announcements (pyttsx3)
   GET /tts/score-feedback – spoken score feedback after a performance
   POST /score           – Levenshtein accuracy score sung vs reference lyrics
@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import os
 import tarfile
 import tempfile
 import threading
 import urllib.request
+import wave
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -46,11 +48,13 @@ app.add_middleware(
 )
 
 # ============================================================
-# SHERPA-ONNX RECOGNIZER (lazy-loaded)
+# STT ENGINES (lazy-loaded)
 # ============================================================
 
 _recognizer = None
 _recognizer_lock = threading.Lock()
+_faster_whisper_model = None
+_faster_whisper_lock = threading.Lock()
 
 MODEL_DIR = Path(os.getenv("SHERPA_MODEL_DIR", "/app/models")).resolve()
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,6 +73,26 @@ SHERPA_TOKENS = os.getenv("SHERPA_TOKENS_PATH") or str(MODEL_DIR / "tokens.txt")
 SHERPA_ENCODER = os.getenv("SHERPA_ENCODER_PATH") or str(MODEL_DIR / "encoder.onnx")
 SHERPA_DECODER = os.getenv("SHERPA_DECODER_PATH") or str(MODEL_DIR / "decoder.onnx")
 SHERPA_JOINER = os.getenv("SHERPA_JOINER_PATH") or str(MODEL_DIR / "joiner.onnx")
+FASTER_WHISPER_MODEL_NAME = os.getenv("FASTER_WHISPER_MODEL", "tiny.en").strip() or "tiny.en"
+FASTER_WHISPER_COMPUTE_TYPE = os.getenv("FASTER_WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
+FASTER_WHISPER_DOWNLOAD_ROOT = Path(
+    os.getenv("FASTER_WHISPER_DOWNLOAD_ROOT", str(MODEL_DIR / "faster-whisper"))
+).resolve()
+FASTER_WHISPER_DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+FALLBACK_PARTIAL_INTERVAL_SECONDS = max(
+    1.0,
+    float(os.getenv("FALLBACK_STT_PARTIAL_INTERVAL_SECONDS", "3"))
+)
+FALLBACK_IDLE_FINALIZE_SECONDS = max(
+    0.5,
+    float(os.getenv("FALLBACK_STT_IDLE_FINALIZE_SECONDS", "1.25"))
+)
+PCM_SAMPLE_RATE = 16000
+PCM_SAMPLE_WIDTH_BYTES = 2
+PCM_CHANNELS = 1
+FALLBACK_MIN_CHUNK_BYTES = int(
+    PCM_SAMPLE_RATE * PCM_SAMPLE_WIDTH_BYTES * FALLBACK_PARTIAL_INTERVAL_SECONDS
+)
 
 
 def _download_model_archive(model_url: str, destination_dir: Path) -> None:
@@ -200,6 +224,126 @@ def _load_recognizer():
         return _recognizer
 
 
+def _load_faster_whisper_model():
+    """Lazy-load a faster-whisper model as a fallback STT engine."""
+    global _faster_whisper_model
+    if _faster_whisper_model is not None:
+        return _faster_whisper_model
+
+    with _faster_whisper_lock:
+        if _faster_whisper_model is not None:
+            return _faster_whisper_model
+
+        try:
+            from faster_whisper import WhisperModel  # type: ignore[import]
+
+            _faster_whisper_model = WhisperModel(
+                FASTER_WHISPER_MODEL_NAME,
+                device="cpu",
+                compute_type=FASTER_WHISPER_COMPUTE_TYPE,
+                download_root=str(FASTER_WHISPER_DOWNLOAD_ROOT),
+            )
+            log.info(
+                "faster-whisper model loaded successfully: %s (%s)",
+                FASTER_WHISPER_MODEL_NAME,
+                FASTER_WHISPER_COMPUTE_TYPE,
+            )
+        except ImportError:
+            log.warning("faster-whisper not installed. Run: pip install faster-whisper")
+        except Exception as exc:
+            log.warning("Failed to load faster-whisper model: %s", exc)
+
+        return _faster_whisper_model
+
+
+def _get_stt_backend() -> tuple[str, object | None]:
+    recognizer = _load_recognizer()
+    if recognizer is not None:
+        return "sherpa-onnx", recognizer
+
+    whisper_model = _load_faster_whisper_model()
+    if whisper_model is not None:
+        return "faster-whisper", whisper_model
+
+    return "unavailable", None
+
+
+def _estimate_confidence_from_avg_logprob(avg_logprob: float | None) -> float:
+    if avg_logprob is None:
+        return 0.0
+    try:
+        return max(0.0, min(1.0, math.exp(float(avg_logprob))))
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+
+
+def _transcribe_pcm_bytes_with_faster_whisper(model, pcm_bytes: bytes) -> dict:
+    """Transcribe 16 kHz mono PCM bytes using faster-whisper."""
+    if not pcm_bytes:
+        return {
+            "text": "",
+            "words": [],
+            "confidence": 0.0,
+        }
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+        temp_path = Path(handle.name)
+
+    try:
+        with wave.open(str(temp_path), "wb") as wav_file:
+            wav_file.setnchannels(PCM_CHANNELS)
+            wav_file.setsampwidth(PCM_SAMPLE_WIDTH_BYTES)
+            wav_file.setframerate(PCM_SAMPLE_RATE)
+            wav_file.writeframes(pcm_bytes)
+
+        segments, info = model.transcribe(
+            str(temp_path),
+            language="en",
+            beam_size=1,
+            vad_filter=True,
+            word_timestamps=True,
+            condition_on_previous_text=False,
+        )
+
+        text_parts: list[str] = []
+        words: list[dict] = []
+        confidences: list[float] = []
+
+        for segment in segments:
+            segment_text = str(getattr(segment, "text", "") or "").strip()
+            if segment_text:
+                text_parts.append(segment_text)
+            confidences.append(_estimate_confidence_from_avg_logprob(getattr(segment, "avg_logprob", None)))
+
+            for word in getattr(segment, "words", []) or []:
+                token = str(getattr(word, "word", "") or "").strip()
+                if not token:
+                    continue
+                words.append({
+                    "word": token,
+                    "start": round(float(getattr(word, "start", 0.0) or 0.0), 3),
+                    "end": round(float(getattr(word, "end", 0.0) or 0.0), 3),
+                })
+                probability = getattr(word, "probability", None)
+                if probability is not None:
+                    try:
+                        confidences.append(float(probability))
+                    except (TypeError, ValueError):
+                        pass
+
+        confidence = round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+        transcript_text = " ".join(part for part in text_parts if part).strip()
+        detected_language = getattr(info, "language", None)
+        return {
+            "text": transcript_text,
+            "words": words,
+            "confidence": confidence,
+            "language": detected_language,
+        }
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 # ============================================================
 # TTS ENGINE (pyttsx3, offline)
 # ============================================================
@@ -291,55 +435,111 @@ async def stt_stream(websocket: WebSocket):
     """
     await websocket.accept()
     log.info("STT WebSocket connected")
-    recognizer = _load_recognizer()
+    engine_name, engine = _get_stt_backend()
 
-    if recognizer is None:
+    if engine_name == "unavailable" or engine is None:
         # Graceful stub while models are not yet installed
         try:
             while True:
                 await websocket.receive_bytes()
                 await websocket.send_json({
                     "text": "", "words": [], "is_final": False, "confidence": 0.0,
-                    "warning": "STT engine unavailable. Install sherpa-onnx and download models.",
+                    "warning": "STT engine unavailable. Install sherpa-onnx or faster-whisper and download models.",
                 })
         except WebSocketDisconnect:
             pass
         return
 
-    stream = recognizer.create_stream()
+    if engine_name == "sherpa-onnx":
+        recognizer = engine
+        stream = recognizer.create_stream()
+        try:
+            while True:
+                raw = await websocket.receive_bytes()
+                samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                stream.accept_waveform(PCM_SAMPLE_RATE, samples)
+                while recognizer.is_ready(stream):
+                    recognizer.decode_stream(stream)
+                result = recognizer.get_result(stream)
+                is_final = recognizer.is_endpoint(stream)
+
+                words = []
+                if hasattr(result, "words") and result.words:
+                    words = [
+                        {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3)}
+                        for w in result.words
+                    ]
+
+                await websocket.send_json({
+                    "text": result.text if result else "",
+                    "words": words,
+                    "is_final": is_final,
+                    "confidence": float(getattr(result, "confidence", 0.0)),
+                    "engine": engine_name,
+                })
+
+                if is_final:
+                    stream = recognizer.create_stream()
+
+        except WebSocketDisconnect:
+            log.info("STT WebSocket disconnected")
+        except Exception as exc:
+            log.exception("STT stream error: %s", exc)
+            try:
+                await websocket.send_json({"error": str(exc), "is_final": True, "engine": engine_name})
+            except Exception:
+                pass
+        return
+
+    pcm_buffer = bytearray()
+    last_partial_size = 0
+    last_sent_text = ""
+
     try:
         while True:
-            raw = await websocket.receive_bytes()
-            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-            stream.accept_waveform(16000, samples)
-            while recognizer.is_ready(stream):
-                recognizer.decode_stream(stream)
-            result = recognizer.get_result(stream)
-            is_final = recognizer.is_endpoint(stream)
+            try:
+                raw = await asyncio.wait_for(
+                    websocket.receive_bytes(),
+                    timeout=FALLBACK_IDLE_FINALIZE_SECONDS,
+                )
+                pcm_buffer.extend(raw)
 
-            words = []
-            if hasattr(result, "words") and result.words:
-                words = [
-                    {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3)}
-                    for w in result.words
-                ]
+                if len(pcm_buffer) - last_partial_size < FALLBACK_MIN_CHUNK_BYTES:
+                    continue
 
-            await websocket.send_json({
-                "text": result.text if result else "",
-                "words": words,
-                "is_final": is_final,
-                "confidence": float(getattr(result, "confidence", 0.0)),
-            })
+                transcript = _transcribe_pcm_bytes_with_faster_whisper(engine, bytes(pcm_buffer))
+                last_partial_size = len(pcm_buffer)
+                if transcript["text"] == last_sent_text and transcript["words"]:
+                    continue
 
-            if is_final:
-                stream = recognizer.create_stream()
+                last_sent_text = transcript["text"]
+                await websocket.send_json({
+                    **transcript,
+                    "is_final": False,
+                    "engine": engine_name,
+                })
+            except asyncio.TimeoutError:
+                if not pcm_buffer:
+                    continue
+
+                transcript = _transcribe_pcm_bytes_with_faster_whisper(engine, bytes(pcm_buffer))
+                if transcript["text"] or transcript["words"]:
+                    last_sent_text = transcript["text"]
+                    await websocket.send_json({
+                        **transcript,
+                        "is_final": True,
+                        "engine": engine_name,
+                    })
+
+                pcm_buffer.clear()
+                last_partial_size = 0
 
     except WebSocketDisconnect:
         log.info("STT WebSocket disconnected")
     except Exception as exc:
-        log.exception("STT stream error: %s", exc)
+        log.exception("Fallback STT stream error: %s", exc)
         try:
-            await websocket.send_json({"error": str(exc), "is_final": True})
+            await websocket.send_json({"error": str(exc), "is_final": True, "engine": engine_name})
         except Exception:
             pass
 
@@ -410,12 +610,13 @@ def score_performance(body: ScoreRequest):
 
 @app.get("/health")
 def health():
-    recognizer = _load_recognizer()
+    engine_name, engine = _get_stt_backend()
     return {
         "status": "ok",
         "service": "wiseravenshare-karaoke-speech",
         "version": "1.0.0",
-        "stt_engine": "sherpa-onnx" if recognizer is not None else "unavailable (models needed)",
+        "stt_engine": engine_name if engine is not None else "unavailable",
+        "stt_fallback_model": FASTER_WHISPER_MODEL_NAME,
         "tts_engine": "pyttsx3",
     }
 

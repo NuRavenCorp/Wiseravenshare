@@ -4,3 +4,4 @@ numpy>=1.26.0
 pyttsx3>=2.90
 pydantic>=2.0.0
 sherpa-onnx>=1.10.0
+faster-whisper>=1.1.0
