@@ -9,7 +9,6 @@ import {
     FiHardDrive,
     FiImage,
     FiMusic,
-    FiPlay,
     FiRefreshCw,
     FiSearch,
     FiTrash2,
@@ -19,7 +18,6 @@ import {
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
-import { queueTrackForFmRadio, persistMusicLibrary } from '../Services/fmTrackBridge';
 
 const TAB_OPTIONS = [
     { id: 'all', label: 'All' },
@@ -211,9 +209,6 @@ const MyLibraryPage = ({ onNavigate }) => {
             setMusic(musicItems.filter(Boolean));
             setPhotos(photoItems.filter(Boolean));
             setVideos(videoItems.filter(Boolean));
-
-            // Keep the FM radio cassette deck in sync with the durable library.
-            persistMusicLibrary(musicItems.filter(Boolean));
         } catch (loadError) {
             const message = loadError?.message || 'Unable to load the media library.';
             setError(message);
@@ -384,11 +379,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         try {
             if (item.type === 'music') {
                 await apiService.deleteMusicLibraryItem(item.id);
-                setMusic((prev) => {
-                    const next = prev.filter((entry) => entry.id !== item.id);
-                    persistMusicLibrary(next);
-                    return next;
-                });
+                setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
             } else if (item.type === 'photo') {
                 await apiService.deletePhotoLibraryItem(item.id);
                 setPhotos((prev) => prev.filter((entry) => entry.id !== item.id));
@@ -401,16 +392,6 @@ const MyLibraryPage = ({ onNavigate }) => {
         } catch (deleteError) {
             addToast(deleteError?.message || 'Failed to delete media.', 'error');
         }
-    };
-
-    const handlePlayMusic = (track) => {
-        // Media library music: proprietary/original tracks shaped with the FM radio
-        // graphic equalizer. Default to vocal clarity for mastering review.
-        if (!queueTrackForFmRadio(track, { source: 'media-library', enhancementPreset: 'vocal' })) {
-            addToast('Could not queue this track for the FM radio player.', 'error');
-            return;
-        }
-        onNavigate?.('fm-tuner');
     };
 
     const handleCopy = async (value) => {
@@ -461,15 +442,9 @@ const MyLibraryPage = ({ onNavigate }) => {
                     </div>
 
                     <div style={actionsStyle}>
-                        {item.type === 'music' ? (
-                            <button type="button" style={primaryButtonStyle} onClick={() => handlePlayMusic(item)} title="Play in FM Radio with the graphic equalizer">
-                                <FiPlay /> Play in FM
-                            </button>
-                        ) : (
-                            <button type="button" style={secondaryButtonStyle} onClick={() => window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')}>
-                                <FiExternalLink /> Open
-                            </button>
-                        )}
+                        <button type="button" style={secondaryButtonStyle} onClick={() => window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')}>
+                            <FiExternalLink /> Open
+                        </button>
 
                         <button type="button" style={secondaryButtonStyle} onClick={() => handleCopy(item.mediaUrl)}>
                             <FiCopy /> Copy URL
@@ -488,7 +463,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         <div style={pageStyle}>
             <section style={heroStyle}>
                 <div>
-                    <div style={eyebrowStyle}>Music Library · DigitalOcean Spaces + metadata</div>
+                    <div style={eyebrowStyle}>Media Library · DigitalOcean Spaces + metadata</div>
                     <h1 style={headingStyle}>Media Library</h1>
                     <p style={subheadingStyle}>
                         Upload once, store in Spaces, and organize everything through metadata instead of scanning buckets.
@@ -508,7 +483,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <aside style={panelStyle}>
                     <div style={panelHeaderStyle}>
                         <FiUpload />
-                        <strong>Upload to Music Library</strong>
+                        <strong>Upload to Library</strong>
                     </div>
                     <form onSubmit={handleUpload} style={formStyle}>
                         <label style={fieldStyle}>
