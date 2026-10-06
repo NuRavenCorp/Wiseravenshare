@@ -38,7 +38,6 @@ import CollaborationPage from './Pages/CollaborationPage';
 import TeamLaunchpadPage from './Pages/TeamLaunchpadPage';
 import MusicRightsStudioPage from './Pages/MusicRightsStudioPage';
 import FMRadioPage from './Pages/FMRadioPage';
-import MyLibraryPage from './Pages/MyLibraryPage';
 import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import PodcastCheckoutPage from './Pages/PodcastCheckoutPage';
@@ -386,6 +385,16 @@ const App = () => {
     };
 
     const navigateToPage = (target) => {
+        const page = typeof target === 'string'
+            ? target
+            : target?.page;
+
+        if (page === 'my-library' || page === 'music-player') {
+            setIsRavensightMode(false);
+            setCurrentPage('my-library');
+            return;
+        }
+
         if (typeof target === 'string') {
             setCurrentPage(target);
             return;
@@ -610,7 +619,7 @@ const App = () => {
             case 'music-rights-studio':
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <MyLibraryPage onNavigate={setCurrentPage} />;
+                return <RavensightVideo onNavigate={navigateToPage} initialTab="library" />;
             case 'fm-tuner':
                 return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="radio" />;
             case 'radio-creator':
@@ -618,7 +627,7 @@ const App = () => {
                     ? <FMRadioPage onNavigate={setCurrentPage} canAccessCreator initialTab="creator" />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'my-library':
-                return <MyLibraryPage onNavigate={setCurrentPage} />;
+                return <RavensightVideo onNavigate={navigateToPage} initialTab="library" />;
             case 'instrument-connector':
                 return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
             case 'podcast-rights-studio':
@@ -810,6 +819,7 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'fm-tuner', label: '📻 FM Radio' },
+        { id: 'my-library', label: '📚 My Library' },
         { id: 'setup', label: '⚙️ Set Up' },
         { id: 'profile', label: 'Settings' },
         { id: 'settings', label: 'Profile' }
@@ -869,7 +879,7 @@ const App = () => {
                     {navItems.map((item) => (
                         <button
                             key={item.id}
-                            onClick={() => setCurrentPage(item.id)}
+                            onClick={() => navigateToPage(item.id)}
                             style={{
                                 border: '1px solid var(--border-color)',
                                 background: currentPage === item.id ? 'var(--highlight-color)' : 'var(--card-bg)',
