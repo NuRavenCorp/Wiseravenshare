@@ -7,6 +7,7 @@ import { socialService } from '../../Services/socialService';
 import { useAuth } from '../../Contexts/AuthContext';
 import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, removeLocalVideo, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 import CollaborativeScriptRoom from './CollaborativeScriptRoom';
+import MultiCameraMonitor from './MultiCameraMonitor';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
 import { useCollaborationHub } from '../../hooks/useCollaborationHub';
@@ -794,6 +795,11 @@ const VideoFeed = ({ onNotification }) => {
                     </button>
                 </div>
             )}
+
+            {/* Multi-Camera Monitors */}
+            <div style={{ marginBottom: 20 }}>
+                <MultiCameraMonitor />
+            </div>
 
             {/* Filter Bar */}
             <div style={{
