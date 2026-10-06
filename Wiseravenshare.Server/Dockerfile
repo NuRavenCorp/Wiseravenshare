@@ -21,7 +21,7 @@ RUN npm run build
 # ==========================================
 # Stage 2: Build the Backend (.NET API)
 # ==========================================
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS server-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS server-build
 WORKDIR /src
 
 # Copy project file to cache layers for dotnet restore
@@ -39,16 +39,27 @@ RUN dotnet publish Wiseravenshare.Server/Wiseravenshare.Server.csproj \
 # ==========================================
 # Stage 3: Final Production Runtime
 # ==========================================
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache tzdata curl icu-libs
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        ffmpeg \
+        libsndfile1 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 ENV ASPNETCORE_URLS=http://+:10000
+ENV WRS_PYTHON_EXE=/usr/bin/python3
+ENV WRS_SERVICES_ROOT=/app/services
 EXPOSE 10000
 
 # Health check
@@ -57,6 +68,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Copy compiled backend
 COPY --from=server-build /app/publish ./
+
+# Copy Python microservices so the orchestrator can provision and launch them
+COPY services/ ./services/
 
 # Copy compiled frontend into wwwroot for .NET to serve as static files
 COPY --from=client-build /build/client/dist ./wwwroot

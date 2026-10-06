@@ -55,6 +55,7 @@ services:
     environment:
       SHERPA_MODEL_DIR: /app/models
       SHERPA_MODEL_URL: ${SHERPA_MODEL_URL:-}
+      SHERPA_MODEL_BASE_URL: ${SHERPA_MODEL_BASE_URL:-https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main}
       SHERPA_TOKENS_PATH: ${SHERPA_TOKENS_PATH:-}
       SHERPA_ENCODER_PATH: ${SHERPA_ENCODER_PATH:-}
       SHERPA_DECODER_PATH: ${SHERPA_DECODER_PATH:-}
