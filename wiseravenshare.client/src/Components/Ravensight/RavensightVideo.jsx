@@ -190,8 +190,10 @@ const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
     };
 };
 
-const RavensightVideo = ({ onNavigate }) => {
-    const [activeTab, setActiveTab] = useState('record'); // record, feed, upload, library, podcast, subscribe
+const VALID_TABS = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
+
+const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
+    const [activeTab, setActiveTab] = useState(() => (VALID_TABS.has(initialTab) ? initialTab : 'record')); // record, feed, upload, library, podcast, subscribe
     const [notifications, setNotifications] = useState([]);
     const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_PLAN_ID);
     const [billingSync, setBillingSync] = useState({
@@ -248,11 +250,16 @@ const RavensightVideo = ({ onNavigate }) => {
 
     useEffect(() => {
         const queuedTab = consumeRavensightTab();
-        const allowedTabs = new Set(['record', 'feed', 'upload', 'library', 'podcast', 'subscribe']);
-        if (allowedTabs.has(queuedTab)) {
+        if (VALID_TABS.has(queuedTab)) {
             setActiveTab(queuedTab);
         }
     }, []);
+
+    useEffect(() => {
+        if (VALID_TABS.has(initialTab)) {
+            setActiveTab(initialTab);
+        }
+    }, [initialTab]);
 
     const getCatalogPlanById = (planId = DEFAULT_PLAN_ID) => {
         const matched = stripeCatalog.find((plan) => plan.planId === planId);
