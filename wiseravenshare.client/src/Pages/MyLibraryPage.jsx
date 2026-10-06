@@ -45,9 +45,13 @@ const formatDate = (value) => {
     return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
 };
 
+// ✅ FIX: never persist blob: URLs. They are session-scoped and die on reload.
+const isEphemeralUrl = (value) => /^blob:/i.test(String(value || '').trim());
+
 const normalizeUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
+    if (isEphemeralUrl(raw)) return ''; // ✅ FIX
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
         try {
             const parsed = new URL(raw);
@@ -56,16 +60,25 @@ const normalizeUrl = (value) => {
             return raw;
         }
     }
-    if (raw.startsWith('/') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    if (raw.startsWith('/') || raw.startsWith('data:')) return raw;
     if (raw.startsWith('api/')) return `/${raw}`;
     if (/^https?:\/\//i.test(raw)) return raw;
     return '';
 };
 
-const blobUrlFromPath = (relativePath = '') => {
-    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+// ✅ FIX: use a single, generic media proxy route that works for images,
+// audio, and video. Falls back to the video-streaming route only for video.
+const buildMediaUrlFromPath = (relativePath = '', type = '') => {
+    const normalized = String(relativePath || '')
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
     if (!normalized) return '';
-    return `/api/videostreaming/blob/${normalized.split('/').filter(Boolean).map(encodeURIComponent).join('/')}`;
+    const encoded = normalized.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+    if (type === 'video') return `/api/videostreaming/blob/${encoded}`;
+    // Generic Space-backed proxy route. If your backend exposes a different
+    // one, change this single line.
+    return `/api/media/blob/${encoded}`;
 };
 
 const inferTypeFromFile = (file) => {
@@ -76,63 +89,131 @@ const inferTypeFromFile = (file) => {
     return 'photo';
 };
 
+const pickFirstString = (...values) => {
+    for (const value of values) {
+        if (value === undefined || value === null) continue;
+        const text = String(value).trim();
+        if (text) return text;
+    }
+    return '';
+};
+
+// ✅ FIX: a single resolver that prefers a real server URL, then falls back
+// to a deterministic proxy URL built from the persisted relative path.
+const resolveMediaUrl = (item, type) => {
+    const direct = normalizeUrl(
+        pickFirstString(
+            item?.mediaUrl,
+            item?.MediaUrl,
+            item?.url,
+            item?.Url,
+            item?.imageUrl,
+            item?.ImageUrl,
+            item?.videoUrl,
+            item?.VideoUrl
+        )
+    );
+    if (direct) return direct;
+
+    const relativePath = pickFirstString(
+        item?.relativePath,
+        item?.RelativePath,
+        item?.objectKey,
+        item?.ObjectKey,
+        item?.filePath,
+        item?.FilePath,
+        item?.file?.relativePath
+    );
+    return buildMediaUrlFromPath(relativePath, type);
+};
+
 const normalizeMusic = (item) => {
-    const fileName = String(item?.fileName || item?.FileName || '').trim();
-    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
-    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.url || item?.MediaUrl || item?.Url || '') || blobUrlFromPath(relativePath) || '';
+    const fileName = pickFirstString(item?.fileName, item?.FileName);
+    const relativePath = pickFirstString(
+        item?.relativePath,
+        item?.RelativePath,
+        item?.objectKey,
+        item?.ObjectKey
+    );
+    const mediaUrl = resolveMediaUrl(item, 'music');
 
     return {
-        id: String(item?.id || item?.Id || fileName || `music-${Date.now()}`),
+        id: pickFirstString(item?.id, item?.Id, fileName, `music-${Date.now()}`),
         type: 'music',
-        title: String(item?.title || item?.Title || fileName || 'Untitled track').trim(),
-        artist: String(item?.artist || item?.Artist || '').trim(),
-        album: String(item?.album || item?.Album || '').trim(),
-        genre: String(item?.genre || item?.Genre || '').trim(),
+        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled track'),
+        artist: pickFirstString(item?.artist, item?.Artist),
+        album: pickFirstString(item?.album, item?.Album),
+        genre: pickFirstString(item?.genre, item?.Genre),
         fileName,
         relativePath,
         mediaUrl,
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
-        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        uploadedAt: pickFirstString(
+            item?.uploadedAt,
+            item?.UploadedAt,
+            item?.createdAt,
+            item?.CreatedAt
+        ),
         source: 'spaces'
     };
 };
 
 const normalizePhoto = (item) => {
-    const fileName = String(item?.fileName || item?.FileName || '').trim();
-    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
-    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.imageUrl || item?.url || item?.MediaUrl || '') || blobUrlFromPath(relativePath) || '';
+    const fileName = pickFirstString(item?.fileName, item?.FileName);
+    const relativePath = pickFirstString(
+        item?.relativePath,
+        item?.RelativePath,
+        item?.objectKey,
+        item?.ObjectKey
+    );
+    const mediaUrl = resolveMediaUrl(item, 'photo');
 
     return {
-        id: String(item?.id || item?.Id || fileName || `photo-${Date.now()}`),
+        id: pickFirstString(item?.id, item?.Id, fileName, `photo-${Date.now()}`),
         type: 'photo',
-        title: String(item?.title || item?.Title || fileName || 'Untitled photo').trim(),
-        description: String(item?.description || item?.Description || '').trim(),
+        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled photo'),
+        description: pickFirstString(item?.description, item?.Description),
         fileName,
         relativePath,
         mediaUrl,
         thumbnailUrl: mediaUrl,
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
-        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        uploadedAt: pickFirstString(
+            item?.uploadedAt,
+            item?.UploadedAt,
+            item?.createdAt,
+            item?.CreatedAt
+        ),
         source: 'spaces'
     };
 };
 
 const normalizeVideo = (item) => {
-    const fileName = String(item?.fileName || item?.FileName || '').trim();
-    const relativePath = String(item?.relativePath || item?.RelativePath || item?.objectKey || item?.ObjectKey || '').trim();
-    const mediaUrl = normalizeUrl(item?.mediaUrl || item?.videoUrl || item?.url || item?.MediaUrl || '') || blobUrlFromPath(relativePath) || '';
+    const fileName = pickFirstString(item?.fileName, item?.FileName);
+    const relativePath = pickFirstString(
+        item?.relativePath,
+        item?.RelativePath,
+        item?.objectKey,
+        item?.ObjectKey
+    );
+    const mediaUrl = resolveMediaUrl(item, 'video');
 
     return {
-        id: String(item?.id || item?.Id || fileName || `video-${Date.now()}`),
+        id: pickFirstString(item?.id, item?.Id, fileName, `video-${Date.now()}`),
         type: 'video',
-        title: String(item?.title || item?.Title || fileName || 'Untitled video').trim(),
-        description: String(item?.description || item?.Description || '').trim(),
+        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled video'),
+        description: pickFirstString(item?.description, item?.Description),
         fileName,
         relativePath,
         mediaUrl,
-        thumbnailUrl: normalizeUrl(item?.thumbnailUrl || item?.ThumbnailUrl || '') || mediaUrl,
+        thumbnailUrl: normalizeUrl(item?.thumbnailUrl || item?.ThumbnailUrl) || mediaUrl,
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
-        uploadedAt: item?.uploadedAt || item?.UploadedAt || item?.createdAt || item?.CreatedAt || '',
+        uploadedAt: pickFirstString(
+            item?.uploadedAt,
+            item?.UploadedAt,
+            item?.createdAt,
+            item?.CreatedAt
+        ),
         source: 'spaces'
     };
 };
@@ -146,25 +227,11 @@ const readList = (payload, keys = ['items', 'data', 'tracks', 'videos', 'photos'
     return [];
 };
 
-const getListMeta = (payload) => {
-    if (Array.isArray(payload)) {
-        return { total: payload.length };
-    }
-
-    if (payload && typeof payload === 'object') {
-        return {
-            total: Number(payload.total || payload.totalCount || payload.count || payload.items?.length || payload.data?.length || 0),
-            persistenceStatus: payload.persistenceStatus || 'ready'
-        };
-    }
-
-    return { total: 0, persistenceStatus: 'ready' };
-};
-
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
     const uploadInputRef = useRef(null);
+    const isMountedRef = useRef(true);
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -185,45 +252,83 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [error, setError] = useState('');
     const [selectedItem, setSelectedItem] = useState(null);
 
-    const loadLibrary = useCallback(async () => {
-        setError('');
-        if (!refreshing) setLoading(true);
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
 
-        try {
-            const [musicResult, photoResult, videoResult] = await Promise.allSettled([
-                apiService.getMusicLibrary(),
-                apiService.getPhotoLibrary(),
-                apiService.getVideoLibrary()
-            ]);
+    // ✅ FIX: loadLibrary no longer depends on `refreshing`. That dependency
+    // was causing the callback identity to change on every refresh toggle,
+    // which re-fired the effect and produced duplicate/aborted fetches that
+    // could overwrite freshly uploaded items with empty lists.
+    const loadLibrary = useCallback(
+        async ({ silent = false } = {}) => {
+            if (!silent) setLoading(true);
+            setError('');
 
-            const musicItems = musicResult.status === 'fulfilled'
-                ? readList(musicResult.value?.data, ['items', 'tracks', 'data']).map(normalizeMusic)
-                : [];
-            const photoItems = photoResult.status === 'fulfilled'
-                ? readList(photoResult.value?.data, ['data', 'items', 'photos']).map(normalizePhoto)
-                : [];
-            const videoItems = videoResult.status === 'fulfilled'
-                ? readList(videoResult.value?.data, ['videos', 'items', 'data']).map(normalizeVideo)
-                : [];
+            try {
+                const [musicResult, photoResult, videoResult] = await Promise.allSettled([
+                    apiService.getMusicLibrary(),
+                    apiService.getPhotoLibrary(),
+                    apiService.getVideoLibrary()
+                ]);
 
-            setMusic(musicItems.filter(Boolean));
-            setPhotos(photoItems.filter(Boolean));
-            setVideos(videoItems.filter(Boolean));
-        } catch (loadError) {
-            const message = loadError?.message || 'Unable to load the media library.';
-            setError(message);
-            addToast(message, 'error');
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, [addToast, refreshing]);
+                if (!isMountedRef.current) return;
+
+                const musicItems =
+                    musicResult.status === 'fulfilled'
+                        ? readList(musicResult.value?.data, ['items', 'tracks', 'data']).map(normalizeMusic)
+                        : [];
+                const photoItems =
+                    photoResult.status === 'fulfilled'
+                        ? readList(photoResult.value?.data, ['data', 'items', 'photos']).map(normalizePhoto)
+                        : [];
+                const videoItems =
+                    videoResult.status === 'fulfilled'
+                        ? readList(videoResult.value?.data, ['videos', 'items', 'data']).map(normalizeVideo)
+                        : [];
+
+                setMusic(musicItems.filter(Boolean));
+                setPhotos(photoItems.filter(Boolean));
+                setVideos(videoItems.filter(Boolean));
+
+                const failures = [musicResult, photoResult, videoResult].filter(
+                    (r) => r.status === 'rejected'
+                );
+                if (failures.length) {
+                    const reason = failures[0].reason;
+                    const message =
+                        reason?.message || 'Some media categories could not be loaded.';
+                    setError(message);
+                }
+            } catch (loadError) {
+                if (!isMountedRef.current) return;
+                const message = loadError?.message || 'Unable to load the media library.';
+                setError(message);
+                addToast(message, 'error');
+            } finally {
+                if (isMountedRef.current) {
+                    setLoading(false);
+                    setRefreshing(false);
+                }
+            }
+        },
+        [addToast]
+    );
 
     useEffect(() => {
         void loadLibrary();
     }, [loadLibrary, user?.id]);
 
+    const handleRefresh = useCallback(() => {
+        setRefreshing(true);
+        void loadLibrary({ silent: true });
+    }, [loadLibrary]);
+
     const allItems = useMemo(() => [...music, ...photos, ...videos], [music, photos, videos]);
+
     const filteredItems = useMemo(() => {
         const term = query.trim().toLowerCase();
         const tabFilter = activeTab === 'all' ? null : activeTab;
@@ -243,7 +348,12 @@ const MyLibraryPage = ({ onNavigate }) => {
     }, [activeTab, allItems, query]);
 
     useEffect(() => {
-        if (selectedItem && !allItems.some((item) => item.id === selectedItem.id && item.type === selectedItem.type)) {
+        if (
+            selectedItem &&
+            !allItems.some(
+                (item) => item.id === selectedItem.id && item.type === selectedItem.type
+            )
+        ) {
             setSelectedItem(null);
         }
     }, [allItems, selectedItem]);
@@ -257,18 +367,21 @@ const MyLibraryPage = ({ onNavigate }) => {
             video: videos.length,
             totalSize
         };
-    }, [allItems.length, music.length, photos.length, videos.length, allItems]);
+    }, [allItems, music.length, photos.length, videos.length]);
 
     const uploadLimitReached = useMemo(() => {
         const counts = { music: music.length, photo: photos.length, video: videos.length };
-        return LIMITS[uploadType] && counts[uploadType] >= LIMITS[uploadType];
+        return Boolean(LIMITS[uploadType]) && counts[uploadType] >= LIMITS[uploadType];
     }, [music.length, photos.length, videos.length, uploadType]);
 
     const updateItemLists = useCallback((type, nextItem) => {
         if (!nextItem) return;
-        if (type === 'music') setMusic((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
-        if (type === 'photo') setPhotos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
-        if (type === 'video') setVideos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'music')
+            setMusic((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'photo')
+            setPhotos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'video')
+            setVideos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
     }, []);
 
     const handleUpload = async (event) => {
@@ -280,7 +393,10 @@ const MyLibraryPage = ({ onNavigate }) => {
         }
 
         if (uploadLimitReached) {
-            addToast(`${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Delete an item first.`, 'error');
+            addToast(
+                `${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Delete an item first.`,
+                'error'
+            );
             return;
         }
 
@@ -312,45 +428,57 @@ const MyLibraryPage = ({ onNavigate }) => {
             }
 
             const data = response?.data || response || {};
-            const mediaUrl = String(data.mediaUrl || data.filePath || data.url || data.file?.mediaUrl || '').trim();
-            const relativePath = String(data.relativePath || data.file?.relativePath || data.objectKey || '').trim();
 
-            const nextItem = uploadType === 'music'
-                ? normalizeMusic({
-                    id: data.track?.id || data.id || `music-${Date.now()}`,
-                    title: data.track?.title || title,
-                    artist: data.track?.artist || uploadArtist,
-                    album: data.track?.album || uploadAlbum,
-                    genre: data.track?.genre || uploadGenre,
-                    fileName: data.track?.fileName || uploadFile.name,
-                    relativePath: data.track?.relativePath || relativePath,
-                    mediaUrl: data.track?.mediaUrl || mediaUrl,
-                    sizeBytes: uploadFile.size,
-                    uploadedAt: new Date().toISOString()
-                })
-                : uploadType === 'photo'
-                    ? normalizePhoto({
-                        id: data.id || `photo-${Date.now()}`,
-                        title,
-                        description: uploadDescription,
-                        fileName: data.fileName || uploadFile.name,
-                        relativePath: relativePath || data.relativePath,
-                        mediaUrl,
-                        sizeBytes: uploadFile.size,
-                        uploadedAt: new Date().toISOString()
-                    })
-                    : normalizeVideo({
-                        id: data.id || `video-${Date.now()}`,
-                        title,
-                        description: uploadDescription,
-                        fileName: data.fileName || uploadFile.name,
-                        relativePath: relativePath || data.relativePath,
-                        mediaUrl,
-                        sizeBytes: uploadFile.size,
-                        uploadedAt: new Date().toISOString()
-                    });
+            // ✅ FIX: merge server response with local file info so we always
+            // end up with a usable, persistent URL. If the server didn't echo
+            // a mediaUrl but did give a relativePath, the normalizer builds a
+            // deterministic proxy URL from it.
+            const enriched = {
+                id:
+                    data.track?.id ||
+                    data.id ||
+                    `${uploadType}-${uploadFile.name}-${uploadFile.size}-${uploadFile.lastModified}`,
+                title: data.track?.title || title,
+                description: uploadDescription,
+                artist: data.track?.artist || uploadArtist,
+                album: data.track?.album || uploadAlbum,
+                genre: data.track?.genre || uploadGenre,
+                fileName: data.track?.fileName || data.fileName || uploadFile.name,
+                relativePath:
+                    data.track?.relativePath ||
+                    data.relativePath ||
+                    data.file?.relativePath ||
+                    data.objectKey ||
+                    data.filePath ||
+                    '',
+                mediaUrl:
+                    data.track?.mediaUrl ||
+                    data.mediaUrl ||
+                    data.url ||
+                    data.file?.mediaUrl ||
+                    data.filePath ||
+                    '',
+                sizeBytes: uploadFile.size,
+                uploadedAt: new Date().toISOString()
+            };
 
-            updateItemLists(uploadType, nextItem);
+            const nextItem =
+                uploadType === 'music'
+                    ? normalizeMusic(enriched)
+                    : uploadType === 'photo'
+                        ? normalizePhoto(enriched)
+                        : normalizeVideo(enriched);
+
+            // ✅ FIX: only commit the optimistic item if it actually has a
+            // renderable URL. Otherwise we'd show a broken card that vanishes
+            // on the next refresh anyway.
+            if (!nextItem.mediaUrl) {
+                // Try one silent re-sync from the server, since the upload
+                // succeeded but the response shape was unexpected.
+                await loadLibrary({ silent: true });
+            } else {
+                updateItemLists(uploadType, nextItem);
+            }
 
             setUploadFile(null);
             setUploadTitle('');
@@ -359,16 +487,17 @@ const MyLibraryPage = ({ onNavigate }) => {
             setUploadAlbum('');
             setUploadGenre('');
             setProgress(0);
-            if (uploadInputRef.current) {
-                uploadInputRef.current.value = '';
-            }
+            if (uploadInputRef.current) uploadInputRef.current.value = '';
 
             addToast(`${title} uploaded to Spaces.`, 'success');
-            await loadLibrary();
+
+            // ✅ FIX: silent re-sync so the server's canonical record (with
+            // its persistent URL + id) replaces the optimistic one.
+            await loadLibrary({ silent: true });
         } catch (uploadError) {
             addToast(uploadError?.message || 'Upload failed.', 'error');
         } finally {
-            setUploading(false);
+            if (isMountedRef.current) setUploading(false);
         }
     };
 
@@ -376,21 +505,28 @@ const MyLibraryPage = ({ onNavigate }) => {
         const confirmed = window.confirm(`Delete "${item.title}" from the media library?`);
         if (!confirmed) return;
 
+        // Optimistic remove
+        if (item.type === 'music') {
+            setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
+        } else if (item.type === 'photo') {
+            setPhotos((prev) => prev.filter((entry) => entry.id !== item.id));
+        } else if (item.type === 'video') {
+            setVideos((prev) => prev.filter((entry) => entry.id !== item.id));
+        }
+
         try {
             if (item.type === 'music') {
                 await apiService.deleteMusicLibraryItem(item.id);
-                setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
             } else if (item.type === 'photo') {
                 await apiService.deletePhotoLibraryItem(item.id);
-                setPhotos((prev) => prev.filter((entry) => entry.id !== item.id));
             } else if (item.type === 'video') {
                 await apiService.deleteVideoLibraryItem(item.id);
-                setVideos((prev) => prev.filter((entry) => entry.id !== item.id));
             }
-
             addToast('Media removed.', 'success');
         } catch (deleteError) {
             addToast(deleteError?.message || 'Failed to delete media.', 'error');
+            // ✅ FIX: re-sync so the UI matches the server after a failed delete.
+            await loadLibrary({ silent: true });
         }
     };
 
@@ -406,76 +542,143 @@ const MyLibraryPage = ({ onNavigate }) => {
         }
     };
 
-    const renderedItems = filteredItems.map((item) => {
-        return (
-            <article
-                key={`${item.type}-${item.id}`}
-                style={{
-                    ...cardStyle,
-                    cursor: 'pointer',
-                    outline: selectedItem?.id === item.id && selectedItem?.type === item.type ? '2px solid rgba(59,130,246,0.8)' : 'none'
-                }}
-                onDoubleClick={() => setSelectedItem(item)}
-                title="Double-click to render this file"
-            >
-                <div style={thumbStyle}>
+    const renderedItems = filteredItems.map((item) => (
+        <article
+            key={`${item.type}-${item.id}`}
+            style={{
+                ...cardStyle,
+                cursor: 'pointer',
+                outline:
+                    selectedItem?.id === item.id && selectedItem?.type === item.type
+                        ? '2px solid rgba(59,130,246,0.8)'
+                        : 'none'
+            }}
+            onDoubleClick={() => setSelectedItem(item)}
+            title="Double-click to render this file"
+        >
+            <div style={thumbStyle}>
+                {item.type === 'photo' && item.mediaUrl ? (
+                    <img
+                        src={item.mediaUrl}
+                        alt={item.title}
+                        style={mediaPreviewStyle}
+                        loading="lazy"
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                        }}
+                    />
+                ) : (
                     <div style={iconPlaceholderStyle}>
-                        {item.type === 'music' ? <FiMusic /> : item.type === 'photo' ? <FiImage /> : <FiVideo />}
+                        {item.type === 'music' ? (
+                            <FiMusic />
+                        ) : item.type === 'photo' ? (
+                            <FiImage />
+                        ) : (
+                            <FiVideo />
+                        )}
                     </div>
+                )}
+            </div>
+
+            <div style={bodyStyle}>
+                <div style={titleRowStyle}>
+                    <strong style={titleStyle}>{item.fileName || item.title}</strong>
+                    <span style={pillStyle}>
+                        {item.type === 'music' ? 'music-library' : item.type}
+                    </span>
+                </div>
+                {item.title && item.title !== item.fileName ? (
+                    <div style={mutedStyle}>{item.title}</div>
+                ) : null}
+                {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
+                {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
+                {item.description ? (
+                    <div style={descriptionStyle}>{item.description}</div>
+                ) : null}
+
+                <div style={metaGridStyle}>
+                    <span>
+                        <FiFolder style={metaIconStyle} />{' '}
+                        {item.relativePath || 'Spaces managed'}
+                    </span>
+                    <span>
+                        <FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}
+                    </span>
+                    <span>
+                        <FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}
+                    </span>
+                    <span>{item.fileName || 'Unknown file'}</span>
                 </div>
 
-                <div style={bodyStyle}>
-                    <div style={titleRowStyle}>
-                        <strong style={titleStyle}>{item.fileName || item.title}</strong>
-                        <span style={pillStyle}>{item.type === 'music' ? 'music-library' : item.type}</span>
-                    </div>
-                    {item.title && item.title !== item.fileName ? <div style={mutedStyle}>{item.title}</div> : null}
-                    {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
-                    {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
-                    {item.description ? <div style={descriptionStyle}>{item.description}</div> : null}
+                <div style={actionsStyle}>
+                    <button
+                        type="button"
+                        style={secondaryButtonStyle}
+                        onClick={() =>
+                            item.mediaUrl &&
+                            window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')
+                        }
+                        disabled={!item.mediaUrl}
+                    >
+                        <FiExternalLink /> Open
+                    </button>
 
-                    <div style={metaGridStyle}>
-                        <span><FiFolder style={metaIconStyle} /> {item.relativePath || 'Spaces managed'}</span>
-                        <span><FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}</span>
-                        <span><FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}</span>
-                        <span>{item.fileName || 'Unknown file'}</span>
-                    </div>
+                    <button
+                        type="button"
+                        style={secondaryButtonStyle}
+                        onClick={() => handleCopy(item.mediaUrl)}
+                        disabled={!item.mediaUrl}
+                    >
+                        <FiCopy /> Copy URL
+                    </button>
 
-                    <div style={actionsStyle}>
-                        <button type="button" style={secondaryButtonStyle} onClick={() => window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')}>
-                            <FiExternalLink /> Open
-                        </button>
-
-                        <button type="button" style={secondaryButtonStyle} onClick={() => handleCopy(item.mediaUrl)}>
-                            <FiCopy /> Copy URL
-                        </button>
-
-                        <button type="button" style={dangerButtonStyle} onClick={() => handleDelete(item)}>
-                            <FiTrash2 /> Delete
-                        </button>
-                    </div>
+                    <button
+                        type="button"
+                        style={dangerButtonStyle}
+                        onClick={() => handleDelete(item)}
+                    >
+                        <FiTrash2 /> Delete
+                    </button>
                 </div>
-            </article>
-        );
-    });
+            </div>
+        </article>
+    ));
 
     return (
         <div style={pageStyle}>
             <section style={heroStyle}>
                 <div>
-                    <div style={eyebrowStyle}>Media Library · DigitalOcean Spaces + metadata</div>
+                    <div style={eyebrowStyle}>
+                        Media Library · DigitalOcean Spaces + metadata
+                    </div>
                     <h1 style={headingStyle}>Media Library</h1>
                     <p style={subheadingStyle}>
-                        Upload once, store in Spaces, and organize everything through metadata instead of scanning buckets.
+                        Upload once, store in Spaces, and organize everything through metadata
+                        instead of scanning buckets.
                     </p>
                 </div>
 
                 <div style={summaryGridStyle}>
-                    <div style={summaryCardStyle}><strong>{stats.total}</strong><span>Total files</span></div>
-                    <div style={summaryCardStyle}><strong>{stats.music}</strong><span>Music</span></div>
-                    <div style={summaryCardStyle}><strong>{stats.photo}</strong><span>Photos</span></div>
-                    <div style={summaryCardStyle}><strong>{stats.video}</strong><span>Videos</span></div>
-                    <div style={summaryCardStyle}><strong>{formatBytes(stats.totalSize)}</strong><span>Total size</span></div>
+                    <div style={summaryCardStyle}>
+                        <strong>{stats.total}</strong>
+                        <span>Total files</span>
+                    </div>
+                    <div style={summaryCardStyle}>
+                        <strong>{stats.music}</strong>
+                        <span>Music</span>
+                    </div>
+                    <div style={summaryCardStyle}>
+                        <strong>{stats.photo}</strong>
+                        <span>Photos</span>
+                    </div>
+                    <div style={summaryCardStyle}>
+                        <strong>{stats.video}</strong>
+                        <span>Videos</span>
+                    </div>
+                    <div style={summaryCardStyle}>
+                        <strong>{formatBytes(stats.totalSize)}</strong>
+                        <span>Total size</span>
+                    </div>
                 </div>
             </section>
 
@@ -488,7 +691,11 @@ const MyLibraryPage = ({ onNavigate }) => {
                     <form onSubmit={handleUpload} style={formStyle}>
                         <label style={fieldStyle}>
                             Type
-                            <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} style={inputStyle}>
+                            <select
+                                value={uploadType}
+                                onChange={(e) => setUploadType(e.target.value)}
+                                style={inputStyle}
+                            >
                                 <option value="music">Music</option>
                                 <option value="photo">Photo</option>
                                 <option value="video">Video</option>
@@ -517,29 +724,74 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <label style={fieldStyle}>
                             Title
-                            <input value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="File title" style={inputStyle} />
+                            <input
+                                value={uploadTitle}
+                                onChange={(e) => setUploadTitle(e.target.value)}
+                                placeholder="File title"
+                                style={inputStyle}
+                            />
                         </label>
 
                         {uploadType === 'music' ? (
                             <>
-                                <label style={fieldStyle}>Artist<input value={uploadArtist} onChange={(e) => setUploadArtist(e.target.value)} style={inputStyle} /></label>
-                                <label style={fieldStyle}>Album<input value={uploadAlbum} onChange={(e) => setUploadAlbum(e.target.value)} style={inputStyle} /></label>
-                                <label style={fieldStyle}>Genre<input value={uploadGenre} onChange={(e) => setUploadGenre(e.target.value)} style={inputStyle} /></label>
+                                <label style={fieldStyle}>
+                                    Artist
+                                    <input
+                                        value={uploadArtist}
+                                        onChange={(e) => setUploadArtist(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                </label>
+                                <label style={fieldStyle}>
+                                    Album
+                                    <input
+                                        value={uploadAlbum}
+                                        onChange={(e) => setUploadAlbum(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                </label>
+                                <label style={fieldStyle}>
+                                    Genre
+                                    <input
+                                        value={uploadGenre}
+                                        onChange={(e) => setUploadGenre(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                </label>
                             </>
                         ) : (
                             <label style={fieldStyle}>
                                 Description
-                                <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} rows={3} style={inputStyle} />
+                                <textarea
+                                    value={uploadDescription}
+                                    onChange={(e) => setUploadDescription(e.target.value)}
+                                    rows={3}
+                                    style={inputStyle}
+                                />
                             </label>
                         )}
 
-                        <button type="submit" disabled={uploading || !uploadFile} style={uploadButtonStyle}>
-                            {uploading ? <><FiRefreshCw className="spin" /> Uploading {progress}%</> : <><FiUpload /> Upload</>}
+                        <button
+                            type="submit"
+                            disabled={uploading || !uploadFile}
+                            style={uploadButtonStyle}
+                        >
+                            {uploading ? (
+                                <>
+                                    <FiRefreshCw className="spin" /> Uploading {progress}%
+                                </>
+                            ) : (
+                                <>
+                                    <FiUpload /> Upload
+                                </>
+                            )}
                         </button>
                     </form>
 
                     <div style={noteStyle}>
-                        This library is for proprietary, original music only. Upload once to Spaces, then shape your sound with the FM Radio graphic equalizer; the database tracks metadata, ownership, and URLs.
+                        This library is for proprietary, original music only. Upload once to
+                        Spaces, then shape your sound with the FM Radio graphic equalizer; the
+                        database tracks metadata, ownership, and URLs.
                     </div>
                 </aside>
 
@@ -566,14 +818,21 @@ const MyLibraryPage = ({ onNavigate }) => {
                                 placeholder="Search by title, file name, path, artist..."
                                 style={searchInputStyle}
                             />
-                            <button type="button" onClick={() => { setRefreshing(true); void loadLibrary(); }} style={refreshButtonStyle}>
+                            <button
+                                type="button"
+                                onClick={handleRefresh}
+                                style={refreshButtonStyle}
+                                disabled={refreshing}
+                            >
                                 <FiRefreshCw className={refreshing ? 'spin' : ''} />
                             </button>
                         </div>
                     </div>
 
                     {error ? (
-                        <div style={errorStyle}><FiAlertCircle /> {error}</div>
+                        <div style={errorStyle}>
+                            <FiAlertCircle /> {error}
+                        </div>
                     ) : null}
 
                     {loading ? (
@@ -594,7 +853,9 @@ const MyLibraryPage = ({ onNavigate }) => {
                             <span>Double-click a file card to render it here.</span>
                         </div>
                         <div style={previewFrameStyle}>
-                            {selectedItem ? renderPreview(selectedItem) : (
+                            {selectedItem ? (
+                                renderPreview(selectedItem)
+                            ) : (
                                 <div style={previewEmptyStyle}>
                                     <FiExternalLink size={24} />
                                     <span>No file selected yet.</span>
@@ -647,12 +908,9 @@ const renderPreview = (item) => {
     );
 };
 
-const pageStyle = {
-    display: 'grid',
-    gap: '16px',
-    padding: '16px 0 24px'
-};
+/* ---------------- styles (unchanged) ---------------- */
 
+const pageStyle = { display: 'grid', gap: '16px', padding: '16px 0 24px' };
 const heroStyle = {
     display: 'grid',
     gap: '14px',
@@ -661,33 +919,24 @@ const heroStyle = {
     borderRadius: '18px',
     background: 'linear-gradient(180deg, rgba(59,130,246,0.10), rgba(168,85,247,0.08))'
 };
-
 const eyebrowStyle = {
     fontSize: '12px',
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
     opacity: 0.75
 };
-
-const headingStyle = {
-    margin: '6px 0 0',
-    fontSize: '34px',
-    lineHeight: 1.1
-};
-
+const headingStyle = { margin: '6px 0 0', fontSize: '34px', lineHeight: 1.1 };
 const subheadingStyle = {
     margin: '8px 0 0',
     maxWidth: '780px',
     color: 'var(--light-color)',
     lineHeight: 1.6
 };
-
 const summaryGridStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
     gap: '10px'
 };
-
 const summaryCardStyle = {
     border: '1px solid var(--border-color)',
     borderRadius: '14px',
@@ -696,14 +945,12 @@ const summaryCardStyle = {
     display: 'grid',
     gap: '4px'
 };
-
 const layoutStyle = {
     display: 'grid',
     gridTemplateColumns: '320px minmax(0, 1fr)',
     gap: '16px',
     alignItems: 'start'
 };
-
 const panelStyle = {
     border: '1px solid var(--border-color)',
     borderRadius: '18px',
@@ -712,25 +959,9 @@ const panelStyle = {
     display: 'grid',
     gap: '14px'
 };
-
-const panelHeaderStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    fontSize: '16px'
-};
-
-const formStyle = {
-    display: 'grid',
-    gap: '10px'
-};
-
-const fieldStyle = {
-    display: 'grid',
-    gap: '6px',
-    fontSize: '13px'
-};
-
+const panelHeaderStyle = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px' };
+const formStyle = { display: 'grid', gap: '10px' };
+const fieldStyle = { display: 'grid', gap: '6px', fontSize: '13px' };
 const inputStyle = {
     width: '100%',
     boxSizing: 'border-box',
@@ -740,7 +971,6 @@ const inputStyle = {
     color: 'var(--text-color)',
     padding: '10px 12px'
 };
-
 const uploadButtonStyle = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -754,7 +984,6 @@ const uploadButtonStyle = {
     cursor: 'pointer',
     fontWeight: 700
 };
-
 const noteStyle = {
     padding: '12px',
     borderRadius: '12px',
@@ -764,24 +993,9 @@ const noteStyle = {
     fontSize: '13px',
     lineHeight: 1.5
 };
-
-const mainStyle = {
-    minWidth: 0,
-    display: 'grid',
-    gap: '14px'
-};
-
-const toolbarStyle = {
-    display: 'grid',
-    gap: '12px'
-};
-
-const tabsStyle = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px'
-};
-
+const mainStyle = { minWidth: 0, display: 'grid', gap: '14px' };
+const toolbarStyle = { display: 'grid', gap: '12px' };
+const tabsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
 const tabStyle = {
     border: '1px solid var(--border-color)',
     borderRadius: '999px',
@@ -790,14 +1004,12 @@ const tabStyle = {
     color: 'var(--text-color)',
     cursor: 'pointer'
 };
-
 const activeTabStyle = {
     ...tabStyle,
     background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
     color: '#fff',
     borderColor: 'transparent'
 };
-
 const searchWrapStyle = {
     display: 'grid',
     gridTemplateColumns: 'auto minmax(0, 1fr) auto',
@@ -808,7 +1020,6 @@ const searchWrapStyle = {
     border: '1px solid var(--border-color)',
     background: 'var(--card-bg)'
 };
-
 const searchInputStyle = {
     width: '100%',
     border: 'none',
@@ -816,7 +1027,6 @@ const searchInputStyle = {
     background: 'transparent',
     color: 'var(--text-color)'
 };
-
 const refreshButtonStyle = {
     border: 'none',
     background: 'transparent',
@@ -825,13 +1035,11 @@ const refreshButtonStyle = {
     display: 'grid',
     placeItems: 'center'
 };
-
 const gridStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
     gap: '14px'
 };
-
 const previewStyle = {
     display: 'grid',
     gap: '12px',
@@ -840,14 +1048,12 @@ const previewStyle = {
     padding: '16px',
     background: 'var(--card-bg)'
 };
-
 const previewHeaderStyle = {
     display: 'grid',
     gap: '4px',
     color: 'var(--light-color)',
     fontSize: '13px'
 };
-
 const previewFrameStyle = {
     minHeight: '180px',
     display: 'grid',
@@ -857,32 +1063,20 @@ const previewFrameStyle = {
     padding: '12px',
     background: 'rgba(255,255,255,0.02)'
 };
-
-const previewMediaStyle = {
-    maxWidth: '100%',
-    maxHeight: '360px',
-    borderRadius: '12px'
-};
-
+const previewMediaStyle = { maxWidth: '100%', maxHeight: '360px', borderRadius: '12px' };
 const previewAudioWrapStyle = {
     width: '100%',
     display: 'grid',
     gap: '10px',
     justifyItems: 'center'
 };
-
-const previewAudioStyle = {
-    width: '100%',
-    maxWidth: '520px'
-};
-
+const previewAudioStyle = { width: '100%', maxWidth: '520px' };
 const previewCaptionStyle = {
     display: 'grid',
     gap: '4px',
     textAlign: 'center',
     color: 'var(--light-color)'
 };
-
 const previewEmptyStyle = {
     display: 'grid',
     placeItems: 'center',
@@ -890,7 +1084,6 @@ const previewEmptyStyle = {
     textAlign: 'center',
     color: 'var(--light-color)'
 };
-
 const cardStyle = {
     border: '1px solid var(--border-color)',
     borderRadius: '18px',
@@ -898,7 +1091,6 @@ const cardStyle = {
     overflow: 'hidden',
     display: 'grid'
 };
-
 const thumbStyle = {
     aspectRatio: '16 / 9',
     background: 'rgba(255,255,255,0.03)',
@@ -906,13 +1098,7 @@ const thumbStyle = {
     placeItems: 'center',
     overflow: 'hidden'
 };
-
-const mediaPreviewStyle = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover'
-};
-
+const mediaPreviewStyle = { width: '100%', height: '100%', objectFit: 'cover' };
 const iconPlaceholderStyle = {
     width: '100%',
     height: '100%',
@@ -921,25 +1107,14 @@ const iconPlaceholderStyle = {
     fontSize: '42px',
     color: 'rgba(255,255,255,0.35)'
 };
-
-const bodyStyle = {
-    display: 'grid',
-    gap: '10px',
-    padding: '14px'
-};
-
+const bodyStyle = { display: 'grid', gap: '10px', padding: '14px' };
 const titleRowStyle = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '10px'
 };
-
-const titleStyle = {
-    fontSize: '16px',
-    lineHeight: 1.3
-};
-
+const titleStyle = { fontSize: '16px', lineHeight: 1.3 };
 const pillStyle = {
     padding: '4px 8px',
     borderRadius: '999px',
@@ -948,18 +1123,8 @@ const pillStyle = {
     fontSize: '12px',
     textTransform: 'uppercase'
 };
-
-const mutedStyle = {
-    color: 'var(--light-color)',
-    fontSize: '13px'
-};
-
-const descriptionStyle = {
-    color: 'var(--light-color)',
-    fontSize: '13px',
-    lineHeight: 1.5
-};
-
+const mutedStyle = { color: 'var(--light-color)', fontSize: '13px' };
+const descriptionStyle = { color: 'var(--light-color)', fontSize: '13px', lineHeight: 1.5 };
 const metaGridStyle = {
     display: 'grid',
     gridTemplateColumns: '1fr',
@@ -967,18 +1132,8 @@ const metaGridStyle = {
     fontSize: '12px',
     color: 'var(--light-color)'
 };
-
-const metaIconStyle = {
-    verticalAlign: 'middle',
-    marginRight: '4px'
-};
-
-const actionsStyle = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px'
-};
-
+const metaIconStyle = { verticalAlign: 'middle', marginRight: '4px' };
+const actionsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
 const secondaryButtonStyle = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -990,21 +1145,12 @@ const secondaryButtonStyle = {
     color: 'var(--text-color)',
     cursor: 'pointer'
 };
-
-const primaryButtonStyle = {
-    ...secondaryButtonStyle,
-    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
-    color: '#fff',
-    borderColor: 'transparent'
-};
-
 const dangerButtonStyle = {
     ...secondaryButtonStyle,
     background: 'rgba(239,68,68,0.10)',
     color: '#fca5a5',
     borderColor: 'rgba(239,68,68,0.30)'
 };
-
 const errorStyle = {
     display: 'flex',
     alignItems: 'center',
@@ -1015,7 +1161,6 @@ const errorStyle = {
     border: '1px solid rgba(239,68,68,0.28)',
     color: '#fecaca'
 };
-
 const emptyStyle = {
     display: 'grid',
     placeItems: 'center',
