@@ -54,6 +54,16 @@ _recognizer_lock = threading.Lock()
 
 MODEL_DIR = Path(os.getenv("SHERPA_MODEL_DIR", "/app/models")).resolve()
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_SHERPA_MODEL_BASE_URL = (
+    "https://huggingface.co/csukuangfj/"
+    "sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main"
+)
+DEFAULT_SHERPA_MODEL_FILES = {
+    "tokens.txt": "tokens.txt",
+    "encoder-epoch-99-avg-1-chunk-16-left-64.onnx": "encoder.onnx",
+    "decoder-epoch-99-avg-1-chunk-16-left-64.onnx": "decoder.onnx",
+    "joiner-epoch-99-avg-1-chunk-16-left-64.onnx": "joiner.onnx",
+}
 
 SHERPA_TOKENS = os.getenv("SHERPA_TOKENS_PATH") or str(MODEL_DIR / "tokens.txt")
 SHERPA_ENCODER = os.getenv("SHERPA_ENCODER_PATH") or str(MODEL_DIR / "encoder.onnx")
@@ -103,19 +113,47 @@ def _download_model_archive(model_url: str, destination_dir: Path) -> None:
         log.warning("Sherpa model download failed: %s", exc)
 
 
+def _download_model_files(model_base_url: str, destination_dir: Path) -> None:
+    """Download individual Sherpa model files from a Hugging Face repo."""
+    if not model_base_url:
+        return
+
+    normalized_base = model_base_url.rstrip("/")
+    try:
+        for remote_name, local_name in DEFAULT_SHERPA_MODEL_FILES.items():
+            destination = destination_dir / local_name
+            if destination.exists():
+                continue
+
+            source_url = f"{normalized_base}/{remote_name}"
+            log.info("Downloading Sherpa model file from %s", source_url)
+            urllib.request.urlretrieve(source_url, destination)
+        log.info("Downloaded Sherpa model files to %s", destination_dir)
+    except Exception as exc:
+        log.warning("Sherpa model file download failed: %s", exc)
+
+
 def ensure_sherpa_models() -> None:
     """Resolve the model paths and optionally download a default archive if available."""
     if all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
         return
 
-    model_url = os.getenv("SHERPA_MODEL_URL")
+    model_url = os.getenv("SHERPA_MODEL_URL", "").strip()
     if model_url:
         _download_model_archive(model_url, MODEL_DIR)
+
+    if all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
+        return
+
+    model_base_url = os.getenv("SHERPA_MODEL_BASE_URL", DEFAULT_SHERPA_MODEL_BASE_URL).strip()
+    if model_base_url:
+        _download_model_files(model_base_url, MODEL_DIR)
 
     if not all(os.path.exists(p) for p in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]):
         log.warning(
             "Sherpa model files are missing. STT will stay degraded until model files are downloaded. "
-            "Set SHERPA_MODEL_URL, SHERPA_TOKENS_PATH, SHERPA_ENCODER_PATH, SHERPA_DECODER_PATH, and SHERPA_JOINER_PATH."
+            "Set SHERPA_MODEL_URL or SHERPA_MODEL_BASE_URL, SHERPA_TOKENS_PATH, SHERPA_ENCODER_PATH, "
+            "SHERPA_DECODER_PATH, and SHERPA_JOINER_PATH."
         )
 
 
