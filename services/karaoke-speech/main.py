@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import logging
 import math
@@ -266,6 +267,29 @@ def _get_stt_backend() -> tuple[str, object | None]:
         return "faster-whisper", whisper_model
 
     return "unavailable", None
+
+
+def _describe_stt_health() -> tuple[str, str]:
+    if _recognizer is not None:
+        return "sherpa-onnx", "ready"
+
+    sherpa_installed = importlib.util.find_spec("sherpa_onnx") is not None
+    sherpa_models_ready = all(
+        os.path.exists(path) for path in [SHERPA_TOKENS, SHERPA_ENCODER, SHERPA_DECODER, SHERPA_JOINER]
+    )
+    if sherpa_installed and sherpa_models_ready:
+        return "sherpa-onnx", "models-ready"
+
+    if _faster_whisper_model is not None:
+        return "faster-whisper", "ready"
+
+    if importlib.util.find_spec("faster_whisper") is not None:
+        return "faster-whisper", "lazy"
+
+    if sherpa_installed:
+        return "sherpa-onnx", "models-missing"
+
+    return "unavailable", "not-installed"
 
 
 def _estimate_confidence_from_avg_logprob(avg_logprob: float | None) -> float:
@@ -610,12 +634,13 @@ def score_performance(body: ScoreRequest):
 
 @app.get("/health")
 def health():
-    engine_name, engine = _get_stt_backend()
+    engine_name, engine_state = _describe_stt_health()
     return {
         "status": "ok",
         "service": "wiseravenshare-karaoke-speech",
         "version": "1.0.0",
-        "stt_engine": engine_name if engine is not None else "unavailable",
+        "stt_engine": engine_name,
+        "stt_engine_state": engine_state,
         "stt_fallback_model": FASTER_WHISPER_MODEL_NAME,
         "tts_engine": "pyttsx3",
     }
