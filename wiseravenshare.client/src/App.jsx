@@ -610,7 +610,7 @@ const App = () => {
             case 'music-rights-studio':
                 return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
             case 'music-player':
-                return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="cassette" />;
+                return <MyLibraryPage onNavigate={setCurrentPage} />;
             case 'fm-tuner':
                 return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="radio" />;
             case 'radio-creator':

@@ -30,7 +30,8 @@ import '../Styles/FMRadioPage.css';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FM_LOW  = 88.0;
 const FM_HIGH = 108.0;
-const MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
+const MUSIC_LIBRARY_CACHE_KEY = 'wr_music_library_cache';
+const LEGACY_MUSIC_LIBRARY_CACHE_KEY = 'wiseMusic_library';
 const INSTRUMENT_HANDOFF_KEY = 'wr_instrument_handoff';
 const TRACK_PLAYER_HANDOFF_KEY = 'wr_track_player_handoff';
 
@@ -373,10 +374,10 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     persistentTrackIndex = Number.isFinite(trackIndex) ? trackIndex : 0;
   }, [currentTrack, trackIndex]);
 
-  // Pull durable tracks that Music Player has already cached so FM cassette/radio creator
+  // Pull durable tracks that the music library has already cached so FM cassette/radio creator
   // can reuse the original uploaded media list instead of appearing empty.
   useEffect(() => {
-    const persisted = lsGet(MUSIC_LIBRARY_CACHE_KEY, []);
+    const persisted = lsGet(MUSIC_LIBRARY_CACHE_KEY, lsGet(LEGACY_MUSIC_LIBRARY_CACHE_KEY, []));
     if (!Array.isArray(persisted) || persisted.length === 0) return;
 
     const normalized = persisted
@@ -384,6 +385,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
 
     if (!normalized.length) return;
+    lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
     setLibrary((prev) => {
       if (Array.isArray(prev) && prev.length > 0) return prev;
       return normalized;
@@ -1193,6 +1195,15 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       setTab('cassette');
       loadTrack(targetTrack, Math.max(0, targetIndex), true);
+
+      // wise-Tracks handoff may request a graphic-equalizer preset for
+      // proprietary/original music. Apply it once the EQ chain is built.
+      const requestedPreset = String(parsed?.enhancementPreset || '').trim();
+      if (requestedPreset && Object.prototype.hasOwnProperty.call(EQ_PRESETS, requestedPreset)) {
+        setEqPreset(requestedPreset);
+        setEqGains([...EQ_PRESETS[requestedPreset]]);
+      }
+
       localStorage.removeItem(TRACK_PLAYER_HANDOFF_KEY);
     } catch {
       localStorage.removeItem(TRACK_PLAYER_HANDOFF_KEY);
@@ -1873,7 +1884,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
         <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
-        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 MUSIC PLAYER</button>
+        <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 MUSIC LIBRARY</button>
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
@@ -1881,7 +1892,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
-          <div className="wr-deck-label">◄◄ MUSIC PLAYER · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
+          <div className="wr-deck-label">◄◄ MUSIC LIBRARY · MP3 · MP4 · FLAC · WAV · OGG · M4A · AAC · OPUS · WMA ►►</div>
 
           <div className="wr-viz-wrap">
             <canvas ref={canvasRef} className="wr-canvas" width={800} height={72} />
@@ -2125,7 +2136,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
           <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
-          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Music Player</button>
+          <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Music Library</button>
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
         </div>
       </div>
@@ -2383,7 +2394,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             </button>
             <button className="mod-ctrl" onClick={stop} title="Stop">⏹</button>
             <button className="mod-ctrl sm" onClick={skipNext} disabled={!library.length} title="Next">⏭</button>
-            <button className="mod-pill" onClick={() => setTab('cassette')} title="Open music player">Open Player</button>
+            <button className="mod-pill" onClick={() => setTab('cassette')} title="Open music library">Open Library</button>
           </div>
         </div>
       )}
