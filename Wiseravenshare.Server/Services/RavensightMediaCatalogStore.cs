@@ -509,6 +509,44 @@ ORDER BY saved_at_utc DESC;";
         return rows;
     }
 
+    public async Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default)
+    {
+        await EnsureSchemaAsync(cancellationToken);
+
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var sql = $@"
+SELECT 1
+FROM {AssetsTable}
+WHERE user_id = @user_id
+  AND deleted_at_utc IS NULL
+  AND (
+      relative_path = @relative_path
+      OR relative_path ILIKE '%' || @relative_path
+      OR @relative_path ILIKE '%' || relative_path
+  )
+LIMIT 1;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("relative_path", normalized);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
+    }
+
     private static string NormalizeSaveRoot(string? value)
     {
         var normalized = string.Concat(value ?? "auto").Trim().ToLowerInvariant();

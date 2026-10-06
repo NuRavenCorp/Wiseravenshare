@@ -25,6 +25,8 @@ public interface IMusicLibraryStore
         Guid userId,
         string fileName,
         CancellationToken cancellationToken = default);
+
+    Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default);
 }
 
 public sealed class MusicLibraryDeleteResult
@@ -304,6 +306,43 @@ WHERE owner_user_id = @user_id
         await update.ExecuteNonQueryAsync(cancellationToken);
 
         return results;
+    }
+
+    public async Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+SELECT 1
+FROM app_data.bucket_objects
+WHERE owner_user_id = @user_id
+  AND deleted_at IS NULL
+  AND upload_status = 'uploaded'
+  AND (
+      object_key = @object_key
+      OR object_key ILIKE '%' || @object_key
+      OR @object_key ILIKE '%' || object_key
+  )
+LIMIT 1;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("object_key", normalized);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
     }
 
     private async Task InsertBucketObjectAsync(

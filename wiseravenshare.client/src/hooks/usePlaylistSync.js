@@ -1,0 +1,60 @@
+import { useEffect, useRef } from 'react';
+import { fetchRemotePlaylists, pushRemotePlaylists, pushResumePosition } from '../Services/playlistsApi.js';
+import { useDebouncedEffect } from './useDebouncedEffect.js';
+
+export function usePlaylistSync(playlistsApi, { enabled = true, mergeStrategy = 'union' } = {}) {
+  const hydrated = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || hydrated.current) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchRemotePlaylists();
+        if (cancelled) return;
+
+        if (remote.length === 0) {
+          hydrated.current = true;
+          return;
+        }
+
+        if (mergeStrategy === 'union') {
+          const localNames = new Set(playlistsApi.playlists.map((playlist) => playlist.name));
+          const toAdd = remote.filter((playlist) => !localNames.has(playlist.name));
+          toAdd.forEach((playlist) => {
+            const id = playlistsApi.createPlaylist(playlist.name);
+            playlistsApi.addManyToPlaylist(id, playlist.items || []);
+          });
+        } else if (playlistsApi.playlists.length === 0) {
+          remote.forEach((playlist) => {
+            const id = playlistsApi.createPlaylist(playlist.name);
+            playlistsApi.addManyToPlaylist(id, playlist.items || []);
+          });
+        }
+
+        hydrated.current = true;
+      } catch (error) {
+        console.warn('[playlistSync] pull failed', error?.message);
+        hydrated.current = true;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, mergeStrategy]);
+
+  useDebouncedEffect(() => {
+    if (!enabled || !hydrated.current) return;
+    pushRemotePlaylists(playlistsApi.playlists);
+  }, [enabled, playlistsApi.playlists], 900);
+
+  useDebouncedEffect(() => {
+    if (!enabled || !hydrated.current) return;
+    Object.entries(playlistsApi.playback.positions || {}).forEach(([mediaId, seconds]) => {
+      pushResumePosition(mediaId, seconds);
+    });
+  }, [enabled, playlistsApi.playback.positions], 1500);
+}

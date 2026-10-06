@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
+import { getAuthToken } from '../Services/authStorage.js';
 
 export function useAssistant(conversationId) {
   const [messages, setMessages] = useState([]);
@@ -8,7 +9,7 @@ export function useAssistant(conversationId) {
   const connRef = useRef(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('accessToken') || '';
+    const token = getAuthToken() || '';
     const wsUrl = import.meta.env.VITE_WS_URL || 'wss://api.wiseravenshare.com';
     
     const conn = new signalR.HubConnectionBuilder()

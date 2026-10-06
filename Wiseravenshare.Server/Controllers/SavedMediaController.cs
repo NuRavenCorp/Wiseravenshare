@@ -33,8 +33,13 @@ namespace Wiseravenshare.Server.Controllers
         /// </summary>
         private Guid GetUserId()
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            var userIdValue =
+                User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst("sub")?.Value
+                ?? User.FindFirst("id")?.Value
+                ?? User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrWhiteSpace(userIdValue) || !Guid.TryParse(userIdValue, out var userId))
                 throw new UnauthorizedAccessException("Invalid or missing user ID in token");
             return userId;
         }
@@ -132,6 +137,11 @@ namespace Wiseravenshare.Server.Controllers
                 var result = await _savedMediaService.GetUserLibraryAsync(userId, page, pageSize, mediaType, onlyVisible);
                 return Ok(result);
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to media library");
+                return Unauthorized(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving media library");
@@ -161,6 +171,11 @@ namespace Wiseravenshare.Server.Controllers
                 var result = await _savedMediaService.GetHiddenMediaAsync(userId, page, pageSize);
                 return Ok(result);
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to hidden media");
+                return Unauthorized(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving hidden media");
@@ -189,6 +204,11 @@ namespace Wiseravenshare.Server.Controllers
                 var userId = GetUserId();
                 var result = await _savedMediaService.GetVisibleMediaAsync(userId, page, pageSize);
                 return Ok(result);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to visible media");
+                return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -224,6 +244,11 @@ namespace Wiseravenshare.Server.Controllers
                 var result = await _savedMediaService.GetTaggedMediaAsync(userId, tag, page, pageSize);
                 return Ok(result);
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to tagged media");
+                return Unauthorized(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving tagged media");
@@ -252,6 +277,11 @@ namespace Wiseravenshare.Server.Controllers
                 var userId = GetUserId();
                 var result = await _savedMediaService.GetScheduledMediaAsync(userId, page, pageSize);
                 return Ok(result);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to scheduled media");
+                return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -425,6 +455,11 @@ namespace Wiseravenshare.Server.Controllers
                 var userId = GetUserId();
                 var result = await _savedMediaService.GetLibraryStatsAsync(userId);
                 return Ok(result);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to media stats");
+                return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {

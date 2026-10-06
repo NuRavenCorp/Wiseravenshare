@@ -1829,6 +1829,7 @@ builder.Services.AddScoped<IYouTubeService, YouTubeService>();
 builder.Services.AddScoped<IVideoService, VideoService>();
 builder.Services.AddScoped<IRavensightMediaPathService, RavensightMediaPathService>();
 builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageService>();
+builder.Services.AddSingleton<IMediaBlobSignatureService, MediaBlobSignatureService>();
 builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
 builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
 builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
@@ -2699,6 +2700,5 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
-
 
 

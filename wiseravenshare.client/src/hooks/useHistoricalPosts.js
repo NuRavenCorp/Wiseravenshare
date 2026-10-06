@@ -1,6 +1,7 @@
 // wiseravenshare.client/src/hooks/useHistoricalPosts.js
 import { useState, useCallback } from 'react';
 import axios from 'axios';
+import { getAuthToken } from '../Services/authStorage.js';
 
 const API_BASE_URL = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') || '/api';
 
@@ -15,11 +16,12 @@ export const useHistoricalPosts = () => {
     setLoading(true);
     setError(null);
     try {
+      const token = getAuthToken();
       const config = {
         method,
         url: `${API_BASE_URL}/HistoricalPosts${endpoint}`,
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'Content-Type': 'application/json'
         }
       };

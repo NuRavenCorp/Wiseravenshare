@@ -908,28 +908,46 @@ const renderPreview = (item) => {
     );
 };
 
-/* ---------------- styles (unchanged) ---------------- */
+const DARK_BG = '#050816';
+const DARK_PANEL = '#0b1220';
+const DARK_PANEL_ALT = '#101a2d';
+const DARK_PANEL_ELEVATED = '#14213b';
+const DARK_BORDER = 'rgba(148, 163, 184, 0.22)';
+const DARK_BORDER_STRONG = 'rgba(96, 165, 250, 0.38)';
+const DARK_TEXT = '#e5eefb';
+const DARK_MUTED = '#94a3b8';
+const DARK_ACCENT = '#60a5fa';
+const DARK_ACCENT_ALT = '#a855f7';
 
-const pageStyle = { display: 'grid', gap: '16px', padding: '16px 0 24px' };
+const pageStyle = {
+    display: 'grid',
+    gap: '16px',
+    padding: '16px 0 24px',
+    color: DARK_TEXT
+};
 const heroStyle = {
     display: 'grid',
     gap: '14px',
     padding: '20px',
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER_STRONG}`,
     borderRadius: '18px',
-    background: 'linear-gradient(180deg, rgba(59,130,246,0.10), rgba(168,85,247,0.08))'
+    background: `linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(17, 24, 39, 0.94)),
+        radial-gradient(circle at top right, rgba(96, 165, 250, 0.20), transparent 40%),
+        radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.18), transparent 38%)`,
+    boxShadow: '0 18px 50px rgba(2, 6, 23, 0.45)'
 };
 const eyebrowStyle = {
     fontSize: '12px',
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
-    opacity: 0.75
+    color: DARK_ACCENT,
+    opacity: 0.92
 };
-const headingStyle = { margin: '6px 0 0', fontSize: '34px', lineHeight: 1.1 };
+const headingStyle = { margin: '6px 0 0', fontSize: '34px', lineHeight: 1.1, color: '#f8fbff' };
 const subheadingStyle = {
     margin: '8px 0 0',
     maxWidth: '780px',
-    color: 'var(--light-color)',
+    color: DARK_MUTED,
     lineHeight: 1.6
 };
 const summaryGridStyle = {
@@ -938,12 +956,14 @@ const summaryGridStyle = {
     gap: '10px'
 };
 const summaryCardStyle = {
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '14px',
     padding: '12px',
-    background: 'var(--card-bg)',
+    background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(9, 14, 26, 0.96))',
     display: 'grid',
-    gap: '4px'
+    gap: '4px',
+    color: DARK_TEXT,
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)'
 };
 const layoutStyle = {
     display: 'grid',
@@ -952,23 +972,25 @@ const layoutStyle = {
     alignItems: 'start'
 };
 const panelStyle = {
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '18px',
     padding: '16px',
-    background: 'var(--card-bg)',
+    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
     display: 'grid',
-    gap: '14px'
+    gap: '14px',
+    color: DARK_TEXT,
+    boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)'
 };
 const panelHeaderStyle = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px' };
 const formStyle = { display: 'grid', gap: '10px' };
-const fieldStyle = { display: 'grid', gap: '6px', fontSize: '13px' };
+const fieldStyle = { display: 'grid', gap: '6px', fontSize: '13px', color: DARK_MUTED };
 const inputStyle = {
     width: '100%',
     boxSizing: 'border-box',
     borderRadius: '10px',
-    border: '1px solid var(--border-color)',
-    background: 'rgba(255,255,255,0.03)',
-    color: 'var(--text-color)',
+    border: `1px solid ${DARK_BORDER}`,
+    background: 'rgba(15, 23, 42, 0.92)',
+    color: DARK_TEXT,
     padding: '10px 12px'
 };
 const uploadButtonStyle = {
@@ -987,9 +1009,9 @@ const uploadButtonStyle = {
 const noteStyle = {
     padding: '12px',
     borderRadius: '12px',
-    border: '1px solid var(--border-color)',
-    background: 'rgba(59,130,246,0.08)',
-    color: 'var(--light-color)',
+    border: `1px solid ${DARK_BORDER}`,
+    background: 'rgba(37, 99, 235, 0.14)',
+    color: DARK_MUTED,
     fontSize: '13px',
     lineHeight: 1.5
 };
@@ -997,16 +1019,16 @@ const mainStyle = { minWidth: 0, display: 'grid', gap: '14px' };
 const toolbarStyle = { display: 'grid', gap: '12px' };
 const tabsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
 const tabStyle = {
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '999px',
     padding: '8px 14px',
-    background: 'rgba(255,255,255,0.03)',
-    color: 'var(--text-color)',
+    background: 'rgba(15, 23, 42, 0.88)',
+    color: DARK_TEXT,
     cursor: 'pointer'
 };
 const activeTabStyle = {
     ...tabStyle,
-    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+    background: `linear-gradient(135deg, ${DARK_ACCENT}, ${DARK_ACCENT_ALT})`,
     color: '#fff',
     borderColor: 'transparent'
 };
@@ -1017,20 +1039,20 @@ const searchWrapStyle = {
     gap: '10px',
     padding: '10px 12px',
     borderRadius: '14px',
-    border: '1px solid var(--border-color)',
-    background: 'var(--card-bg)'
+    border: `1px solid ${DARK_BORDER}`,
+    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`
 };
 const searchInputStyle = {
     width: '100%',
     border: 'none',
     outline: 'none',
     background: 'transparent',
-    color: 'var(--text-color)'
+    color: DARK_TEXT
 };
 const refreshButtonStyle = {
     border: 'none',
     background: 'transparent',
-    color: 'var(--text-color)',
+    color: DARK_TEXT,
     cursor: 'pointer',
     display: 'grid',
     placeItems: 'center'
@@ -1043,25 +1065,26 @@ const gridStyle = {
 const previewStyle = {
     display: 'grid',
     gap: '12px',
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '18px',
     padding: '16px',
-    background: 'var(--card-bg)'
+    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
+    boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)'
 };
 const previewHeaderStyle = {
     display: 'grid',
     gap: '4px',
-    color: 'var(--light-color)',
+    color: DARK_MUTED,
     fontSize: '13px'
 };
 const previewFrameStyle = {
     minHeight: '180px',
     display: 'grid',
     placeItems: 'center',
-    border: '1px dashed var(--border-color)',
+    border: `1px dashed ${DARK_BORDER}`,
     borderRadius: '16px',
     padding: '12px',
-    background: 'rgba(255,255,255,0.02)'
+    background: 'rgba(5, 8, 22, 0.78)'
 };
 const previewMediaStyle = { maxWidth: '100%', maxHeight: '360px', borderRadius: '12px' };
 const previewAudioWrapStyle = {
@@ -1075,25 +1098,27 @@ const previewCaptionStyle = {
     display: 'grid',
     gap: '4px',
     textAlign: 'center',
-    color: 'var(--light-color)'
+    color: DARK_MUTED
 };
 const previewEmptyStyle = {
     display: 'grid',
     placeItems: 'center',
     gap: '10px',
     textAlign: 'center',
-    color: 'var(--light-color)'
+    color: DARK_MUTED
 };
 const cardStyle = {
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '18px',
-    background: 'var(--card-bg)',
+    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
     overflow: 'hidden',
-    display: 'grid'
+    display: 'grid',
+    color: DARK_TEXT,
+    boxShadow: '0 10px 24px rgba(2, 6, 23, 0.26)'
 };
 const thumbStyle = {
     aspectRatio: '16 / 9',
-    background: 'rgba(255,255,255,0.03)',
+    background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(5, 8, 22, 0.98))',
     display: 'grid',
     placeItems: 'center',
     overflow: 'hidden'
@@ -1105,7 +1130,7 @@ const iconPlaceholderStyle = {
     display: 'grid',
     placeItems: 'center',
     fontSize: '42px',
-    color: 'rgba(255,255,255,0.35)'
+    color: 'rgba(148, 163, 184, 0.45)'
 };
 const bodyStyle = { display: 'grid', gap: '10px', padding: '14px' };
 const titleRowStyle = {
@@ -1118,19 +1143,19 @@ const titleStyle = { fontSize: '16px', lineHeight: 1.3 };
 const pillStyle = {
     padding: '4px 8px',
     borderRadius: '999px',
-    background: 'rgba(59,130,246,0.12)',
-    color: 'var(--light-color)',
+    background: 'rgba(59, 130, 246, 0.16)',
+    color: '#bfdbfe',
     fontSize: '12px',
     textTransform: 'uppercase'
 };
-const mutedStyle = { color: 'var(--light-color)', fontSize: '13px' };
-const descriptionStyle = { color: 'var(--light-color)', fontSize: '13px', lineHeight: 1.5 };
+const mutedStyle = { color: DARK_MUTED, fontSize: '13px' };
+const descriptionStyle = { color: DARK_MUTED, fontSize: '13px', lineHeight: 1.5 };
 const metaGridStyle = {
     display: 'grid',
     gridTemplateColumns: '1fr',
     gap: '4px',
     fontSize: '12px',
-    color: 'var(--light-color)'
+    color: DARK_MUTED
 };
 const metaIconStyle = { verticalAlign: 'middle', marginRight: '4px' };
 const actionsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
@@ -1138,11 +1163,11 @@ const secondaryButtonStyle = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '6px',
-    border: '1px solid var(--border-color)',
+    border: `1px solid ${DARK_BORDER}`,
     borderRadius: '10px',
     padding: '8px 10px',
-    background: 'rgba(255,255,255,0.03)',
-    color: 'var(--text-color)',
+    background: 'rgba(15, 23, 42, 0.92)',
+    color: DARK_TEXT,
     cursor: 'pointer'
 };
 const dangerButtonStyle = {
@@ -1166,10 +1191,10 @@ const emptyStyle = {
     placeItems: 'center',
     gap: '8px',
     padding: '32px',
-    border: '1px dashed var(--border-color)',
+    border: `1px dashed ${DARK_BORDER}`,
     borderRadius: '18px',
-    color: 'var(--light-color)',
-    background: 'rgba(255,255,255,0.02)'
+    color: DARK_MUTED,
+    background: 'rgba(5, 8, 22, 0.78)'
 };
 
 export default MyLibraryPage;

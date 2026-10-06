@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './PodcastCheckoutPage.css';
+import { getAuthToken } from '../Services/authStorage.js';
 
 const PLAN_PAYMENT_LINKS = {
   growth_suite: {
@@ -154,12 +155,13 @@ const PodcastCheckoutPage = ({ onNavigate, initialPlan }) => {
       const priceId = billingCycle === 'annual' 
         ? plan.annualPriceId
         : plan.monthlyPriceId;
+      const token = getAuthToken();
 
       const response = await fetch('/api/payments/checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           plan: selectedPlan,

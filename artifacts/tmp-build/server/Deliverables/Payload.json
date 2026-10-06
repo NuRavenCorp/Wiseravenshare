@@ -1,0 +1,83 @@
+{
+  "content_id": "cnt_9f3a2b",
+  "creator_id": "usr_raven007",
+  "stream_id": "strm_2026_09_23_001",
+  "timestamp_utc": "2026-09-23T14:32:11Z",
+  "engine_version": "autoscreen-1.4.2",
+  "points": [
+    {
+      "point_id": 1,
+      "point_name": "Identity & Authorization",
+      "result": "PASS",
+      "confidence": 1.0
+    },
+    {
+      "point_id": 2,
+      "point_name": "Malware & File Integrity",
+      "result": "PASS",
+      "confidence": 1.0
+    },
+    {
+      "point_id": 3,
+      "point_name": "Intellectual Property / DMCA",
+      "result": "FLAG",
+      "confidence": 0.62,
+      "evidence": [ "audio_match:track_88213" ],
+      "notes": "Possible licensed track in background."
+    },
+    {
+      "point_id": 4,
+      "point_name": "Content Safety (Zero-Tolerance)",
+      "result": "PASS",
+      "confidence": 0.99
+    },
+    {
+      "point_id": 5,
+      "point_name": "Hate Speech & Harassment",
+      "result": "PASS",
+      "confidence": 0.97
+    },
+    {
+      "point_id": 6,
+      "point_name": "Age-Rating & Labeling",
+      "result": "PASS",
+      "confidence": 0.95
+    },
+    {
+      "point_id": 7,
+      "point_name": "Truth Scoring & Verification",
+      "result": "FLAG",
+      "confidence": 0.71,
+      "notes": "Claim about [topic] lacks cited source."
+    },
+    {
+      "point_id": 8,
+      "point_name": "Sponsorship & Disclosure",
+      "result": "PASS",
+      "confidence": 0.9
+    },
+    {
+      "point_id": 9,
+      "point_name": "Technical Quality",
+      "result": "PASS",
+      "confidence": 1.0
+    },
+    {
+      "point_id": 10,
+      "point_name": "Metadata & Distribution",
+      "result": "PASS",
+      "confidence": 0.98
+    }
+  ],
+  "overall_status": "HUMAN_REVIEW",
+  "enforcement": {
+    "tier": 0,
+    "action": "NONE"
+  },
+  "appeal": { "eligible": true },
+  "audit": {
+    "logged_at": "2026-09-23T14:32:12Z",
+    "retention_until": "2028-09-23T14:32:12Z",
+    "hash": "sha256:ab12cd34ef56..."
+  }
+}

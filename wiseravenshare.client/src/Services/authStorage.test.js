@@ -35,6 +35,8 @@ test('persists the canonical token to both storage layers and keeps legacy keys 
   assert.equal(global.sessionStorage.getItem('wr_auth_token'), 'persisted-token');
   assert.equal(global.localStorage.getItem('auth_token'), 'persisted-token');
   assert.equal(global.sessionStorage.getItem('auth_token'), 'persisted-token');
+  assert.equal(global.localStorage.getItem('accessToken'), 'persisted-token');
+  assert.equal(global.sessionStorage.getItem('accessToken'), 'persisted-token');
 });
 
 test('drops the auth token cleanly from every persisted location', () => {
@@ -52,4 +54,6 @@ test('drops the auth token cleanly from every persisted location', () => {
   assert.equal(global.sessionStorage.getItem('wr_auth_token'), null);
   assert.equal(global.localStorage.getItem('auth_token'), null);
   assert.equal(global.sessionStorage.getItem('auth_token'), null);
+  assert.equal(global.localStorage.getItem('accessToken'), null);
+  assert.equal(global.sessionStorage.getItem('accessToken'), null);
 });
