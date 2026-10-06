@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Header from './Components/Common/Header';
 import Sidebar from './Components/Common/Sidebar';
 import RightSidebar from './Components/Common/RightSidebar';
@@ -385,23 +385,23 @@ const App = () => {
     };
 
     const navigateToPage = (target) => {
-        const page = typeof target === 'string'
+        const nextPage = typeof target === 'string'
             ? target
             : target?.page;
 
-        if (page === 'my-library' || page === 'music-player') {
+        if (nextPage === 'my-library' || nextPage === 'music-player') {
+            queueRavensightTab('library');
+            setIsRavensightMode(true);
+            setCurrentPage('ravensight');
+            return;
+        }
+
+        if (nextPage === 'ravensight') {
+            setIsRavensightMode(true);
+            setCurrentPage(nextPage);
+        } else if (typeof nextPage === 'string' && nextPage.trim()) {
             setIsRavensightMode(false);
-            setCurrentPage('my-library');
-            return;
-        }
-
-        if (typeof target === 'string') {
-            setCurrentPage(target);
-            return;
-        }
-
-        if (target?.page) {
-            setCurrentPage(target.page);
+            setCurrentPage(nextPage);
         }
 
         if (target?.editProfile) {
@@ -525,9 +525,9 @@ const App = () => {
 
         switch (currentPage) {
             case 'feed':
-                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={navigateToPage} />;
             case 'discover':
-                return <DiscoverPage onNavigate={setCurrentPage} />;
+                return <DiscoverPage onNavigate={navigateToPage} />;
             case 'bookmarks':
                 return <BookmarksPage />;
             case 'messages':
@@ -539,7 +539,7 @@ const App = () => {
             case 'truthseeker':
                 return <TruthSeeker />;
             case 'ai-assistant':
-                return <AiAssistantPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
+                return <AiAssistantPage addTruthAlert={addTruthAlert} onNavigate={navigateToPage} />;
             case 'ainews':
                 return <AINews onOpenArticle={(article) => openArticle(article, 'ainews')} />;
             case 'breakingnews':
@@ -547,15 +547,15 @@ const App = () => {
             case 'article':
                 return <ArticlePage article={selectedArticle} onBack={() => setCurrentPage(articleBackPage)} />;
             case 'profile':
-                return <SettingsPage onNavigate={setCurrentPage} />;
+                return <SettingsPage onNavigate={navigateToPage} />;
             case 'setup':
-                return <SettingsPage onNavigate={setCurrentPage} showConnections={true} />;
+                return <SettingsPage onNavigate={navigateToPage} showConnections={true} />;
             case 'settings':
                 return (
                     <ProfilePage
                         openEditMode={profileEditRequested}
                         onEditModeHandled={() => setProfileEditRequested(false)}
-                        onNavigate={setCurrentPage}
+                        onNavigate={navigateToPage}
                     />
                 );
             case 'growth':
@@ -568,7 +568,7 @@ const App = () => {
                     : <div style={{ padding: '20px' }}>Admin access required.</div>;
             case 'admin-panel':
                 return isAdminUser
-                    ? <AdminPanelPage onNavigate={setCurrentPage} />
+                    ? <AdminPanelPage onNavigate={navigateToPage} />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'revenue':
                 return isAdminUser
@@ -591,23 +591,23 @@ const App = () => {
                     ? <CrawlerMetricsInsightsPage />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'assistant':
-                return <AssistantPage onNavigate={setCurrentPage} />;
+                return <AssistantPage onNavigate={navigateToPage} />;
             case 'facebook-feed':
             case 'tiktok-feed':
             case 'instagram-feed':
             case 'youtube-feed':
             case 'social-feeds':
                 return isAdminUser
-                    ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} initialPlatform={currentPage.replace('-feed', '')} />
-                    : <SettingsPage onNavigate={setCurrentPage} />;
+                    ? <FeedPage addTruthAlert={addTruthAlert} onNavigate={navigateToPage} initialPlatform={currentPage.replace('-feed', '')} />
+                    : <SettingsPage onNavigate={navigateToPage} />;
             case 'ravensight':
                 return <RavensightVideo onNavigate={navigateFromRavensight} />;
             case 'newsroom-video':
                 return <NewsroomRecorderPage onSendToPodcastControlRoom={() => openRavensightWithTab('podcast')} />;
             case 'amateur-journalist':
-                return <AmateurJournalistPage onNavigate={setCurrentPage} />;
+                return <AmateurJournalistPage onNavigate={navigateToPage} />;
             case 'canvas':
-                return <CanvasPage onNavigate={setCurrentPage} />;
+                return <CanvasPage onNavigate={navigateToPage} />;
             case 'collaboration':
                 return (
                     <ErrorBoundary>
@@ -615,25 +615,25 @@ const App = () => {
                     </ErrorBoundary>
                 );
             case 'team-launchpad':
-                return <TeamLaunchpadPage user={user} onNavigate={setCurrentPage} isAdminUser={isAdminUser} />;
+                return <TeamLaunchpadPage user={user} onNavigate={navigateToPage} isAdminUser={isAdminUser} />;
             case 'music-rights-studio':
-                return <MusicRightsStudioPage user={user} onNavigate={setCurrentPage} />;
+                return <MusicRightsStudioPage user={user} onNavigate={navigateToPage} />;
             case 'music-player':
-                return <RavensightVideo onNavigate={navigateToPage} initialTab="library" />;
+                return <RavensightVideo onNavigate={navigateFromRavensight} initialTab="library" />;
             case 'fm-tuner':
-                return <FMRadioPage onNavigate={setCurrentPage} canAccessCreator={isAdminUser} initialTab="radio" />;
+                return <FMRadioPage onNavigate={navigateToPage} canAccessCreator={isAdminUser} initialTab="radio" />;
             case 'radio-creator':
                 return isAdminUser
-                    ? <FMRadioPage onNavigate={setCurrentPage} canAccessCreator initialTab="creator" />
+                    ? <FMRadioPage onNavigate={navigateToPage} canAccessCreator initialTab="creator" />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'my-library':
-                return <RavensightVideo onNavigate={navigateToPage} initialTab="library" />;
+                return <RavensightVideo onNavigate={navigateFromRavensight} initialTab="library" />;
             case 'instrument-connector':
-                return <InstrumentConnectorPage onNavigate={setCurrentPage} />;
+                return <InstrumentConnectorPage onNavigate={navigateToPage} />;
             case 'podcast-rights-studio':
-                return <PodcastRightsStudioPage user={user} onNavigate={setCurrentPage} />;
+                return <PodcastRightsStudioPage user={user} onNavigate={navigateToPage} />;
             case 'podcast-checkout':
-                return <PodcastCheckoutPage onNavigate={setCurrentPage} />;
+                return <PodcastCheckoutPage onNavigate={navigateToPage} />;
             case 'podcast-audio-processor':
                 return <PodcastAudioProcessor />;
             case 'karaoke':
@@ -645,7 +645,7 @@ const App = () => {
             case 'terms':
                 return <TermsOfServicePage onBack={() => setCurrentPage('feed')} />;
             default:
-                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={setCurrentPage} />;
+                return <FeedPage addTruthAlert={addTruthAlert} onNavigate={navigateToPage} />;
         }
     };
 
@@ -819,7 +819,6 @@ const App = () => {
         { id: 'ainews', label: 'AI News' },
         { id: 'ai-assistant', label: 'AI Assistant' },
         { id: 'fm-tuner', label: '📻 FM Radio' },
-        { id: 'my-library', label: '📚 My Library' },
         { id: 'setup', label: '⚙️ Set Up' },
         { id: 'profile', label: 'Settings' },
         { id: 'settings', label: 'Profile' }
@@ -879,7 +878,7 @@ const App = () => {
                     {navItems.map((item) => (
                         <button
                             key={item.id}
-                            onClick={() => navigateToPage(item.id)}
+                            onClick={() => setCurrentPage(item.id)}
                             style={{
                                 border: '1px solid var(--border-color)',
                                 background: currentPage === item.id ? 'var(--highlight-color)' : 'var(--card-bg)',
@@ -936,7 +935,7 @@ const App = () => {
                     <main className="middle-column">
                         {renderPage()}
                     </main>
-                    <RightSidebar onNavigate={setCurrentPage} />
+                    <RightSidebar onNavigate={navigateToPage} />
                 </div>
             </div>
             <RavenChatModal
