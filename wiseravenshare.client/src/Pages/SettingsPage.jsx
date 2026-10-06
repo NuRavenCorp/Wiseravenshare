@@ -388,7 +388,18 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
 
         setLinkSavingPlatform(platform);
         try {
-            await apiService.updateSocialFeeds(user.id, payload);
+            const result = await apiService.updateSocialFeeds(user.id, payload);
+            const updatedFeeds = result?.data || {};
+
+            // Persist updated feeds to localStorage and notify all listeners so
+            // Profile page / Sidebar pick up the change without needing a reload.
+            try {
+                localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedFeeds));
+            } catch {
+                // best effort
+            }
+            window.dispatchEvent(new Event('wiseraven:social-updated'));
+
             addToast(`${CONNECTION_PLATFORMS.find((item) => item.id === platform)?.label || 'Social'} link saved.`, 'success');
             setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: '' }));
             await loadSettings();

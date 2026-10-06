@@ -161,7 +161,11 @@ public sealed class UsersController : ControllerBase
 
     private bool CanAccessUser(string id)
     {
-        var subjectId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        var subjectId =
+            User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("id")
+            ?? User.FindFirstValue("userId");
         return string.Equals(subjectId, id, StringComparison.Ordinal);
     }
 
