@@ -60,6 +60,7 @@ ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 ENV ASPNETCORE_URLS=http://+:10000
 ENV WRS_PYTHON_EXE=/usr/bin/python3
 ENV WRS_SERVICES_ROOT=/app/services
+ENV PythonServices__PipInstallOnStartup=false
 EXPOSE 10000
 
 # Health check
@@ -71,6 +72,15 @@ COPY --from=server-build /app/publish ./
 
 # Copy Python microservices so the orchestrator can provision and launch them
 COPY services/ ./services/
+
+# Prebuild Python service virtual environments so karaoke/audio services are
+# ready immediately at container start instead of installing on first boot.
+RUN set -eux; \
+    for service in audio-processor karaoke-engine karaoke-speech; do \
+        python3 -m venv "/app/services/${service}/.venv"; \
+        "/app/services/${service}/.venv/bin/python" -m pip install --upgrade pip --quiet; \
+        "/app/services/${service}/.venv/bin/python" -m pip install -r "/app/services/${service}/requirements.txt" --quiet; \
+    done
 
 # Copy compiled frontend into wwwroot for .NET to serve as static files
 COPY --from=client-build /build/client/dist ./wwwroot
