@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand, FaVideo, FaUsers, FaTrash } from 'react-icons/fa';
 import '@flaticon/flaticon-uicons/css/all/all.css';
 import Hls from 'hls.js';
@@ -77,6 +77,8 @@ const VideoFeed = ({ onNotification }) => {
     const [savingVideoIds, setSavingVideoIds] = useState([]);
     const [scriptVideo, setScriptVideo] = useState(null);
     const [activePodcastCommand, setActivePodcastCommand] = useState(null);
+    const [monitorSlots, setMonitorSlots] = useState(['', '', '']);
+    const [monitorMirror, setMonitorMirror] = useState([true, true, true]);
     const observerRef = useRef();
     const { user } = useAuth();
     const {
@@ -86,6 +88,29 @@ const VideoFeed = ({ onNotification }) => {
         acknowledgePodcastCommand,
         onEvent
     } = useCollaborationHub();
+
+    const monitorCandidates = useMemo(() => {
+        return videos
+            .map((video, index) => normalizeVideo(video, index))
+            .filter((video) => Boolean(resolveMediaUrl(video.videoUrl || video.mediaUrl || '')));
+    }, [videos]);
+
+    useEffect(() => {
+        if (monitorCandidates.length === 0) {
+            setMonitorSlots(['', '', '']);
+            return;
+        }
+
+        setMonitorSlots((current) => current.map((slotId, index) => {
+            const existing = monitorCandidates.find((candidate) => String(candidate.id || '') === slotId);
+            if (existing) {
+                return slotId;
+            }
+
+            const fallback = monitorCandidates[index] || monitorCandidates[0];
+            return String(fallback?.id || '');
+        }));
+    }, [monitorCandidates]);
 
     useEffect(() => {
         loadVideos();
@@ -864,6 +889,110 @@ const VideoFeed = ({ onNotification }) => {
                     <p>Check back later for new content!</p>
                 </div>
             )}
+
+            {/* Bottom Source Monitor Array */}
+            <div style={{ marginTop: '24px' }}>
+                <div style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '14px',
+                    padding: '14px',
+                    background: 'rgba(255,255,255,0.02)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '16px' }}>Video Monitor Array</h3>
+                        <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
+                            Mirror and monitor up to 3 feed sources
+                        </span>
+                    </div>
+
+                    {monitorCandidates.length === 0 ? (
+                        <div style={{ color: 'var(--highlight-color)', fontSize: '13px' }}>
+                            No feed sources available yet. Upload or refresh to populate monitor slots.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                            {[0, 1, 2].map((slotIndex) => {
+                                const selectedId = monitorSlots[slotIndex];
+                                const selectedVideo = monitorCandidates.find((candidate) => String(candidate.id || '') === selectedId) || monitorCandidates[slotIndex] || monitorCandidates[0];
+                                const monitorSrc = resolveMediaUrl(selectedVideo?.videoUrl || selectedVideo?.mediaUrl || '');
+                                const isMirrored = Boolean(monitorMirror[slotIndex]);
+
+                                return (
+                                    <div
+                                        key={`monitor-slot-${slotIndex}`}
+                                        style={{
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '10px',
+                                            background: '#0f1118',
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-color)', display: 'grid', gap: '8px' }}>
+                                            <div style={{ fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--highlight-color)', fontWeight: 700 }}>
+                                                Source {slotIndex + 1}
+                                            </div>
+                                            <select
+                                                value={String(selectedVideo?.id || '')}
+                                                onChange={(event) => {
+                                                    const nextId = String(event.target.value || '');
+                                                    setMonitorSlots((current) => current.map((slot, idx) => (idx === slotIndex ? nextId : slot)));
+                                                }}
+                                                style={{
+                                                    width: '100%',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'var(--secondary-color)',
+                                                    color: 'var(--text-color)',
+                                                    padding: '6px 8px',
+                                                    fontSize: '12px'
+                                                }}
+                                            >
+                                                {monitorCandidates.map((candidate) => (
+                                                    <option key={candidate.id} value={String(candidate.id || '')}>
+                                                        {candidate.title || `Source ${candidate.id}`}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setMonitorMirror((current) => current.map((mirror, idx) => (idx === slotIndex ? !mirror : mirror)));
+                                                }}
+                                                style={{
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'transparent',
+                                                    color: 'var(--text-color)',
+                                                    borderRadius: '8px',
+                                                    padding: '6px 8px',
+                                                    fontSize: '12px',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                {isMirrored ? 'Mirroring On' : 'Mirroring Off'}
+                                            </button>
+                                        </div>
+                                        <div style={{ background: '#000', aspectRatio: '16 / 9' }}>
+                                            <video
+                                                src={monitorSrc}
+                                                muted
+                                                loop
+                                                playsInline
+                                                controls
+                                                style={{
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    objectFit: 'cover',
+                                                    transform: isMirrored ? 'scaleX(-1)' : 'none'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {scriptVideo && (
                 <CollaborativeScriptRoom

@@ -18,11 +18,13 @@ public class BillingController : ControllerBase
 {
     private readonly ISubscriptionService _subscriptionService;
     private readonly AppDbContext _db;
+    private readonly ILogger<BillingController> _logger;
 
-    public BillingController(ISubscriptionService subscriptionService, AppDbContext db)
+    public BillingController(ISubscriptionService subscriptionService, AppDbContext db, ILogger<BillingController> logger)
     {
         _subscriptionService = subscriptionService;
         _db = db;
+        _logger = logger;
     }
 
     [Authorize]
@@ -104,8 +106,21 @@ public class BillingController : ControllerBase
         }
 
         var userId = User.GetUserId();
-        var result = await _subscriptionService.GetSubscriptionStatusAsync(userId);
-        return Ok(result);
+        try
+        {
+            var result = await _subscriptionService.GetSubscriptionStatusAsync(userId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve subscription status for user {UserId}. Returning inactive fallback.", userId);
+            return Ok(new SubscriptionStatusDto
+            {
+                HasActiveSubscription = false,
+                Status = "unverified",
+                CancelAtPeriodEnd = false
+            });
+        }
     }
 
     [Authorize]

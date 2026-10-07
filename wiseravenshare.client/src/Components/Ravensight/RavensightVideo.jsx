@@ -166,6 +166,14 @@ const buildRenewDate = (days) => {
 
 const formatMoney = (value) => `$${Number(value).toFixed(2)}`;
 
+const resolveFriendlyBillingError = (error, fallbackMessage) => {
+    const status = Number(error?.status ?? error?.response?.status ?? 0);
+    if (status >= 500) {
+        return fallbackMessage;
+    }
+    return error?.message || fallbackMessage;
+};
+
 const getPlanById = (planId = DEFAULT_PLAN_ID) => {
     return PRICING_PLANS.find((plan) => plan.id === planId) || PRICING_PLANS[0];
 };
@@ -347,7 +355,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                 }
 
                 setStripeCatalog([]);
-                setCatalogError(error?.message || 'Unable to load Stripe product catalog.');
+                setCatalogError(resolveFriendlyBillingError(error, 'Billing catalog is temporarily unavailable.'));
             }
         };
 
@@ -431,7 +439,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                     hasActiveSubscription: Boolean(subscription?.isActive),
                     currentPeriodEnd: subscription?.renewsAt || null,
                     priceId: null,
-                    error: error?.message || 'Unable to verify subscription status right now.'
+                    error: resolveFriendlyBillingError(error, 'Billing sync is temporarily unavailable.')
                 });
             }
         };
