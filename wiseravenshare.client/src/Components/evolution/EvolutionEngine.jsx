@@ -1,6 +1,6 @@
 import { ModuleRegistry } from './ModuleRegistry';
 import { PluginManager } from './PluginManager';
-import { storage } from '../../Services/storage';
+import { storage } from '../../Services/unifiedStorage';
 import api from '../../Services/api';
 
 class EvolutionEngine {
