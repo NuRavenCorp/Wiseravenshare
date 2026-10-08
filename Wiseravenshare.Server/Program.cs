@@ -1845,6 +1845,8 @@ builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+builder.Services.AddScoped<IYouTubeCacheEngine, YouTubeCacheEngine>();
+builder.Services.AddScoped<IYouTubeTokenService, YouTubeTokenService>();
 builder.Services.AddScoped<IVideoService, VideoService>();
 builder.Services.AddScoped<IRavensightMediaPathService, RavensightMediaPathService>();
 builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageService>();
@@ -1900,6 +1902,7 @@ builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();
+builder.Services.AddHostedService<YouTubeSyncWorker>();
 builder.Services.AddContentTrendingBackgroundJob(enabled: true);
 builder.Services.AddHttpClient("SocialPublish");
 builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();
@@ -2080,7 +2083,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs")))
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/api/hubs/social")))
                 {
                     context.Token = accessToken;
                 }
@@ -2523,6 +2526,7 @@ app.MapHub<NotificationHub>("/api/hubs/notifications");
 app.MapHub<MessageHub>("/api/hubs/messages");
 app.MapHub<CrossPlatformCollaborationHub>("/api/hubs/collaboration");
 app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
+app.MapHub<SocialHub>("/api/hubs/social");
 
 if (frontendDistExists)
 {
