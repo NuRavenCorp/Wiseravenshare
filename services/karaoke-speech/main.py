@@ -649,4 +649,4 @@ def health():
 if __name__ == "__main__":
     ensure_sherpa_models()
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8003, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8003, log_level="info", access_log=False)

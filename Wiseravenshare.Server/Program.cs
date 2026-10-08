@@ -1766,7 +1766,7 @@ builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assist
 builder.Services.AddHttpClient<Wiseravenshare.Server.Services.MlClient>(c =>
 {
     c.BaseAddress = new Uri(
-        builder.Configuration["MlService:BaseUrl"] ?? "http://localhost:8000");
+        builder.Configuration["MlService:BaseUrl"] ?? "http://localhost:8005");
     c.Timeout = TimeSpan.FromSeconds(10);
 });
 builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.ILlmGateway,
@@ -2719,4 +2719,3 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
-
