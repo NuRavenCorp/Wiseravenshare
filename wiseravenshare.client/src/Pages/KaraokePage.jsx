@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import KaraokeScorer from '../Components/Karaoke/KaraokeScorer';
-import { getAuthToken } from '../Services/authStorage.js';
+import { getAuthToken } from '../Services/unifiedStorage';
 import './KaraokePage.css';
 
 /* ─── pitch detection ──────────────────────────────────────────────────────── */

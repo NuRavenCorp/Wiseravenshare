@@ -1,4 +1,4 @@
-import { storage } from './storage';
+import { storage } from '../Services/unifiedStorage';
 import { KEYS } from './storageKeys';
 
 const MIGRATIONS = [

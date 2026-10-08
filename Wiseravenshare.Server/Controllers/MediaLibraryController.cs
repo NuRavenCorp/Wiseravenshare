@@ -256,6 +256,55 @@ public sealed class MediaLibraryController : ControllerBase
         return Ok(progress);
     }
 
+    [HttpGet("resume")]
+    public async Task<IActionResult> GetResumePositions([FromQuery] string? mediaIds = null)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var ids = (mediaIds ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(raw => Guid.TryParse(raw, out var parsed) ? parsed : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        var positions = await _mediaService.GetPlaybackPositionsAsync(userId, ids);
+        return Ok(new
+        {
+            positions = positions.ToDictionary(entry => entry.Key.ToString(), entry => entry.Value)
+        });
+    }
+
+    [HttpPut("resume/{mediaId:guid}")]
+    public async Task<IActionResult> UpsertResumePosition(Guid mediaId, [FromBody] MediaProgressDto request)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var progress = await _mediaService.SaveProgressAsync(mediaId, request, userId);
+        return Ok(progress);
+    }
+
+    [HttpDelete("resume/{mediaId:guid}")]
+    public async Task<IActionResult> ClearResumePosition(Guid mediaId)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        await _mediaService.ClearProgressAsync(mediaId, userId);
+        return NoContent();
+    }
+
     [HttpGet("{mediaId:guid}/streaming-status")]
     public async Task<IActionResult> GetStreamingStatus(Guid mediaId)
     {

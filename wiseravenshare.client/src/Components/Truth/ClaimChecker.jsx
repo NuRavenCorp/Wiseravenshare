@@ -4,7 +4,7 @@ import {
     FaTimesCircle, FaExclamationTriangle, FaSpinner, FaQuoteLeft,
     FaShieldAlt, FaDatabase, FaChartLine, FaShare, FaSave
 } from 'react-icons/fa';
-import { truthEngine } from '../../Services/truthEngine';
+import { truthService } from '../../Services/truthService';
 import { newsAPI } from '../../services/newsAPI';
 
 const ClaimChecker = () => {

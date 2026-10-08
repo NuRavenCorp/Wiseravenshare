@@ -1,5 +1,5 @@
 // wiseravenshare.client/src/Services/wisecoinService.js
-import { getAuthToken } from './authStorage.js';
+import { getAuthToken } from './unifiedStorage';
 
 const API_BASE = '/api/wisecoin';
 

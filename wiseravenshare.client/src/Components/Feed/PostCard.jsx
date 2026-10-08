@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Compartment from '../Common/Compartment';
-import { truthEngine } from '../../Services/truthEngine';
+import { truthService } from '../../Services/truthService';
 import { apiService } from '../../Services/api';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { classifyPostMedia } from './postMediaClassifier';

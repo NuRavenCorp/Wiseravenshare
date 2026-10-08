@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi';
 import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
-import { getAuthToken } from '../Services/authStorage.js';
+import { getAuthToken } from '../Services/unifiedStorage';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
 import '../Styles/MusicRightsStudio.css';
 

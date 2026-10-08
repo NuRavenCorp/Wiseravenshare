@@ -52,6 +52,7 @@ public class AppDbContext : DbContext
     public DbSet<MediaPlaylist> MediaPlaylists => Set<MediaPlaylist>();
     public DbSet<MediaPlaylistItem> MediaPlaylistItems => Set<MediaPlaylistItem>();
     public DbSet<MediaViewHistory> MediaViewHistories => Set<MediaViewHistory>();
+    public DbSet<MediaPlaybackState> MediaPlaybackStates => Set<MediaPlaybackState>();
     public DbSet<MediaLike> MediaLikes => Set<MediaLike>();
     public DbSet<MediaBookmark> MediaBookmarks => Set<MediaBookmark>();
     public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
@@ -676,6 +677,21 @@ public class AppDbContext : DbContext
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
+            modelBuilder.Entity<MediaPlaybackState>(entity =>
+            {
+                entity.ToTable("MediaPlaybackStates");
+                entity.HasIndex(x => new { x.UserId, x.MediaId }).IsUnique();
+                entity.HasIndex(x => new { x.Completed, x.LastPlayedAt });
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
             modelBuilder.Entity<MediaLike>(entity =>
             {
                 entity.ToTable("MediaLikes");
@@ -1196,4 +1212,3 @@ public class AppDbContext : DbContext
         });
     }
 }
-

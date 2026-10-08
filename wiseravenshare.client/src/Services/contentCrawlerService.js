@@ -1,4 +1,4 @@
-import { getAuthToken } from './authStorage';
+import { getAuthToken } from './unifiedStorage';
 
 const API_BASE = '/api/contentcrawler';
 

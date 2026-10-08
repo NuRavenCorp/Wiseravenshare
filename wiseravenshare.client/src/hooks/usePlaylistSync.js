@@ -1,6 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { fetchRemotePlaylists, pushRemotePlaylists, pushResumePosition } from '../Services/playlistsApi.js';
+import { fetchRemotePlaylists, fetchResumePositions, pushRemotePlaylists, pushResumePosition } from '../Services/playlistsApi.js';
 import { useDebouncedEffect } from './useDebouncedEffect.js';
+
+const collectMediaIds = (playlists) => Array.from(
+  new Set(
+    (Array.isArray(playlists) ? playlists : [])
+      .flatMap((playlist) => (Array.isArray(playlist?.items) ? playlist.items : []))
+      .map((mediaId) => String(mediaId || '').trim())
+      .filter(Boolean)
+  )
+);
 
 export function usePlaylistSync(playlistsApi, { enabled = true, mergeStrategy = 'union' } = {}) {
   const hydrated = useRef(false);
@@ -32,6 +41,18 @@ export function usePlaylistSync(playlistsApi, { enabled = true, mergeStrategy = 
             playlistsApi.addManyToPlaylist(id, playlist.items || []);
           });
         }
+
+        const remotePositions = await fetchResumePositions(
+          collectMediaIds([...playlistsApi.playlists, ...remote])
+        );
+        if (cancelled) return;
+
+        Object.entries(remotePositions).forEach(([mediaId, seconds]) => {
+          const localSeconds = Number(playlistsApi.playback.positions?.[mediaId] || 0);
+          if (seconds > localSeconds) {
+            playlistsApi.setResumePosition(mediaId, seconds);
+          }
+        });
 
         hydrated.current = true;
       } catch (error) {

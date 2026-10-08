@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './PodcastCheckoutPage.css';
-import { getAuthToken } from '../Services/authStorage.js';
+import { getAuthToken } from '../Services/unifiedStorage';
 
 const PLAN_PAYMENT_LINKS = {
   growth_suite: {

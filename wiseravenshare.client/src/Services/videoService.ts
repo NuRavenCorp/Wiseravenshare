@@ -1,4 +1,4 @@
-import { getAuthToken as getSharedAuthToken } from './authStorage.js';
+import { getAuthToken as getSharedAuthToken } from './unifiedStorage';
 
 type UploadVideoResponse = Record<string, unknown>;
 

@@ -153,6 +153,19 @@ public class MediaViewHistory : BaseEntity
     public virtual User User { get; set; } = null!;
 }
 
+public class MediaPlaybackState : BaseEntity
+{
+    public Guid MediaId { get; set; }
+    public Guid UserId { get; set; }
+    public int PositionSeconds { get; set; }
+    public bool IsPlaying { get; set; }
+    public bool Completed { get; set; }
+    public DateTime LastPlayedAt { get; set; } = DateTime.UtcNow;
+
+    public virtual MediaItem MediaItem { get; set; } = null!;
+    public virtual User User { get; set; } = null!;
+}
+
 public class MediaLike : BaseEntity
 {
     public Guid MediaId { get; set; }

@@ -1,4 +1,4 @@
-import { getAuthToken } from '../Services/authStorage';
+import { getAuthToken } from '../Services/unifiedStorage';
 
 export type RavensightMediaKind = 'video' | 'photo' | 'audio';
 export type RavensightSaveRoot = 'auto' | 'videos' | 'pictures';

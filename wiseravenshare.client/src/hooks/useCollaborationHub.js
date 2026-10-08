@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { HubConnectionState, LogLevel } from '@microsoft/signalr';
 import { createHubConnection } from '../Services/realtimeHub.js';
-import { getAuthToken } from '../Services/authStorage.js';
+import { getAuthToken } from '../Services/unifiedStorage';
 
 const HUB_PATH = '/api/hubs/collaboration';
 

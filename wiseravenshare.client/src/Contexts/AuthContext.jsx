@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { authService } from '../Services/Auth.jsx';
-import { AUTH_SYNC_EVENT, AUTH_SYNC_STORAGE_KEY_NAME } from '../Services/authStorage.js';
+import { AUTH_SYNC_EVENT, AUTH_SYNC_STORAGE_KEY_NAME } from '../Services/unifiedStorage';
 import { socialGraphService } from '../Services/SocialGraph';
 import { compressAvatarImage } from '../utils/avatarUtils';
 

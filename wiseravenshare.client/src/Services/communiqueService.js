@@ -1,7 +1,7 @@
 // wiseravenshare.client/src/Services/communiqueService.js
 // RavenCommunique — Twilio SMS / WhatsApp / Voice API client
 
-import { getAuthToken } from './authStorage';
+import { getAuthToken } from './unifiedStorage';
 
 // Use the same origin as the main API — never a separate communique subdomain.
 const resolveCommuniqueApiBase = () => {

@@ -39,6 +39,28 @@ const normalizeFeedDrafts = (feeds) => ({
     youtube: normalizeConnectionDraft(feeds?.youTube || feeds?.youtube || feeds?.YouTube)
 });
 
+const mergeConnectedStatusIntoDrafts = (drafts, statuses) => {
+    const nextDrafts = { ...EMPTY_LINK_DRAFTS, ...(drafts || {}) };
+
+    for (const platform of CONNECTION_PLATFORMS) {
+        const status = statuses?.[platform.id] || {};
+        const details = status.details || {};
+        const isConnected = Boolean(status.connected || status.isConnected || status.active || status.enabled);
+        if (!isConnected) {
+            continue;
+        }
+
+        const existingDraft = nextDrafts[platform.id] || { username: '', profileUrl: '' };
+        const username = String(existingDraft.username || '').trim() || String(details.username || '').trim();
+        const profileUrl = String(existingDraft.profileUrl || '').trim()
+            || String(details.profileUrl || details.feedUrl || '').trim();
+
+        nextDrafts[platform.id] = { username, profileUrl };
+    }
+
+    return nextDrafts;
+};
+
 const normalizeHttpUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -201,13 +223,15 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
             });
             setStatusByPlatform(nextStatuses);
 
+            let baseDrafts = EMPTY_LINK_DRAFTS;
             try {
                 const socialFeedsResponse = await apiService.getSocialFeeds(user.id);
                 const socialFeeds = socialFeedsResponse?.data || socialFeedsResponse || {};
-                setLinkDrafts(normalizeFeedDrafts(socialFeeds));
+                baseDrafts = normalizeFeedDrafts(socialFeeds);
             } catch {
-                setLinkDrafts(EMPTY_LINK_DRAFTS);
+                baseDrafts = EMPTY_LINK_DRAFTS;
             }
+            setLinkDrafts(mergeConnectedStatusIntoDrafts(baseDrafts, nextStatuses));
 
             try {
                 const subResponse = await apiService.getSubscriptionStatus();
