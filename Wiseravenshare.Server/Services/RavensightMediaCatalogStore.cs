@@ -395,6 +395,50 @@ LIMIT 1;";
         };
     }
 
+    public async Task<bool> UpdateAssetStateAsync(
+        Guid userId,
+        string assetId,
+        bool archived,
+        bool protectedState,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSchemaAsync(cancellationToken);
+
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(assetId) || string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var sql = $@"
+UPDATE {AssetsTable}
+SET metadata_json = jsonb_set(
+        jsonb_set(
+            COALESCE(metadata_json, '{{}}'::jsonb),
+            '{{archived}}',
+            to_jsonb(@archived),
+            TRUE
+        ),
+        '{{protected}}',
+        to_jsonb(@protected),
+        TRUE
+    ),
+    updated_at_utc = @updated_at_utc
+WHERE user_id = @user_id
+  AND id = @id
+  AND deleted_at_utc IS NULL;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("id", assetId.Trim());
+        command.Parameters.AddWithValue("archived", archived);
+        command.Parameters.AddWithValue("protected", protectedState);
+        command.Parameters.AddWithValue("updated_at_utc", DateTime.UtcNow);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
     public async Task<IReadOnlyList<RavensightMediaAssetRecord>> GetUserAssetsAsync(
         Guid userId,
         string? mediaType = null,

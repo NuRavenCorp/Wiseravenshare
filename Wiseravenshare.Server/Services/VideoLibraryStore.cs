@@ -51,12 +51,14 @@ public sealed class VideoLibraryStore
             {
                 if (await TryBindExistingSchemaAsync(connection, DefaultSchemaName, cancellationToken))
                 {
+                    await EnsureStateColumnsAsync(connection, cancellationToken);
                     _schemaEnsured = true;
                     return;
                 }
 
                 if (await TryEnsureSchemaAsync(connection, DefaultSchemaName, cancellationToken))
                 {
+                    await EnsureStateColumnsAsync(connection, cancellationToken);
                     _schemaEnsured = true;
                     return;
                 }
@@ -169,6 +171,8 @@ CREATE TABLE IF NOT EXISTS {videosTable} (
     music_track_genre TEXT NULL,
     storage_mode TEXT NOT NULL DEFAULT 'temporary',
     retention_status TEXT NOT NULL DEFAULT 'active',
+    archived BOOLEAN NOT NULL DEFAULT FALSE,
+    protected BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NULL,
     views INTEGER NOT NULL DEFAULT 0,
     likes INTEGER NOT NULL DEFAULT 0,
@@ -183,7 +187,9 @@ ALTER TABLE {videosTable}
     ADD COLUMN IF NOT EXISTS music_track_url TEXT NULL,
     ADD COLUMN IF NOT EXISTS music_track_artist TEXT NULL,
     ADD COLUMN IF NOT EXISTS music_track_album TEXT NULL,
-    ADD COLUMN IF NOT EXISTS music_track_genre TEXT NULL;
+    ADD COLUMN IF NOT EXISTS music_track_genre TEXT NULL,
+    ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_ravensight_videos_v2_user_id_created_at
     ON {videosTable} (user_id, created_at DESC);
@@ -289,7 +295,9 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_v2_video_id_created_at
             MusicTrackAlbum = string.IsNullOrWhiteSpace(request.MusicTrackAlbum) ? null : request.MusicTrackAlbum.Trim(),
             MusicTrackGenre = string.IsNullOrWhiteSpace(request.MusicTrackGenre) ? null : request.MusicTrackGenre.Trim(),
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            Archived = request.Archived,
+            Protected = request.Protected
         };
 
         // User-owned library videos are permanent — they persist until the user deletes them.
@@ -312,7 +320,7 @@ INSERT INTO {_videosTable} (
 ) VALUES (
     @id, @user_id, @title, @description, @tags, @video_url, @thumbnail_url, @status, @privacy_status,
     @youtube_url, @tiktok_url, @facebook_url, @music_track_id, @music_track_title, @music_track_url, @music_track_artist, @music_track_album, @music_track_genre,
-    @storage_mode, @retention_status, @expires_at, 0, 0, 0, @created_at, @updated_at
+    @storage_mode, @retention_status, @archived, @protected, @expires_at, 0, 0, 0, @created_at, @updated_at
 );";
 
             await using var command = new NpgsqlCommand(sql, connection);
@@ -336,6 +344,8 @@ INSERT INTO {_videosTable} (
             command.Parameters.AddWithValue("music_track_genre", (object?)entity.MusicTrackGenre ?? DBNull.Value);
             command.Parameters.AddWithValue("storage_mode", entity.StorageMode);
             command.Parameters.AddWithValue("retention_status", entity.RetentionStatus);
+            command.Parameters.AddWithValue("archived", entity.Archived);
+            command.Parameters.AddWithValue("protected", entity.Protected);
             command.Parameters.AddWithValue("expires_at", (object?)entity.ExpiresAt ?? DBNull.Value);
             command.Parameters.AddWithValue("created_at", entity.CreatedAt);
             command.Parameters.AddWithValue("updated_at", entity.UpdatedAt);
@@ -359,7 +369,7 @@ INSERT INTO {_videosTable} (
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, archived, protected, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE user_id = @user_id
   AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
@@ -393,7 +403,7 @@ ORDER BY created_at DESC;";
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, archived, protected, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 {whereClause}
 ORDER BY created_at DESC
@@ -427,7 +437,7 @@ LIMIT @limit_plus_one OFFSET @offset;";
 
         var sql = $@"
 SELECT id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
-       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+       youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre, storage_mode, retention_status, archived, protected, expires_at, views, likes, comments, created_at, updated_at
     FROM {_videosTable}
 WHERE id = @id
   AND (storage_mode = 'permanent' OR expires_at IS NULL OR expires_at > NOW())
@@ -499,6 +509,24 @@ WHERE id = @id AND user_id = @user_id;";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("user_id", userId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task<bool> UpdateVideoStateAsync(string id, string userId, bool archived, bool protectedState, CancellationToken cancellationToken = default)
+    {
+        await EnsureSchemaAsync(cancellationToken);
+        EnsureDbConfigured();
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var sql = $"UPDATE {_videosTable} SET archived = @archived, protected = @protected, updated_at = @updated_at WHERE id = @id AND user_id = @user_id;";
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("archived", archived);
+        command.Parameters.AddWithValue("protected", protectedState);
+        command.Parameters.AddWithValue("updated_at", DateTime.UtcNow);
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
@@ -658,12 +686,14 @@ LIMIT @limit OFFSET @offset;";
                 MusicTrackGenre = reader.IsDBNull(17) ? null : reader.GetString(17),
                 StorageMode = reader.IsDBNull(18) ? "temporary" : reader.GetString(18),
                 RetentionStatus = reader.IsDBNull(19) ? "active" : reader.GetString(19),
-                ExpiresAt = reader.IsDBNull(20) ? null : reader.GetDateTime(20),
-                Views = reader.GetInt32(21),
-                Likes = reader.GetInt32(22),
-                Comments = reader.GetInt32(23),
-                CreatedAt = reader.GetDateTime(24),
-                UpdatedAt = reader.GetDateTime(25)
+                Archived = !reader.IsDBNull(20) && reader.GetBoolean(20),
+                Protected = !reader.IsDBNull(21) && reader.GetBoolean(21),
+                ExpiresAt = reader.IsDBNull(22) ? null : reader.GetDateTime(22),
+                Views = reader.GetInt32(23),
+                Likes = reader.GetInt32(24),
+                Comments = reader.GetInt32(25),
+                CreatedAt = reader.GetDateTime(26),
+                UpdatedAt = reader.GetDateTime(27)
             });
         }
 
@@ -676,6 +706,17 @@ LIMIT @limit OFFSET @offset;";
         {
             throw new InvalidOperationException("DATABASE_URL or ConnectionStrings:DefaultConnection is required for video library persistence.");
         }
+    }
+
+    private async Task EnsureStateColumnsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        var sql = $@"
+ALTER TABLE {_videosTable}
+    ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT FALSE;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static string NormalizeConnectionString(string connectionString)

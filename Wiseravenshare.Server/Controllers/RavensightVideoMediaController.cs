@@ -217,6 +217,38 @@ public sealed class RavensightVideoMediaController : ControllerBase
         });
     }
 
+    [HttpPatch("{videoId}/state")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateVideoState(
+        [FromRoute] string videoId,
+        [FromBody] UpdateRavensightMediaStateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        if (string.IsNullOrWhiteSpace(videoId))
+        {
+            return BadRequest(new { message = "videoId is required." });
+        }
+
+        var updated = await _videoLibraryStore.UpdateVideoStateAsync(
+            videoId.Trim(),
+            userId.ToString(),
+            request.Archived ?? false,
+            request.Protected ?? false,
+            cancellationToken);
+
+        if (!updated)
+        {
+            return NotFound(new { message = "Video not found." });
+        }
+
+        return Ok(new { success = true, archived = request.Archived ?? false, @protected = request.Protected ?? false });
+    }
+
     private async Task<bool> HasActiveSubscriptionAsync(Guid userId)
     {
         if (IsAllAccessAdmin())
