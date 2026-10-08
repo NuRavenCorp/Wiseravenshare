@@ -94,6 +94,11 @@ public sealed class NewsAggregationService : INewsAggregationService
             .Take(normalizedLimit)
             .ToList();
 
+        foreach (var article in merged)
+        {
+            article.MarkerKey = CreateDeduplicationKey(article);
+        }
+
         return new NewsSearchResponse
         {
             Query = normalizedQuery,
@@ -567,6 +572,7 @@ public sealed class NewsSearchResponse
 
 public sealed class NewsArticle
 {
+    public string MarkerKey { get; set; } = string.Empty;
     public string Provider { get; set; } = string.Empty;
     public string? Source { get; set; }
     public string Title { get; set; } = string.Empty;

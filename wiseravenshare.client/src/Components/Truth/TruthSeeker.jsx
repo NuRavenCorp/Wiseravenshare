@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import Compartment from '../Common/Compartment';
 import { FaShieldAlt, FaSearch, FaCheckCircle, FaExclamationTriangle, FaTimesCircle } from 'react-icons/fa';
-import { truthEngine } from '../../Services/truthEngine';
+import { truthService } from '../../Services/truthService';
 
 const TruthSeeker = () => {
     const [claim, setClaim] = useState('');

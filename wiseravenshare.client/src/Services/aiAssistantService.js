@@ -1,6 +1,6 @@
 // Wiseravenshare.client/src/Services/aiAssistantService.js
 import axios from 'axios';
-import { getAuthToken } from './authStorage.js';
+import { getAuthToken } from './unifiedStorage';
 
 const resolveBase = () => {
     const configured = String(import.meta?.env?.VITE_API_URL || '').trim();

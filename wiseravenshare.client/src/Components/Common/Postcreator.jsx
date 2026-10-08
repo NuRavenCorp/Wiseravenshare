@@ -9,6 +9,8 @@ import {
     setRavensightLocalSaveRootPreference
 } from '../../utils/ravensightLocalSave';
 
+const SOCIAL_FEEDS_STORAGE_KEY = 'wiseSocialFeeds';
+
 const RAVENSIGHT_DESTINATION_BY_MEDIA_TYPE = {
     video: '/wiseravenshare/ravensight/video',
     photo: '/wiseravenshare/ravensight/photo',
@@ -54,6 +56,96 @@ const safeAvatarInitials = (value, name) => {
     return null; // use <img> instead
 };
 
+const getConnection = (feeds, ...keys) => {
+    const source = feeds || {};
+    for (const key of keys) {
+        if (source[key]) {
+            return source[key];
+        }
+    }
+    return {};
+};
+
+const readCachedSocialFeeds = () => {
+    if (typeof window === 'undefined') {
+        return {};
+    }
+
+    try {
+        const raw = window.localStorage.getItem(SOCIAL_FEEDS_STORAGE_KEY);
+        if (!raw) {
+            return {};
+        }
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+};
+
+const cleanHandle = (value) => String(value || '').trim().replace(/^@/, '');
+
+const parseHandleFromProfileUrl = (platform, profileUrl) => {
+    const value = String(profileUrl || '').trim();
+    if (!value) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(value.includes('://') ? value : `https://${value}`);
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        if (!segments.length) {
+            return '';
+        }
+
+        if (platform === 'tiktok') {
+            const withAt = segments.find((segment) => segment.startsWith('@'));
+            return cleanHandle(withAt || segments[0]);
+        }
+
+        if (platform === 'youtube') {
+            const [first, second] = segments;
+            if (String(first || '').startsWith('@')) {
+                return cleanHandle(first);
+            }
+            if ((first === 'channel' || first === 'c' || first === 'user') && second) {
+                return cleanHandle(second);
+            }
+            return cleanHandle(first);
+        }
+
+        return cleanHandle(segments[0]);
+    } catch {
+        return '';
+    }
+};
+
+const resolveSocialAutofillValues = (currentUser) => {
+    const userFeeds = (currentUser && typeof currentUser === 'object' ? currentUser.socialFeeds : {}) || {};
+    const cachedFeeds = readCachedSocialFeeds();
+    const feeds = Object.keys(cachedFeeds).length > 0 ? cachedFeeds : userFeeds;
+
+    const youtube = getConnection(feeds, 'youtube', 'youTube', 'YouTube');
+    const tiktok = getConnection(feeds, 'tikTok', 'tiktok', 'TikTok');
+    const facebook = getConnection(feeds, 'facebook', 'Facebook');
+
+    const youtubeValue = String(youtube?.username || '').trim()
+        || String(youtube?.profileUrl || youtube?.feedUrl || '').trim();
+    const tiktokValue = cleanHandle(
+        String(tiktok?.username || '').trim()
+        || parseHandleFromProfileUrl('tiktok', tiktok?.profileUrl || tiktok?.feedUrl || '')
+    );
+    const facebookValue = String(facebook?.username || '').trim()
+        || String(facebook?.profileUrl || facebook?.feedUrl || '').trim()
+        || cleanHandle(parseHandleFromProfileUrl('facebook', facebook?.profileUrl || facebook?.feedUrl || ''));
+
+    return {
+        youtube: youtubeValue,
+        tiktok: tiktokValue,
+        facebook: facebookValue
+    };
+};
+
 const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, onNavigate, hideMultiPlatformPublish = false }) => {
     const [content, setContent] = useState('');
     const [mediaFiles, setMediaFiles] = useState([]);
@@ -86,6 +178,33 @@ const PostCreator = ({ onPostCreate, addTruthAlert, currentUser, onNavigate, hid
     useEffect(() => {
         addTruthAlertRef.current = addTruthAlert;
     }, [addTruthAlert]);
+
+    useEffect(() => {
+        const applySocialAutofill = () => {
+            const autofill = resolveSocialAutofillValues(currentUser);
+
+            if (!youTubeChannelOrEmail.trim() && autofill.youtube) {
+                setYouTubeChannelOrEmail(autofill.youtube);
+            }
+            if (!tikTokUsername.trim() && autofill.tiktok) {
+                setTikTokUsername(autofill.tiktok);
+            }
+            if (!facebookPageOrProfile.trim() && autofill.facebook) {
+                setFacebookPageOrProfile(autofill.facebook);
+            }
+        };
+
+        applySocialAutofill();
+
+        if (typeof window === 'undefined') {
+            return undefined;
+        }
+
+        window.addEventListener('wiseraven:social-updated', applySocialAutofill);
+        return () => {
+            window.removeEventListener('wiseraven:social-updated', applySocialAutofill);
+        };
+    }, [currentUser, youTubeChannelOrEmail, tikTokUsername, facebookPageOrProfile]);
 
     // Auto-save media files to computer when they are selected.
     useEffect(() => {

@@ -291,6 +291,83 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
             .OrderByDescending(x => x.ViewedAt)
             .FirstOrDefaultAsync();
     }
+
+    public async Task UpsertPlaybackStateAsync(Guid mediaId, Guid userId, int positionSeconds, bool isPlaying)
+    {
+        var now = DateTime.UtcNow;
+        var safePosition = Math.Max(0, positionSeconds);
+        var state = await _context.MediaPlaybackStates
+            .FirstOrDefaultAsync(x => x.MediaId == mediaId && x.UserId == userId);
+
+        if (state == null)
+        {
+            state = new MediaPlaybackState
+            {
+                MediaId = mediaId,
+                UserId = userId
+            };
+            await _context.MediaPlaybackStates.AddAsync(state);
+        }
+
+        state.PositionSeconds = safePosition;
+        state.IsPlaying = isPlaying;
+        state.Completed = false;
+        state.LastPlayedAt = now;
+        state.UpdatedAt = now;
+        state.IsDeleted = false;
+        state.DeletedAt = null;
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, int>> GetPlaybackPositionsAsync(Guid userId, IReadOnlyCollection<Guid> mediaIds)
+    {
+        if (mediaIds.Count == 0)
+        {
+            return new Dictionary<Guid, int>();
+        }
+
+        var states = await _context.MediaPlaybackStates
+            .AsNoTracking()
+            .Where(x =>
+                x.UserId == userId &&
+                mediaIds.Contains(x.MediaId) &&
+                !x.IsDeleted &&
+                !x.Completed &&
+                x.PositionSeconds > 0)
+            .ToListAsync();
+
+        return states.ToDictionary(x => x.MediaId, x => x.PositionSeconds);
+    }
+
+    public Task<MediaPlaybackState?> GetPlaybackStateAsync(Guid mediaId, Guid userId)
+    {
+        return _context.MediaPlaybackStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.MediaId == mediaId && x.UserId == userId && !x.IsDeleted);
+    }
+
+    public async Task ClearPlaybackStateAsync(Guid mediaId, Guid userId)
+    {
+        var states = await _context.MediaPlaybackStates
+            .Where(x => x.MediaId == mediaId && x.UserId == userId && !x.IsDeleted)
+            .ToListAsync();
+
+        if (states.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var state in states)
+        {
+            state.IsDeleted = true;
+            state.DeletedAt = now;
+            state.UpdatedAt = now;
+        }
+
+        await _context.SaveChangesAsync();
+    }
 }
 
 public sealed class PlaylistRepository : Repository<MediaPlaylist>, IPlaylistRepository

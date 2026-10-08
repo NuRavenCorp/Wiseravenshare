@@ -995,6 +995,25 @@ CREATE TABLE IF NOT EXISTS app_data.""MediaViewHistories"" (
 CREATE INDEX IF NOT EXISTS idx_media_view_histories_media_user_time
     ON app_data.""MediaViewHistories"" (""MediaId"", ""UserId"", ""ViewedAt"" DESC);
 
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaybackStates"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""PositionSeconds"" INTEGER NOT NULL DEFAULT 0,
+    ""IsPlaying"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Completed"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""LastPlayedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_playback_states_user_media
+    ON app_data.""MediaPlaybackStates"" (""UserId"", ""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_playback_states_completed_last_played
+    ON app_data.""MediaPlaybackStates"" (""Completed"", ""LastPlayedAt"" DESC);
+
 CREATE TABLE IF NOT EXISTS app_data.""MediaLikes"" (
     ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ""MediaId"" UUID NOT NULL,
@@ -2700,5 +2719,4 @@ ORDER BY ""MigrationId"";";
 await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
 
 app.Run();
-
 

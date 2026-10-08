@@ -1,5 +1,5 @@
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
-import { getAuthToken } from './authStorage.js';
+import { getAuthToken } from './unifiedStorage';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 

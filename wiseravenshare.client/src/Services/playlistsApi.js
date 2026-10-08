@@ -131,8 +131,35 @@ export async function pushRemotePlaylists(playlists) {
   }
 }
 
-export async function fetchResumePositions() {
-  return {};
+export async function fetchResumePositions(mediaIds = []) {
+  const ids = Array.from(
+    new Set((Array.isArray(mediaIds) ? mediaIds : []).map((id) => String(id || '').trim()).filter(Boolean))
+  );
+
+  if (ids.length === 0) {
+    return {};
+  }
+
+  try {
+    const response = await api.get(`${MEDIA_LIBRARY_ENDPOINT}/resume`, {
+      params: { mediaIds: ids.join(',') },
+    });
+    const positions = response?.data?.positions;
+    if (!positions || typeof positions !== 'object') {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(positions)
+        .map(([mediaId, seconds]) => [String(mediaId || '').trim(), Math.max(0, Math.round(Number(seconds) || 0))])
+        .filter(([mediaId, seconds]) => mediaId && seconds > 0)
+    );
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      return {};
+    }
+    throw error;
+  }
 }
 
 export async function pushResumePosition(mediaId, seconds, extra = {}) {
@@ -142,12 +169,22 @@ export async function pushResumePosition(mediaId, seconds, extra = {}) {
   }
 
   try {
-    await api.post(`${MEDIA_LIBRARY_ENDPOINT}/${encodeURIComponent(normalizedMediaId)}/progress`, {
+    const payload = {
       mediaId: normalizedMediaId,
       position: Math.max(0, Math.round(Number(seconds) || 0)),
       isPlaying: Boolean(extra?.isPlaying),
-    });
+    };
+
+    await api.put(`${MEDIA_LIBRARY_ENDPOINT}/resume/${encodeURIComponent(normalizedMediaId)}`, payload);
   } catch {
-    // Best effort sync only.
+    try {
+      await api.post(`${MEDIA_LIBRARY_ENDPOINT}/${encodeURIComponent(normalizedMediaId)}/progress`, {
+        mediaId: normalizedMediaId,
+        position: Math.max(0, Math.round(Number(seconds) || 0)),
+        isPlaying: Boolean(extra?.isPlaying),
+      });
+    } catch {
+      // Best effort sync only.
+    }
   }
 }

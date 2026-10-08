@@ -33,7 +33,9 @@ public interface IMediaService
     Task ReorderPlaylistAsync(Guid playlistId, ReorderPlaylistRequest request, Guid userId);
     Task<IEnumerable<PlaylistDto>> GetUserPlaylistsAsync(Guid userId);
     Task TrackMediaViewAsync(Guid mediaId, Guid userId, int? position = null);
+    Task<IReadOnlyDictionary<Guid, int>> GetPlaybackPositionsAsync(Guid userId, IReadOnlyCollection<Guid> mediaIds);
     Task<MediaProgressDto> SaveProgressAsync(Guid mediaId, MediaProgressDto progress, Guid userId);
+    Task ClearProgressAsync(Guid mediaId, Guid userId);
     Task<StreamingStatusDto> GetStreamingStatusAsync(Guid mediaId, Guid userId);
 }
 
@@ -497,6 +499,11 @@ public sealed class MediaService : IMediaService
         return _mediaRepository.TrackViewAsync(mediaId, userId, position);
     }
 
+    public Task<IReadOnlyDictionary<Guid, int>> GetPlaybackPositionsAsync(Guid userId, IReadOnlyCollection<Guid> mediaIds)
+    {
+        return _mediaRepository.GetPlaybackPositionsAsync(userId, mediaIds);
+    }
+
     public async Task<MediaProgressDto> SaveProgressAsync(Guid mediaId, MediaProgressDto progress, Guid userId)
     {
         if (progress.MediaId != mediaId)
@@ -504,15 +511,20 @@ public sealed class MediaService : IMediaService
             throw new BadRequestException("Route media id and payload media id must match.");
         }
 
-        await _mediaRepository.TrackViewAsync(mediaId, userId, progress.Position);
+        await _mediaRepository.UpsertPlaybackStateAsync(mediaId, userId, progress.Position, progress.IsPlaying);
         return progress;
+    }
+
+    public Task ClearProgressAsync(Guid mediaId, Guid userId)
+    {
+        return _mediaRepository.ClearPlaybackStateAsync(mediaId, userId);
     }
 
     public async Task<StreamingStatusDto> GetStreamingStatusAsync(Guid mediaId, Guid userId)
     {
         var media = await _mediaRepository.GetByIdAsync(mediaId) ?? throw new NotFoundException("Media not found.");
-        var view = await _mediaRepository.GetLatestViewAsync(mediaId, userId);
-        var position = view?.PositionSeconds;
+        var playbackState = await _mediaRepository.GetPlaybackStateAsync(mediaId, userId);
+        var position = playbackState?.PositionSeconds;
         var duration = media.Duration;
         var progress = duration.HasValue && duration > 0 && position.HasValue
             ? Math.Round((decimal)position.Value / duration.Value * 100m, 2)
@@ -523,7 +535,7 @@ public sealed class MediaService : IMediaService
             Status = media.Status.ToString(),
             CurrentPosition = position,
             Duration = duration,
-            IsPlaying = false,
+            IsPlaying = playbackState?.IsPlaying ?? false,
             Progress = progress,
             CurrentTrack = media.Title
         };

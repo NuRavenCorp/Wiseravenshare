@@ -19,6 +19,10 @@ public interface IMediaRepository : IRepository<MediaItem>
     Task<bool> IsBookmarkedAsync(Guid mediaId, Guid userId);
     Task TrackViewAsync(Guid mediaId, Guid userId, int? positionSeconds = null);
     Task<MediaViewHistory?> GetLatestViewAsync(Guid mediaId, Guid userId);
+    Task UpsertPlaybackStateAsync(Guid mediaId, Guid userId, int positionSeconds, bool isPlaying);
+    Task<IReadOnlyDictionary<Guid, int>> GetPlaybackPositionsAsync(Guid userId, IReadOnlyCollection<Guid> mediaIds);
+    Task<MediaPlaybackState?> GetPlaybackStateAsync(Guid mediaId, Guid userId);
+    Task ClearPlaybackStateAsync(Guid mediaId, Guid userId);
 }
 
 public interface IPlaylistRepository : IRepository<MediaPlaylist>

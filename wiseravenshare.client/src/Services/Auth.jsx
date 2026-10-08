@@ -1,5 +1,5 @@
 import api from './api';
-import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken, clearAdminPassToken } from './authStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken, clearAdminPassToken } from './unifiedStorage';
 
 const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 30000;
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';

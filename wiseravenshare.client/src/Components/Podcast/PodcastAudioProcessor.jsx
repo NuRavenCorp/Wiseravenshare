@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../../Contexts/AuthContext';
-import { getAuthToken } from '../../Services/authStorage';
+import { getAuthToken } from '../../Services/unifiedStorage';
 
 const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4',
     'audio/x-m4a', 'audio/flac', 'audio/x-flac', 'audio/ogg', 'audio/vorbis'];

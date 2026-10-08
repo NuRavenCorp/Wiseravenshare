@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FaTrophy, FaMedal, FaUserCheck, FaChartLine, FaFilter, FaSearch } from 'react-icons/fa';
-import { truthEngine } from '../../Services/truthEngine';
+import { truthService } from '../../Services/truthService';
 
 const TruthLeaderboard = () => {
     const [leaderboard, setLeaderboard] = useState([]);

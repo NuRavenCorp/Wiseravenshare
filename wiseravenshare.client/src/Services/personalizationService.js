@@ -1,4 +1,4 @@
-import { getAuthToken } from './authStorage.js';
+import { getAuthToken } from './unifiedStorage';
 
 const API_BASE = (import.meta?.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') || 'http://localhost:5242/api';
 

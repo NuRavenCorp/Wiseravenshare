@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FaGlobe, FaTwitter, FaNewspaper, FaChartLine, FaBell, FaFilter, FaSearch, FaRobot } from 'react-icons/fa';
-import { truthEngine } from '../../Services/truthEngine';
+import { truthService } from '../../Services/truthService';
 import { wsService } from '../../Services/websocket';
 
 const RealTimeTruthMonitor = () => {
