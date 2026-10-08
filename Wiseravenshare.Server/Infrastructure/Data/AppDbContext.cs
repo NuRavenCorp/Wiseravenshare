@@ -163,6 +163,8 @@ public class AppDbContext : DbContext
 
     // Media Library (user saved photos, videos, music with visibility control)
     public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
+    public DbSet<CachedYouTubeRecord> CachedYouTubeRecords => Set<CachedYouTubeRecord>();
+    public DbSet<UserActivity> UserActivities => Set<UserActivity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -235,6 +237,26 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(f => new { f.FollowerId, f.FollowingId })
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<CachedYouTubeRecord>(entity =>
+        {
+            entity.HasIndex(r => r.CacheKey);
+            entity.HasIndex(r => r.AbsoluteExpiration);
+            entity.Property(r => r.JsonData).HasColumnType("text");
+            entity.Property(r => r.CacheKey).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<UserActivity>(entity =>
+        {
+            entity.HasIndex(a => a.ActorUserId);
+            entity.HasIndex(a => a.CreatedAt);
+            entity.Property(a => a.TargetType).HasMaxLength(64);
+            entity.Property(a => a.Summary).HasMaxLength(1000);
+            entity.HasOne(a => a.Actor)
+                .WithMany()
+                .HasForeignKey(a => a.ActorUserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<UserBlock>(entity =>
