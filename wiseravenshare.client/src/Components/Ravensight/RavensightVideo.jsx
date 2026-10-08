@@ -62,6 +62,13 @@ const PRICING_PLANS = [
 
 const DEFAULT_PLAN_ID = 'creator_pro';
 const DEFAULT_BILLING_CYCLE = 'monthly';
+const FREE_STARTER_PLAN_ID = 'creator_pro';
+
+const PLAN_ENTITLEMENT_RANK = {
+    creator_pro: 1,
+    growth_suite: 2,
+    studio_plus: 3
+};
 
 const PRODUCT_ROADMAP = [
     {
@@ -176,6 +183,12 @@ const resolveFriendlyBillingError = (error, fallbackMessage) => {
 
 const getPlanById = (planId = DEFAULT_PLAN_ID) => {
     return PRICING_PLANS.find((plan) => plan.id === planId) || PRICING_PLANS[0];
+};
+
+const hasPlanAccess = (requiredPlanId, activePlanId) => {
+    const requiredRank = PLAN_ENTITLEMENT_RANK[requiredPlanId] || 0;
+    const activeRank = PLAN_ENTITLEMENT_RANK[activePlanId] || 0;
+    return activeRank >= requiredRank;
 };
 
 const getFallbackCatalogPlan = (planId = DEFAULT_PLAN_ID) => {
@@ -293,14 +306,9 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
         ? 'studio_plus'
         : billingSync.hasActiveSubscription
         ? (resolvePlanIdFromPriceId(billingSync.priceId) || subscription?.planId || DEFAULT_PLAN_ID)
-        : selectedPlanId;
+        : FREE_STARTER_PLAN_ID;
 
-    const unlockedFeatureCount = PAID_FEATURES.filter((feature) => {
-        if (feature.access === 'creator_pro') return true;
-        if (feature.access === 'growth_suite') return activePlanId === 'growth_suite' || activePlanId === 'studio_plus';
-        if (feature.access === 'studio_plus') return activePlanId === 'studio_plus';
-        return false;
-    }).length;
+    const unlockedFeatureCount = PAID_FEATURES.filter((feature) => hasPlanAccess(feature.access, activePlanId)).length;
 
     const addNotification = (message, type = 'info') => {
         const id = Date.now();
@@ -672,7 +680,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                     <span>
                         Publishing access:
                         <strong style={{ marginLeft: '6px' }}>
-                            {subscription?.isActive ? `${subscription.tier} active` : `Choose a plan below`}
+                            {subscription?.isActive ? `${subscription.tier} active` : 'Free starter active'}
                         </strong>
                     </span>
                     <span style={{
@@ -736,9 +744,13 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                     marginBottom: '18px'
                 }}>
                     {PAID_FEATURES.map((feature) => {
-                        const isUnlocked = feature.access === 'creator_pro'
-                            || (feature.access === 'growth_suite' && (activePlanId === 'growth_suite' || activePlanId === 'studio_plus'))
-                            || (feature.access === 'studio_plus' && activePlanId === 'studio_plus');
+                        const isUnlocked = hasPlanAccess(feature.access, activePlanId);
+                        const isFreeStarterUnlocked = !billingSync.hasActiveSubscription
+                            && !isAdminAllAccess
+                            && feature.access === FREE_STARTER_PLAN_ID;
+                        const accessLabel = isUnlocked
+                            ? (isFreeStarterUnlocked ? 'Included in free starter' : 'Unlocked')
+                            : `Upgrade to ${feature.access.replace('_', ' ')}`;
 
                         return (
                             <div key={feature.title} style={{
@@ -756,7 +768,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                                         padding: '4px 8px',
                                         background: isUnlocked ? 'rgba(76,175,80,0.18)' : 'rgba(255,255,255,0.08)'
                                     }}>
-                                        {isUnlocked ? 'Unlocked' : `Needs ${feature.access.replace('_', ' ')}`}
+                                        {accessLabel}
                                     </span>
                                 </div>
                                 <div style={{ color: 'var(--light-color)', lineHeight: 1.5, fontSize: '13px' }}>{feature.detail}</div>
@@ -776,14 +788,14 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                         <div>
                             <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, opacity: 0.8 }}>Billing status</div>
                             <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>
-                                {billingSync.hasActiveSubscription ? 'Active subscription verified' : 'Subscription not active'}
+                                {billingSync.hasActiveSubscription ? 'Active subscription verified' : 'Free starter active'}
                             </div>
                             <div style={{ color: 'var(--light-color)', marginTop: '4px' }}>
                                 {isAdminAllAccess
                                     ? 'Administrator account has permanent all-access to subscription features.'
                                     : billingSync.source === 'server'
                                     ? `Synced from Stripe with status ${billingSync.status}.`
-                                    : 'Showing local preview until Stripe status is available.'}
+                                    : 'Core publishing is available now. Upgrade only when you need growth and team features.'}
                             </div>
                             {catalogError && (
                                 <div style={{ color: '#ffd7d7', marginTop: '4px' }}>{catalogError}</div>
@@ -799,7 +811,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                 {activeTab === 'record' && (
                     <VideoRecorder
                         onNotification={addNotification}
-                        canDirectUpload={isAdminAllAccess || Boolean(subscription?.isActive)}
+                        canDirectUpload={hasPlanAccess('creator_pro', activePlanId)}
                         subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
@@ -809,7 +821,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                 {activeTab === 'upload' && (
                     <VideoUploader
                         onNotification={addNotification}
-                        canDirectUpload={isAdminAllAccess || Boolean(subscription?.isActive)}
+                        canDirectUpload={hasPlanAccess('creator_pro', activePlanId)}
                         subscriptionPriceMonthly={getPlanById(subscription?.planId || DEFAULT_PLAN_ID).monthlyPrice}
                     />
                 )}
@@ -844,7 +856,7 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                                 </div>
                                 <h3 style={{ margin: '8px 0 6px', fontSize: '32px' }}>Choose the plan that fits your publishing pace.</h3>
                                 <p style={{ margin: 0, color: 'var(--light-color)' }}>
-                                    A creator-first suite designed to help you publish faster, grow smarter, and scale with more structure.
+                                    Start on the free starter plan, then upgrade when you need growth intelligence or team workflows.
                                 </p>
                             </div>
 
@@ -856,9 +868,9 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                                 padding: '16px 18px',
                                 color: 'var(--light-color)'
                             }}>
-                                    <strong style={{ color: 'var(--text-color)' }}>Early access rollout:</strong> We are launching with the creator publishing core first, then expanding into growth intelligence and team workflows to power the broader social ecosystem.
+                                    <strong style={{ color: 'var(--text-color)' }}>Lower-friction access:</strong> Core creator publishing stays available on free starter. Paid plans focus on growth intelligence and team workflow unlocks.
                                     <div style={{ marginTop: '10px' }}>
-                                        Current selected plan unlocks <strong style={{ color: 'var(--text-color)' }}>{unlockedFeatureCount} premium feature groups</strong> in the publishing studio.
+                                        Your current access tier unlocks <strong style={{ color: 'var(--text-color)' }}>{unlockedFeatureCount} feature groups</strong> in the publishing studio.
                                     </div>
                             </div>
 
@@ -961,6 +973,25 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
                             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '24px', alignItems: 'center' }}>
                                 {!subscription?.isActive ? (
                                     <>
+                                        <button
+                                            onClick={() => {
+                                                safeTrackGrowthEvent('paywall_continue_free_starter', {
+                                                    source: 'ravensight_video'
+                                                });
+                                                setActiveTab('record');
+                                            }}
+                                            style={{
+                                                border: '1px solid var(--border-color)',
+                                                background: 'transparent',
+                                                color: 'var(--text-color)',
+                                                borderRadius: '999px',
+                                                padding: '12px 18px',
+                                                fontWeight: 700,
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Continue with free starter
+                                        </button>
                                         <button
                                             onClick={() => subscribeNow(selectedPlanId, 'monthly')}
                                             disabled={!getCatalogPlanById(selectedPlanId).monthly.configured && !allowLocalCheckoutFallback}
