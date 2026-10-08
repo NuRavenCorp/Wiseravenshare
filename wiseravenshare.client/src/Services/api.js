@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './authStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './unifiedStorage';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
@@ -1390,6 +1390,18 @@ export const apiService = {
             throw normalizeApiError(error, 'Failed to load photo library.');
         }
     },
+    updatePhotoLibraryState: async (photoId, state = {}) => {
+        const normalizedPhotoId = String(photoId || '').trim();
+        if (!normalizedPhotoId) {
+            throw new Error('Photo id is required.');
+        }
+
+        try {
+            return await api.patch(`/ravensight/media/photos/${encodeURIComponent(normalizedPhotoId)}/state`, state);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update photo state.');
+        }
+    },
     deletePhotoLibraryItem: async (photoId) => {
         const normalizedPhotoId = String(photoId || '').trim();
         if (!normalizedPhotoId) {
@@ -1420,6 +1432,18 @@ export const apiService = {
                 }
             }
             throw normalizeApiError(error, 'Failed to remove saved media item.');
+        }
+    },
+    updateMusicLibraryState: async (trackId, state = {}) => {
+        const normalizedTrackId = String(trackId || '').trim();
+        if (!normalizedTrackId) {
+            throw new Error('Track id is required.');
+        }
+
+        try {
+            return await api.patch(`/ravensight/media/music/${encodeURIComponent(normalizedTrackId)}/state`, state);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update music state.');
         }
     },
     deleteMusicLibraryItem: async (trackId) => {
@@ -1453,6 +1477,18 @@ export const apiService = {
             }
 
             throw normalizeApiError(error, 'Failed to remove video from your library.');
+        }
+    },
+    updateVideoLibraryState: async (videoId, state = {}) => {
+        const normalizedVideoId = String(videoId || '').trim();
+        if (!normalizedVideoId) {
+            throw new Error('Video id is required.');
+        }
+
+        try {
+            return await api.patch(`/ravensight/media/videos/${encodeURIComponent(normalizedVideoId)}/state`, state);
+        } catch (error) {
+            throw normalizeApiError(error, 'Failed to update video state.');
         }
     },
     getVideoLibrary: async () => {

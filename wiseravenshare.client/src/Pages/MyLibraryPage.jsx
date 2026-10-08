@@ -23,13 +23,31 @@ const TAB_OPTIONS = [
     { id: 'all', label: 'All' },
     { id: 'music', label: 'Music' },
     { id: 'photo', label: 'Photos' },
-    { id: 'video', label: 'Videos' }
+    { id: 'video', label: 'Videos' },
+    { id: 'archive', label: 'Local Archive' }
 ];
 
 const LIMITS = {
     music: 30,
     photo: 30,
     video: 30
+};
+
+const LIBRARY_STATE_KEY = 'ml:state:v1';
+
+const readLibraryState = () => {
+    return {};
+};
+
+const writeLibraryState = (state) => {
+    return state;
+};
+
+const getItemKey = (item) => `${String(item?.type || 'media').toLowerCase()}:${String(item?.id || '')}`;
+
+const getItemState = (item, state) => state?.[getItemKey(item)] || {
+    archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
+    protected: Boolean(item?.protected || item?.isProtected || item?.Protected)
 };
 
 const formatBytes = (value) => {
@@ -154,6 +172,8 @@ const normalizeMusic = (item) => {
             item?.createdAt,
             item?.CreatedAt
         ),
+        archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
+        protected: Boolean(item?.protected || item?.isProtected || item?.Protected),
         source: 'spaces'
     };
 };
@@ -184,6 +204,8 @@ const normalizePhoto = (item) => {
             item?.createdAt,
             item?.CreatedAt
         ),
+        archived: Boolean(item?.archived || item?.isArchived || item?.Archived || item?.mediaMetadata?.archived),
+        protected: Boolean(item?.protected || item?.isProtected || item?.Protected || item?.mediaMetadata?.protected),
         source: 'spaces'
     };
 };
@@ -214,6 +236,8 @@ const normalizeVideo = (item) => {
             item?.createdAt,
             item?.CreatedAt
         ),
+        archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
+        protected: Boolean(item?.protected || item?.isProtected || item?.Protected),
         source: 'spaces'
     };
 };
@@ -249,6 +273,7 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [music, setMusic] = useState([]);
     const [photos, setPhotos] = useState([]);
     const [videos, setVideos] = useState([]);
+    const [libraryState, setLibraryState] = useState({});
     const [error, setError] = useState('');
     const [selectedItem, setSelectedItem] = useState(null);
 
@@ -293,6 +318,29 @@ const MyLibraryPage = ({ onNavigate }) => {
                 setMusic(musicItems.filter(Boolean));
                 setPhotos(photoItems.filter(Boolean));
                 setVideos(videoItems.filter(Boolean));
+                setLibraryState({
+                    ...musicItems.filter(Boolean).reduce((acc, item) => {
+                        acc[getItemKey(item)] = {
+                            archived: Boolean(item.archived),
+                            protected: Boolean(item.protected)
+                        };
+                        return acc;
+                    }, {}),
+                    ...photoItems.filter(Boolean).reduce((acc, item) => {
+                        acc[getItemKey(item)] = {
+                            archived: Boolean(item.archived),
+                            protected: Boolean(item.protected)
+                        };
+                        return acc;
+                    }, {}),
+                    ...videoItems.filter(Boolean).reduce((acc, item) => {
+                        acc[getItemKey(item)] = {
+                            archived: Boolean(item.archived),
+                            protected: Boolean(item.protected)
+                        };
+                        return acc;
+                    }, {})
+                });
 
                 const failures = [musicResult, photoResult, videoResult].filter(
                     (r) => r.status === 'rejected'
@@ -329,11 +377,22 @@ const MyLibraryPage = ({ onNavigate }) => {
 
     const allItems = useMemo(() => [...music, ...photos, ...videos], [music, photos, videos]);
 
+    const archivedItems = useMemo(
+        () => allItems.filter((item) => Boolean(getItemState(item, libraryState).archived)),
+        [allItems, libraryState]
+    );
+
+    const activeItems = useMemo(
+        () => allItems.filter((item) => !getItemState(item, libraryState).archived),
+        [allItems, libraryState]
+    );
+
     const filteredItems = useMemo(() => {
         const term = query.trim().toLowerCase();
         const tabFilter = activeTab === 'all' ? null : activeTab;
-        return allItems.filter((item) => {
-            if (tabFilter && item.type !== tabFilter) return false;
+        const sourceItems = activeTab === 'archive' ? archivedItems : activeItems;
+        return sourceItems.filter((item) => {
+            if (tabFilter && tabFilter !== 'archive' && item.type !== tabFilter) return false;
             if (!term) return true;
             return [
                 item.title,
@@ -342,10 +401,12 @@ const MyLibraryPage = ({ onNavigate }) => {
                 item.genre,
                 item.description,
                 item.fileName,
-                item.relativePath
+                item.relativePath,
+                getItemState(item, libraryState).archived ? 'archived' : '',
+                getItemState(item, libraryState).protected ? 'protected' : ''
             ].some((value) => String(value || '').toLowerCase().includes(term));
         });
-    }, [activeTab, allItems, query]);
+    }, [activeTab, activeItems, archivedItems, libraryState, query]);
 
     useEffect(() => {
         if (
@@ -359,20 +420,25 @@ const MyLibraryPage = ({ onNavigate }) => {
     }, [allItems, selectedItem]);
 
     const stats = useMemo(() => {
-        const totalSize = allItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
+        const totalSize = activeItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
         return {
-            total: allItems.length,
-            music: music.length,
-            photo: photos.length,
-            video: videos.length,
+            total: activeItems.length,
+            archive: archivedItems.length,
+            music: activeItems.filter((item) => item.type === 'music').length,
+            photo: activeItems.filter((item) => item.type === 'photo').length,
+            video: activeItems.filter((item) => item.type === 'video').length,
             totalSize
         };
-    }, [allItems, music.length, photos.length, videos.length]);
+    }, [activeItems, archivedItems]);
 
     const uploadLimitReached = useMemo(() => {
-        const counts = { music: music.length, photo: photos.length, video: videos.length };
+        const counts = {
+            music: activeItems.filter((item) => item.type === 'music').length,
+            photo: activeItems.filter((item) => item.type === 'photo').length,
+            video: activeItems.filter((item) => item.type === 'video').length
+        };
         return Boolean(LIMITS[uploadType]) && counts[uploadType] >= LIMITS[uploadType];
-    }, [music.length, photos.length, videos.length, uploadType]);
+    }, [activeItems, uploadType]);
 
     const updateItemLists = useCallback((type, nextItem) => {
         if (!nextItem) return;
@@ -384,6 +450,72 @@ const MyLibraryPage = ({ onNavigate }) => {
             setVideos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
     }, []);
 
+    const updateLibraryState = useCallback((item, patch) => {
+        const key = getItemKey(item);
+        setLibraryState((prev) => {
+            const next = { ...(prev || {}) };
+            const current = next[key] || {};
+            const merged = {
+                ...current,
+                ...patch
+            };
+
+            if (!merged.archived && !merged.protected) {
+                delete next[key];
+                return next;
+            }
+
+            next[key] = merged;
+            return next;
+        });
+    }, []);
+
+    const removeLibraryState = useCallback((item) => {
+        const key = getItemKey(item);
+        setLibraryState((prev) => {
+            const next = { ...(prev || {}) };
+            delete next[key];
+            return next;
+        });
+    }, []);
+
+    const persistState = useCallback(async (item, nextState) => {
+        const state = {
+            archived: Boolean(nextState?.archived),
+            protected: Boolean(nextState?.protected)
+        };
+
+        try {
+            if (item.type === 'music') {
+                await apiService.updateMusicLibraryState(item.id, state);
+            } else if (item.type === 'photo') {
+                await apiService.updatePhotoLibraryState(item.id, state);
+            } else if (item.type === 'video') {
+                await apiService.updateVideoLibraryState(item.id, state);
+            }
+
+            updateLibraryState(item, state);
+        } catch (error) {
+            addToast(error?.message || 'Unable to update media state.', 'error');
+        }
+    }, [addToast, updateLibraryState]);
+
+    const handleToggleArchive = useCallback((item) => {
+        const currentState = getItemState(item, libraryState);
+        void persistState(item, {
+            archived: !currentState.archived,
+            protected: Boolean(currentState.protected)
+        });
+    }, [libraryState, persistState]);
+
+    const handleToggleProtect = useCallback((item) => {
+        const currentState = getItemState(item, libraryState);
+        void persistState(item, {
+            archived: Boolean(currentState.archived),
+            protected: !currentState.protected
+        });
+    }, [libraryState, persistState]);
+
     const handleUpload = async (event) => {
         event.preventDefault();
 
@@ -394,7 +526,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         if (uploadLimitReached) {
             addToast(
-                `${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Delete an item first.`,
+                `${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Archive or delete an item first.`,
                 'error'
             );
             return;
@@ -513,6 +645,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         } else if (item.type === 'video') {
             setVideos((prev) => prev.filter((entry) => entry.id !== item.id));
         }
+        removeLibraryState(item);
 
         try {
             if (item.type === 'music') {
@@ -542,107 +675,133 @@ const MyLibraryPage = ({ onNavigate }) => {
         }
     };
 
-    const renderedItems = filteredItems.map((item) => (
-        <article
-            key={`${item.type}-${item.id}`}
-            style={{
-                ...cardStyle,
-                cursor: 'pointer',
-                outline:
-                    selectedItem?.id === item.id && selectedItem?.type === item.type
-                        ? '2px solid rgba(59,130,246,0.8)'
-                        : 'none'
-            }}
-            onDoubleClick={() => setSelectedItem(item)}
-            title="Double-click to render this file"
-        >
-            <div style={thumbStyle}>
-                {item.type === 'photo' && item.mediaUrl ? (
-                    <img
-                        src={item.mediaUrl}
-                        alt={item.title}
-                        style={mediaPreviewStyle}
-                        loading="lazy"
-                        onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                        }}
-                    />
-                ) : (
-                    <div style={iconPlaceholderStyle}>
-                        {item.type === 'music' ? (
-                            <FiMusic />
-                        ) : item.type === 'photo' ? (
-                            <FiImage />
-                        ) : (
-                            <FiVideo />
-                        )}
+    const renderedItems = filteredItems.map((item) => {
+        const state = getItemState(item, libraryState);
+        const archived = Boolean(state.archived);
+        const protectedItem = Boolean(state.protected);
+
+        return (
+            <article
+                key={`${item.type}-${item.id}`}
+                style={{
+                    ...cardStyle,
+                    cursor: 'pointer',
+                    outline:
+                        selectedItem?.id === item.id && selectedItem?.type === item.type
+                            ? '2px solid rgba(59,130,246,0.8)'
+                            : 'none'
+                }}
+                onDoubleClick={() => setSelectedItem(item)}
+                title="Double-click to render this file"
+            >
+                <div style={thumbStyle}>
+                    {item.type === 'photo' && item.mediaUrl ? (
+                        <img
+                            src={item.mediaUrl}
+                            alt={item.title}
+                            style={mediaPreviewStyle}
+                            loading="lazy"
+                            onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                            }}
+                        />
+                    ) : (
+                        <div style={iconPlaceholderStyle}>
+                            {item.type === 'music' ? (
+                                <FiMusic />
+                            ) : item.type === 'photo' ? (
+                                <FiImage />
+                            ) : (
+                                <FiVideo />
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div style={bodyStyle}>
+                    <div style={titleRowStyle}>
+                        <strong style={titleStyle}>{item.fileName || item.title}</strong>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            {protectedItem && <span style={protectedPillStyle}>Protected</span>}
+                            {archived && <span style={archivePillStyle}>Archived</span>}
+                            <span style={pillStyle}>
+                                {item.type === 'music' ? 'music-library' : item.type}
+                            </span>
+                        </div>
                     </div>
-                )}
-            </div>
+                    {item.title && item.title !== item.fileName ? (
+                        <div style={mutedStyle}>{item.title}</div>
+                    ) : null}
+                    {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
+                    {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
+                    {item.description ? (
+                        <div style={descriptionStyle}>{item.description}</div>
+                    ) : null}
 
-            <div style={bodyStyle}>
-                <div style={titleRowStyle}>
-                    <strong style={titleStyle}>{item.fileName || item.title}</strong>
-                    <span style={pillStyle}>
-                        {item.type === 'music' ? 'music-library' : item.type}
-                    </span>
+                    <div style={metaGridStyle}>
+                        <span>
+                            <FiFolder style={metaIconStyle} />{' '}
+                            {item.relativePath || 'Spaces managed'}
+                        </span>
+                        <span>
+                            <FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}
+                        </span>
+                        <span>
+                            <FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}
+                        </span>
+                        <span>{item.fileName || 'Unknown file'}</span>
+                    </div>
+
+                    <div style={actionsStyle}>
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => handleToggleArchive(item)}
+                        >
+                            {archived ? 'Restore' : 'Archive'}
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => handleToggleProtect(item)}
+                        >
+                            {protectedItem ? 'Unprotect' : 'Protect'}
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() =>
+                                item.mediaUrl &&
+                                window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')
+                            }
+                            disabled={!item.mediaUrl}
+                        >
+                            <FiExternalLink /> Open
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => handleCopy(item.mediaUrl)}
+                            disabled={!item.mediaUrl}
+                        >
+                            <FiCopy /> Copy URL
+                        </button>
+
+                        <button
+                            type="button"
+                            style={dangerButtonStyle}
+                            onClick={() => handleDelete(item)}
+                        >
+                            <FiTrash2 /> Delete
+                        </button>
+                    </div>
                 </div>
-                {item.title && item.title !== item.fileName ? (
-                    <div style={mutedStyle}>{item.title}</div>
-                ) : null}
-                {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
-                {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
-                {item.description ? (
-                    <div style={descriptionStyle}>{item.description}</div>
-                ) : null}
-
-                <div style={metaGridStyle}>
-                    <span>
-                        <FiFolder style={metaIconStyle} />{' '}
-                        {item.relativePath || 'Spaces managed'}
-                    </span>
-                    <span>
-                        <FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}
-                    </span>
-                    <span>
-                        <FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}
-                    </span>
-                    <span>{item.fileName || 'Unknown file'}</span>
-                </div>
-
-                <div style={actionsStyle}>
-                    <button
-                        type="button"
-                        style={secondaryButtonStyle}
-                        onClick={() =>
-                            item.mediaUrl &&
-                            window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')
-                        }
-                        disabled={!item.mediaUrl}
-                    >
-                        <FiExternalLink /> Open
-                    </button>
-
-                    <button
-                        type="button"
-                        style={secondaryButtonStyle}
-                        onClick={() => handleCopy(item.mediaUrl)}
-                        disabled={!item.mediaUrl}
-                    >
-                        <FiCopy /> Copy URL
-                    </button>
-
-                    <button
-                        type="button"
-                        style={dangerButtonStyle}
-                        onClick={() => handleDelete(item)}
-                    >
-                        <FiTrash2 /> Delete
-                    </button>
-                </div>
-            </div>
-        </article>
-    ));
+            </article>
+        );
+    });
 
     return (
         <div style={pageStyle}>
@@ -661,7 +820,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 <div style={summaryGridStyle}>
                     <div style={summaryCardStyle}>
                         <strong>{stats.total}</strong>
-                        <span>Total files</span>
+                        <span>Active files</span>
                     </div>
                     <div style={summaryCardStyle}>
                         <strong>{stats.music}</strong>
@@ -674,6 +833,10 @@ const MyLibraryPage = ({ onNavigate }) => {
                     <div style={summaryCardStyle}>
                         <strong>{stats.video}</strong>
                         <span>Videos</span>
+                    </div>
+                    <div style={summaryCardStyle}>
+                        <strong>{stats.archive}</strong>
+                        <span>Local Archive</span>
                     </div>
                     <div style={summaryCardStyle}>
                         <strong>{formatBytes(stats.totalSize)}</strong>
@@ -789,9 +952,8 @@ const MyLibraryPage = ({ onNavigate }) => {
                     </form>
 
                     <div style={noteStyle}>
-                        This library is for proprietary, original music only. Upload once to
-                        Spaces, then shape your sound with the FM Radio graphic equalizer; the
-                        database tracks metadata, ownership, and URLs.
+                        Archive items when you hit capacity. Archived media stays in your
+                        library, but it is removed from active counts until you restore it.
                     </div>
                 </aside>
 
@@ -841,7 +1003,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                         <div style={emptyStyle}>
                             <FiCheckCircle size={24} />
                             <strong>No media found</strong>
-                            <span>Upload photos, videos, or music to populate your library.</span>
+                            <span>Upload photos, videos, or music, or switch to Local Archive.</span>
                         </div>
                     ) : (
                         <div style={gridStyle}>{renderedItems}</div>
@@ -1147,6 +1309,16 @@ const pillStyle = {
     color: '#bfdbfe',
     fontSize: '12px',
     textTransform: 'uppercase'
+};
+const archivePillStyle = {
+    ...pillStyle,
+    background: 'rgba(251, 191, 36, 0.16)',
+    color: '#fde68a'
+};
+const protectedPillStyle = {
+    ...pillStyle,
+    background: 'rgba(34, 197, 94, 0.16)',
+    color: '#86efac'
 };
 const mutedStyle = { color: DARK_MUTED, fontSize: '13px' };
 const descriptionStyle = { color: DARK_MUTED, fontSize: '13px', lineHeight: 1.5 };

@@ -22,6 +22,8 @@ public sealed class VideoLibraryVideo
     public string? MusicTrackGenre { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public string RetentionStatus { get; set; } = "active";
+    public bool Archived { get; set; }
+    public bool Protected { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public int Views { get; set; }
     public int Likes { get; set; }
@@ -51,6 +53,8 @@ public sealed class CreateVideoLibraryEntryRequest
     public string? MusicTrackGenre { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public bool IsPermanent { get; set; }
+    public bool Archived { get; set; }
+    public bool Protected { get; set; }
 }
 
 public sealed class UpdateVideoLibraryEntryRequest
@@ -84,6 +88,8 @@ public sealed class Ravensight_VideoLibrary
     public string? FacebookUrl { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public string RetentionStatus { get; set; } = "active";
+    public bool Archived { get; set; }
+    public bool Protected { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public int Views { get; set; }
     public int Likes { get; set; }
@@ -107,6 +113,8 @@ public sealed class CreateRavensight_VideoLibraryEntryRequest
     public string? FacebookUrl { get; set; }
     public string StorageMode { get; set; } = "temporary";
     public bool IsPermanent { get; set; }
+    public bool Archived { get; set; }
+    public bool Protected { get; set; }
 }
 
 public sealed class UpdateRavensight_VideoLibraryEntryRequest

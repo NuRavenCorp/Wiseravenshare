@@ -277,6 +277,38 @@ public sealed class RavensightMusicMediaController : ControllerBase
         });
     }
 
+    [HttpPatch("{trackId}/state")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateTrackState(
+        [FromRoute] string trackId,
+        [FromBody] UpdateRavensightMediaStateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        if (string.IsNullOrWhiteSpace(trackId))
+        {
+            return BadRequest(new { message = "trackId is required." });
+        }
+
+        var updated = await _musicLibraryStore.UpdateTrackStateAsync(
+            userId,
+            trackId.Trim(),
+            request.Archived ?? false,
+            request.Protected ?? false,
+            cancellationToken);
+
+        if (!updated)
+        {
+            return NotFound(new { message = "Track not found." });
+        }
+
+        return Ok(new { success = true, archived = request.Archived ?? false, @protected = request.Protected ?? false });
+    }
+
     [HttpPost("save")]
     [RequestSizeLimit(200_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
@@ -368,6 +400,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
                     album = track.Album,
                     genre = track.Genre,
                     fingerprint = track.Fingerprint,
+                    archived = false,
+                    @protected = false,
                     mediaUrl
                 })
             }, cancellationToken);

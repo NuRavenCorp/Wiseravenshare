@@ -62,6 +62,14 @@ public sealed class UserMusicTrackDto
     public string ObjectKey { get; set; } = string.Empty;
     public string UploadedAt { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
+    public bool Archived { get; set; }
+    public bool Protected { get; set; }
+}
+
+public sealed class UpdateRavensightMediaStateRequest
+{
+    public bool? Archived { get; set; }
+    public bool? Protected { get; set; }
 }
 
 public sealed class MusicPlayerStateUpsertRequest

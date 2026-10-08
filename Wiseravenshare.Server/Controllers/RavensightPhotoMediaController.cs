@@ -62,6 +62,8 @@ public sealed class RavensightPhotoMediaController : ControllerBase
                 a.PublicUrl,
                 StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
                     ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+            archived = ReadMetadataBool(a.MetadataJson, "archived"),
+            @protected = ReadMetadataBool(a.MetadataJson, "protected"),
             uploadedAt = a.SavedAtUtc.ToString("O"),
             createdAt = a.SavedAtUtc.ToString("O"),
             type = "photo"
@@ -135,6 +137,38 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         });
     }
 
+    [HttpPatch("{photoId}/state")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdatePhotoState(
+        [FromRoute] string photoId,
+        [FromBody] UpdateRavensightMediaStateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Unable to determine current user." });
+        }
+
+        if (string.IsNullOrWhiteSpace(photoId))
+        {
+            return BadRequest(new { message = "photoId is required." });
+        }
+
+        var updated = await _mediaCatalogStore.UpdateAssetStateAsync(
+            userId,
+            photoId.Trim(),
+            request.Archived ?? false,
+            request.Protected ?? false,
+            cancellationToken);
+
+        if (!updated)
+        {
+            return NotFound(new { message = "Photo not found." });
+        }
+
+        return Ok(new { success = true, archived = request.Archived ?? false, @protected = request.Protected ?? false });
+    }
+
     [HttpPost("save")]
     [RequestSizeLimit(100_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
@@ -188,7 +222,9 @@ public sealed class RavensightPhotoMediaController : ControllerBase
                 SavedAtUtc = saved.SavedAtUtc,
                 MetadataJson = JsonSerializer.Serialize(new
                 {
-                    caption = dto.Caption
+                    caption = dto.Caption,
+                    archived = false,
+                    @protected = false
                 })
             }, cancellationToken);
         }
@@ -255,5 +291,34 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         var displayName = User.FindFirstValue(ClaimTypes.Name);
         var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
         return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
+    }
+
+    private static bool ReadMetadataBool(string? metadataJson, string key)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(metadataJson);
+            if (!doc.RootElement.TryGetProperty(key, out var value))
+            {
+                return false;
+            }
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+                _ => false
+            };
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

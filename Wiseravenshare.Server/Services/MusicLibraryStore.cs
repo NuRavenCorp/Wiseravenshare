@@ -26,6 +26,13 @@ public interface IMusicLibraryStore
         string fileName,
         CancellationToken cancellationToken = default);
 
+    Task<bool> UpdateTrackStateAsync(
+        Guid userId,
+        string trackId,
+        bool archived,
+        bool protectedState,
+        CancellationToken cancellationToken = default);
+
     Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default);
 }
 
@@ -114,7 +121,9 @@ ORDER BY created_at DESC;";
                 RelativePath = objectKey.Replace('\\', '/').Trim('/'),
                 ObjectKey = objectKey,
                 UploadedAt = reader.GetDateTime(7).ToString("O"),
-                SizeBytes = reader.GetInt64(4)
+                SizeBytes = reader.GetInt64(4),
+                Archived = ReadMetadataBool(metadata, "archived"),
+                Protected = ReadMetadataBool(metadata, "protected")
             });
         }
 
@@ -143,6 +152,8 @@ ORDER BY created_at DESC;";
             ["album"] = dto.Album?.Trim() ?? string.Empty,
             ["genre"] = dto.Genre?.Trim() ?? string.Empty,
             ["fingerprint"] = string.IsNullOrWhiteSpace(dto.Fingerprint) ? null : dto.Fingerprint.Trim(),
+            ["archived"] = false,
+            ["protected"] = false,
             ["destinationFolder"] = saved.DestinationFolder,
             ["sourceFileName"] = file.FileName,
             ["storedFileName"] = saved.FileName,
@@ -306,6 +317,49 @@ WHERE owner_user_id = @user_id
         await update.ExecuteNonQueryAsync(cancellationToken);
 
         return results;
+    }
+
+    public async Task<bool> UpdateTrackStateAsync(
+        Guid userId,
+        string trackId,
+        bool archived,
+        bool protectedState,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+UPDATE app_data.bucket_objects
+SET metadata = jsonb_set(
+        jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{archived}',
+            to_jsonb(@archived),
+            TRUE
+        ),
+        '{protected}',
+        to_jsonb(@protected),
+        TRUE
+    ),
+    updated_at = @updated_at
+WHERE owner_user_id = @user_id
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("track_id", trackId.Trim());
+        command.Parameters.AddWithValue("archived", archived);
+        command.Parameters.AddWithValue("protected", protectedState);
+        command.Parameters.AddWithValue("updated_at", DateTime.UtcNow);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public async Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default)
@@ -512,6 +566,35 @@ INSERT INTO app_data.bucket_objects (
         }
 
         return fallback ?? string.Empty;
+    }
+
+    private static bool ReadMetadataBool(JsonElement? metadata, string propertyName)
+    {
+        if (metadata is not { } element)
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value))
+        {
+            if (value.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (value.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return false;
     }
 
     private static string NormalizeFolderPath(string? folder)
