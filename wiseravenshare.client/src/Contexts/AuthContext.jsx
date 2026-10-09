@@ -344,6 +344,27 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const refreshSocialFeeds = useCallback((feedsFromServer) => {
+        const normalized = normalizeSocialFeeds(feedsFromServer);
+        setUser((prev) => {
+            if (!prev) return prev;
+            const next = { ...prev, socialFeeds: normalized };
+            try {
+                const stored = JSON.parse(localStorage.getItem('user_data') || '{}');
+                localStorage.setItem('user_data', JSON.stringify({ ...stored, socialFeeds: normalized }));
+            } catch {
+                // best effort
+            }
+            try {
+                localStorage.setItem('wiseSocialFeeds', JSON.stringify(normalized));
+            } catch {
+                // best effort
+            }
+            return next;
+        });
+        window.dispatchEvent(new Event('wiseraven:social-updated'));
+    }, []);
+
     const value = {
         user,
         loading,
@@ -353,6 +374,7 @@ export const AuthProvider = ({ children }) => {
         acceptTeamInvite,
         logout,
         updateProfile,
+        refreshSocialFeeds,
         isAuthenticated: !!user
     };
 
