@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FiPlay, FiPause, FiVolume2, FiVolume1, FiVolume, FiVolumeX, FiSkipForward, FiSkipBack, FiRepeat, FiShuffle } from 'react-icons/fi';
 import '../../Styles/AudioPlayer.css';
+import { toBlobStreamUrl } from '../../utils/mediaStreamUrl';
 
 /**
  * Comprehensive Audio Player Component
@@ -14,13 +15,13 @@ import '../../Styles/AudioPlayer.css';
  * - Keyboard shortcuts
  * - Responsive design
  */
-const AudioPlayer = ({ 
-  track, 
-  autoPlay = false, 
+const AudioPlayer = ({
+  track,
+  autoPlay = false,
   showVisualizer = true,
   onEnded,
   onError,
-  compact = false 
+  compact = false
 }) => {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
@@ -55,17 +56,6 @@ const AudioPlayer = ({
     'audio/aac': ['aac'],
     'audio/flac': ['flac'],
     'audio/ogg': ['ogg', 'oga']
-  };
-
-  const toBlobStreamUrl = (relativePath = '') => {
-    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!normalized) return '';
-    const encoded = normalized
-      .split('/')
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
   };
 
   const normalizePlaybackUrl = (value = '') => {

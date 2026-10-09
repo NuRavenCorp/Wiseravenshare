@@ -17,3 +17,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["wiseravenshare*", "Wiseravenshare*"]
+
+[tool.pytest.ini_options]
+testpaths = ["agents", "server"]
+addopts = "-p no:langsmith"
+

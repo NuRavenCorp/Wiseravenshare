@@ -411,7 +411,7 @@ const GrowthPage = () => {
             <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px' }}>
                 <h3 style={{ marginTop: 0 }}>Admin Login And Policy Control</h3>
                 <div style={{ color: 'var(--light-color)', fontSize: '13px', marginBottom: '12px' }}>
-                    Default admin login: <strong>admin</strong> / <strong>1@Chinchin234</strong>. Rotate it from inside the app after first sign-in.
+                    Rotate your admin credentials securely below using your configured administrator password.
                 </div>
                 <div style={{ display: 'grid', gap: '8px', maxWidth: '420px' }}>
                     <input

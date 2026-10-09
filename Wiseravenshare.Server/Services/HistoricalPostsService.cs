@@ -243,13 +243,18 @@ namespace Wiseravenshare.Server.Services
 
                 if (dayPosts.Any() || i == 0) // Always include today even if no posts
                 {
+                    var firstContent = dayPosts.FirstOrDefault()?.Content;
+                    var preview = string.IsNullOrEmpty(firstContent)
+                        ? string.Empty
+                        : (firstContent.Length > 100 ? firstContent[..100] : firstContent);
+
                     timeline.Add(new HistoricalDaySnapshot
                     {
                         Date = currentDate,
                         DayOfWeek = currentDate.DayOfWeek.ToString(),
                         PostCount = dayPosts.Count,
                         TotalEngagement = dayPosts.Sum(p => p.LikesCount + p.RepostsCount + p.CommentsCount),
-                        Preview = dayPosts.FirstOrDefault()?.Content?.Substring(0, 100),
+                        Preview = preview,
                         HasPosts = dayPosts.Count > 0
                     });
                 }
@@ -283,7 +288,7 @@ namespace Wiseravenshare.Server.Services
                 TotalComments = posts.Sum(p => p.CommentsCount),
                 TotalShares = posts.Sum(p => p.SharesCount),
                 TotalEngagement = posts.Sum(p => p.LikesCount + p.RepostsCount + p.CommentsCount + p.SharesCount),
-                MostEngagedPost = posts.OrderByDescending(p => p.LikesCount + p.RepostsCount + p.CommentsCount).FirstOrDefault()?.Content,
+                MostEngagedPost = posts.OrderByDescending(p => p.LikesCount + p.RepostsCount + p.CommentsCount).FirstOrDefault()?.Content ?? string.Empty,
                 DayRange = daySpan + 1
             };
         }
@@ -353,7 +358,7 @@ namespace Wiseravenshare.Server.Services
     public class DailyPostsArchiveResponse
     {
         public DateTime Date { get; set; }
-        public string DayOfWeek { get; set; }
+        public string DayOfWeek { get; set; } = string.Empty;
         public List<PostDto> Posts { get; set; } = new();
         public int TotalPostsForDay { get; set; }
         public int Page { get; set; }
@@ -367,12 +372,12 @@ namespace Wiseravenshare.Server.Services
     public class PostDateSummary
     {
         public DateTime Date { get; set; }
-        public string DayOfWeek { get; set; }
+        public string DayOfWeek { get; set; } = string.Empty;
         public int PostCount { get; set; }
         public int LikeCount { get; set; }
         public int RepostCount { get; set; }
         public int CommentCount { get; set; }
-        public string PreviewText { get; set; }
+        public string PreviewText { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -381,10 +386,10 @@ namespace Wiseravenshare.Server.Services
     public class HistoricalDaySnapshot
     {
         public DateTime Date { get; set; }
-        public string DayOfWeek { get; set; }
+        public string DayOfWeek { get; set; } = string.Empty;
         public int PostCount { get; set; }
         public int TotalEngagement { get; set; }
-        public string Preview { get; set; }
+        public string Preview { get; set; } = string.Empty;
         public bool HasPosts { get; set; }
     }
 
@@ -400,7 +405,7 @@ namespace Wiseravenshare.Server.Services
         public int TotalComments { get; set; }
         public int TotalShares { get; set; }
         public int TotalEngagement { get; set; }
-        public string MostEngagedPost { get; set; }
+        public string MostEngagedPost { get; set; } = string.Empty;
         public int DayRange { get; set; }
     }
 }

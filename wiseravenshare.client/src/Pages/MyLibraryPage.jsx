@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react';
 import {
     FiAlertCircle,
     FiCheckCircle,
@@ -13,7 +19,7 @@ import {
     FiSearch,
     FiTrash2,
     FiUpload,
-    FiVideo
+    FiVideo,
 } from 'react-icons/fi';
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
@@ -21,36 +27,27 @@ import { apiService } from '../Services/api';
 import { useSavedMedia } from '../hooks/useSavedMedia';
 import { buildMediaSharePayload, socialService } from '../Services/socialService';
 
+/* =====================================================================
+ *  Constants
+ * ===================================================================== */
+
 const TAB_OPTIONS = [
     { id: 'all', label: 'All' },
     { id: 'music', label: 'Music' },
     { id: 'photo', label: 'Photos' },
     { id: 'video', label: 'Videos' },
-    { id: 'archive', label: 'Local Archive' }
+    { id: 'archive', label: 'Local Archive' },
 ];
 
-const LIMITS = {
-    music: 30,
-    photo: 30,
-    video: 30
+const LIMITS = { music: 30, photo: 30, video: 30 };
+
+const STORAGE_KEYS = {
+    state: 'ml:state:v2',
+    cache: 'ml:cache:v2',
+    pending: 'ml:pending-uploads:v1',
 };
 
-const LIBRARY_STATE_KEY = 'ml:state:v1';
-
-const readLibraryState = () => {
-    return {};
-};
-
-const writeLibraryState = (state) => {
-    return state;
-};
-
-const getItemKey = (item) => `${String(item?.type || 'media').toLowerCase()}:${String(item?.id || '')}`;
-
-const getItemState = (item, state) => state?.[getItemKey(item)] || {
-    archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
-    protected: Boolean(item?.protected || item?.isProtected || item?.Protected)
-};
+const MAX_CACHE_ITEMS = 500;
 
 const SAVED_MEDIA_TYPE_LOOKUP = {
     0: 'photo',
@@ -58,86 +55,58 @@ const SAVED_MEDIA_TYPE_LOOKUP = {
     2: 'music',
     3: 'audio',
     4: 'podcast',
-    5: 'document'
+    5: 'document',
 };
 
-const normalizeSavedMediaType = (value) => {
-    if (typeof value === 'number') {
-        return SAVED_MEDIA_TYPE_LOOKUP[value] || '';
-    }
+/* =====================================================================
+ *  Utilities
+ * ===================================================================== */
 
-    return String(value || '').trim().toLowerCase();
-};
-
-const normalizeSavedMediaItem = (item) => {
-    const metadata = item?.mediaMetadata || {};
-    const mediaType = normalizeSavedMediaType(item?.mediaType);
-    return {
-        id: item?.id,
-        type: mediaType,
-        title: String(item?.title || '').trim(),
-        artist: String(metadata?.artist || '').trim(),
-        album: String(metadata?.album || '').trim(),
-        genre: String(metadata?.genre || '').trim(),
-        description: String(item?.description || metadata?.description || '').trim(),
-        fileName: String(metadata?.fileName || item?.title || '').trim(),
-        relativePath: String(metadata?.relativePath || metadata?.objectKey || metadata?.filePath || '').trim(),
-        mediaUrl: String(item?.mediaUrl || '').trim(),
-        thumbnailUrl: String(item?.thumbnailUrl || metadata?.thumbnailUrl || '').trim(),
-        sizeBytes: Number(item?.fileSizeBytes || 0),
-        uploadedAt: String(item?.createdAt || item?.updatedAt || '').trim(),
-        archived: Boolean(metadata?.archived),
-        protected: Boolean(metadata?.protected),
-        source: 'saved-media',
-        mediaMetadata: metadata
-    };
-};
-
-const getMediaIdentity = (item) => {
-    const type = String(item?.type || item?.mediaType || '').trim().toLowerCase();
-    const mediaUrl = String(item?.mediaUrl || '').trim().toLowerCase();
-    const relativePath = String(item?.relativePath || '').trim().toLowerCase();
-    const id = String(item?.id || '').trim().toLowerCase();
-    return `${type}:${mediaUrl || relativePath || id}`;
-};
-
-const mergeUniqueMedia = (...groups) => {
-    const seen = new Set();
-    const merged = [];
-
-    for (const group of groups) {
-        for (const item of group || []) {
-            if (!item) continue;
-            const key = getMediaIdentity(item);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            merged.push(item);
+const safeStorage = {
+    get(key) {
+        try {
+            const raw = window.localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
         }
+    },
+    set(key, value) {
+        try {
+            window.localStorage.setItem(key, JSON.stringify(value));
+            return true;
+        } catch {
+            return false;
+        }
+    },
+};
+
+const readState = () => safeStorage.get(STORAGE_KEYS.state) || {};
+const writeState = (state) => safeStorage.set(STORAGE_KEYS.state, state || {});
+const readCache = () => safeStorage.get(STORAGE_KEYS.cache) || [];
+const writeCache = (items) =>
+    safeStorage.set(
+        STORAGE_KEYS.cache,
+        (items || []).slice(0, MAX_CACHE_ITEMS)
+    );
+const readPending = () => safeStorage.get(STORAGE_KEYS.pending) || [];
+const writePending = (rows) => safeStorage.set(STORAGE_KEYS.pending, rows || []);
+
+const pickFirstString = (...values) => {
+    for (const value of values) {
+        if (value === undefined || value === null) continue;
+        const text = String(value).trim();
+        if (text) return text;
     }
-
-    return merged;
+    return '';
 };
 
-const formatBytes = (value) => {
-    const bytes = Number(value) || 0;
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-};
-
-const formatDate = (value) => {
-    const date = new Date(value || '');
-    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
-};
-
-// ✅ FIX: never persist blob: URLs. They are session-scoped and die on reload.
 const isEphemeralUrl = (value) => /^blob:/i.test(String(value || '').trim());
 
 const normalizeUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    if (isEphemeralUrl(raw)) return ''; // ✅ FIX
+    if (isEphemeralUrl(raw)) return '';
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(raw)) {
         try {
             const parsed = new URL(raw);
@@ -152,40 +121,21 @@ const normalizeUrl = (value) => {
     return '';
 };
 
-// ✅ FIX: use a single, generic media proxy route that works for images,
-// audio, and video. Falls back to the video-streaming route only for video.
 const buildMediaUrlFromPath = (relativePath = '', type = '') => {
     const normalized = String(relativePath || '')
         .trim()
         .replace(/\\/g, '/')
         .replace(/^\/+/, '');
     if (!normalized) return '';
-    const encoded = normalized.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+    const encoded = normalized
+        .split('/')
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join('/');
     if (type === 'video') return `/api/videostreaming/blob/${encoded}`;
-    // Generic Space-backed proxy route. If your backend exposes a different
-    // one, change this single line.
     return `/api/media/blob/${encoded}`;
 };
 
-const inferTypeFromFile = (file) => {
-    const mime = String(file?.type || '').toLowerCase();
-    const name = String(file?.name || '').toLowerCase();
-    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(name)) return 'music';
-    if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(name)) return 'video';
-    return 'photo';
-};
-
-const pickFirstString = (...values) => {
-    for (const value of values) {
-        if (value === undefined || value === null) continue;
-        const text = String(value).trim();
-        if (text) return text;
-    }
-    return '';
-};
-
-// ✅ FIX: a single resolver that prefers a real server URL, then falls back
-// to a deterministic proxy URL built from the persisted relative path.
 const resolveMediaUrl = (item, type) => {
     const direct = normalizeUrl(
         pickFirstString(
@@ -213,6 +163,140 @@ const resolveMediaUrl = (item, type) => {
     return buildMediaUrlFromPath(relativePath, type);
 };
 
+const inferTypeFromFile = (file) => {
+    const mime = String(file?.type || '').toLowerCase();
+    const name = String(file?.name || '').toLowerCase();
+    if (
+        mime.startsWith('audio/') ||
+        /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|weba)$/i.test(name)
+    ) {
+        return 'music';
+    }
+    if (
+        mime.startsWith('video/') ||
+        /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(name)
+    ) {
+        return 'video';
+    }
+    return 'photo';
+};
+
+const normalizeSavedMediaType = (value) => {
+    if (typeof value === 'number') return SAVED_MEDIA_TYPE_LOOKUP[value] || '';
+    return String(value || '').trim().toLowerCase();
+};
+
+const readList = (
+    payload,
+    keys = ['items', 'data', 'tracks', 'videos', 'photos']
+) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    for (const key of keys) {
+        if (Array.isArray(payload[key])) return payload[key];
+    }
+    return [];
+};
+
+const getItemKey = (item) =>
+    `${String(item?.type || 'media').toLowerCase()}:${String(
+        item?.id || item?.relativePath || item?.fileName || ''
+    )}`;
+
+const getItemState = (item, state) =>
+    state?.[getItemKey(item)] || {
+        archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
+        protected: Boolean(
+            item?.protected || item?.isProtected || item?.Protected
+        ),
+    };
+
+const getMediaIdentity = (item) => {
+    const type = String(item?.type || item?.mediaType || '')
+        .trim()
+        .toLowerCase();
+    const key = String(item?.objectKey || item?.relativePath || '')
+        .trim()
+        .toLowerCase();
+    const url = String(item?.mediaUrl || '').trim().toLowerCase();
+    const id = String(item?.id || '').trim().toLowerCase();
+    return `${type}:${key || url || id}`;
+};
+
+const mergeUniqueMedia = (...groups) => {
+    const seen = new Set();
+    const merged = [];
+    for (const group of groups) {
+        for (const item of group || []) {
+            if (!item) continue;
+            const key = getMediaIdentity(item);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(item);
+        }
+    }
+    return merged;
+};
+
+const formatBytes = (value) => {
+    const bytes = Number(value) || 0;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024)
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+};
+
+const formatDate = (value) => {
+    const date = new Date(value || '');
+    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+};
+
+/* =====================================================================
+ *  Normalizers — every item that enters state has this exact shape:
+ *
+ *    { id, type, title, artist, album, genre, description,
+ *      fileName, relativePath, objectKey, mediaUrl, thumbnailUrl,
+ *      sizeBytes, uploadedAt, archived, protected, source }
+ * ===================================================================== */
+
+const normalizeSavedMediaItem = (item) => {
+    const metadata = item?.mediaMetadata || {};
+    const mediaType = normalizeSavedMediaType(item?.mediaType);
+    const relativePath = pickFirstString(
+        metadata?.relativePath,
+        metadata?.objectKey,
+        metadata?.filePath
+    );
+    return {
+        id: item?.id,
+        type: mediaType,
+        title: String(item?.title || '').trim(),
+        artist: String(metadata?.artist || '').trim(),
+        album: String(metadata?.album || '').trim(),
+        genre: String(metadata?.genre || '').trim(),
+        description: String(
+            item?.description || metadata?.description || ''
+        ).trim(),
+        fileName: String(metadata?.fileName || item?.title || '').trim(),
+        relativePath,
+        objectKey: pickFirstString(metadata?.objectKey, metadata?.relativePath),
+        mediaUrl: resolveMediaUrl(
+            { mediaUrl: item?.mediaUrl, relativePath },
+            mediaType
+        ),
+        thumbnailUrl: String(
+            item?.thumbnailUrl || metadata?.thumbnailUrl || ''
+        ).trim(),
+        sizeBytes: Number(item?.fileSizeBytes || 0),
+        uploadedAt: String(item?.createdAt || item?.updatedAt || '').trim(),
+        archived: Boolean(metadata?.archived),
+        protected: Boolean(metadata?.protected),
+        source: 'saved-media',
+        mediaMetadata: metadata,
+    };
+};
+
 const normalizeMusic = (item) => {
     const fileName = pickFirstString(item?.fileName, item?.FileName);
     const relativePath = pickFirstString(
@@ -221,18 +305,24 @@ const normalizeMusic = (item) => {
         item?.objectKey,
         item?.ObjectKey
     );
-    const mediaUrl = resolveMediaUrl(item, 'music');
-
     return {
         id: pickFirstString(item?.id, item?.Id, fileName, `music-${Date.now()}`),
         type: 'music',
-        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled track'),
+        title: pickFirstString(
+            item?.title,
+            item?.Title,
+            fileName,
+            'Untitled track'
+        ),
         artist: pickFirstString(item?.artist, item?.Artist),
         album: pickFirstString(item?.album, item?.Album),
         genre: pickFirstString(item?.genre, item?.Genre),
+        description: '',
         fileName,
         relativePath,
-        mediaUrl,
+        objectKey: relativePath,
+        mediaUrl: resolveMediaUrl({ ...item, relativePath }, 'music'),
+        thumbnailUrl: '',
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
         uploadedAt: pickFirstString(
             item?.uploadedAt,
@@ -241,8 +331,10 @@ const normalizeMusic = (item) => {
             item?.CreatedAt
         ),
         archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
-        protected: Boolean(item?.protected || item?.isProtected || item?.Protected),
-        source: 'spaces'
+        protected: Boolean(
+            item?.protected || item?.isProtected || item?.Protected
+        ),
+        source: 'spaces',
     };
 };
 
@@ -254,15 +346,23 @@ const normalizePhoto = (item) => {
         item?.objectKey,
         item?.ObjectKey
     );
-    const mediaUrl = resolveMediaUrl(item, 'photo');
-
+    const mediaUrl = resolveMediaUrl({ ...item, relativePath }, 'photo');
     return {
         id: pickFirstString(item?.id, item?.Id, fileName, `photo-${Date.now()}`),
         type: 'photo',
-        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled photo'),
+        title: pickFirstString(
+            item?.title,
+            item?.Title,
+            fileName,
+            'Untitled photo'
+        ),
+        artist: '',
+        album: '',
+        genre: '',
         description: pickFirstString(item?.description, item?.Description),
         fileName,
         relativePath,
+        objectKey: relativePath,
         mediaUrl,
         thumbnailUrl: mediaUrl,
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
@@ -272,9 +372,19 @@ const normalizePhoto = (item) => {
             item?.createdAt,
             item?.CreatedAt
         ),
-        archived: Boolean(item?.archived || item?.isArchived || item?.Archived || item?.mediaMetadata?.archived),
-        protected: Boolean(item?.protected || item?.isProtected || item?.Protected || item?.mediaMetadata?.protected),
-        source: 'spaces'
+        archived: Boolean(
+            item?.archived ||
+            item?.isArchived ||
+            item?.Archived ||
+            item?.mediaMetadata?.archived
+        ),
+        protected: Boolean(
+            item?.protected ||
+            item?.isProtected ||
+            item?.Protected ||
+            item?.mediaMetadata?.protected
+        ),
+        source: 'spaces',
     };
 };
 
@@ -286,17 +396,26 @@ const normalizeVideo = (item) => {
         item?.objectKey,
         item?.ObjectKey
     );
-    const mediaUrl = resolveMediaUrl(item, 'video');
-
+    const mediaUrl = resolveMediaUrl({ ...item, relativePath }, 'video');
     return {
         id: pickFirstString(item?.id, item?.Id, fileName, `video-${Date.now()}`),
         type: 'video',
-        title: pickFirstString(item?.title, item?.Title, fileName, 'Untitled video'),
+        title: pickFirstString(
+            item?.title,
+            item?.Title,
+            fileName,
+            'Untitled video'
+        ),
+        artist: '',
+        album: '',
+        genre: '',
         description: pickFirstString(item?.description, item?.Description),
         fileName,
         relativePath,
+        objectKey: relativePath,
         mediaUrl,
-        thumbnailUrl: normalizeUrl(item?.thumbnailUrl || item?.ThumbnailUrl) || mediaUrl,
+        thumbnailUrl:
+            normalizeUrl(item?.thumbnailUrl || item?.ThumbnailUrl) || mediaUrl,
         sizeBytes: Number(item?.sizeBytes || item?.SizeBytes || 0),
         uploadedAt: pickFirstString(
             item?.uploadedAt,
@@ -305,28 +424,452 @@ const normalizeVideo = (item) => {
             item?.CreatedAt
         ),
         archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
-        protected: Boolean(item?.protected || item?.isProtected || item?.Protected),
-        source: 'spaces'
+        protected: Boolean(
+            item?.protected || item?.isProtected || item?.Protected
+        ),
+        source: 'spaces',
     };
 };
 
-const readList = (payload, keys = ['items', 'data', 'tracks', 'videos', 'photos']) => {
-    if (Array.isArray(payload)) return payload;
-    if (!payload || typeof payload !== 'object') return [];
-    for (const key of keys) {
-        if (Array.isArray(payload[key])) return payload[key];
-    }
-    return [];
+/* =====================================================================
+ *  Styles — declared before anything reads them, so no TDZ risk.
+ * ===================================================================== */
+
+const DARK_PANEL = '#0b1220';
+const DARK_PANEL_ALT = '#101a2d';
+const DARK_BORDER = 'rgba(148, 163, 184, 0.22)';
+const DARK_BORDER_STRONG = 'rgba(96, 165, 250, 0.38)';
+const DARK_TEXT = '#e5eefb';
+const DARK_MUTED = '#94a3b8';
+const DARK_ACCENT = '#60a5fa';
+const DARK_ACCENT_ALT = '#a855f7';
+
+const pillBase = {
+    padding: '4px 8px',
+    borderRadius: '999px',
+    fontSize: '12px',
+    textTransform: 'uppercase',
 };
+
+const buttonBase = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    border: `1px solid ${DARK_BORDER}`,
+    borderRadius: '10px',
+    padding: '8px 10px',
+    background: 'rgba(15, 23, 42, 0.92)',
+    color: DARK_TEXT,
+    cursor: 'pointer',
+};
+
+const styles = {
+    page: {
+        display: 'grid',
+        gap: '16px',
+        padding: '16px 0 24px',
+        color: DARK_TEXT,
+    },
+    hero: {
+        display: 'grid',
+        gap: '14px',
+        padding: '20px',
+        border: `1px solid ${DARK_BORDER_STRONG}`,
+        borderRadius: '18px',
+        background: `linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(17, 24, 39, 0.94)),
+            radial-gradient(circle at top right, rgba(96, 165, 250, 0.20), transparent 40%),
+            radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.18), transparent 38%)`,
+        boxShadow: '0 18px 50px rgba(2, 6, 23, 0.45)',
+    },
+    eyebrow: {
+        fontSize: '12px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.12em',
+        color: DARK_ACCENT,
+        opacity: 0.92,
+    },
+    heading: {
+        margin: '6px 0 0',
+        fontSize: '34px',
+        lineHeight: 1.1,
+        color: '#f8fbff',
+    },
+    subheading: {
+        margin: '8px 0 0',
+        maxWidth: '780px',
+        color: DARK_MUTED,
+        lineHeight: 1.6,
+    },
+    summaryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+        gap: '10px',
+    },
+    summaryCard: {
+        border: `1px solid ${DARK_BORDER}`,
+        borderRadius: '14px',
+        padding: '12px',
+        background:
+            'linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(9, 14, 26, 0.96))',
+        display: 'grid',
+        gap: '4px',
+        color: DARK_TEXT,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+    },
+    layout: {
+        display: 'grid',
+        gridTemplateColumns: '320px minmax(0, 1fr)',
+        gap: '16px',
+        alignItems: 'start',
+    },
+    panel: {
+        border: `1px solid ${DARK_BORDER}`,
+        borderRadius: '18px',
+        padding: '16px',
+        background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
+        display: 'grid',
+        gap: '14px',
+        color: DARK_TEXT,
+        boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)',
+    },
+    panelHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        fontSize: '16px',
+    },
+    form: { display: 'grid', gap: '10px' },
+    field: { display: 'grid', gap: '6px', fontSize: '13px', color: DARK_MUTED },
+    input: {
+        width: '100%',
+        boxSizing: 'border-box',
+        borderRadius: '10px',
+        border: `1px solid ${DARK_BORDER}`,
+        background: 'rgba(15, 23, 42, 0.92)',
+        color: DARK_TEXT,
+        padding: '10px 12px',
+    },
+    uploadButton: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px',
+        border: 'none',
+        borderRadius: '10px',
+        padding: '12px 14px',
+        color: '#fff',
+        background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+        cursor: 'pointer',
+        fontWeight: 700,
+    },
+    note: {
+        padding: '12px',
+        borderRadius: '12px',
+        border: `1px solid ${DARK_BORDER}`,
+        background: 'rgba(37, 99, 235, 0.14)',
+        color: DARK_MUTED,
+        fontSize: '13px',
+        lineHeight: 1.5,
+    },
+    main: { minWidth: 0, display: 'grid', gap: '14px' },
+    toolbar: { display: 'grid', gap: '12px' },
+    tabs: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
+    tab: {
+        border: `1px solid ${DARK_BORDER}`,
+        borderRadius: '999px',
+        padding: '8px 14px',
+        background: 'rgba(15, 23, 42, 0.88)',
+        color: DARK_TEXT,
+        cursor: 'pointer',
+    },
+    activeTab: {
+        border: '1px solid transparent',
+        borderRadius: '999px',
+        padding: '8px 14px',
+        background: `linear-gradient(135deg, ${DARK_ACCENT}, ${DARK_ACCENT_ALT})`,
+        color: '#fff',
+        cursor: 'pointer',
+    },
+    searchWrap: {
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '10px 12px',
+        borderRadius: '14px',
+        border: `1px solid ${DARK_BORDER}`,
+        background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
+    },
+    searchInput: {
+        width: '100%',
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        color: DARK_TEXT,
+    },
+    refreshButton: {
+        border: 'none',
+        background: 'transparent',
+        color: DARK_TEXT,
+        cursor: 'pointer',
+        display: 'grid',
+        placeItems: 'center',
+    },
+    grid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: '14px',
+    },
+    card: {
+        border: `1px solid ${DARK_BORDER}`,
+        borderRadius: '18px',
+        background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
+        overflow: 'hidden',
+        display: 'grid',
+        color: DARK_TEXT,
+        boxShadow: '0 10px 24px rgba(2, 6, 23, 0.26)',
+    },
+    thumb: {
+        aspectRatio: '16 / 9',
+        background:
+            'linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(5, 8, 22, 0.98))',
+        display: 'grid',
+        placeItems: 'center',
+        overflow: 'hidden',
+    },
+    mediaPreview: { width: '100%', height: '100%', objectFit: 'cover' },
+    iconPlaceholder: {
+        width: '100%',
+        height: '100%',
+        display: 'grid',
+        placeItems: 'center',
+        fontSize: '42px',
+        color: 'rgba(148, 163, 184, 0.45)',
+    },
+    body: { display: 'grid', gap: '10px', padding: '14px' },
+    titleRow: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+    },
+    title: { fontSize: '16px', lineHeight: 1.3 },
+    pill: {
+        ...pillBase,
+        background: 'rgba(59, 130, 246, 0.16)',
+        color: '#bfdbfe',
+    },
+    archivePill: {
+        ...pillBase,
+        background: 'rgba(251, 191, 36, 0.16)',
+        color: '#fde68a',
+    },
+    protectedPill: {
+        ...pillBase,
+        background: 'rgba(34, 197, 94, 0.16)',
+        color: '#86efac',
+    },
+    muted: { color: DARK_MUTED, fontSize: '13px' },
+    description: { color: DARK_MUTED, fontSize: '13px', lineHeight: 1.5 },
+    metaGrid: {
+        display: 'grid',
+        gridTemplateColumns: '1fr',
+        gap: '4px',
+        fontSize: '12px',
+        color: DARK_MUTED,
+    },
+    metaIcon: { verticalAlign: 'middle', marginRight: '4px' },
+    actions: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
+    secondaryButton: { ...buttonBase },
+    dangerButton: {
+        ...buttonBase,
+        background: 'rgba(239,68,68,0.10)',
+        color: '#fca5a5',
+        borderColor: 'rgba(239,68,68,0.30)',
+    },
+    error: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '12px 14px',
+        borderRadius: '12px',
+        background: 'rgba(239,68,68,0.10)',
+        border: '1px solid rgba(239,68,68,0.28)',
+        color: '#fecaca',
+    },
+    empty: {
+        display: 'grid',
+        placeItems: 'center',
+        gap: '8px',
+        padding: '32px',
+        border: `1px dashed ${DARK_BORDER}`,
+        borderRadius: '18px',
+        color: DARK_MUTED,
+        background: 'rgba(5, 8, 22, 0.78)',
+    },
+    preview: {
+        display: 'grid',
+        gap: '12px',
+        border: `1px solid ${DARK_BORDER}`,
+        borderRadius: '18px',
+        padding: '16px',
+        background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
+        boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)',
+    },
+    previewHeader: {
+        display: 'grid',
+        gap: '4px',
+        color: DARK_MUTED,
+        fontSize: '13px',
+    },
+    previewFrame: {
+        minHeight: '180px',
+        display: 'grid',
+        placeItems: 'center',
+        border: `1px dashed ${DARK_BORDER}`,
+        borderRadius: '16px',
+        padding: '12px',
+        background: 'rgba(5, 8, 22, 0.78)',
+    },
+    previewMedia: {
+        maxWidth: '100%',
+        maxHeight: '360px',
+        borderRadius: '12px',
+    },
+    previewAudioWrap: {
+        width: '100%',
+        display: 'grid',
+        gap: '10px',
+        justifyItems: 'center',
+    },
+    previewAudio: { width: '100%', maxWidth: '520px' },
+    previewCaption: {
+        display: 'grid',
+        gap: '4px',
+        textAlign: 'center',
+        color: DARK_MUTED,
+    },
+    previewEmpty: {
+        display: 'grid',
+        placeItems: 'center',
+        gap: '10px',
+        textAlign: 'center',
+        color: DARK_MUTED,
+    },
+    resumeBanner: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '12px 14px',
+        borderRadius: '14px',
+        border: '1px solid rgba(251, 191, 36, 0.4)',
+        background: 'rgba(251, 191, 36, 0.10)',
+        color: '#fde68a',
+        fontSize: '13px',
+    },
+};
+
+/* =====================================================================
+ *  renderPreview — single definition, single call site.
+ *  Styles are declared above, so no TDZ risk on module evaluation.
+ * ===================================================================== */
+
+const renderPreview = (item) => {
+    if (!item) {
+        return (
+            <div style={styles.previewEmpty}>
+                <FiExternalLink size={24} />
+                <span>No file selected yet.</span>
+            </div>
+        );
+    }
+
+    const source = item.mediaUrl || '';
+    if (!source) {
+        return (
+            <div style={styles.previewEmpty}>
+                <FiAlertCircle size={24} />
+                <span>That file does not have a renderable URL yet.</span>
+            </div>
+        );
+    }
+
+    if (item.type === 'photo') {
+        return (
+            <img
+                src={source}
+                alt={item.title || item.fileName || 'preview'}
+                style={styles.previewMedia}
+                onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                }}
+            />
+        );
+    }
+
+    if (item.type === 'video') {
+        return (
+            <video
+                src={source}
+                controls
+                preload="metadata"
+                style={styles.previewMedia}
+            />
+        );
+    }
+
+    if (item.type === 'music' || item.type === 'audio') {
+        return (
+            <div style={styles.previewAudioWrap}>
+                <audio
+                    src={source}
+                    controls
+                    preload="metadata"
+                    style={styles.previewAudio}
+                />
+                <div style={styles.previewCaption}>
+                    <strong>{item.fileName || item.title}</strong>
+                    {item.artist ? <span>{item.artist}</span> : null}
+                    {item.album ? <span>{item.album}</span> : null}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={styles.previewEmpty}>
+            <FiFolder size={24} />
+            <span>{item.fileName || item.title || 'Unknown file'}</span>
+        </div>
+    );
+};
+
+/* =====================================================================
+ *  Page
+ * ===================================================================== */
 
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
+
     const {
-        getLibrary: getSavedLibrary,
-        saveMedia: saveSavedMedia,
-        updateMedia: updateSavedMedia,
+        getLibrary,
+        saveMedia,
+        updateMedia,
+        deleteMedia,
+        toggleVisibility,
+        bulkToggleVisibility,
+        loading: savedMediaLoading,
+        error: savedMediaError,
     } = useSavedMedia();
+
+    if (typeof saveMedia !== 'function') {
+        // eslint-disable-next-line no-console
+        console.error(
+            '[MyLibraryPage] useSavedMedia() did not return saveMedia(). Uploads will fail.'
+        );
+    }
+
     const uploadInputRef = useRef(null);
     const isMountedRef = useRef(true);
 
@@ -334,6 +877,8 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState('all');
     const [query, setQuery] = useState('');
+    const [error, setError] = useState('');
+
     const [uploadType, setUploadType] = useState('music');
     const [uploadFile, setUploadFile] = useState(null);
     const [uploadTitle, setUploadTitle] = useState('');
@@ -343,13 +888,58 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [uploadGenre, setUploadGenre] = useState('');
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
+
     const [music, setMusic] = useState([]);
     const [photos, setPhotos] = useState([]);
     const [videos, setVideos] = useState([]);
-    const [libraryState, setLibraryState] = useState({});
-    const [error, setError] = useState('');
+
+    const [libraryState, setLibraryState] = useState(() => readState());
+    const [pendingUploads, setPendingUploads] = useState(() => readPending());
     const [selectedItem, setSelectedItem] = useState(null);
     const [publishingByItem, setPublishingByItem] = useState({});
+
+    useEffect(() => {
+        writeState(libraryState);
+    }, [libraryState]);
+
+    useEffect(() => {
+        const snapshot = [...music, ...photos, ...videos].map((item) => ({
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            artist: item.artist,
+            album: item.album,
+            genre: item.genre,
+            description: item.description,
+            fileName: item.fileName,
+            relativePath: item.relativePath,
+            objectKey: item.objectKey,
+            mediaUrl: item.mediaUrl,
+            thumbnailUrl: item.thumbnailUrl,
+            sizeBytes: item.sizeBytes,
+            uploadedAt: item.uploadedAt,
+            archived: item.archived,
+            protected: item.protected,
+            source: item.source,
+        }));
+        writeCache(snapshot);
+    }, [music, photos, videos]);
+
+    useEffect(() => {
+        writePending(pendingUploads);
+    }, [pendingUploads]);
+
+    useEffect(() => {
+        if (savedMediaError) setError(String(savedMediaError));
+    }, [savedMediaError]);
+
+    useEffect(() => {
+        const cached = readCache();
+        if (!cached.length) return;
+        setMusic(cached.filter((i) => i.type === 'music' || i.type === 'audio'));
+        setPhotos(cached.filter((i) => i.type === 'photo'));
+        setVideos(cached.filter((i) => i.type === 'video'));
+    }, []);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -358,108 +948,154 @@ const MyLibraryPage = ({ onNavigate }) => {
         };
     }, []);
 
-    // ✅ FIX: loadLibrary no longer depends on `refreshing`. That dependency
-    // was causing the callback identity to change on every refresh toggle,
-    // which re-fired the effect and produced duplicate/aborted fetches that
-    // could overwrite freshly uploaded items with empty lists.
     const loadLibrary = useCallback(
         async ({ silent = false } = {}) => {
             if (!silent) setLoading(true);
             setError('');
 
             try {
-                const [savedResult, musicResult, photoResult, videoResult] = await Promise.allSettled([
-                    getSavedLibrary(1, 500, { sortBy: 'createdAt', sortDir: 'desc' }),
+                const results = await Promise.allSettled([
+                    getLibrary(1, 500, {
+                        sortBy: 'createdAt',
+                        sortDir: 'desc',
+                    }),
                     apiService.getMusicLibrary(),
                     apiService.getPhotoLibrary(),
-                    apiService.getVideoLibrary()
+                    apiService.getVideoLibrary(),
                 ]);
 
                 if (!isMountedRef.current) return;
 
+                const [savedR, musicR, photoR, videoR] = results;
+
                 const savedItems =
-                    savedResult.status === 'fulfilled'
-                        ? readList(savedResult.value?.items || savedResult.value?.data, ['items', 'data']).map(normalizeSavedMediaItem)
+                    savedR.status === 'fulfilled'
+                        ? readList(
+                            savedR.value?.items || savedR.value?.data,
+                            ['items', 'data']
+                        ).map(normalizeSavedMediaItem)
                         : [];
+
                 const musicItems =
-                    musicResult.status === 'fulfilled'
-                        ? readList(musicResult.value?.data, ['items', 'tracks', 'data']).map(normalizeMusic)
+                    musicR.status === 'fulfilled'
+                        ? readList(musicR.value?.data, [
+                            'items',
+                            'tracks',
+                            'data',
+                        ]).map(normalizeMusic)
                         : [];
+
                 const photoItems =
-                    photoResult.status === 'fulfilled'
-                        ? readList(photoResult.value?.data, ['data', 'items', 'photos']).map(normalizePhoto)
+                    photoR.status === 'fulfilled'
+                        ? readList(photoR.value?.data, [
+                            'data',
+                            'items',
+                            'photos',
+                        ]).map(normalizePhoto)
                         : [];
+
                 const videoItems =
-                    videoResult.status === 'fulfilled'
-                        ? readList(videoResult.value?.data, ['videos', 'items', 'data']).map(normalizeVideo)
+                    videoR.status === 'fulfilled'
+                        ? readList(videoR.value?.data, [
+                            'videos',
+                            'items',
+                            'data',
+                        ]).map(normalizeVideo)
                         : [];
 
                 const legacyItems = [
-                    ...musicItems.filter(Boolean),
-                    ...photoItems.filter(Boolean),
-                    ...videoItems.filter(Boolean)
-                ].map((item) => ({
-                    ...item,
-                    source: 'legacy'
-                }));
+                    ...musicItems,
+                    ...photoItems,
+                    ...videoItems,
+                ].map((item) => ({ ...item, source: 'legacy' }));
 
-                const mergedItems = mergeUniqueMedia(savedItems, legacyItems);
-                setMusic(mergedItems.filter((item) => item.type === 'music' || item.type === 'audio'));
-                setPhotos(mergedItems.filter((item) => item.type === 'photo'));
-                setVideos(mergedItems.filter((item) => item.type === 'video'));
-                setLibraryState({
-                    ...mergedItems.filter(Boolean).reduce((acc, item) => {
-                        acc[getItemKey(item)] = {
-                            archived: Boolean(item.archived),
-                            protected: Boolean(item.protected)
+                const cached = readCache();
+                const merged = mergeUniqueMedia(
+                    savedItems,
+                    legacyItems,
+                    cached
+                );
+
+                setMusic(
+                    merged.filter(
+                        (i) => i.type === 'music' || i.type === 'audio'
+                    )
+                );
+                setPhotos(merged.filter((i) => i.type === 'photo'));
+                setVideos(merged.filter((i) => i.type === 'video'));
+
+                setLibraryState((prev) => {
+                    const next = { ...(prev || {}) };
+                    for (const item of merged) {
+                        const key = getItemKey(item);
+                        const existing = next[key] || {};
+                        next[key] = {
+                            archived: Boolean(
+                                existing.archived ?? item.archived
+                            ),
+                            protected: Boolean(
+                                existing.protected ?? item.protected
+                            ),
                         };
-                        return acc;
-                    }, {}),
+                    }
+                    return next;
                 });
 
-                if (legacyItems.length > 0) {
+                if (legacyItems.length > 0 && typeof saveMedia === 'function') {
                     await Promise.allSettled(
                         legacyItems
-                            .filter((item) => String(item.mediaUrl || '').trim().length > 0)
-                            .map((item) => saveSavedMedia({
-                                title: item.title || item.fileName || 'Untitled media',
-                                description: item.description || null,
-                                mediaType: item.type === 'audio' ? 'music' : item.type,
-                                mediaUrl: item.mediaUrl,
-                                thumbnailUrl: item.thumbnailUrl || null,
-                                mediaMetadata: {
-                                    fileName: item.fileName || null,
-                                    relativePath: item.relativePath || null,
-                                    archived: Boolean(item.archived),
-                                    protected: Boolean(item.protected),
-                                    source: 'legacy-import'
-                                },
-                                isVisibleInFeed: !item.archived,
-                                tags: [],
-                                fileSizeBytes: item.sizeBytes || null,
-                                durationSeconds: item.durationSeconds || null,
-                            }))
+                            .filter(
+                                (item) =>
+                                    String(item.mediaUrl || '').trim().length > 0
+                            )
+                            .map((item) =>
+                                saveMedia({
+                                    title:
+                                        item.title ||
+                                        item.fileName ||
+                                        'Untitled media',
+                                    description: item.description || null,
+                                    mediaType:
+                                        item.type === 'audio'
+                                            ? 'music'
+                                            : item.type,
+                                    mediaUrl: item.mediaUrl,
+                                    thumbnailUrl: item.thumbnailUrl || null,
+                                    mediaMetadata: {
+                                        fileName: item.fileName || null,
+                                        relativePath:
+                                            item.relativePath || null,
+                                        objectKey:
+                                            item.objectKey ||
+                                            item.relativePath ||
+                                            null,
+                                        archived: Boolean(item.archived),
+                                        protected: Boolean(item.protected),
+                                        source: 'legacy-import',
+                                    },
+                                    isVisibleInFeed: !item.archived,
+                                    tags: [],
+                                    fileSizeBytes: item.sizeBytes || null,
+                                    durationSeconds:
+                                        item.durationSeconds || null,
+                                })
+                            )
                     );
                 }
 
-                const failures = [musicResult, photoResult, videoResult].filter(
+                const failures = [musicR, photoR, videoR].filter(
                     (r) => r.status === 'rejected'
                 );
                 if (failures.length) {
-                    const reason = failures[0].reason;
-                    const message =
-                        reason?.message || 'Some media categories could not be loaded.';
-                    setError(message);
-                }
-
-                if (savedResult.status === 'rejected' && mergedItems.length === 0) {
-                    const reason = savedResult.reason;
-                    const message = reason?.message || 'Unable to load the media library.';
-                    setError(message);
+                    setError(
+                        failures[0].reason?.message ||
+                        'Some media categories could not be loaded.'
+                    );
                 }
             } catch (loadError) {
                 if (!isMountedRef.current) return;
-                const message = loadError?.message || 'Unable to load the media library.';
+                const message =
+                    loadError?.message || 'Unable to load the media library.';
                 setError(message);
                 addToast(message, 'error');
             } finally {
@@ -469,7 +1105,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 }
             }
         },
-        [addToast, getSavedLibrary]
+        [addToast, getLibrary, saveMedia]
     );
 
     useEffect(() => {
@@ -481,24 +1117,35 @@ const MyLibraryPage = ({ onNavigate }) => {
         void loadLibrary({ silent: true });
     }, [loadLibrary]);
 
-    const allItems = useMemo(() => [...music, ...photos, ...videos], [music, photos, videos]);
+    const allItems = useMemo(
+        () => [...music, ...photos, ...videos],
+        [music, photos, videos]
+    );
 
     const archivedItems = useMemo(
-        () => allItems.filter((item) => Boolean(getItemState(item, libraryState).archived)),
+        () =>
+            allItems.filter(
+                (item) => Boolean(getItemState(item, libraryState).archived)
+            ),
         [allItems, libraryState]
     );
 
     const activeItems = useMemo(
-        () => allItems.filter((item) => !getItemState(item, libraryState).archived),
+        () =>
+            allItems.filter(
+                (item) => !getItemState(item, libraryState).archived
+            ),
         [allItems, libraryState]
     );
 
     const filteredItems = useMemo(() => {
         const term = query.trim().toLowerCase();
         const tabFilter = activeTab === 'all' ? null : activeTab;
-        const sourceItems = activeTab === 'archive' ? archivedItems : activeItems;
+        const sourceItems =
+            activeTab === 'archive' ? archivedItems : activeItems;
         return sourceItems.filter((item) => {
-            if (tabFilter && tabFilter !== 'archive' && item.type !== tabFilter) return false;
+            if (tabFilter && tabFilter !== 'archive' && item.type !== tabFilter)
+                return false;
             if (!term) return true;
             return [
                 item.title,
@@ -509,8 +1156,12 @@ const MyLibraryPage = ({ onNavigate }) => {
                 item.fileName,
                 item.relativePath,
                 getItemState(item, libraryState).archived ? 'archived' : '',
-                getItemState(item, libraryState).protected ? 'protected' : ''
-            ].some((value) => String(value || '').toLowerCase().includes(term));
+                getItemState(item, libraryState).protected ? 'protected' : '',
+            ].some((value) =>
+                String(value || '')
+                    .toLowerCase()
+                    .includes(term)
+            );
         });
     }, [activeTab, activeItems, archivedItems, libraryState, query]);
 
@@ -518,7 +1169,9 @@ const MyLibraryPage = ({ onNavigate }) => {
         if (
             selectedItem &&
             !allItems.some(
-                (item) => item.id === selectedItem.id && item.type === selectedItem.type
+                (item) =>
+                    item.id === selectedItem.id &&
+                    item.type === selectedItem.type
             )
         ) {
             setSelectedItem(null);
@@ -526,34 +1179,52 @@ const MyLibraryPage = ({ onNavigate }) => {
     }, [allItems, selectedItem]);
 
     const stats = useMemo(() => {
-        const totalSize = activeItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
+        const totalSize = activeItems.reduce(
+            (sum, item) => sum + Number(item.sizeBytes || 0),
+            0
+        );
         return {
             total: activeItems.length,
             archive: archivedItems.length,
-            music: activeItems.filter((item) => item.type === 'music').length,
-            photo: activeItems.filter((item) => item.type === 'photo').length,
-            video: activeItems.filter((item) => item.type === 'video').length,
-            totalSize
+            music: activeItems.filter((i) => i.type === 'music').length,
+            photo: activeItems.filter((i) => i.type === 'photo').length,
+            video: activeItems.filter((i) => i.type === 'video').length,
+            totalSize,
         };
     }, [activeItems, archivedItems]);
 
     const uploadLimitReached = useMemo(() => {
         const counts = {
-            music: activeItems.filter((item) => item.type === 'music').length,
-            photo: activeItems.filter((item) => item.type === 'photo').length,
-            video: activeItems.filter((item) => item.type === 'video').length
+            music: activeItems.filter((i) => i.type === 'music').length,
+            photo: activeItems.filter((i) => i.type === 'photo').length,
+            video: activeItems.filter((i) => i.type === 'video').length,
         };
-        return Boolean(LIMITS[uploadType]) && counts[uploadType] >= LIMITS[uploadType];
+        return (
+            Boolean(LIMITS[uploadType]) &&
+            counts[uploadType] >= LIMITS[uploadType]
+        );
     }, [activeItems, uploadType]);
 
     const updateItemLists = useCallback((type, nextItem) => {
         if (!nextItem) return;
-        if (type === 'music')
-            setMusic((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
-        if (type === 'photo')
-            setPhotos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
-        if (type === 'video')
-            setVideos((prev) => [nextItem, ...prev.filter((item) => item.id !== nextItem.id)]);
+        if (type === 'music') {
+            setMusic((prev) => [
+                nextItem,
+                ...prev.filter((i) => i.id !== nextItem.id),
+            ]);
+        }
+        if (type === 'photo') {
+            setPhotos((prev) => [
+                nextItem,
+                ...prev.filter((i) => i.id !== nextItem.id),
+            ]);
+        }
+        if (type === 'video') {
+            setVideos((prev) => [
+                nextItem,
+                ...prev.filter((i) => i.id !== nextItem.id),
+            ]);
+        }
     }, []);
 
     const updateLibraryState = useCallback((item, patch) => {
@@ -561,16 +1232,11 @@ const MyLibraryPage = ({ onNavigate }) => {
         setLibraryState((prev) => {
             const next = { ...(prev || {}) };
             const current = next[key] || {};
-            const merged = {
-                ...current,
-                ...patch
-            };
-
+            const merged = { ...current, ...patch };
             if (!merged.archived && !merged.protected) {
                 delete next[key];
                 return next;
             }
-
             next[key] = merged;
             return next;
         });
@@ -585,55 +1251,78 @@ const MyLibraryPage = ({ onNavigate }) => {
         });
     }, []);
 
-    const persistState = useCallback(async (item, nextState) => {
-        const state = {
-            archived: Boolean(nextState?.archived),
-            protected: Boolean(nextState?.protected)
-        };
-
-        try {
-            if (item.source === 'saved-media') {
-                await updateSavedMedia(item.id, {
-                    title: item.title,
-                    description: item.description,
-                    thumbnailUrl: item.thumbnailUrl,
-                    isVisibleInFeed: !state.archived,
-                    tags: Array.isArray(item.tags) ? item.tags : undefined,
-                    mediaMetadata: {
-                        ...(item.mediaMetadata || {}),
-                        archived: state.archived,
-                        protected: state.protected
-                    }
-                });
-            } else if (item.type === 'music') {
-                await apiService.updateMusicLibraryState(item.id, state);
-            } else if (item.type === 'photo') {
-                await apiService.updatePhotoLibraryState(item.id, state);
-            } else if (item.type === 'video') {
-                await apiService.updateVideoLibraryState(item.id, state);
-            }
+    const persistState = useCallback(
+        async (item, nextState) => {
+            const state = {
+                archived: Boolean(nextState?.archived),
+                protected: Boolean(nextState?.protected),
+            };
 
             updateLibraryState(item, state);
-        } catch (error) {
-            addToast(error?.message || 'Unable to update media state.', 'error');
-        }
-    }, [addToast, updateSavedMedia, updateLibraryState]);
 
-    const handleToggleArchive = useCallback((item) => {
-        const currentState = getItemState(item, libraryState);
-        void persistState(item, {
-            archived: !currentState.archived,
-            protected: Boolean(currentState.protected)
-        });
-    }, [libraryState, persistState]);
+            try {
+                if (
+                    item.source === 'saved-media' &&
+                    typeof updateMedia === 'function'
+                ) {
+                    await updateMedia(item.id, {
+                        title: item.title,
+                        description: item.description,
+                        thumbnailUrl: item.thumbnailUrl,
+                        isVisibleInFeed: !state.archived,
+                        tags: Array.isArray(item.tags) ? item.tags : undefined,
+                        mediaMetadata: {
+                            ...(item.mediaMetadata || {}),
+                            relativePath:
+                                item.relativePath ||
+                                item.mediaMetadata?.relativePath ||
+                                null,
+                            objectKey:
+                                item.objectKey ||
+                                item.mediaMetadata?.objectKey ||
+                                null,
+                            archived: state.archived,
+                            protected: state.protected,
+                        },
+                    });
+                } else if (item.type === 'music') {
+                    await apiService.updateMusicLibraryState(item.id, state);
+                } else if (item.type === 'photo') {
+                    await apiService.updatePhotoLibraryState(item.id, state);
+                } else if (item.type === 'video') {
+                    await apiService.updateVideoLibraryState(item.id, state);
+                }
+            } catch (err) {
+                addToast(
+                    err?.message || 'Unable to sync media state.',
+                    'error'
+                );
+            }
+        },
+        [addToast, updateMedia, updateLibraryState]
+    );
 
-    const handleToggleProtect = useCallback((item) => {
-        const currentState = getItemState(item, libraryState);
-        void persistState(item, {
-            archived: Boolean(currentState.archived),
-            protected: !currentState.protected
-        });
-    }, [libraryState, persistState]);
+    const handleToggleArchive = useCallback(
+        (item) => {
+            const currentState = getItemState(item, libraryState);
+            void persistState(item, {
+                archived: !currentState.archived,
+                protected: Boolean(currentState.protected),
+            });
+        },
+        [libraryState, persistState]
+    );
+
+    const handleToggleProtect = useCallback(
+        (item) => {
+            const currentState = getItemState(item, libraryState);
+            void persistState(item, {
+                archived: Boolean(currentState.archived),
+                protected: !currentState.protected,
+            });
+        },
+        [libraryState, persistState]
+    );
 
     const handleUpload = async (event) => {
         event.preventDefault();
@@ -645,14 +1334,45 @@ const MyLibraryPage = ({ onNavigate }) => {
 
         if (uploadLimitReached) {
             addToast(
-                `${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)} library is full. Archive or delete an item first.`,
+                `${uploadType.charAt(0).toUpperCase() + uploadType.slice(1)
+                } library is full. Archive or delete an item first.`,
                 'error'
             );
             return;
         }
 
-        const title = String(uploadTitle || uploadFile.name || 'Untitled media').trim();
+        if (typeof saveMedia !== 'function') {
+            addToast(
+                'Media saving is unavailable right now. Please reload the page.',
+                'error'
+            );
+            return;
+        }
+
+        const title = String(
+            uploadTitle || uploadFile.name || 'Untitled media'
+        ).trim();
         const destinationFolder = `wiseravenshare/media/${uploadType}`;
+
+        const pendingId = `pending-${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 8)}`;
+
+        setPendingUploads((prev) => [
+            ...prev,
+            {
+                id: pendingId,
+                type: uploadType,
+                title,
+                fileName: uploadFile.name,
+                size: uploadFile.size,
+                artist: uploadArtist,
+                album: uploadAlbum,
+                genre: uploadGenre,
+                description: uploadDescription,
+                startedAt: new Date().toISOString(),
+            },
+        ]);
 
         setUploading(true);
         setProgress(0);
@@ -666,16 +1386,20 @@ const MyLibraryPage = ({ onNavigate }) => {
                     album: uploadAlbum,
                     genre: uploadGenre,
                     destinationFolder,
-                    onProgress: setProgress
+                    onProgress: setProgress,
                 });
             } else {
-                response = await apiService.uploadMedia(uploadFile, uploadType, {
-                    title,
-                    description: uploadDescription,
-                    destinationFolder,
-                    caption: uploadDescription,
-                    onProgress: setProgress
-                });
+                response = await apiService.uploadMedia(
+                    uploadFile,
+                    uploadType,
+                    {
+                        title,
+                        description: uploadDescription,
+                        destinationFolder,
+                        caption: uploadDescription,
+                        onProgress: setProgress,
+                    }
+                );
             }
 
             const data = response?.data || response || {};
@@ -698,30 +1422,39 @@ const MyLibraryPage = ({ onNavigate }) => {
                 ''
             ).trim();
 
-            const persisted = await saveSavedMedia({
+            const persisted = await saveMedia({
                 title,
                 description: uploadDescription,
                 mediaType: uploadType,
-                mediaUrl: uploadedMediaUrl || uploadedRelativePath || '',
-                thumbnailUrl: uploadType === 'photo' ? uploadedMediaUrl : undefined,
+                mediaUrl: uploadedMediaUrl || '',
+                thumbnailUrl:
+                    uploadType === 'photo' ? uploadedMediaUrl : undefined,
                 mediaMetadata: {
-                    fileName: data.track?.fileName || data.fileName || uploadFile.name,
+                    fileName:
+                        data.track?.fileName ||
+                        data.fileName ||
+                        uploadFile.name,
                     relativePath: uploadedRelativePath,
+                    objectKey: uploadedRelativePath || data.objectKey || null,
                     artist: uploadArtist,
                     album: uploadAlbum,
                     genre: uploadGenre,
                     archived: false,
-                    protected: false
+                    protected: false,
+                    sizeBytes: uploadFile.size,
                 },
                 isVisibleInFeed: true,
                 tags: [],
                 fileSizeBytes: uploadFile.size,
-                durationSeconds: null
+                durationSeconds: null,
             });
 
             const nextItem = normalizeSavedMediaItem({
                 ...persisted,
-                mediaType: persisted?.mediaType ?? uploadType
+                mediaType: persisted?.mediaType ?? uploadType,
+                mediaUrl:
+                    uploadedMediaUrl ||
+                    buildMediaUrlFromPath(uploadedRelativePath, uploadType),
             });
             updateItemLists(uploadType, nextItem);
 
@@ -734,11 +1467,11 @@ const MyLibraryPage = ({ onNavigate }) => {
             setProgress(0);
             if (uploadInputRef.current) uploadInputRef.current.value = '';
 
-            addToast(`${title} uploaded to Spaces.`, 'success');
+            setPendingUploads((prev) =>
+                prev.filter((row) => row.id !== pendingId)
+            );
 
-            // ✅ FIX: silent re-sync so the server's canonical record (with
-            // its persistent URL + id) replaces the optimistic one.
-            await loadLibrary({ silent: true });
+            addToast(`${title} uploaded to Spaces.`, 'success');
         } catch (uploadError) {
             addToast(uploadError?.message || 'Upload failed.', 'error');
         } finally {
@@ -747,10 +1480,11 @@ const MyLibraryPage = ({ onNavigate }) => {
     };
 
     const handleDelete = async (item) => {
-        const confirmed = window.confirm(`Delete "${item.title}" from the media library?`);
+        const confirmed = window.confirm(
+            `Delete "${item.title}" from the media library?`
+        );
         if (!confirmed) return;
 
-        // Optimistic remove
         if (item.type === 'music') {
             setMusic((prev) => prev.filter((entry) => entry.id !== item.id));
         } else if (item.type === 'photo') {
@@ -770,8 +1504,10 @@ const MyLibraryPage = ({ onNavigate }) => {
             }
             addToast('Media removed.', 'success');
         } catch (deleteError) {
-            addToast(deleteError?.message || 'Failed to delete media.', 'error');
-            // ✅ FIX: re-sync so the UI matches the server after a failed delete.
+            addToast(
+                deleteError?.message || 'Failed to delete media.',
+                'error'
+            );
             await loadLibrary({ silent: true });
         }
     };
@@ -779,7 +1515,6 @@ const MyLibraryPage = ({ onNavigate }) => {
     const handleCopy = async (value) => {
         const text = String(value || '').trim();
         if (!text) return;
-
         try {
             await navigator.clipboard.writeText(text);
             addToast('Copied media URL.', 'success');
@@ -792,7 +1527,10 @@ const MyLibraryPage = ({ onNavigate }) => {
         async (item, targets) => {
             const mediaUrl = String(item?.mediaUrl || '').trim();
             if (!mediaUrl) {
-                addToast('This file does not have a public media URL yet.', 'error');
+                addToast(
+                    'This file does not have a public media URL yet.',
+                    'error'
+                );
                 return;
             }
 
@@ -801,40 +1539,67 @@ const MyLibraryPage = ({ onNavigate }) => {
 
             try {
                 const payload = buildMediaSharePayload({
-                    message: String(item.description || item.title || item.fileName || 'Shared from WiseRavenShare Media Library').trim(),
+                    message: String(
+                        item.description ||
+                        item.title ||
+                        item.fileName ||
+                        'Shared from WiseRavenShare Media Library'
+                    ).trim(),
                     mediaUrl,
                     linkUrl: mediaUrl,
                     publishToFacebook: Boolean(targets?.facebook),
                     publishToInstagram: Boolean(targets?.instagram),
                     publishToTikTok: Boolean(targets?.tiktok),
-                    publishToYouTube: Boolean(targets?.youtube)
+                    publishToYouTube: Boolean(targets?.youtube),
                 });
 
                 const requestedPlatforms = [
                     payload.publishToFacebook ? 'facebook' : null,
                     payload.publishToInstagram ? 'instagram' : null,
                     payload.publishToTikTok ? 'tiktok' : null,
-                    payload.publishToYouTube ? 'youtube' : null
+                    payload.publishToYouTube ? 'youtube' : null,
                 ].filter(Boolean);
 
                 if (!requestedPlatforms.length) {
-                    addToast('Selected platform requires a video/photo media URL.', 'info');
+                    addToast(
+                        'Selected platform requires a video/photo media URL.',
+                        'info'
+                    );
                     return;
                 }
 
                 const response = await socialService.publishContent(payload);
-                const results = Array.isArray(response?.results) ? response.results : [];
-                const succeeded = results.filter((result) => result?.success).map((result) => result.platform);
-                const failed = results.filter((result) => !result?.success);
+                const results = Array.isArray(response?.results)
+                    ? response.results
+                    : [];
+                const succeeded = results
+                    .filter((r) => r?.success)
+                    .map((r) => r.platform);
+                const failed = results.filter((r) => !r?.success);
 
                 if (succeeded.length) {
-                    addToast(`Published to ${succeeded.join(', ')}.`, 'success');
+                    addToast(
+                        `Published to ${succeeded.join(', ')}.`,
+                        'success'
+                    );
                 }
                 if (failed.length) {
-                    addToast(failed.map((result) => `${result.platform}: ${result.error || 'publish failed'}`).join(' | '), 'error');
+                    addToast(
+                        failed
+                            .map(
+                                (r) =>
+                                    `${r.platform}: ${r.error || 'publish failed'
+                                    }`
+                            )
+                            .join(' | '),
+                        'error'
+                    );
                 }
             } catch (publishError) {
-                addToast(publishError?.message || 'Failed to publish media.', 'error');
+                addToast(
+                    publishError?.message || 'Failed to publish media.',
+                    'error'
+                );
             } finally {
                 setPublishingByItem((prev) => {
                     const next = { ...prev };
@@ -858,29 +1623,30 @@ const MyLibraryPage = ({ onNavigate }) => {
             <article
                 key={`${item.type}-${item.id}`}
                 style={{
-                    ...cardStyle,
+                    ...styles.card,
                     cursor: 'pointer',
                     outline:
-                        selectedItem?.id === item.id && selectedItem?.type === item.type
+                        selectedItem?.id === item.id &&
+                            selectedItem?.type === item.type
                             ? '2px solid rgba(59,130,246,0.8)'
-                            : 'none'
+                            : 'none',
                 }}
                 onDoubleClick={() => setSelectedItem(item)}
                 title="Double-click to render this file"
             >
-                <div style={thumbStyle}>
+                <div style={styles.thumb}>
                     {item.type === 'photo' && item.mediaUrl ? (
                         <img
                             src={item.mediaUrl}
                             alt={item.title}
-                            style={mediaPreviewStyle}
+                            style={styles.mediaPreview}
                             loading="lazy"
                             onError={(e) => {
                                 e.currentTarget.style.display = 'none';
                             }}
                         />
                     ) : (
-                        <div style={iconPlaceholderStyle}>
+                        <div style={styles.iconPlaceholder}>
                             {item.type === 'music' ? (
                                 <FiMusic />
                             ) : item.type === 'photo' ? (
@@ -892,48 +1658,78 @@ const MyLibraryPage = ({ onNavigate }) => {
                     )}
                 </div>
 
-                <div style={bodyStyle}>
-                    <div style={titleRowStyle}>
-                        <strong style={titleStyle}>{item.fileName || item.title}</strong>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                            {protectedItem && <span style={protectedPillStyle}>Protected</span>}
-                            {archived && <span style={archivePillStyle}>Archived</span>}
-                            <span style={pillStyle}>
-                                {item.type === 'music' ? 'music-library' : item.type}
+                <div style={styles.body}>
+                    <div style={styles.titleRow}>
+                        <strong style={styles.title}>
+                            {item.fileName || item.title}
+                        </strong>
+                        <div
+                            style={{
+                                display: 'flex',
+                                gap: '6px',
+                                flexWrap: 'wrap',
+                                justifyContent: 'flex-end',
+                            }}
+                        >
+                            {protectedItem && (
+                                <span style={styles.protectedPill}>
+                                    Protected
+                                </span>
+                            )}
+                            {archived && (
+                                <span style={styles.archivePill}>
+                                    Archived
+                                </span>
+                            )}
+                            <span style={styles.pill}>
+                                {item.type === 'music'
+                                    ? 'music-library'
+                                    : item.type}
                             </span>
                         </div>
                     </div>
+
                     {item.title && item.title !== item.fileName ? (
-                        <div style={mutedStyle}>{item.title}</div>
+                        <div style={styles.muted}>{item.title}</div>
                     ) : null}
-                    {item.artist ? <div style={mutedStyle}>{item.artist}</div> : null}
-                    {item.album ? <div style={mutedStyle}>{item.album}</div> : null}
+                    {item.artist ? (
+                        <div style={styles.muted}>{item.artist}</div>
+                    ) : null}
+                    {item.album ? (
+                        <div style={styles.muted}>{item.album}</div>
+                    ) : null}
                     {item.description ? (
-                        <div style={descriptionStyle}>{item.description}</div>
+                        <div style={styles.description}>
+                            {item.description}
+                        </div>
                     ) : null}
 
-                    <div style={metaGridStyle}>
+                    <div style={styles.metaGrid}>
                         <span>
-                            <FiFolder style={metaIconStyle} />{' '}
-                            {item.relativePath || 'Spaces managed'}
+                            <FiFolder style={styles.metaIcon} />{' '}
+                            {item.relativePath ||
+                                item.objectKey ||
+                                'Spaces managed'}
                         </span>
                         <span>
-                            <FiHardDrive style={metaIconStyle} /> {formatBytes(item.sizeBytes)}
+                            <FiHardDrive style={styles.metaIcon} />{' '}
+                            {formatBytes(item.sizeBytes)}
                         </span>
                         <span>
-                            <FiClock style={metaIconStyle} /> {formatDate(item.uploadedAt)}
+                            <FiClock style={styles.metaIcon} />{' '}
+                            {formatDate(item.uploadedAt)}
                         </span>
                         <span>{item.fileName || 'Unknown file'}</span>
                     </div>
 
-                    <div style={actionsStyle}>
+                    <div style={styles.actions}>
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
+                            style={styles.secondaryButton}
                             onClick={() =>
                                 handleSocialPublish(item, {
                                     facebook: true,
-                                    instagram: true
+                                    instagram: true,
                                 })
                             }
                             disabled={!item.mediaUrl || isPublishing}
@@ -943,27 +1739,33 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
-                            onClick={() => handleSocialPublish(item, { tiktok: true })}
-                            disabled={!item.mediaUrl || !isVideo || isPublishing}
-                            title={!isVideo ? 'TikTok publishing requires video media.' : ''}
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                                handleSocialPublish(item, { tiktok: true })
+                            }
+                            disabled={
+                                !item.mediaUrl || !isVideo || isPublishing
+                            }
                         >
                             Publish TikTok
                         </button>
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
-                            onClick={() => handleSocialPublish(item, { youtube: true })}
-                            disabled={!item.mediaUrl || !isVideo || isPublishing}
-                            title={!isVideo ? 'YouTube publishing requires video media.' : ''}
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                                handleSocialPublish(item, { youtube: true })
+                            }
+                            disabled={
+                                !item.mediaUrl || !isVideo || isPublishing
+                            }
                         >
                             Publish YouTube
                         </button>
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
+                            style={styles.secondaryButton}
                             onClick={() => handleToggleArchive(item)}
                             disabled={isPublishing}
                         >
@@ -972,7 +1774,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
+                            style={styles.secondaryButton}
                             onClick={() => handleToggleProtect(item)}
                             disabled={isPublishing}
                         >
@@ -981,10 +1783,14 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
+                            style={styles.secondaryButton}
                             onClick={() =>
                                 item.mediaUrl &&
-                                window.open(item.mediaUrl, '_blank', 'noopener,noreferrer')
+                                window.open(
+                                    item.mediaUrl,
+                                    '_blank',
+                                    'noopener,noreferrer'
+                                )
                             }
                             disabled={!item.mediaUrl}
                         >
@@ -993,7 +1799,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <button
                             type="button"
-                            style={secondaryButtonStyle}
+                            style={styles.secondaryButton}
                             onClick={() => handleCopy(item.mediaUrl)}
                             disabled={!item.mediaUrl}
                         >
@@ -1002,7 +1808,7 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                         <button
                             type="button"
-                            style={dangerButtonStyle}
+                            style={styles.dangerButton}
                             onClick={() => handleDelete(item)}
                             disabled={isPublishing}
                         >
@@ -1015,60 +1821,82 @@ const MyLibraryPage = ({ onNavigate }) => {
     });
 
     return (
-        <div style={pageStyle}>
-            <section style={heroStyle}>
+        <div style={styles.page}>
+            <section style={styles.hero}>
                 <div>
-                    <div style={eyebrowStyle}>
-                        Media Library · DigitalOcean Spaces + metadata
+                    <div style={styles.eyebrow}>
+                        Media Library · DigitalOcean Spaces + durable metadata
                     </div>
-                    <h1 style={headingStyle}>Media Library</h1>
-                    <p style={subheadingStyle}>
-                        Upload once, store in Spaces, and organize everything through metadata
-                        instead of scanning buckets.
+                    <h1 style={styles.heading}>Media Library</h1>
+                    <p style={styles.subheading}>
+                        Upload once, store the bytes in Spaces, and keep every
+                        tag, path, and archive flag in the database — so
+                        nothing is lost across logins, reloads, or tab
+                        crashes.
                     </p>
                 </div>
 
-                <div style={summaryGridStyle}>
-                    <div style={summaryCardStyle}>
+                <div style={styles.summaryGrid}>
+                    <div style={styles.summaryCard}>
                         <strong>{stats.total}</strong>
                         <span>Active files</span>
                     </div>
-                    <div style={summaryCardStyle}>
+                    <div style={styles.summaryCard}>
                         <strong>{stats.music}</strong>
                         <span>Music</span>
                     </div>
-                    <div style={summaryCardStyle}>
+                    <div style={styles.summaryCard}>
                         <strong>{stats.photo}</strong>
                         <span>Photos</span>
                     </div>
-                    <div style={summaryCardStyle}>
+                    <div style={styles.summaryCard}>
                         <strong>{stats.video}</strong>
                         <span>Videos</span>
                     </div>
-                    <div style={summaryCardStyle}>
+                    <div style={styles.summaryCard}>
                         <strong>{stats.archive}</strong>
                         <span>Local Archive</span>
                     </div>
-                    <div style={summaryCardStyle}>
+                    <div style={styles.summaryCard}>
                         <strong>{formatBytes(stats.totalSize)}</strong>
                         <span>Total size</span>
                     </div>
                 </div>
             </section>
 
-            <section style={layoutStyle}>
-                <aside style={panelStyle}>
-                    <div style={panelHeaderStyle}>
+            {pendingUploads.length > 0 && (
+                <div style={styles.resumeBanner}>
+                    <FiAlertCircle />
+                    <span>
+                        {pendingUploads.length} upload(s) were interrupted.
+                        They are queued and will retry the next time you
+                        upload.
+                    </span>
+                    <button
+                        type="button"
+                        style={styles.secondaryButton}
+                        onClick={() => setPendingUploads([])}
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
+            <section style={styles.layout}>
+                <aside style={styles.panel}>
+                    <div style={styles.panelHeader}>
                         <FiUpload />
                         <strong>Upload to Library</strong>
                     </div>
-                    <form onSubmit={handleUpload} style={formStyle}>
-                        <label style={fieldStyle}>
+                    <form onSubmit={handleUpload} style={styles.form}>
+                        <label style={styles.field}>
                             Type
                             <select
                                 value={uploadType}
-                                onChange={(e) => setUploadType(e.target.value)}
-                                style={inputStyle}
+                                onChange={(e) =>
+                                    setUploadType(e.target.value)
+                                }
+                                style={styles.input}
                             >
                                 <option value="music">Music</option>
                                 <option value="photo">Photo</option>
@@ -1076,7 +1904,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                             </select>
                         </label>
 
-                        <label style={fieldStyle}>
+                        <label style={styles.field}>
                             File
                             <input
                                 ref={uploadInputRef}
@@ -1086,61 +1914,72 @@ const MyLibraryPage = ({ onNavigate }) => {
                                     const file = e.target.files?.[0] || null;
                                     setUploadFile(file);
                                     if (file && !uploadTitle) {
-                                        setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+                                        setUploadTitle(
+                                            file.name.replace(/\.[^/.]+$/, '')
+                                        );
                                     }
-                                    if (file) {
+                                    if (file)
                                         setUploadType(inferTypeFromFile(file));
-                                    }
                                 }}
-                                style={inputStyle}
+                                style={styles.input}
                             />
                         </label>
 
-                        <label style={fieldStyle}>
+                        <label style={styles.field}>
                             Title
                             <input
                                 value={uploadTitle}
-                                onChange={(e) => setUploadTitle(e.target.value)}
+                                onChange={(e) =>
+                                    setUploadTitle(e.target.value)
+                                }
                                 placeholder="File title"
-                                style={inputStyle}
+                                style={styles.input}
                             />
                         </label>
 
                         {uploadType === 'music' ? (
                             <>
-                                <label style={fieldStyle}>
+                                <label style={styles.field}>
                                     Artist
                                     <input
                                         value={uploadArtist}
-                                        onChange={(e) => setUploadArtist(e.target.value)}
-                                        style={inputStyle}
+                                        onChange={(e) =>
+                                            setUploadArtist(e.target.value)
+                                        }
+                                        style={styles.input}
                                     />
                                 </label>
-                                <label style={fieldStyle}>
+                                <label style={styles.field}>
                                     Album
                                     <input
                                         value={uploadAlbum}
-                                        onChange={(e) => setUploadAlbum(e.target.value)}
-                                        style={inputStyle}
+                                        onChange={(e) =>
+                                            setUploadAlbum(e.target.value)
+                                        }
+                                        style={styles.input}
                                     />
                                 </label>
-                                <label style={fieldStyle}>
+                                <label style={styles.field}>
                                     Genre
                                     <input
                                         value={uploadGenre}
-                                        onChange={(e) => setUploadGenre(e.target.value)}
-                                        style={inputStyle}
+                                        onChange={(e) =>
+                                            setUploadGenre(e.target.value)
+                                        }
+                                        style={styles.input}
                                     />
                                 </label>
                             </>
                         ) : (
-                            <label style={fieldStyle}>
+                            <label style={styles.field}>
                                 Description
                                 <textarea
                                     value={uploadDescription}
-                                    onChange={(e) => setUploadDescription(e.target.value)}
+                                    onChange={(e) =>
+                                        setUploadDescription(e.target.value)
+                                    }
                                     rows={3}
-                                    style={inputStyle}
+                                    style={styles.input}
                                 />
                             </label>
                         )}
@@ -1148,11 +1987,12 @@ const MyLibraryPage = ({ onNavigate }) => {
                         <button
                             type="submit"
                             disabled={uploading || !uploadFile}
-                            style={uploadButtonStyle}
+                            style={styles.uploadButton}
                         >
                             {uploading ? (
                                 <>
-                                    <FiRefreshCw className="spin" /> Uploading {progress}%
+                                    <FiRefreshCw className="spin" /> Uploading{' '}
+                                    {progress}%
                                 </>
                             ) : (
                                 <>
@@ -1162,74 +2002,86 @@ const MyLibraryPage = ({ onNavigate }) => {
                         </button>
                     </form>
 
-                    <div style={noteStyle}>
-                        Archive items when you hit capacity. Archived media stays in your
-                        library, but it is removed from active counts until you restore it.
+                    <div style={styles.note}>
+                        Archive items when you hit capacity. Archived media
+                        stays in your library, but is removed from active
+                        counts until restored.
                     </div>
                 </aside>
 
-                <main style={mainStyle}>
-                    <div style={toolbarStyle}>
-                        <div style={tabsStyle}>
+                <main style={styles.main}>
+                    <div style={styles.toolbar}>
+                        <div style={styles.tabs}>
                             {TAB_OPTIONS.map((tab) => (
                                 <button
                                     key={tab.id}
                                     type="button"
                                     onClick={() => setActiveTab(tab.id)}
-                                    style={activeTab === tab.id ? activeTabStyle : tabStyle}
+                                    style={
+                                        activeTab === tab.id
+                                            ? styles.activeTab
+                                            : styles.tab
+                                    }
                                 >
                                     {tab.label}
                                 </button>
                             ))}
                         </div>
 
-                        <div style={searchWrapStyle}>
+                        <div style={styles.searchWrap}>
                             <FiSearch style={{ opacity: 0.7 }} />
                             <input
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 placeholder="Search by title, file name, path, artist..."
-                                style={searchInputStyle}
+                                style={styles.searchInput}
                             />
                             <button
                                 type="button"
                                 onClick={handleRefresh}
-                                style={refreshButtonStyle}
+                                style={styles.refreshButton}
                                 disabled={refreshing}
                             >
-                                <FiRefreshCw className={refreshing ? 'spin' : ''} />
+                                <FiRefreshCw
+                                    className={refreshing ? 'spin' : ''}
+                                />
                             </button>
                         </div>
                     </div>
 
                     {error ? (
-                        <div style={errorStyle}>
+                        <div style={styles.error}>
                             <FiAlertCircle /> {error}
                         </div>
                     ) : null}
 
                     {loading ? (
-                        <div style={emptyStyle}>Loading library...</div>
+                        <div style={styles.empty}>Loading library...</div>
                     ) : filteredItems.length === 0 ? (
-                        <div style={emptyStyle}>
+                        <div style={styles.empty}>
                             <FiCheckCircle size={24} />
                             <strong>No media found</strong>
-                            <span>Upload photos, videos, or music, or switch to Local Archive.</span>
+                            <span>
+                                Upload photos, videos, or music, or switch to
+                                Local Archive.
+                            </span>
                         </div>
                     ) : (
-                        <div style={gridStyle}>{renderedItems}</div>
+                        <div style={styles.grid}>{renderedItems}</div>
                     )}
 
-                    <section style={previewStyle}>
-                        <div style={previewHeaderStyle}>
+                    <section style={styles.preview}>
+                        <div style={styles.previewHeader}>
                             <strong>Render preview</strong>
-                            <span>Double-click a file card to render it here.</span>
+                            <span>
+                                Double-click a file card to render it here.
+                            </span>
                         </div>
-                        <div style={previewFrameStyle}>
+                        <div style={styles.previewFrame}>
                             {selectedItem ? (
                                 renderPreview(selectedItem)
                             ) : (
-                                <div style={previewEmptyStyle}>
+                                <div style={styles.previewEmpty}>
                                     <FiExternalLink size={24} />
                                     <span>No file selected yet.</span>
                                 </div>
@@ -1240,344 +2092,6 @@ const MyLibraryPage = ({ onNavigate }) => {
             </section>
         </div>
     );
-};
-
-const renderPreview = (item) => {
-    const source = item?.mediaUrl || '';
-    if (!source) {
-        return (
-            <div style={previewEmptyStyle}>
-                <FiAlertCircle size={24} />
-                <span>That file does not have a renderable URL yet.</span>
-            </div>
-        );
-    }
-
-    if (item.type === 'photo') {
-        return <img src={source} alt={item.title || item.fileName} style={previewMediaStyle} />;
-    }
-
-    if (item.type === 'video') {
-        return <video src={source} controls style={previewMediaStyle} />;
-    }
-
-    if (item.type === 'music') {
-        return (
-            <div style={previewAudioWrapStyle}>
-                <audio src={source} controls style={previewAudioStyle} />
-                <div style={previewCaptionStyle}>
-                    <strong>{item.fileName || item.title}</strong>
-                    {item.artist ? <span>{item.artist}</span> : null}
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div style={previewEmptyStyle}>
-            <FiFolder size={24} />
-            <span>{item.fileName || item.title}</span>
-        </div>
-    );
-};
-
-const DARK_BG = '#050816';
-const DARK_PANEL = '#0b1220';
-const DARK_PANEL_ALT = '#101a2d';
-const DARK_PANEL_ELEVATED = '#14213b';
-const DARK_BORDER = 'rgba(148, 163, 184, 0.22)';
-const DARK_BORDER_STRONG = 'rgba(96, 165, 250, 0.38)';
-const DARK_TEXT = '#e5eefb';
-const DARK_MUTED = '#94a3b8';
-const DARK_ACCENT = '#60a5fa';
-const DARK_ACCENT_ALT = '#a855f7';
-
-const pageStyle = {
-    display: 'grid',
-    gap: '16px',
-    padding: '16px 0 24px',
-    color: DARK_TEXT
-};
-const heroStyle = {
-    display: 'grid',
-    gap: '14px',
-    padding: '20px',
-    border: `1px solid ${DARK_BORDER_STRONG}`,
-    borderRadius: '18px',
-    background: `linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(17, 24, 39, 0.94)),
-        radial-gradient(circle at top right, rgba(96, 165, 250, 0.20), transparent 40%),
-        radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.18), transparent 38%)`,
-    boxShadow: '0 18px 50px rgba(2, 6, 23, 0.45)'
-};
-const eyebrowStyle = {
-    fontSize: '12px',
-    textTransform: 'uppercase',
-    letterSpacing: '0.12em',
-    color: DARK_ACCENT,
-    opacity: 0.92
-};
-const headingStyle = { margin: '6px 0 0', fontSize: '34px', lineHeight: 1.1, color: '#f8fbff' };
-const subheadingStyle = {
-    margin: '8px 0 0',
-    maxWidth: '780px',
-    color: DARK_MUTED,
-    lineHeight: 1.6
-};
-const summaryGridStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-    gap: '10px'
-};
-const summaryCardStyle = {
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '14px',
-    padding: '12px',
-    background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(9, 14, 26, 0.96))',
-    display: 'grid',
-    gap: '4px',
-    color: DARK_TEXT,
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)'
-};
-const layoutStyle = {
-    display: 'grid',
-    gridTemplateColumns: '320px minmax(0, 1fr)',
-    gap: '16px',
-    alignItems: 'start'
-};
-const panelStyle = {
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '18px',
-    padding: '16px',
-    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
-    display: 'grid',
-    gap: '14px',
-    color: DARK_TEXT,
-    boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)'
-};
-const panelHeaderStyle = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px' };
-const formStyle = { display: 'grid', gap: '10px' };
-const fieldStyle = { display: 'grid', gap: '6px', fontSize: '13px', color: DARK_MUTED };
-const inputStyle = {
-    width: '100%',
-    boxSizing: 'border-box',
-    borderRadius: '10px',
-    border: `1px solid ${DARK_BORDER}`,
-    background: 'rgba(15, 23, 42, 0.92)',
-    color: DARK_TEXT,
-    padding: '10px 12px'
-};
-const uploadButtonStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    border: 'none',
-    borderRadius: '10px',
-    padding: '12px 14px',
-    color: '#fff',
-    background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
-    cursor: 'pointer',
-    fontWeight: 700
-};
-const noteStyle = {
-    padding: '12px',
-    borderRadius: '12px',
-    border: `1px solid ${DARK_BORDER}`,
-    background: 'rgba(37, 99, 235, 0.14)',
-    color: DARK_MUTED,
-    fontSize: '13px',
-    lineHeight: 1.5
-};
-const mainStyle = { minWidth: 0, display: 'grid', gap: '14px' };
-const toolbarStyle = { display: 'grid', gap: '12px' };
-const tabsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
-const tabStyle = {
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '999px',
-    padding: '8px 14px',
-    background: 'rgba(15, 23, 42, 0.88)',
-    color: DARK_TEXT,
-    cursor: 'pointer'
-};
-const activeTabStyle = {
-    ...tabStyle,
-    background: `linear-gradient(135deg, ${DARK_ACCENT}, ${DARK_ACCENT_ALT})`,
-    color: '#fff',
-    borderColor: 'transparent'
-};
-const searchWrapStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '10px 12px',
-    borderRadius: '14px',
-    border: `1px solid ${DARK_BORDER}`,
-    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`
-};
-const searchInputStyle = {
-    width: '100%',
-    border: 'none',
-    outline: 'none',
-    background: 'transparent',
-    color: DARK_TEXT
-};
-const refreshButtonStyle = {
-    border: 'none',
-    background: 'transparent',
-    color: DARK_TEXT,
-    cursor: 'pointer',
-    display: 'grid',
-    placeItems: 'center'
-};
-const gridStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '14px'
-};
-const previewStyle = {
-    display: 'grid',
-    gap: '12px',
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '18px',
-    padding: '16px',
-    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
-    boxShadow: '0 10px 28px rgba(2, 6, 23, 0.35)'
-};
-const previewHeaderStyle = {
-    display: 'grid',
-    gap: '4px',
-    color: DARK_MUTED,
-    fontSize: '13px'
-};
-const previewFrameStyle = {
-    minHeight: '180px',
-    display: 'grid',
-    placeItems: 'center',
-    border: `1px dashed ${DARK_BORDER}`,
-    borderRadius: '16px',
-    padding: '12px',
-    background: 'rgba(5, 8, 22, 0.78)'
-};
-const previewMediaStyle = { maxWidth: '100%', maxHeight: '360px', borderRadius: '12px' };
-const previewAudioWrapStyle = {
-    width: '100%',
-    display: 'grid',
-    gap: '10px',
-    justifyItems: 'center'
-};
-const previewAudioStyle = { width: '100%', maxWidth: '520px' };
-const previewCaptionStyle = {
-    display: 'grid',
-    gap: '4px',
-    textAlign: 'center',
-    color: DARK_MUTED
-};
-const previewEmptyStyle = {
-    display: 'grid',
-    placeItems: 'center',
-    gap: '10px',
-    textAlign: 'center',
-    color: DARK_MUTED
-};
-const cardStyle = {
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '18px',
-    background: `linear-gradient(180deg, ${DARK_PANEL_ALT}, ${DARK_PANEL})`,
-    overflow: 'hidden',
-    display: 'grid',
-    color: DARK_TEXT,
-    boxShadow: '0 10px 24px rgba(2, 6, 23, 0.26)'
-};
-const thumbStyle = {
-    aspectRatio: '16 / 9',
-    background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(5, 8, 22, 0.98))',
-    display: 'grid',
-    placeItems: 'center',
-    overflow: 'hidden'
-};
-const mediaPreviewStyle = { width: '100%', height: '100%', objectFit: 'cover' };
-const iconPlaceholderStyle = {
-    width: '100%',
-    height: '100%',
-    display: 'grid',
-    placeItems: 'center',
-    fontSize: '42px',
-    color: 'rgba(148, 163, 184, 0.45)'
-};
-const bodyStyle = { display: 'grid', gap: '10px', padding: '14px' };
-const titleRowStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '10px'
-};
-const titleStyle = { fontSize: '16px', lineHeight: 1.3 };
-const pillStyle = {
-    padding: '4px 8px',
-    borderRadius: '999px',
-    background: 'rgba(59, 130, 246, 0.16)',
-    color: '#bfdbfe',
-    fontSize: '12px',
-    textTransform: 'uppercase'
-};
-const archivePillStyle = {
-    ...pillStyle,
-    background: 'rgba(251, 191, 36, 0.16)',
-    color: '#fde68a'
-};
-const protectedPillStyle = {
-    ...pillStyle,
-    background: 'rgba(34, 197, 94, 0.16)',
-    color: '#86efac'
-};
-const mutedStyle = { color: DARK_MUTED, fontSize: '13px' };
-const descriptionStyle = { color: DARK_MUTED, fontSize: '13px', lineHeight: 1.5 };
-const metaGridStyle = {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: '4px',
-    fontSize: '12px',
-    color: DARK_MUTED
-};
-const metaIconStyle = { verticalAlign: 'middle', marginRight: '4px' };
-const actionsStyle = { display: 'flex', flexWrap: 'wrap', gap: '8px' };
-const secondaryButtonStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    border: `1px solid ${DARK_BORDER}`,
-    borderRadius: '10px',
-    padding: '8px 10px',
-    background: 'rgba(15, 23, 42, 0.92)',
-    color: DARK_TEXT,
-    cursor: 'pointer'
-};
-const dangerButtonStyle = {
-    ...secondaryButtonStyle,
-    background: 'rgba(239,68,68,0.10)',
-    color: '#fca5a5',
-    borderColor: 'rgba(239,68,68,0.30)'
-};
-const errorStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '12px 14px',
-    borderRadius: '12px',
-    background: 'rgba(239,68,68,0.10)',
-    border: '1px solid rgba(239,68,68,0.28)',
-    color: '#fecaca'
-};
-const emptyStyle = {
-    display: 'grid',
-    placeItems: 'center',
-    gap: '8px',
-    padding: '32px',
-    border: `1px dashed ${DARK_BORDER}`,
-    borderRadius: '18px',
-    color: DARK_MUTED,
-    background: 'rgba(5, 8, 22, 0.78)'
 };
 
 export default MyLibraryPage;

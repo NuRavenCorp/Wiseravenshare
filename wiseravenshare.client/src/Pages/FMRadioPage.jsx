@@ -26,6 +26,7 @@ import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
 import '../Styles/FMRadioPage.css';
+import { toBlobStreamUrl } from '../utils/mediaStreamUrl';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FM_LOW  = 88.0;
@@ -157,20 +158,6 @@ const normalizeLibraryTrack = (track) => {
     return '';
   };
 
-  const toBlobStreamUrl = (relativePath = '') => {
-    const normalized = String(relativePath || '')
-      .trim()
-      .replace(/\\/g, '/')
-      .replace(/^\/+/, '');
-    if (!normalized) return '';
-    const encoded = normalized
-      .split('/')
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
-  };
-
   const fileName = String(track.name || track.fileName || track.title || 'Untitled').trim();
   const artist = String(track.artist || '').trim();
   const title = String(track.title || '').trim() || parseMeta(fileName).title;
@@ -199,11 +186,8 @@ const resolveTrackSourceCandidates = (track) => {
 
   const rawDirect = String(track.mediaUrl || track.url || track.objectUrl || '').trim();
   const normalizedDirect = rawDirect.startsWith('api/') ? `/${rawDirect}` : rawDirect;
-  const relativePath = String(track.relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-  const encodedRelativePath = relativePath
-    ? relativePath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment)).join('/')
-    : '';
-  const blobStream = encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : '';
+  const relativePath = String(track.relativePath || track.RelativePath || track.objectKey || track.ObjectKey || '').trim();
+  const blobStream = toBlobStreamUrl(relativePath);
   const fileName = String(track.fileName || track.name || '').trim();
   const fileNameStream = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
   const proxy = /^https?:\/\//i.test(normalizedDirect)

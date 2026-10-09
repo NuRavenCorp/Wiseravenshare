@@ -48,9 +48,9 @@ public class PodcastTrademarkFilingService
     /// </summary>
     public class TrademarkForm
     {
-        public string FormCode { get; set; }
-        public string FormName { get; set; }
-        public string ProtectionType { get; set; }
+        public string FormCode { get; set; } = string.Empty;
+        public string FormName { get; set; } = string.Empty;
+        public string ProtectionType { get; set; } = string.Empty;
         /// <summary>
         /// USPTO filing fee (base cost)
         /// </summary>
@@ -63,9 +63,9 @@ public class PodcastTrademarkFilingService
         /// Total user pays (USDTO + Wiseravenshare)
         /// </summary>
         public decimal TotalUserPriceUsd { get; set; }
-        public string Description { get; set; }
-        public List<string> RequiredDocuments { get; set; }
-        public List<string> AppliesTo { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public List<string> RequiredDocuments { get; set; } = new();
+        public List<string> AppliesTo { get; set; } = new();
         public int ProcessingWeeks { get; set; } // Typical processing time
     }
 
@@ -74,22 +74,22 @@ public class PodcastTrademarkFilingService
     /// </summary>
     public class TrademarkFiling
     {
-        public string FilingId { get; set; }
-        public string UserId { get; set; }
-        public string PodcastId { get; set; } // Link to podcast
-        public string FormCode { get; set; } // TX, VI, SR
+        public string FilingId { get; set; } = string.Empty;
+        public string UserId { get; set; } = string.Empty;
+        public string PodcastId { get; set; } = string.Empty; // Link to podcast
+        public string FormCode { get; set; } = string.Empty; // TX, VI, SR
         public TrademarkStatus Status { get; set; }
         
         // Trademark details
-        public string TrademarkText { get; set; } // For TX: exact text to protect
-        public string TrademarkDescription { get; set; } // Description of mark
-        public string ClassificationCode { get; set; } // USPTO class (e.g., 041 for podcasting)
-        public string GoodsServicesDescription { get; set; } // What services covered
+        public string TrademarkText { get; set; } = string.Empty; // For TX: exact text to protect
+        public string TrademarkDescription { get; set; } = string.Empty; // Description of mark
+        public string ClassificationCode { get; set; } = string.Empty; // USPTO class (e.g., 041 for podcasting)
+        public string GoodsServicesDescription { get; set; } = string.Empty; // What services covered
         
         // Ownership
-        public string OwnerName { get; set; }
-        public string OwnerEmail { get; set; }
-        public string OwnerAddress { get; set; }
+        public string OwnerName { get; set; } = string.Empty;
+        public string OwnerEmail { get; set; } = string.Empty;
+        public string OwnerAddress { get; set; } = string.Empty;
         
         // Files
         public List<TrademarkDocument> UploadedDocuments { get; set; } = new();
@@ -100,10 +100,10 @@ public class PodcastTrademarkFilingService
         public decimal TotalPrice { get; set; }
         
         // Payment & USPTO tracking
-        public string PaymentIntentId { get; set; }
-        public string USPTOApplicationNumber { get; set; }
-        public string RegistrationNumber { get; set; }
-        public string CurrentExaminerOfficeAction { get; set; } // If issued
+        public string PaymentIntentId { get; set; } = string.Empty;
+        public string USPTOApplicationNumber { get; set; } = string.Empty;
+        public string RegistrationNumber { get; set; } = string.Empty;
+        public string CurrentExaminerOfficeAction { get; set; } = string.Empty; // If issued
         public DateTime? ExaminerResponseDeadline { get; set; }
         
         // Timelines
@@ -118,13 +118,13 @@ public class PodcastTrademarkFilingService
     /// </summary>
     public class TrademarkDocument
     {
-        public string DocumentId { get; set; }
-        public string FilingId { get; set; }
-        public string FileName { get; set; }
-        public string StorageKey { get; set; } // GCS/S3 path
+        public string DocumentId { get; set; } = string.Empty;
+        public string FilingId { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string StorageKey { get; set; } = string.Empty; // GCS/S3 path
         public long FileSizeBytes { get; set; }
-        public string MimeType { get; set; }
-        public string DocumentType { get; set; } // Logo, Specimen, EvidenceOfUse, etc.
+        public string MimeType { get; set; } = string.Empty;
+        public string DocumentType { get; set; } = string.Empty; // Logo, Specimen, EvidenceOfUse, etc.
         public DateTime UploadedAt { get; set; }
     }
 
@@ -255,7 +255,7 @@ public class PodcastTrademarkFilingService
     /// <summary>
     /// Gets single form by code
     /// </summary>
-    public TrademarkForm GetFormByCode(string formCode)
+    public TrademarkForm? GetFormByCode(string formCode)
     {
         return GetAvailableForms().FirstOrDefault(f => f.FormCode == formCode);
     }
@@ -406,8 +406,9 @@ public class PodcastTrademarkFilingService
         DateTime submittedDate, string formCode)
     {
         var form = GetFormByCode(formCode);
-        var weeksLow = form.ProcessingWeeks;
-        var weeksHigh = form.ProcessingWeeks + 4; // Add 4 weeks for variance
+        var baseWeeks = form?.ProcessingWeeks ?? 12;
+        var weeksLow = baseWeeks;
+        var weeksHigh = baseWeeks + 4; // Add 4 weeks for variance
 
         var earliest = submittedDate.AddDays(weeksLow * 7);
         var latest = submittedDate.AddDays(weeksHigh * 7);

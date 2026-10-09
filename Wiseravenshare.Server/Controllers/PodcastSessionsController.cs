@@ -213,7 +213,7 @@ public class PodcastSessionsController : ControllerBase
             _logger.LogInformation($"Session {sessionId} closed by user {userId}");
             return Ok(new { success = true, message = "Session closed successfully" });
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
             return Forbid();
         }

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build --logLevel error",
+    "test": "node --test src/**/*.test.js",
     "preview": "vite preview",
     "android:assets": "npx @capacitor/assets generate --android",
     "android:sync": "npm run build && npx cap sync android",
