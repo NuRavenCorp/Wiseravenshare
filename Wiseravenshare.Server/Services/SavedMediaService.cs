@@ -58,29 +58,46 @@ namespace Wiseravenshare.Server.Services
             if (user == null)
                 throw new ArgumentException($"User {userId} not found");
 
-            var media = new SavedMedia
-            {
-                UserId = userId,
-                Title = request.Title,
-                Description = request.Description,
-                MediaType = request.MediaType,
-                MediaUrl = request.MediaUrl,
-                ThumbnailUrl = request.ThumbnailUrl,
-                MediaMetadata = request.MediaMetadata,
-                IsVisibleInFeed = request.IsVisibleInFeed,
-                Tags = request.Tags,
-                FileSizeBytes = request.FileSizeBytes,
-                DurationSeconds = request.DurationSeconds,
-                ScheduledPublishAt = request.ScheduledPublishAt,
-                SourcePostId = request.SourcePostId,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            var media = _savedMediaRepository.GetAll().FirstOrDefault(m =>
+                m.UserId == userId &&
+                !m.IsDeleted &&
+                m.MediaType == request.MediaType &&
+                m.MediaUrl == request.MediaUrl &&
+                m.SourcePostId == request.SourcePostId);
 
-            await _savedMediaRepository.AddAsync(media);
+            var isNew = media == null;
+            if (media == null)
+            {
+                media = new SavedMedia
+                {
+                    UserId = userId,
+                    CreatedAt = DateTime.UtcNow
+                };
+            }
+            media.Title = request.Title;
+            media.Description = request.Description;
+            media.MediaType = request.MediaType;
+            media.MediaUrl = request.MediaUrl;
+            media.ThumbnailUrl = request.ThumbnailUrl;
+            if (request.MediaMetadata != null)
+                media.MediaMetadata = request.MediaMetadata;
+            media.IsVisibleInFeed = request.IsVisibleInFeed;
+            if (request.Tags != null)
+                media.Tags = request.Tags;
+            media.FileSizeBytes = request.FileSizeBytes;
+            media.DurationSeconds = request.DurationSeconds;
+            media.ScheduledPublishAt = request.ScheduledPublishAt;
+            media.SourcePostId = request.SourcePostId;
+            media.UpdatedAt = DateTime.UtcNow;
+
+            if (isNew)
+                await _savedMediaRepository.AddAsync(media);
+            else
+                _savedMediaRepository.Update(media);
+
             await _savedMediaRepository.SaveChangesAsync();
 
-            _logger.LogInformation("Media saved successfully with ID: {MediaId}", media.Id);
+            _logger.LogInformation("Media saved successfully with ID: {MediaId} ({Mode})", media.Id, isNew ? "created" : "updated");
             return MapToResponse(media);
         }
 

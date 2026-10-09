@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './unifiedStorage';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './unifiedStorage.js';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 

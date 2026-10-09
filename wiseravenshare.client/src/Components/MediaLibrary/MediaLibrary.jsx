@@ -48,9 +48,6 @@ function normalizeType(item) {
   return String(item?.mediaType || item?.type || '').toLowerCase().replace('image', 'photo');
 }
 
-let _localIdSeed = Date.now();
-function nextLocalId() { return `local-${++_localIdSeed}`; }
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function CapacityBar({ items }) {
@@ -217,7 +214,10 @@ const MediaLibrary = () => {
 
   const allItems = useMemo(() => {
     const seen = new Set(apiItems.map((i) => i.id));
-    const extras = (localItems || []).filter((i) => i.id && !seen.has(i.id));
+    const extras = (localItems || []).filter((i) => {
+      const mediaUrl = String(i?.mediaUrl || i?.blobUrl || '').trim().toLowerCase();
+      return i.id && !seen.has(i.id) && mediaUrl && !mediaUrl.startsWith('blob:') && !mediaUrl.startsWith('file:');
+    });
     return [...apiItems, ...extras];
   }, [apiItems, localItems]);
 
@@ -283,11 +283,11 @@ const MediaLibrary = () => {
 
   useEffect(() => { loadApiItems(); }, [loadApiItems]);
 
-  const handleLocalUpload = useCallback(() => {
+  const handleLocalUpload = useCallback(async () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file) { addToast('Please select a file.', 'warning'); return; }
     const raw = file.type;
-    let type = 'archive';
+    let type = 'document';
     if (raw.startsWith('image/')) type = 'photo';
     else if (raw.startsWith('video/')) type = 'video';
     else if (raw.startsWith('audio/')) type = 'music';
@@ -299,24 +299,86 @@ const MediaLibrary = () => {
       }).length;
       if (existing >= limit) { addToast(`${type} capacity full (${limit}).`, 'warning'); return; }
     }
-    const blobUrl = URL.createObjectURL(file);
-    const newItem = {
-      id: nextLocalId(),
-      name: file.name,
-      title: uploadTitle.trim() || file.name,
-      description: uploadDesc.trim(),
-      mediaType: type, type,
-      mediaUrl: blobUrl, blobUrl,
-      fileSizeBytes: file.size,
-      isVisibleInFeed: true,
-      createdAt: new Date().toISOString(),
-      _isLocal: true,
-    };
-    setLocalItems((prev) => [newItem, ...(prev || [])]);
-    setUploadTitle(''); setUploadDesc('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    addToast(`"${newItem.title}" added.`, 'success');
-  }, [addToast, allItems, uploadTitle, uploadDesc, setLocalItems]);
+    const title = uploadTitle.trim() || file.name;
+    const destinationFolder = `wiseravenshare/media-library/${type}`;
+
+    try {
+      const uploadResponse = type === 'music'
+        ? await apiService.uploadMusicTrack(file, {
+            title,
+            artist: '',
+            album: '',
+            genre: '',
+            destinationFolder,
+          })
+        : await apiService.uploadMedia(file, type, {
+            title,
+            description: uploadDesc.trim(),
+            caption: uploadDesc.trim(),
+            destinationFolder,
+          });
+
+      const data = uploadResponse?.data || uploadResponse || {};
+      const mediaUrl = String(
+        data.track?.mediaUrl ||
+        data.mediaUrl ||
+        data.url ||
+        data.file?.mediaUrl ||
+        data.filePath ||
+        ''
+      ).trim();
+      const relativePath = String(
+        data.track?.relativePath ||
+        data.relativePath ||
+        data.file?.relativePath ||
+        data.objectKey ||
+        data.filePath ||
+        ''
+      ).trim();
+
+      const saved = await saveMedia({
+        title,
+        description: uploadDesc.trim(),
+        mediaType: type,
+        mediaUrl: mediaUrl || relativePath || '',
+        thumbnailUrl: type === 'photo' ? (mediaUrl || '') : undefined,
+        mediaMetadata: {
+          fileName: file.name,
+          relativePath,
+          source: 'media-library',
+          archived: false,
+          protected: false,
+        },
+        isVisibleInFeed: true,
+        tags: [],
+        fileSizeBytes: file.size,
+        durationSeconds: null,
+      });
+
+      const nextItem = {
+        ...saved,
+        id: saved.id,
+        title: saved.title || title,
+        name: saved.title || title,
+        description: saved.description || uploadDesc.trim(),
+        mediaType: saved.mediaType,
+        type: saved.mediaType,
+        mediaUrl: saved.mediaUrl || mediaUrl || relativePath,
+        thumbnailUrl: saved.thumbnailUrl || (type === 'photo' ? (mediaUrl || relativePath) : ''),
+        fileSizeBytes: saved.fileSizeBytes || file.size,
+        createdAt: saved.createdAt,
+        updatedAt: saved.updatedAt,
+      };
+
+      setLocalItems((prev) => [nextItem, ...(prev || []).filter((item) => item.id !== nextItem.id)]);
+      setUploadTitle(''); setUploadDesc('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      addToast(`"${nextItem.title}" added.`, 'success');
+      await loadApiItems();
+    } catch (error) {
+      addToast(error?.message || 'Upload failed.', 'error');
+    }
+  }, [addToast, loadApiItems, saveMedia, uploadDesc, uploadTitle, setLocalItems]);
 
   const handleSelectItem = useCallback((id) => {
     setSelectedItems((prev) => {
@@ -619,4 +681,3 @@ const MediaLibrary = () => {
 };
 
 export default MediaLibrary;
-
