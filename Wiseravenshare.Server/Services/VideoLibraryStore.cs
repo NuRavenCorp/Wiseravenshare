@@ -689,11 +689,16 @@ LIMIT @limit OFFSET @offset;";
                 Archived = !reader.IsDBNull(20) && reader.GetBoolean(20),
                 Protected = !reader.IsDBNull(21) && reader.GetBoolean(21),
                 ExpiresAt = reader.IsDBNull(22) ? null : reader.GetDateTime(22),
-                Views = reader.GetInt32(23),
-                Likes = reader.GetInt32(24),
-                Comments = reader.GetInt32(25),
-                CreatedAt = reader.GetDateTime(26),
-                UpdatedAt = reader.GetDateTime(27)
+                Views = reader.IsDBNull(23) ? 0 : reader.GetInt32(23),
+                Likes = reader.IsDBNull(24) ? 0 : reader.GetInt32(24),
+                Comments = reader.IsDBNull(25) ? 0 : reader.GetInt32(25),
+                // created_at / updated_at are NOT NULL DEFAULT NOW() for rows
+                // written by this schema, but ALTER TABLE ADD COLUMN can leave
+                // pre-existing rows NULL. An unguarded GetDateTime throws
+                // InvalidCastException, which surfaced as an unhandled 500 on
+                // GET /api/ravensight/media/videos.
+                CreatedAt = reader.IsDBNull(26) ? DateTime.UtcNow : reader.GetDateTime(26),
+                UpdatedAt = reader.IsDBNull(27) ? DateTime.UtcNow : reader.GetDateTime(27)
             });
         }
 
