@@ -41,6 +41,7 @@ export const classifyPostMedia = (post = {}, resolvedMedia = '') => {
     const isVideoPost = !isImagePost && !isAudioPost && (
         post.type === 'Video'
         || post.mediaType === 'video'
+        || /\/videostreaming\/(stream|video)/i.test(source)
         || /\.(mp4|webm|mov|avi|mkv)$/i.test(source)
         || source.startsWith('data:video/')
         || fileNameSuggestsVideo

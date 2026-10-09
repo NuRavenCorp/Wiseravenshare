@@ -18,6 +18,7 @@ import {
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
+import { useSavedMedia } from '../hooks/useSavedMedia';
 import { buildMediaSharePayload, socialService } from '../Services/socialService';
 
 const TAB_OPTIONS = [
@@ -49,6 +50,72 @@ const getItemKey = (item) => `${String(item?.type || 'media').toLowerCase()}:${S
 const getItemState = (item, state) => state?.[getItemKey(item)] || {
     archived: Boolean(item?.archived || item?.isArchived || item?.Archived),
     protected: Boolean(item?.protected || item?.isProtected || item?.Protected)
+};
+
+const SAVED_MEDIA_TYPE_LOOKUP = {
+    0: 'photo',
+    1: 'video',
+    2: 'music',
+    3: 'audio',
+    4: 'podcast',
+    5: 'document'
+};
+
+const normalizeSavedMediaType = (value) => {
+    if (typeof value === 'number') {
+        return SAVED_MEDIA_TYPE_LOOKUP[value] || '';
+    }
+
+    return String(value || '').trim().toLowerCase();
+};
+
+const normalizeSavedMediaItem = (item) => {
+    const metadata = item?.mediaMetadata || {};
+    const mediaType = normalizeSavedMediaType(item?.mediaType);
+    return {
+        id: item?.id,
+        type: mediaType,
+        title: String(item?.title || '').trim(),
+        artist: String(metadata?.artist || '').trim(),
+        album: String(metadata?.album || '').trim(),
+        genre: String(metadata?.genre || '').trim(),
+        description: String(item?.description || metadata?.description || '').trim(),
+        fileName: String(metadata?.fileName || item?.title || '').trim(),
+        relativePath: String(metadata?.relativePath || metadata?.objectKey || metadata?.filePath || '').trim(),
+        mediaUrl: String(item?.mediaUrl || '').trim(),
+        thumbnailUrl: String(item?.thumbnailUrl || metadata?.thumbnailUrl || '').trim(),
+        sizeBytes: Number(item?.fileSizeBytes || 0),
+        uploadedAt: String(item?.createdAt || item?.updatedAt || '').trim(),
+        archived: Boolean(metadata?.archived),
+        protected: Boolean(metadata?.protected),
+        source: 'saved-media',
+        mediaMetadata: metadata
+    };
+};
+
+const getMediaIdentity = (item) => {
+    const type = String(item?.type || item?.mediaType || '').trim().toLowerCase();
+    const mediaUrl = String(item?.mediaUrl || '').trim().toLowerCase();
+    const relativePath = String(item?.relativePath || '').trim().toLowerCase();
+    const id = String(item?.id || '').trim().toLowerCase();
+    return `${type}:${mediaUrl || relativePath || id}`;
+};
+
+const mergeUniqueMedia = (...groups) => {
+    const seen = new Set();
+    const merged = [];
+
+    for (const group of groups) {
+        for (const item of group || []) {
+            if (!item) continue;
+            const key = getMediaIdentity(item);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(item);
+        }
+    }
+
+    return merged;
 };
 
 const formatBytes = (value) => {
@@ -255,6 +322,11 @@ const readList = (payload, keys = ['items', 'data', 'tracks', 'videos', 'photos'
 const MyLibraryPage = ({ onNavigate }) => {
     const { user } = useAuth();
     const { addToast } = useNotification();
+    const {
+        getLibrary: getSavedLibrary,
+        saveMedia: saveSavedMedia,
+        updateMedia: updateSavedMedia,
+    } = useSavedMedia();
     const uploadInputRef = useRef(null);
     const isMountedRef = useRef(true);
 
@@ -296,7 +368,8 @@ const MyLibraryPage = ({ onNavigate }) => {
             setError('');
 
             try {
-                const [musicResult, photoResult, videoResult] = await Promise.allSettled([
+                const [savedResult, musicResult, photoResult, videoResult] = await Promise.allSettled([
+                    getSavedLibrary(1, 500, { sortBy: 'createdAt', sortDir: 'desc' }),
                     apiService.getMusicLibrary(),
                     apiService.getPhotoLibrary(),
                     apiService.getVideoLibrary()
@@ -304,6 +377,10 @@ const MyLibraryPage = ({ onNavigate }) => {
 
                 if (!isMountedRef.current) return;
 
+                const savedItems =
+                    savedResult.status === 'fulfilled'
+                        ? readList(savedResult.value?.items || savedResult.value?.data, ['items', 'data']).map(normalizeSavedMediaItem)
+                        : [];
                 const musicItems =
                     musicResult.status === 'fulfilled'
                         ? readList(musicResult.value?.data, ['items', 'tracks', 'data']).map(normalizeMusic)
@@ -317,32 +394,53 @@ const MyLibraryPage = ({ onNavigate }) => {
                         ? readList(videoResult.value?.data, ['videos', 'items', 'data']).map(normalizeVideo)
                         : [];
 
-                setMusic(musicItems.filter(Boolean));
-                setPhotos(photoItems.filter(Boolean));
-                setVideos(videoItems.filter(Boolean));
+                const legacyItems = [
+                    ...musicItems.filter(Boolean),
+                    ...photoItems.filter(Boolean),
+                    ...videoItems.filter(Boolean)
+                ].map((item) => ({
+                    ...item,
+                    source: 'legacy'
+                }));
+
+                const mergedItems = mergeUniqueMedia(savedItems, legacyItems);
+                setMusic(mergedItems.filter((item) => item.type === 'music' || item.type === 'audio'));
+                setPhotos(mergedItems.filter((item) => item.type === 'photo'));
+                setVideos(mergedItems.filter((item) => item.type === 'video'));
                 setLibraryState({
-                    ...musicItems.filter(Boolean).reduce((acc, item) => {
+                    ...mergedItems.filter(Boolean).reduce((acc, item) => {
                         acc[getItemKey(item)] = {
                             archived: Boolean(item.archived),
                             protected: Boolean(item.protected)
                         };
                         return acc;
                     }, {}),
-                    ...photoItems.filter(Boolean).reduce((acc, item) => {
-                        acc[getItemKey(item)] = {
-                            archived: Boolean(item.archived),
-                            protected: Boolean(item.protected)
-                        };
-                        return acc;
-                    }, {}),
-                    ...videoItems.filter(Boolean).reduce((acc, item) => {
-                        acc[getItemKey(item)] = {
-                            archived: Boolean(item.archived),
-                            protected: Boolean(item.protected)
-                        };
-                        return acc;
-                    }, {})
                 });
+
+                if (legacyItems.length > 0) {
+                    await Promise.allSettled(
+                        legacyItems
+                            .filter((item) => String(item.mediaUrl || '').trim().length > 0)
+                            .map((item) => saveSavedMedia({
+                                title: item.title || item.fileName || 'Untitled media',
+                                description: item.description || null,
+                                mediaType: item.type === 'audio' ? 'music' : item.type,
+                                mediaUrl: item.mediaUrl,
+                                thumbnailUrl: item.thumbnailUrl || null,
+                                mediaMetadata: {
+                                    fileName: item.fileName || null,
+                                    relativePath: item.relativePath || null,
+                                    archived: Boolean(item.archived),
+                                    protected: Boolean(item.protected),
+                                    source: 'legacy-import'
+                                },
+                                isVisibleInFeed: !item.archived,
+                                tags: [],
+                                fileSizeBytes: item.sizeBytes || null,
+                                durationSeconds: item.durationSeconds || null,
+                            }))
+                    );
+                }
 
                 const failures = [musicResult, photoResult, videoResult].filter(
                     (r) => r.status === 'rejected'
@@ -351,6 +449,12 @@ const MyLibraryPage = ({ onNavigate }) => {
                     const reason = failures[0].reason;
                     const message =
                         reason?.message || 'Some media categories could not be loaded.';
+                    setError(message);
+                }
+
+                if (savedResult.status === 'rejected' && mergedItems.length === 0) {
+                    const reason = savedResult.reason;
+                    const message = reason?.message || 'Unable to load the media library.';
                     setError(message);
                 }
             } catch (loadError) {
@@ -365,7 +469,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                 }
             }
         },
-        [addToast]
+        [addToast, getSavedLibrary]
     );
 
     useEffect(() => {
@@ -488,7 +592,20 @@ const MyLibraryPage = ({ onNavigate }) => {
         };
 
         try {
-            if (item.type === 'music') {
+            if (item.source === 'saved-media') {
+                await updateSavedMedia(item.id, {
+                    title: item.title,
+                    description: item.description,
+                    thumbnailUrl: item.thumbnailUrl,
+                    isVisibleInFeed: !state.archived,
+                    tags: Array.isArray(item.tags) ? item.tags : undefined,
+                    mediaMetadata: {
+                        ...(item.mediaMetadata || {}),
+                        archived: state.archived,
+                        protected: state.protected
+                    }
+                });
+            } else if (item.type === 'music') {
                 await apiService.updateMusicLibraryState(item.id, state);
             } else if (item.type === 'photo') {
                 await apiService.updatePhotoLibraryState(item.id, state);
@@ -500,7 +617,7 @@ const MyLibraryPage = ({ onNavigate }) => {
         } catch (error) {
             addToast(error?.message || 'Unable to update media state.', 'error');
         }
-    }, [addToast, updateLibraryState]);
+    }, [addToast, updateSavedMedia, updateLibraryState]);
 
     const handleToggleArchive = useCallback((item) => {
         const currentState = getItemState(item, libraryState);
@@ -563,56 +680,50 @@ const MyLibraryPage = ({ onNavigate }) => {
 
             const data = response?.data || response || {};
 
-            // ✅ FIX: merge server response with local file info so we always
-            // end up with a usable, persistent URL. If the server didn't echo
-            // a mediaUrl but did give a relativePath, the normalizer builds a
-            // deterministic proxy URL from it.
-            const enriched = {
-                id:
-                    data.track?.id ||
-                    data.id ||
-                    `${uploadType}-${uploadFile.name}-${uploadFile.size}-${uploadFile.lastModified}`,
-                title: data.track?.title || title,
+            const uploadedMediaUrl = String(
+                data.track?.mediaUrl ||
+                data.mediaUrl ||
+                data.url ||
+                data.file?.mediaUrl ||
+                data.filePath ||
+                ''
+            ).trim();
+
+            const uploadedRelativePath = String(
+                data.track?.relativePath ||
+                data.relativePath ||
+                data.file?.relativePath ||
+                data.objectKey ||
+                data.filePath ||
+                ''
+            ).trim();
+
+            const persisted = await saveSavedMedia({
+                title,
                 description: uploadDescription,
-                artist: data.track?.artist || uploadArtist,
-                album: data.track?.album || uploadAlbum,
-                genre: data.track?.genre || uploadGenre,
-                fileName: data.track?.fileName || data.fileName || uploadFile.name,
-                relativePath:
-                    data.track?.relativePath ||
-                    data.relativePath ||
-                    data.file?.relativePath ||
-                    data.objectKey ||
-                    data.filePath ||
-                    '',
-                mediaUrl:
-                    data.track?.mediaUrl ||
-                    data.mediaUrl ||
-                    data.url ||
-                    data.file?.mediaUrl ||
-                    data.filePath ||
-                    '',
-                sizeBytes: uploadFile.size,
-                uploadedAt: new Date().toISOString()
-            };
+                mediaType: uploadType,
+                mediaUrl: uploadedMediaUrl || uploadedRelativePath || '',
+                thumbnailUrl: uploadType === 'photo' ? uploadedMediaUrl : undefined,
+                mediaMetadata: {
+                    fileName: data.track?.fileName || data.fileName || uploadFile.name,
+                    relativePath: uploadedRelativePath,
+                    artist: uploadArtist,
+                    album: uploadAlbum,
+                    genre: uploadGenre,
+                    archived: false,
+                    protected: false
+                },
+                isVisibleInFeed: true,
+                tags: [],
+                fileSizeBytes: uploadFile.size,
+                durationSeconds: null
+            });
 
-            const nextItem =
-                uploadType === 'music'
-                    ? normalizeMusic(enriched)
-                    : uploadType === 'photo'
-                        ? normalizePhoto(enriched)
-                        : normalizeVideo(enriched);
-
-            // ✅ FIX: only commit the optimistic item if it actually has a
-            // renderable URL. Otherwise we'd show a broken card that vanishes
-            // on the next refresh anyway.
-            if (!nextItem.mediaUrl) {
-                // Try one silent re-sync from the server, since the upload
-                // succeeded but the response shape was unexpected.
-                await loadLibrary({ silent: true });
-            } else {
-                updateItemLists(uploadType, nextItem);
-            }
+            const nextItem = normalizeSavedMediaItem({
+                ...persisted,
+                mediaType: persisted?.mediaType ?? uploadType
+            });
+            updateItemLists(uploadType, nextItem);
 
             setUploadFile(null);
             setUploadTitle('');
