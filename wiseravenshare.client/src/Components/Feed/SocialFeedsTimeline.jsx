@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../Services/api';
 import { socialService } from '../../Services/socialService';
+import { useSavedMedia } from '../../hooks/useSavedMedia';
 
 const REFRESH_MS = 15000;
 const CUSTOM_RSS_STORAGE_KEY = 'wiseCustomRssAtomFeeds';
@@ -329,6 +330,8 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
         const email = String(user?.email || '').trim().toLowerCase();
         return email.length > 0 && adminEmails.has(email);
     }, [adminEmails, user?.email]);
+
+    const { saveMedia } = useSavedMedia();
 
     const [snapshot, setSnapshot] = useState(() => getSnapshot(user));
     const [feedItems, setFeedItems] = useState([]);
@@ -1035,6 +1038,28 @@ const SocialFeedsTimeline = ({ user, compact = false, initialPlatform = 'all' })
             });
 
             setPublishResults(response?.results || []);
+
+            if (saveToLibrary && mediaUrl) {
+                const isVideoUrl = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(mediaUrl)
+                    || /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts|vimeo\.com\/)/i.test(mediaUrl)
+                    || mediaUrl.includes('videostreaming');
+                const isPhotoUrl = !isVideoUrl && /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(mediaUrl);
+                const mediaType = isVideoUrl ? 'video' : isPhotoUrl ? 'photo' : 'document';
+                try {
+                    await saveMedia({
+                        title: postMessage.trim() || mediaUrl,
+                        description: '',
+                        mediaType,
+                        mediaUrl,
+                        thumbnailUrl: '',
+                        isVisibleInFeed: false,
+                        tags: [],
+                    });
+                } catch {
+                    // Non-fatal — save failure should not block publish result display.
+                }
+            }
+
             setPostMessage('');
             setMediaUrlInput('');
             setLinkUrlInput('');

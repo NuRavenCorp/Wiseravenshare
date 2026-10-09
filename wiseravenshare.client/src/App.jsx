@@ -42,6 +42,7 @@ import InstrumentConnectorPage from './Pages/InstrumentConnectorPage';
 import PodcastRightsStudioPage from './Pages/PodcastRightsStudioPage';
 import PodcastCheckoutPage from './Pages/PodcastCheckoutPage';
 import WiseCoinPage from './Pages/WiseCoinPage';
+import MyLibraryPage from './Pages/MyLibraryPage';
 import GatekeeperDashboard from './Pages/GatekeeperDashboard.jsx';
 import KaraokePage from './Pages/KaraokePage.jsx';
 import PodcastAudioProcessor from './Components/Podcast/PodcastAudioProcessor.jsx';
@@ -389,7 +390,7 @@ const App = () => {
             ? target
             : target?.page;
 
-        if (nextPage === 'my-library' || nextPage === 'music-player') {
+        if (nextPage === 'music-player') {
             queueRavensightTab('library');
             setIsRavensightMode(true);
             setCurrentPage('ravensight');
@@ -627,7 +628,7 @@ const App = () => {
                     ? <FMRadioPage onNavigate={navigateToPage} canAccessCreator initialTab="creator" />
                     : <div style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>Admin access required.</div>;
             case 'my-library':
-                return <RavensightVideo onNavigate={navigateFromRavensight} initialTab="library" />;
+                return <MyLibraryPage onNavigate={navigateToPage} />;
             case 'instrument-connector':
                 return <InstrumentConnectorPage onNavigate={navigateToPage} />;
             case 'podcast-rights-studio':
