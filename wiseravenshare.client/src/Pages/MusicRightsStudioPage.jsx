@@ -8,7 +8,9 @@ import { useAuth } from '../Contexts/AuthContext';
 import { useNotification } from '../Contexts/NotificationContext';
 import { getAuthToken } from '../Services/unifiedStorage';
 import { shareMusic, buildMusicShareUrl, musicPlatformShare } from '../utils/musicShare';
+import { PAYWALLS_BYPASSED } from '../utils/paywallAccess';
 import '../Styles/MusicRightsStudio.css';
+import { toBlobStreamUrl } from '../utils/mediaStreamUrl';
 
 // ─── Stripe Price IDs (from environment) ─────────────────────────────────────
 // Uses per-interval price IDs so checkout can charge the correct billing cycle.
@@ -121,7 +123,10 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   // ── Subscription state ────────────────────────────────────────────────────
   const [subscriptionStatus,  setSubscriptionStatus]  = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
-  const hasActiveRightsPlan = Boolean(
+  // While paywalls are bypassed the studio is open to signed-in users.
+  // The plan check below stays intact and takes effect again once the
+  // VITE_PAYWALLS_BYPASS flag is set to false.
+  const hasActiveRightsPlan = PAYWALLS_BYPASSED || Boolean(
     subscriptionStatus?.hasActiveSubscription &&
     (MUSIC_RIGHTS_PLAN_KEYS.has(subscriptionStatus?.planKey) ||
      MUSIC_RIGHTS_PRICE_IDS.has(subscriptionStatus?.priceId) ||
@@ -411,8 +416,14 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
 
       if (res.status === 402) {
         setShowRegisterModal(false);
-        setShowPaymentGate(true);
-        addToast('A paid Music Rights plan is required. Please select a plan.', 'info');
+        // Only surface the payment gate when gating is actually in force; while
+        // paywalls are bypassed a 402 should not be reachable from the UI.
+        if (!PAYWALLS_BYPASSED) {
+          setShowPaymentGate(true);
+          addToast('A paid Music Rights plan is required. Please select a plan.', 'info');
+        } else {
+          addToast('Registration is temporarily unavailable. Please try again.', 'error');
+        }
         return;
       }
 
@@ -458,17 +469,6 @@ const MusicRightsStudioPage = ({ onNavigate, user: propUser }) => {
   const getBaseFileName = (n = '') => n.replace(/\.[^/.]+$/, '').trim();
   const normalizeText   = (v = '') => v.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-
-  const toBlobStreamUrl = (relativePath = '') => {
-    const normalized = String(relativePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!normalized) return '';
-    const encoded = normalized
-      .split('/')
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-    return encoded ? `/api/videostreaming/blob/${encoded}` : '';
-  };
 
   const normalizePlaybackUrl = (value = '') => {
     const raw = String(value || '').trim();
