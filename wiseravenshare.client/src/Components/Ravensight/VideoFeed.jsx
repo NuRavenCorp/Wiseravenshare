@@ -11,6 +11,7 @@ import MultiCameraMonitor from './MultiCameraMonitor';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
 import { useCollaborationHub } from '../../hooks/useCollaborationHub';
+import MultimediaPlayer from './MultimediaPlayer';
 
 const attachHls = (videoEl, src) => {
     if (!src) return;
@@ -552,22 +553,32 @@ const VideoFeed = ({ onNotification }) => {
                     >
                         ✋
                     </div>
-                    <div style={{ position: 'relative' }} onClick={handlePlayPause}>
-                        <video
-                            ref={videoRef}
-                            poster={resolveMediaUrl(video.thumbnailUrl)}
-                            muted={isMuted}
-                            loop
-                            playsInline
-                            style={{
-                                width: '100%',
-                                height: 'auto',
-                                background: '#000',
-                                borderRadius: '8px',
-                                border: '3px solid rgba(0,0,0,0.8)',
-                                boxShadow: 'inset 0 0 18px rgba(255,255,255,0.08)'
-                            }}
-                        />
+                    <div style={{ position: 'relative' }} onClick={isYouTube ? undefined : handlePlayPause}>
+                        {isYouTube ? (
+                            <MultimediaPlayer
+                                mediaContentId={video.id}
+                                src={video.videoUrl}
+                                mediaType={"youtube"}
+                                title={video.title}
+                                thumbnailUrl={resolveMediaUrl(video.thumbnailUrl)}
+                            />
+                        ) : (
+                            <video
+                                ref={videoRef}
+                                poster={resolveMediaUrl(video.thumbnailUrl)}
+                                muted={isMuted}
+                                loop
+                                playsInline
+                                style={{
+                                    width: '100%',
+                                    height: 'auto',
+                                    background: '#000',
+                                    borderRadius: '8px',
+                                    border: '3px solid rgba(0,0,0,0.8)',
+                                    boxShadow: 'inset 0 0 18px rgba(255,255,255,0.08)'
+                                }}
+                            />
+                        )}
 
                         {/* Duration Badge */}
                         {video.duration && (

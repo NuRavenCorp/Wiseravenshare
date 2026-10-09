@@ -1,4 +1,4 @@
-﻿using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.External.DeepSeekService;
 using Wiseravenshare.Server.Services.Truth;
 using Npgsql;
@@ -2410,6 +2410,7 @@ app.Use(async (context, next) =>
         "img-src 'self' data: https:; " +
         "font-src 'self' data: https:; " +
         "connect-src 'self' https: wss:; " +
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; " +
         "frame-ancestors 'none'; " +
         "base-uri 'self'; " +
         "form-action 'self'; " +
