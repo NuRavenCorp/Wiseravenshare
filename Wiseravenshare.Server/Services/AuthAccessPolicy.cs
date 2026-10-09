@@ -62,4 +62,40 @@ public static class AuthAccessPolicy
     {
         return IsAdminLoginAllowed(email, ResolveConfiguredAdminEmails(configuration));
     }
+
+    /// <summary>
+    /// Configuration key controlling whether paid features are temporarily free.
+    /// </summary>
+    public const string PaywallBypassConfigKey = "Features:Paywalls:Bypass";
+
+    /// <summary>
+    /// True when paywalls are suspended site-wide.
+    ///
+    /// While the site is running free, gated endpoints allow every authenticated
+    /// user through as if they held an active subscription. This is a deliberate
+    /// switch, not a removal: the 402 branches remain in place and become
+    /// reachable again the moment this returns false. Set
+    /// <c>Features:Paywalls:Bypass=false</c> to restore paid gating exactly as it
+    /// was — no code change required.
+    ///
+    /// Intended to be driven by configuration only, so the decision of what to
+    /// charge and for what stays reversible while pricing is settled.
+    /// </summary>
+    public static bool ArePaywallsBypassed(IConfiguration? configuration)
+    {
+        if (configuration is null)
+        {
+            return false;
+        }
+
+        var configured = configuration[PaywallBypassConfigKey];
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            // Default is bypassed: the site runs free until pricing is set.
+            // Flip the key to "false" to switch paid gating back on.
+            return true;
+        }
+
+        return !string.Equals(configured.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+    }
 }

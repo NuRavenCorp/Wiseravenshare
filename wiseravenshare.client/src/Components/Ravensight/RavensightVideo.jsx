@@ -11,6 +11,7 @@ import { authService } from '../../Services/Auth.jsx';
 import { useAuth } from '../../Contexts/AuthContext';
 import { apiService } from '../../Services/api';
 import { subscriptionService } from '../../Services/subscriptionService';
+import { PAYWALLS_BYPASSED } from '../../utils/paywallAccess';
 
 const PRICING_PLANS = [
     {
@@ -302,7 +303,12 @@ const RavensightVideo = ({ onNavigate, initialTab = 'record' }) => {
         return match?.planId || null;
     };
 
-    const activePlanId = isAdminAllAccess
+    // While paywalls are bypassed every signed-in user resolves to the top plan,
+    // so feature checks and direct upload unlock. The real resolution below is
+    // retained and takes over again once VITE_PAYWALLS_BYPASS=false.
+    const activePlanId = PAYWALLS_BYPASSED
+        ? 'studio_plus'
+        : isAdminAllAccess
         ? 'studio_plus'
         : billingSync.hasActiveSubscription
         ? (resolvePlanIdFromPriceId(billingSync.priceId) || subscription?.planId || DEFAULT_PLAN_ID)

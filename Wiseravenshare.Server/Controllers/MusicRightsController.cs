@@ -42,9 +42,10 @@ public sealed class MusicRightsController : ControllerBase
         var email  = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? "unknown";
         var name   = User.FindFirstValue(ClaimTypes.Name)  ?? User.FindFirstValue("name")  ?? email;
 
-        // Check subscription or admin pass
+        // Check subscription or admin pass. Paywalls may be suspended site-wide
+        // while pricing is being settled; see AuthAccessPolicy.ArePaywallsBypassed.
         var isAdmin = AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
-        if (!isAdmin)
+        if (!isAdmin && !AuthAccessPolicy.ArePaywallsBypassed(_configuration))
         {
             try
             {
@@ -120,7 +121,7 @@ public sealed class MusicRightsController : ControllerBase
         var name   = User.FindFirstValue(ClaimTypes.Name)  ?? User.FindFirstValue("name")  ?? email;
 
         var isAdmin = AuthAccessPolicy.IsConfiguredAdminEmail(_configuration, email);
-        if (!isAdmin)
+        if (!isAdmin && !AuthAccessPolicy.ArePaywallsBypassed(_configuration))
         {
             try
             {

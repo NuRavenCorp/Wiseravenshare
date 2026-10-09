@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './unifiedStorage.js';
+import { getAuthToken, getAdminPassToken, setAuthToken, setAdminPassToken, clearAuthToken } from './unifiedStorage.ts';
+import { withPaywallBypass } from '../utils/paywallAccess';
 
 const VITE_DEV_PORTS = new Set(['5173', '4173']);
 
@@ -1667,11 +1668,15 @@ export const apiService = {
     // Billing / Subscription endpoints
     getSubscriptionStatus: async () => {
         try {
-            return await api.get('/billing/subscription');
+            const response = await api.get('/billing/subscription');
+            // While paywalls are bypassed, report an active subscription so
+            // gated UI opens without a payment prompt. Real plan fields are
+            // preserved for display; the server enforces the same switch.
+            return { ...response, data: withPaywallBypass(response?.data) };
         } catch (error) {
             const status = Number(error?.response?.status || 0);
             if (status === 404 || status === 405) {
-                return { data: { hasActiveSubscription: false, status: 'inactive', planKey: null } };
+                return { data: withPaywallBypass({ hasActiveSubscription: false, status: 'inactive', planKey: null }) };
             }
             throw normalizeApiError(error, 'Failed to load subscription status.');
         }

@@ -9,6 +9,7 @@ import { upsertLocalVideo, buildLocalFallbackVideo } from '../Services/ravensigh
 import { ravensightAPI } from '../Services/RavensightAPI';
 import { useCollaborationHub } from '../hooks/useCollaborationHub';
 import { subscriptionService } from '../Services/subscriptionService';
+import { PAYWALLS_BYPASSED } from '../utils/paywallAccess';
 
 const initialTeamMembers = [];
 
@@ -2682,7 +2683,9 @@ const PodcastStudioPage = ({ onNavigate }) => {
     const nextFlowActionLabel = nextRequiredFlow.actionLabel;
     const activePodcastTier = normalizeTierId(subscriptionStatus?.userTier || subscriptionStatus?.tier || 'free');
     const isPodcastAccessAdmin = Boolean(subscriptionStatus?.isAdmin || authService.isAdminAllAccess());
-    const hasPodcastAccess = Boolean(subscriptionStatus?.hasActiveSubscription || isPodcastAccessAdmin);
+    // Bypassed while the site runs free; the underlying plan check is retained
+    // and applies again once VITE_PAYWALLS_BYPASS=false.
+    const hasPodcastAccess = Boolean(PAYWALLS_BYPASSED || subscriptionStatus?.hasActiveSubscription || isPodcastAccessAdmin);
 
     const getTierAccessState = (requiredTier) => {
         if (subscriptionStatusLoading) {
