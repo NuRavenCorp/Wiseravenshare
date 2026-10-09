@@ -328,7 +328,14 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return BadRequest(new { message = "No music file uploaded. Ensure the multipart field is named 'File'." });
         }
 
-        dto.File ??= file;
+        // Normalize the resolved upload back onto the DTO so every downstream
+        // read (dto.File.ContentType below, and SaveMusicAsync) sees the same
+        // instance. Assigning unconditionally matters: `??=` only fires when
+        // dto.File is null, so a non-null but empty binding (Length == 0)
+        // recovered from Request.Form would otherwise be discarded here and
+        // reach SaveMusicAsync empty, which throws InvalidOperationException
+        // and surfaced as an unhandled 500.
+        dto.File = file;
 
         // Return explicit 400 for unsupported formats instead of a 500 from the service layer.
         var fileExtension = Path.GetExtension(file.FileName)?.ToLowerInvariant();
@@ -371,7 +378,19 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var userMusicFolder = $"users/{userStorageIdentity}/media/music";
         dto.DestinationFolder = userMusicFolder;
 
-        var track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, userStorageIdentity, cancellationToken);
+        UserMusicTrackDto track;
+        try
+        {
+            track = await _musicLibraryStore.SaveMusicAsync(userId, dto.File, dto, userStorageIdentity, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // SaveMusicAsync guards against an empty upload; surface that as a
+            // client error rather than letting it become an unhandled 500.
+            _logger.LogWarning(ex, "Music upload rejected for user {UserId}.", userId);
+            return BadRequest(new { message = ex.Message });
+        }
+
         var mediaUrl = string.IsNullOrWhiteSpace(track.MediaUrl)
             ? StreamingUrlHelper.StreamByFileName(track.FileName)
             : track.MediaUrl;

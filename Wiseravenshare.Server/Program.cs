@@ -388,17 +388,80 @@ static bool IsDuplicateMigrationConflict(Exception exception)
     return exception.InnerException is not null && IsDuplicateMigrationConflict(exception.InnerException);
 }
 
-static async Task<bool> HasCorePostSchemaAsync(AppDbContext dbContext, CancellationToken cancellationToken = default)
+/// <summary>
+/// True when every named table exists in app_data. Used to decide whether a
+/// duplicate-object migration failure can be safely skipped: if the tables the
+/// migration was supposed to create are all present, the failure is redundant;
+/// if any are missing, the migration genuinely did not complete.
+/// </summary>
+static async Task<bool> HasTablesAsync(AppDbContext dbContext, IReadOnlyCollection<string> tableNames, CancellationToken cancellationToken = default)
 {
+    if (tableNames.Count == 0)
+    {
+        return true;
+    }
+
     const string sql = @"
-SELECT COUNT(*)
+SELECT COUNT(*) AS ""Value""
 FROM information_schema.tables
 WHERE table_schema = 'app_data'
-  AND table_name IN ('Users', 'Posts', 'PostLikes', 'PostReposts', 'PostBookmarks');";
+  AND table_name = ANY(@names);";
 
-    var result = await dbContext.Database.SqlQueryRaw<int>(sql).ToListAsync(cancellationToken);
-    var existing = result.FirstOrDefault();
-    return existing >= 5;
+    var result = await dbContext.Database
+        .SqlQueryRaw<int>(sql, new NpgsqlParameter("names", tableNames.ToArray()))
+        .ToListAsync(cancellationToken);
+
+    return result.FirstOrDefault() >= tableNames.Count;
+}
+
+/// <summary>
+/// The set of tables the current EF model expects in the app_data schema.
+///
+/// Derived from the model rather than by parsing migration source, so it stays
+/// correct as migrations are added. Used to tell a genuinely-redundant
+/// duplicate-object failure apart from a migration that aborted halfway.
+/// </summary>
+static IReadOnlyCollection<string> ResolveExpectedTables(AppDbContext dbContext)
+{
+    var tables = dbContext.Model.GetEntityTypes()
+        .Select(entityType => entityType.GetTableName())
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Select(name => name!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    return tables;
+}
+
+/// <summary>
+/// The subset of <paramref name="tableNames"/> that does not exist in app_data.
+/// Only used for diagnostics, so a failure here must not mask the real error.
+/// </summary>
+static async Task<IReadOnlyCollection<string>> DescribeMissingTablesAsync(
+    AppDbContext dbContext,
+    IReadOnlyCollection<string> tableNames,
+    CancellationToken cancellationToken = default)
+{
+    try
+    {
+        const string sql = @"
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'app_data'
+  AND table_name = ANY(@names);";
+
+        var present = await dbContext.Database
+            .SqlQueryRaw<string>(sql, new NpgsqlParameter("names", tableNames.ToArray()))
+            .ToListAsync(cancellationToken);
+
+        var presentSet = new HashSet<string>(present, StringComparer.OrdinalIgnoreCase);
+        return tableNames.Where(name => !presentSet.Contains(name)).ToArray();
+    }
+    catch
+    {
+        return tableNames;
+    }
 }
 
 static async Task MarkMigrationsAppliedAsync(AppDbContext dbContext, ILogger logger, IReadOnlyCollection<string> migrationIds, CancellationToken cancellationToken = default)
@@ -452,9 +515,18 @@ static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logg
             }
             catch (Exception migrateEx) when (IsDuplicateMigrationConflict(migrateEx))
             {
-                var schemaReady = await HasCorePostSchemaAsync(dbContext, cancellationToken);
+                // A duplicate-object failure only means "already applied" if the
+                // objects the pending migrations create are actually present.
+                // Checking the base schema instead would mark a half-applied
+                // migration as complete and permanently strand its tables.
+                var expectedTables = ResolveExpectedTables(dbContext);
+                var schemaReady = await HasTablesAsync(dbContext, expectedTables, cancellationToken);
                 if (!schemaReady)
                 {
+                    logger.LogError(
+                        migrateEx,
+                        "Migration reported a duplicate-object conflict but the expected tables are missing: {Tables}. Applying the model bootstrap script to reconcile.",
+                        string.Join(", ", expectedTables));
                     throw;
                 }
 
@@ -506,13 +578,22 @@ static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logg
         }
         catch (Exception migrateRetryEx) when (IsDuplicateMigrationConflict(migrateRetryEx))
         {
-            var schemaReady = await HasCorePostSchemaAsync(dbContext, cancellationToken);
+            var remainingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+            var expectedTables = ResolveExpectedTables(dbContext);
+            var schemaReady = await HasTablesAsync(dbContext, expectedTables, cancellationToken);
             if (!schemaReady)
             {
+                // Do not mark migrations applied while model tables are missing:
+                // that is precisely how a partially-applied migration becomes
+                // permanently recorded as complete.
+                var missing = await DescribeMissingTablesAsync(dbContext, expectedTables, cancellationToken);
+                logger.LogError(
+                    migrateRetryEx,
+                    "Final migration pass hit duplicate objects but these model tables are still missing: {Tables}",
+                    missing);
                 throw;
             }
 
-            var remainingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
             await MarkMigrationsAppliedAsync(dbContext, logger, remainingMigrations, cancellationToken);
             logger.LogInformation("Final migration pass detected duplicate objects on an operational schema; migration history was reconciled.");
         }
