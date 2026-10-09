@@ -209,9 +209,10 @@ public sealed class UserAiConnectorChatService : IUserAiConnectorChatService
             await using var openStream = await openResponse.Content.ReadAsStreamAsync(ct);
             using var streamReader = new StreamReader(openStream, Encoding.UTF8);
 
-            while (!streamReader.EndOfStream && !ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
                 var line = await streamReader.ReadLineAsync(ct);
+                if (line is null) break;
                 if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal))
                 {
                     continue;

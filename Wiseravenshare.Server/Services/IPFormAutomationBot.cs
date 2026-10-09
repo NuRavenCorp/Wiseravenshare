@@ -23,8 +23,8 @@ namespace Wiseravenshare.Server.Services;
 public class IPFormAutomationBot
 {
     private readonly ILogger<IPFormAutomationBot> _logger;
-    private readonly string _copyrightOfficeUrl = "https://www.copyright.gov";
-    private readonly string _teasUrl = "https://teas.uspto.gov";
+    public const string CopyrightOfficeUrl = "https://www.copyright.gov";
+    public const string TeasUrl = "https://teas.uspto.gov";
 
     public IPFormAutomationBot(ILogger<IPFormAutomationBot> logger)
     {
@@ -37,11 +37,11 @@ public class IPFormAutomationBot
     public class FormSubmissionResult
     {
         public bool Success { get; set; }
-        public string ConfirmationNumber { get; set; }
-        public string ConfirmationEmail { get; set; }
-        public string ErrorMessage { get; set; }
+        public string ConfirmationNumber { get; set; } = string.Empty;
+        public string ConfirmationEmail { get; set; } = string.Empty;
+        public string ErrorMessage { get; set; } = string.Empty;
         public DateTime SubmittedAt { get; set; }
-        public string ScreenshotPath { get; set; } // For debugging
+        public string ScreenshotPath { get; set; } = string.Empty; // For debugging
     }
 
     /// <summary>
@@ -196,10 +196,10 @@ public class IPFormAutomationBot
     /// Polls Copyright Office status portal for registration updates.
     /// Checks current status and looks for new certificates.
     /// </summary>
-    public async Task<(bool IsComplete, string RegistrationNumber, string Certificate)> PollCopyrightStatusAsync(
+    public async Task<(bool IsComplete, string? RegistrationNumber, string? Certificate)> PollCopyrightStatusAsync(
         string copyrightFilingId,
         string confirmationNumber,
-        string searchEmail = null)
+        string? searchEmail = null)
     {
         _logger.LogInformation($"Polling Copyright Office status for filing {copyrightFilingId}");
 
@@ -240,7 +240,7 @@ public class IPFormAutomationBot
     /// Polls USPTO status tracker for trademark application updates.
     /// Checks current status and looks for new registration or office actions.
     /// </summary>
-    public async Task<(bool IsComplete, string RegistrationNumber, string Certificate, string OfficeAction)> 
+    public async Task<(bool IsComplete, string? RegistrationNumber, string? Certificate, string? OfficeAction)> 
         PollTrademarkStatusAsync(string trademarkFilingId, string serialNumber)
     {
         _logger.LogInformation($"Polling USPTO status for filing {trademarkFilingId}");
@@ -280,7 +280,7 @@ public class IPFormAutomationBot
     /// Monitors email inbox for Copyright Office notifications.
     /// Extracts registration numbers and certificate attachments.
     /// </summary>
-    public async Task<(bool Registered, string RegistrationNumber, string CertificateUrl)> 
+    public async Task<(bool Registered, string? RegistrationNumber, string? CertificateUrl)> 
         MonitorCopyrightEmailAsync(string userEmail, string imapServer = "imap.gmail.com", int maxWaitSeconds = 3600)
     {
         _logger.LogInformation($"Monitoring email {userEmail} for Copyright Office notifications");
@@ -320,7 +320,7 @@ public class IPFormAutomationBot
     /// Monitors email inbox for USPTO notifications.
     /// Extracts office actions, serial numbers, and registration certificates.
     /// </summary>
-    public async Task<(bool Registered, string RegistrationNumber, string CertificateUrl, string OfficeAction)> 
+    public async Task<(bool Registered, string? RegistrationNumber, string? CertificateUrl, string? OfficeAction)> 
         MonitorTrademarkEmailAsync(string userEmail, string imapServer = "imap.gmail.com", int maxWaitSeconds = 3600)
     {
         _logger.LogInformation($"Monitoring email {userEmail} for USPTO notifications");

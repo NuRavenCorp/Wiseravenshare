@@ -320,7 +320,7 @@ namespace Wiseravenshare.Server.Services
                 HiddenItemsCount = medias.Count(m => !m.IsVisibleInFeed),
                 PublishedCount = medias.Count(m => m.IsPublished),
                 ScheduledCount = medias.Count(m => m.ScheduledPublishAt.HasValue && m.ScheduledPublishAt > DateTime.UtcNow),
-                TotalSizeBytes = medias.Where(m => m.FileSizeBytes.HasValue).Sum(m => m.FileSizeBytes.Value)
+                TotalSizeBytes = medias.Sum(m => m.FileSizeBytes ?? 0L)
             };
         }
 

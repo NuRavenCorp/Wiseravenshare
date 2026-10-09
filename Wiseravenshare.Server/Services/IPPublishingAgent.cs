@@ -50,37 +50,37 @@ public class IPPublishingAgent
     /// </summary>
     public class FilingPublishingTask
     {
-        public string TaskId { get; set; }
-        public string FilingId { get; set; } // Reference to CopyrightFiling or TrademarkFiling
-        public string FilingType { get; set; } // "Copyright" or "Trademark"
-        public string FormCode { get; set; } // SR, PA, TX, VI, etc.
+        public string TaskId { get; set; } = string.Empty;
+        public string FilingId { get; set; } = string.Empty; // Reference to CopyrightFiling or TrademarkFiling
+        public string FilingType { get; set; } = string.Empty; // "Copyright" or "Trademark"
+        public string FormCode { get; set; } = string.Empty; // SR, PA, TX, VI, etc.
         public AgentTaskStatus Status { get; set; }
         
         // Form generation
-        public string GeneratedFormContent { get; set; } // Populated form data (JSON or XML)
-        public string FormTemplateUsed { get; set; } // Template version/ID
+        public string GeneratedFormContent { get; set; } = string.Empty; // Populated form data (JSON or XML)
+        public string FormTemplateUsed { get; set; } = string.Empty; // Template version/ID
         public DateTime? FormGeneratedAt { get; set; }
         
         // Submission tracking
-        public string GovernmentApplicationNumber { get; set; } // Receipt/confirmation number
-        public string GovernmentConfirmationEmail { get; set; } // Email from Copyright Office or USPTO
+        public string GovernmentApplicationNumber { get; set; } = string.Empty; // Receipt/confirmation number
+        public string GovernmentConfirmationEmail { get; set; } = string.Empty; // Email from Copyright Office or USPTO
         public DateTime? SubmittedAt { get; set; }
         public int SubmissionAttempts { get; set; } // Track retries
         
         // Status polling
         public DateTime? LastStatusCheckAt { get; set; }
         public DateTime? NextStatusCheckAt { get; set; }
-        public string LatestStatusFromGovt { get; set; }
+        public string LatestStatusFromGovt { get; set; } = string.Empty;
         
         // Office action handling
-        public string OfficeActionReceived { get; set; } // Office action details
+        public string OfficeActionReceived { get; set; } = string.Empty; // Office action details
         public DateTime? OfficeActionReceivedAt { get; set; }
         public DateTime? OfficeActionDeadline { get; set; }
         public bool AutoResponseGenerated { get; set; }
-        public string AutoResponseContent { get; set; }
+        public string AutoResponseContent { get; set; } = string.Empty;
         
         // Logging
-        public string AgentNotes { get; set; } // Internal agent notes/errors
+        public string AgentNotes { get; set; } = string.Empty; // Internal agent notes/errors
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

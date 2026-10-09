@@ -91,9 +91,10 @@ public class OpenAiClient
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         int promptTokens = 0, completionTokens = 0;
-        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
             if (!line.StartsWith("data: ")) continue;
 

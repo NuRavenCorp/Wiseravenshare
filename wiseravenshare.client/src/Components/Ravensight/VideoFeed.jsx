@@ -8,6 +8,8 @@ import { useAuth } from '../../Contexts/AuthContext';
 import { normalizeVideoRecord, getMergedLocalVideos, upsertLocalVideo, upsertLocalVideos, removeLocalVideo, RAVENSIGHT_LIBRARY_PROTOCOL } from '../../Services/ravensightVideoStore';
 import CollaborativeScriptRoom from './CollaborativeScriptRoom';
 import MultiCameraMonitor from './MultiCameraMonitor';
+import MonitorArray from './MonitorArray';
+import './VideoFeed.css';
 import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
 import { useCollaborationHub } from '../../hooks/useCollaborationHub';
@@ -30,6 +32,16 @@ const attachHls = (videoEl, src) => {
         videoEl.src = src;
     }
 };
+
+/*
+ * YouTube detection.
+ *
+ * A Ravensight record is a YouTube embed when either its mediaType marker says
+ * so, or its resolved media URL points at youtube.com / youtu.be. This mirrors
+ * the predicate MultimediaPlayer applies to its own `src` so the feed and the
+ * player never disagree about which renderer a record needs.
+ */
+const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
 
 const normalizeMediaSource = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -56,6 +68,20 @@ const normalizeVideo = (video, index = 0) => {
         thumbnailUrl: normalizeMediaSource(normalized.thumbnailUrl || '', ''),
         channelAvatar: normalizeMediaSource(normalized.channelAvatar || '', '')
     };
+};
+
+/*
+ * A record needs the YouTube embed renderer when its media URL resolves to a
+ * YouTube host. Only the URL is authoritative here: the record's `mediaType`
+ * is not part of the normalized shape (see normalizeVideoRecord), and a
+ * self-hosted Spaces URL never matches this pattern, so the native <video>
+ * path is the default.
+ */
+const isYouTubeRecord = (video) => {
+    if (!video) return false;
+    const candidate = [video.videoUrl, video.mediaUrl, video.youtubeUrl]
+        .find((value) => typeof value === 'string' && value.trim());
+    return typeof candidate === 'string' && YOUTUBE_URL_PATTERN.test(candidate);
 };
 
 const getLocalFallbackVideos = (currentUserId, filterMode = 'all') => {
@@ -415,6 +441,7 @@ const VideoFeed = ({ onNotification }) => {
         const videoIdentity = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
         const isSharing = sharingVideoIds.includes(videoIdentity);
         const isSaving = savingVideoIds.includes(videoIdentity);
+        const isYouTube = isYouTubeRecord(video);
 
         const resolvedSrc = resolveMediaUrl(video.videoUrl);
         useEffect(() => {
@@ -787,40 +814,19 @@ const VideoFeed = ({ onNotification }) => {
     ];
 
     return (
-        <div>
+        <div className="wr-feed">
             {activePodcastCommand && (
-                <div style={{
-                    marginBottom: '14px',
-                    border: '1px solid rgba(248, 113, 113, 0.45)',
-                    borderRadius: '12px',
-                    background: 'rgba(127, 29, 29, 0.25)',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '10px',
-                    flexWrap: 'wrap'
-                }}>
+                <div className="wr-feed__command">
                     <div>
-                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#fecaca', fontWeight: 700 }}>
-                            Podcast Team Command
-                        </div>
-                        <div style={{ fontWeight: 700 }}>
+                        <div className="wr-feed__command-label">Podcast Team Command</div>
+                        <div className="wr-feed__command-text">
                             {String(activePodcastCommand.command || '').toUpperCase()} {activePodcastCommand.note ? `- ${activePodcastCommand.note}` : ''}
                         </div>
                     </div>
                     <button
                         type="button"
                         onClick={acknowledgeCutCommand}
-                        style={{
-                            border: '1px solid var(--border-color)',
-                            background: 'rgba(255,255,255,0.1)',
-                            color: 'var(--text-color)',
-                            borderRadius: '8px',
-                            padding: '8px 12px',
-                            cursor: 'pointer',
-                            fontWeight: 700
-                        }}
+                        className="wr-feed__command-ack"
                     >
                         Acknowledge
                     </button>
@@ -833,13 +839,7 @@ const VideoFeed = ({ onNotification }) => {
             </div>
 
             {/* Filter Bar */}
-            <div style={{
-                display: 'flex',
-                gap: '10px',
-                marginBottom: '20px',
-                overflowX: 'auto',
-                paddingBottom: '10px'
-            }}>
+            <div className="wr-feed__filters">
                 {filters.map(f => (
                     <button
                         key={f.id}
@@ -847,15 +847,8 @@ const VideoFeed = ({ onNotification }) => {
                             setFilter(f.id);
                             setPage(1);
                         }}
-                        style={{
-                            padding: '8px 20px',
-                            borderRadius: '20px',
-                            border: 'none',
-                            background: filter === f.id ? 'linear-gradient(135deg, var(--highlight-color), var(--accent-color))' : 'var(--secondary-color)',
-                            color: 'white',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap'
-                        }}
+                        className={`wr-feed__filter${filter === f.id ? ' wr-feed__filter--active' : ''}`}
+                        aria-pressed={filter === f.id}
                     >
                         {f.label}
                     </button>
@@ -863,11 +856,7 @@ const VideoFeed = ({ onNotification }) => {
             </div>
 
             {/* Video Grid */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-                gap: '20px'
-            }}>
+            <div className="wr-feed__grid">
                 {videos.map(video => (
                     <VideoCard key={video.id} video={video} />
                 ))}
@@ -875,130 +864,38 @@ const VideoFeed = ({ onNotification }) => {
 
             {/* Loading Indicator */}
             {loading && (
-                <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div className="wr-feed__loading">
                     <div className="loading-spinner" style={{ margin: '0 auto' }}></div>
                 </div>
             )}
 
             {/* Sentinel for Infinite Scroll */}
-            <div id="feed-sentinel" style={{ height: '20px' }}></div>
+            <div id="feed-sentinel" className="wr-feed__sentinel"></div>
 
             {/* Empty State */}
             {!loading && videos.length === 0 && (
-                <div style={{
-                    textAlign: 'center',
-                    padding: '60px',
-                    color: 'var(--highlight-color)'
-                }}>
-                    <FaVideo style={{ fontSize: '64px', marginBottom: '20px' }} />
+                <div className="wr-feed__empty">
+                    <FaVideo className="wr-feed__empty-icon" />
                     <h3>No videos found</h3>
                     <p>Check back later for new content!</p>
                 </div>
             )}
 
-            {/* Bottom Source Monitor Array */}
-            <div style={{ marginTop: '24px' }}>
-                <div style={{
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '14px',
-                    padding: '14px',
-                    background: 'rgba(255,255,255,0.02)'
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                        <h3 style={{ margin: 0, fontSize: '16px' }}>Video Monitor Array</h3>
-                        <span style={{ fontSize: '12px', color: 'var(--highlight-color)' }}>
-                            Mirror and monitor up to 3 feed sources
-                        </span>
-                    </div>
-
-                    {monitorCandidates.length === 0 ? (
-                        <div style={{ color: 'var(--highlight-color)', fontSize: '13px' }}>
-                            No feed sources available yet. Upload or refresh to populate monitor slots.
-                        </div>
-                    ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
-                            {[0, 1, 2].map((slotIndex) => {
-                                const selectedId = monitorSlots[slotIndex];
-                                const selectedVideo = monitorCandidates.find((candidate) => String(candidate.id || '') === selectedId) || monitorCandidates[slotIndex] || monitorCandidates[0];
-                                const monitorSrc = resolveMediaUrl(selectedVideo?.videoUrl || selectedVideo?.mediaUrl || '');
-                                const isMirrored = Boolean(monitorMirror[slotIndex]);
-
-                                return (
-                                    <div
-                                        key={`monitor-slot-${slotIndex}`}
-                                        style={{
-                                            border: '1px solid var(--border-color)',
-                                            borderRadius: '10px',
-                                            background: '#0f1118',
-                                            overflow: 'hidden'
-                                        }}
-                                    >
-                                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-color)', display: 'grid', gap: '8px' }}>
-                                            <div style={{ fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--highlight-color)', fontWeight: 700 }}>
-                                                Source {slotIndex + 1}
-                                            </div>
-                                            <select
-                                                value={String(selectedVideo?.id || '')}
-                                                onChange={(event) => {
-                                                    const nextId = String(event.target.value || '');
-                                                    setMonitorSlots((current) => current.map((slot, idx) => (idx === slotIndex ? nextId : slot)));
-                                                }}
-                                                style={{
-                                                    width: '100%',
-                                                    borderRadius: '8px',
-                                                    border: '1px solid var(--border-color)',
-                                                    background: 'var(--secondary-color)',
-                                                    color: 'var(--text-color)',
-                                                    padding: '6px 8px',
-                                                    fontSize: '12px'
-                                                }}
-                                            >
-                                                {monitorCandidates.map((candidate) => (
-                                                    <option key={candidate.id} value={String(candidate.id || '')}>
-                                                        {candidate.title || `Source ${candidate.id}`}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setMonitorMirror((current) => current.map((mirror, idx) => (idx === slotIndex ? !mirror : mirror)));
-                                                }}
-                                                style={{
-                                                    border: '1px solid var(--border-color)',
-                                                    background: 'transparent',
-                                                    color: 'var(--text-color)',
-                                                    borderRadius: '8px',
-                                                    padding: '6px 8px',
-                                                    fontSize: '12px',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                {isMirrored ? 'Mirroring On' : 'Mirroring Off'}
-                                            </button>
-                                        </div>
-                                        <div style={{ background: '#000', aspectRatio: '16 / 9' }}>
-                                            <video
-                                                src={monitorSrc}
-                                                muted
-                                                loop
-                                                playsInline
-                                                controls
-                                                style={{
-                                                    width: '100%',
-                                                    height: '100%',
-                                                    objectFit: 'cover',
-                                                    transform: isMirrored ? 'scaleX(-1)' : 'none'
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            </div>
+            <MonitorArray
+                candidates={monitorCandidates}
+                slots={monitorSlots}
+                mirrors={monitorMirror}
+                onSelectSource={(slotIndex, nextId) =>
+                    setMonitorSlots((current) =>
+                        current.map((slot, idx) => (idx === slotIndex ? nextId : slot))
+                    )
+                }
+                onToggleMirror={(slotIndex) =>
+                    setMonitorMirror((current) =>
+                        current.map((mirror, idx) => (idx === slotIndex ? !mirror : mirror))
+                    )
+                }
+            />
 
             {scriptVideo && (
                 <CollaborativeScriptRoom

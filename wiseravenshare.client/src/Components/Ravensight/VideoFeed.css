@@ -1,0 +1,240 @@
+/* ============================================================================
+ * VideoFeed.css
+ *
+ * Styles for the Ravensight video feed shell, its filter bar, and the
+ * bottom source monitor array. The video card itself keeps its inline
+ * "retro TV" styling inside VideoCard.jsx, because that art direction is
+ * local to the card and is not reused anywhere else.
+ *
+ * Tokens are declared once here rather than repeated per element, so the
+ * feed and the monitor array stay visually consistent when either changes.
+ * ========================================================================== */
+
+.wr-feed {
+    --wr-feed-radius-lg: 14px;
+    --wr-feed-radius-md: 10px;
+    --wr-feed-radius-sm: 8px;
+    --wr-feed-radius-pill: 20px;
+    --wr-feed-gap: 20px;
+    --wr-feed-monitor-bg: #0f1118;
+    --wr-feed-danger-border: rgba(248, 113, 113, 0.45);
+    --wr-feed-danger-bg: rgba(127, 29, 29, 0.25);
+    --wr-feed-danger-text: #fecaca;
+    --wr-feed-subtle-bg: rgba(255, 255, 255, 0.02);
+    --wr-feed-control-bg: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Podcast command banner ──────────────────────────────────────────────── */
+
+.wr-feed__command {
+    margin-bottom: 14px;
+    border: 1px solid var(--wr-feed-danger-border);
+    border-radius: 12px;
+    background: var(--wr-feed-danger-bg);
+    padding: 12px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.wr-feed__command-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--wr-feed-danger-text);
+    font-weight: 700;
+}
+
+.wr-feed__command-text {
+    font-weight: 700;
+}
+
+.wr-feed__command-ack {
+    border: 1px solid var(--border-color);
+    background: var(--wr-feed-control-bg);
+    color: var(--text-color);
+    border-radius: var(--wr-feed-radius-sm);
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.wr-feed__filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: var(--wr-feed-gap);
+    overflow-x: auto;
+    padding-bottom: 10px;
+}
+
+.wr-feed__filter {
+    padding: 8px 20px;
+    border-radius: var(--wr-feed-radius-pill);
+    border: none;
+    background: var(--secondary-color);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.wr-feed__filter--active {
+    background: linear-gradient(135deg, var(--highlight-color), var(--accent-color));
+}
+
+/* ── Video grid ──────────────────────────────────────────────────────────── */
+
+.wr-feed__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: var(--wr-feed-gap);
+}
+
+/* ── Loading / empty states ──────────────────────────────────────────────── */
+
+.wr-feed__loading {
+    text-align: center;
+    padding: 40px;
+}
+
+.wr-feed__sentinel {
+    height: 20px;
+}
+
+.wr-feed__empty {
+    text-align: center;
+    padding: 60px;
+    color: var(--highlight-color);
+}
+
+.wr-feed__empty-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+/* ── Source monitor array ────────────────────────────────────────────────── */
+
+.wr-monitors {
+    margin-top: 24px;
+}
+
+.wr-monitors__frame {
+    border: 1px solid var(--border-color);
+    border-radius: var(--wr-feed-radius-lg);
+    padding: 14px;
+    background: var(--wr-feed-subtle-bg);
+}
+
+.wr-monitors__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.wr-monitors__title {
+    margin: 0;
+    font-size: 16px;
+}
+
+.wr-monitors__hint {
+    font-size: 12px;
+    color: var(--highlight-color);
+}
+
+.wr-monitors__empty {
+    color: var(--highlight-color);
+    font-size: 13px;
+}
+
+/*
+ * Three equal columns on wide screens. auto-fit with a 260px floor collapsed
+ * to a single stretched column on mid-size viewports, which is why the array
+ * could read as "missing" rather than merely stacked. An explicit responsive
+ * grid keeps all three slots distinguishable at every width.
+ */
+.wr-monitors__grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+@media (max-width: 1100px) {
+    .wr-monitors__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .wr-monitors__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.wr-monitor {
+    border: 1px solid var(--border-color);
+    border-radius: var(--wr-feed-radius-md);
+    background: var(--wr-feed-monitor-bg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.wr-monitor__head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    display: grid;
+    gap: 8px;
+}
+
+.wr-monitor__label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--highlight-color);
+    font-weight: 700;
+}
+
+.wr-monitor__select {
+    width: 100%;
+    border-radius: var(--wr-feed-radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--secondary-color);
+    color: var(--text-color);
+    padding: 6px 8px;
+    font-size: 12px;
+}
+
+.wr-monitor__mirror {
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-color);
+    border-radius: var(--wr-feed-radius-sm);
+    padding: 6px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.wr-monitor__mirror--on {
+    background: var(--wr-feed-control-bg);
+    font-weight: 700;
+}
+
+.wr-monitor__stage {
+    background: #000;
+    aspect-ratio: 16 / 9;
+    flex: 1;
+}
+
+.wr-monitor__video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}

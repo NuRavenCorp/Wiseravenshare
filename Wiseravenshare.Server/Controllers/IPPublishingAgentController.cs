@@ -362,28 +362,28 @@ public class IPPublishingAgentController : ControllerBase
 
     public class SubmitCopyrightRequest
     {
-        public string FilingId { get; set; }
-        public string FormCode { get; set; }
-        public string WorkTitle { get; set; }
-        public string CreatorName { get; set; }
-        public string WorkDescription { get; set; }
-        public List<string> UploadedFileKeys { get; set; }
+        public string FilingId { get; set; } = string.Empty;
+        public string FormCode { get; set; } = string.Empty;
+        public string WorkTitle { get; set; } = string.Empty;
+        public string CreatorName { get; set; } = string.Empty;
+        public string WorkDescription { get; set; } = string.Empty;
+        public List<string> UploadedFileKeys { get; set; } = new();
     }
 
     public class SubmitTrademarkRequest
     {
-        public string FilingId { get; set; }
-        public string FormCode { get; set; }
-        public string TrademarkText { get; set; }
-        public string TrademarkDescription { get; set; }
-        public string GoodsServicesDescription { get; set; }
-        public List<string> UploadedFileKeys { get; set; }
+        public string FilingId { get; set; } = string.Empty;
+        public string FormCode { get; set; } = string.Empty;
+        public string TrademarkText { get; set; } = string.Empty;
+        public string TrademarkDescription { get; set; } = string.Empty;
+        public string GoodsServicesDescription { get; set; } = string.Empty;
+        public List<string> UploadedFileKeys { get; set; } = new();
     }
 
     public class OfficeActionResponseRequest
     {
-        public string ResponseContent { get; set; }
-        public List<string> AttachedFileKeys { get; set; }
+        public string ResponseContent { get; set; } = string.Empty;
+        public List<string> AttachedFileKeys { get; set; } = new();
         public DateTime SubmittedAt { get; set; }
     }
 }
