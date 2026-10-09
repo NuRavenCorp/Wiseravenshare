@@ -237,21 +237,17 @@ public class SocialPlatformService : ISocialPlatformService
 
     public Task<IReadOnlyList<SocialProviderStatusDto>> GetProviderStatusesAsync()
     {
-        var facebookReadConfigured = !string.IsNullOrWhiteSpace(_configuration["Social:Facebook:PageId"])
-            && !string.IsNullOrWhiteSpace(_configuration["Social:Facebook:PageAccessToken"]);
+        var facebookReadConfigured = IsFacebookNativeConfigured();
+        var facebookPublishConfigured = facebookReadConfigured;
+        var instagramPublishConfigured = IsInstagramConfigured();
         var tiktokReadConfigured = !string.IsNullOrWhiteSpace(_configuration["Social:TikTok:AccessToken"]);
+        var tiktokPublishConfigured = tiktokReadConfigured;
+
         var blueskyHandleConfigured = !string.IsNullOrWhiteSpace(_configuration["Social:Bluesky:Handle"]);
         var blueskySessionConfigured = blueskyHandleConfigured
             && !string.IsNullOrWhiteSpace(_configuration["Social:Bluesky:AppPassword"]);
-
-        bool HasAny(params string[] keys) => keys.Any((key) => !string.IsNullOrWhiteSpace(_configuration[key]));
-        var youtubeConfigured = HasAny(
-            "YouTube:ApiKey",
-            "YouTube:ClientId",
-            "YouTube:ClientSecret",
-            "Google:YouTube:ApiKey",
-            "Google:YouTube:ClientId",
-            "Google:YouTube:ClientSecret");
+        var youtubeSyncConfigured = IsYouTubeSyncConfigured();
+        var youtubePublishConfigured = true;
 
         var statuses = new List<SocialProviderStatusDto>
         {
@@ -259,20 +255,20 @@ public class SocialPlatformService : ISocialPlatformService
             {
                 Platform = "facebook",
                 ReadConfigured = facebookReadConfigured,
-                PublishConfigured = facebookReadConfigured,
-                ActiveMode = facebookReadConfigured ? "graph-api" : "not-configured",
-                Detail = facebookReadConfigured
-                    ? "Graph API read/publish enabled."
+                PublishConfigured = facebookPublishConfigured,
+                ActiveMode = facebookPublishConfigured ? "graph-api" : "not-configured",
+                Detail = facebookPublishConfigured
+                    ? "Facebook publish enabled."
                     : "Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
             },
             new()
             {
                 Platform = "tiktok",
                 ReadConfigured = tiktokReadConfigured,
-                PublishConfigured = tiktokReadConfigured,
-                ActiveMode = tiktokReadConfigured ? "open-tiktok-api" : "not-configured",
-                Detail = tiktokReadConfigured
-                    ? "TikTok API read/publish enabled."
+                PublishConfigured = tiktokPublishConfigured,
+                ActiveMode = tiktokPublishConfigured ? "open-tiktok-api" : "not-configured",
+                Detail = tiktokPublishConfigured
+                    ? "TikTok publish enabled. Feed reads require Social:TikTok:AccessToken."
                     : "Set Social:TikTok:AccessToken."
             },
             new()
@@ -294,22 +290,22 @@ public class SocialPlatformService : ISocialPlatformService
             new()
             {
                 Platform = "youtube",
-                ReadConfigured = false,
-                PublishConfigured = youtubeConfigured,
-                ActiveMode = youtubeConfigured ? "publish-configured" : "handle-link-mode",
-                Detail = youtubeConfigured
-                    ? "YouTube publish path is configured."
-                    : "Feed card uses connected handle/link. Configure YouTube credentials for publish."
+                ReadConfigured = youtubeSyncConfigured,
+                PublishConfigured = youtubePublishConfigured,
+                ActiveMode = "native-upload-adapter",
+                Detail = youtubeSyncConfigured
+                    ? "YouTube channel sync is enabled. Publish uses the configured upload adapter."
+                    : "Set YouTubeSync:ApiKey and YouTubeSync:ChannelId to enable channel sync."
             },
             new()
             {
                 Platform = "instagram",
                 ReadConfigured = false,
-                PublishConfigured = IsInstagramConfigured(),
-                ActiveMode = IsInstagramConfigured() ? "graph-api" : "handle-link-mode",
-                Detail = IsInstagramConfigured()
+                PublishConfigured = instagramPublishConfigured,
+                ActiveMode = instagramPublishConfigured ? "graph-api" : "not-configured",
+                Detail = instagramPublishConfigured
                     ? "Instagram Graph API publish is configured."
-                    : "Feed card uses connected handle/link. Set Social:Instagram:BusinessAccountId and Social:Instagram:AccessToken to publish."
+                    : "Set Social:Instagram:BusinessAccountId and Social:Instagram:AccessToken."
             },
             new()
             {
@@ -1135,6 +1131,20 @@ public class SocialPlatformService : ISocialPlatformService
         var businessAccountId = _configuration["Social:Instagram:BusinessAccountId"];
         var accessToken = _configuration["Social:Instagram:AccessToken"];
         return !string.IsNullOrWhiteSpace(businessAccountId) && !string.IsNullOrWhiteSpace(accessToken);
+    }
+
+    private bool IsFacebookNativeConfigured()
+    {
+        var pageId = _configuration["Social:Facebook:PageId"];
+        var accessToken = _configuration["Social:Facebook:PageAccessToken"];
+        return !string.IsNullOrWhiteSpace(pageId) && !string.IsNullOrWhiteSpace(accessToken);
+    }
+
+    private bool IsYouTubeSyncConfigured()
+    {
+        var apiKey = _configuration["YouTubeSync:ApiKey"];
+        var channelId = _configuration["YouTubeSync:ChannelId"];
+        return !string.IsNullOrWhiteSpace(apiKey) && !string.IsNullOrWhiteSpace(channelId);
     }
 
     private string? ResolveWiseRavenStreamWebhookUrl() =>

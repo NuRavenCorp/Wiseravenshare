@@ -3,6 +3,7 @@ import PostCreator from '../Components/Common/Postcreator';
 import PostCard from '../Components/Feed/PostCard.jsx';
 import VideoFeedMini from '../Components/Feed/VideoFeedMini.jsx';
 import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
+import ActivityFeed from '../Components/Common/ActivityFeed.jsx';
 import { useAuth } from '../Contexts/AuthContext';
 import { socialGraphService } from '../Services/SocialGraph';
 import { rankCommunityFirstPosts } from '../Services/EngagementAlgorithms';
@@ -752,6 +753,19 @@ const FeedPage = ({ addTruthAlert, onNavigate, initialPlatform = 'all' }) => {
                         <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>{action.description}</div>
                     </button>
                 ))}
+            </div>
+
+            <div style={{
+                marginBottom: '18px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '12px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '14px'
+            }}>
+                <div style={{ marginBottom: '12px', fontSize: '12px', fontWeight: 700, color: 'var(--highlight-color)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    Activity feed
+                </div>
+                <ActivityFeed userId={currentUser.id} />
             </div>
 
             <div style={{ marginBottom: '16px', border: '1px solid rgba(34, 197, 94, 0.35)', borderRadius: '12px', background: 'rgba(34, 197, 94, 0.08)', padding: '12px 14px', color: 'var(--text-color)' }}>

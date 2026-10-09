@@ -1,352 +1,513 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './MediaLibrary.css';
-import MediaGrid from './MediaGrid';
-import MediaUpload from './MediaUpload';
-import MediaFilters from './MediaFilters';
-import MediaStats from './MediaStats';
-import MediaPagination from './MediaPagination';
 import PlaylistDrawer from './PlaylistDrawer';
 import AddToPlaylistMenu from './AddToPlaylistMenu';
+import { useNotification } from '../../Contexts/NotificationContext';
+import { useAuth } from '../../Contexts/AuthContext';
+import { buildMediaSharePayload, socialService } from '../../Services/socialService';
+import { apiService } from '../../Services/api';
 import { useSavedMedia } from '../../hooks/useSavedMedia';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { useMediaCache } from '../../hooks/useMediaCache';
 import { usePlaylists } from '../../hooks/usePlaylists';
 import { usePlaylistSync } from '../../hooks/usePlaylistSync';
 
-const UI_KEY = 'ml:ui:v1';
-const SELECTED_KEY = 'ml:selected:v1';
+// ─── Constants ────────────────────────────────────────────────────────────────
+const LIMITS = { music: 30, photo: 30, video: 30 };
+
+const TYPE_ICON = {
+  photo: '🖼️', image: '🖼️',
+  music: '🎵', audio: '🎧',
+  video: '🎬',
+  podcast: '🎙️',
+  document: '📄',
+};
+
+const UI_KEY = 'ml:ui:v2';
+const LOCAL_ITEMS_KEY = 'ml:local:v1';
 
 const DEFAULT_UI = {
   activeTab: 'all',
   filterType: null,
-  visibilityFilter: null,
-  currentPage: 1,
-  pageSize: 20,
   sortBy: 'createdAt',
   sortDir: 'desc',
-  viewMode: 'grid',
   showPlaylists: true,
 };
 
-const darkThemeStyle = {
-  background: '#0b1020',
-  color: '#e2e8f0',
-  minHeight: '100vh',
-  padding: '24px 16px',
-  boxSizing: 'border-box',
-};
+function getIcon(type) {
+  return TYPE_ICON[String(type || '').toLowerCase()] || '📦';
+}
 
-const headerStyle = {
-  background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9))',
-  border: '1px solid rgba(148, 163, 184, 0.2)',
-  borderRadius: '16px',
-  padding: '20px 24px',
-  boxShadow: '0 12px 30px rgba(15, 23, 42, 0.35)',
-};
+function formatBytes(value) {
+  const n = Number(value) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1_048_576).toFixed(1)} MB`;
+}
+
+function normalizeType(item) {
+  return String(item?.mediaType || item?.type || '').toLowerCase().replace('image', 'photo');
+}
+
+let _localIdSeed = Date.now();
+function nextLocalId() { return `local-${++_localIdSeed}`; }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function CapacityBar({ items }) {
+  const counts = useMemo(() => {
+    const all = Array.isArray(items) ? items : [];
+    return {
+      music: all.filter(i => ['music', 'audio'].includes(normalizeType(i))).length,
+      photo: all.filter(i => ['photo', 'image'].includes(normalizeType(i))).length,
+      video: all.filter(i => normalizeType(i) === 'video').length,
+      archive: all.filter(i => i?.archived || i?.isArchived).length,
+    };
+  }, [items]);
+
+  const bar = (count, limit) => {
+    const pct = Math.min(100, (count / limit) * 100);
+    const color = pct >= 90 ? '#f87171' : pct >= 70 ? '#fbbf24' : '#34d399';
+    return (
+      <div className="ml-cap-bar-track">
+        <div className="ml-cap-bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    );
+  };
+
+  return (
+    <div className="ml-capacity">
+      <div className="ml-cap-item">
+        <span>🎵 Music</span>
+        <strong>{counts.music}/{LIMITS.music}</strong>
+        {bar(counts.music, LIMITS.music)}
+      </div>
+      <div className="ml-cap-item">
+        <span>📷 Photos</span>
+        <strong>{counts.photo}/{LIMITS.photo}</strong>
+        {bar(counts.photo, LIMITS.photo)}
+      </div>
+      <div className="ml-cap-item">
+        <span>🎬 Videos</span>
+        <strong>{counts.video}/{LIMITS.video}</strong>
+        {bar(counts.video, LIMITS.video)}
+      </div>
+      <div className="ml-cap-item">
+        <span>📦 Archive</span>
+        <strong>{counts.archive}</strong>
+      </div>
+    </div>
+  );
+}
+
+function MediaCard({ item, isSelected, onSelect, onDoubleClick }) {
+  const type = normalizeType(item);
+  const icon = getIcon(type);
+  const title = String(item?.title || item?.name || 'Untitled').trim();
+  const thumb = String(item?.thumbnailUrl || '').trim();
+
+  return (
+    <div
+      className={`ml-card ${isSelected ? 'ml-card--selected' : ''}`}
+      onClick={() => onSelect(item.id)}
+      onDoubleClick={() => onDoubleClick(item)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onDoubleClick(item); }}
+      title={`Double-click to preview: ${title}`}
+    >
+      {thumb ? (
+        <div className="ml-card__thumb">
+          <img src={thumb} alt={title} loading="lazy" />
+        </div>
+      ) : (
+        <div className="ml-card__icon">{icon}</div>
+      )}
+      <div className="ml-card__name">{title}</div>
+      <span className="ml-card__badge">{type || 'file'}</span>
+      {item.fileSizeBytes > 0 && (
+        <div className="ml-card__size">{formatBytes(item.fileSizeBytes)}</div>
+      )}
+      {!item.isVisibleInFeed && item.isVisibleInFeed !== undefined && (
+        <div className="ml-card__hidden-badge">hidden</div>
+      )}
+    </div>
+  );
+}
+
+function InlinePreview({ item, onClose }) {
+  if (!item) return null;
+  const type = normalizeType(item);
+  const url = String(item?.mediaUrl || item?.blobUrl || '').trim();
+  const thumb = String(item?.thumbnailUrl || '').trim();
+  const title = String(item?.title || item?.name || 'Untitled').trim();
+  const desc = String(item?.description || item?.desc || '').trim();
+
+  let mediaEl;
+  if (type === 'photo' || type === 'image') {
+    const src = url || thumb;
+    mediaEl = src
+      ? <img src={src} alt={title} className="ml-preview__media" />
+      : null;
+  } else if (type === 'video') {
+    mediaEl = url
+      ? <video controls src={url} className="ml-preview__media" />
+      : null;
+  } else if (['music', 'audio', 'podcast'].includes(type)) {
+    mediaEl = url
+      ? <audio controls src={url} className="ml-preview__audio" />
+      : null;
+  }
+
+  return (
+    <div className="ml-preview">
+      <div className="ml-preview__header">
+        <span>{getIcon(type)} {title}</span>
+        <button className="ml-preview__close" onClick={onClose} type="button" aria-label="Close preview">✕</button>
+      </div>
+      <div className="ml-preview__body">
+        {mediaEl || (
+          <div className="ml-preview__placeholder">
+            {getIcon(type)} No inline preview available for this file type.
+          </div>
+        )}
+        {(title || desc) && (
+          <div className="ml-preview__meta">
+            {title && <strong>{title}</strong>}
+            {desc && <span className="ml-preview__desc">{desc}</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 const MediaLibrary = () => {
   const {
     getLibrary,
-    getLibraryStats,
     deleteMedia,
     toggleVisibility,
     bulkToggleVisibility,
-    loading,
-    error,
+    loading: apiLoading,
+    error: apiError,
   } = useSavedMedia();
 
   const [ui, setUi] = usePersistedState(UI_KEY, DEFAULT_UI);
-  const [persistedSelectedIds, setPersistedSelectedIds] = usePersistedState(SELECTED_KEY, []);
-  const {
-    activeTab,
-    filterType,
-    visibilityFilter,
-    currentPage,
-    pageSize,
-    sortBy,
-    sortDir,
-    viewMode,
-    showPlaylists,
-  } = ui;
+  const { activeTab, filterType, sortBy, sortDir, showPlaylists } = ui;
+  const patchUi = useCallback((patch) => setUi((c) => ({ ...c, ...patch })), [setUi]);
 
-  const patchUi = useCallback((patch) => {
-    setUi((current) => ({ ...current, ...patch }));
-  }, [setUi]);
-
-  const cache = useMediaCache();
   const playlistsApi = usePlaylists();
   usePlaylistSync(playlistsApi);
+  const { addToast } = useNotification();
+  const { user } = useAuth();
 
-  const [mediaItems, setMediaItems] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [totalCount, setTotalCount] = useState(0);
-  const [selectedItems, setSelectedItems] = useState(() => new Set(persistedSelectedIds || []));
-  const [hydratedFromCache, setHydratedFromCache] = useState(false);
+  const [apiItems, setApiItems] = useState([]);
+  const [localItems, setLocalItems] = usePersistedState(LOCAL_ITEMS_KEY, []);
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [previewItem, setPreviewItem] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 40;
+  const [publishing, setPublishing] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState('');
+  const [publishMessage, setPublishMessage] = useState('');
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadDesc, setUploadDesc] = useState('');
+  const fileInputRef = useRef(null);
+
+  const allItems = useMemo(() => {
+    const seen = new Set(apiItems.map((i) => i.id));
+    const extras = (localItems || []).filter((i) => i.id && !seen.has(i.id));
+    return [...apiItems, ...extras];
+  }, [apiItems, localItems]);
 
   const mediaLookup = useMemo(() => {
     const map = {};
-    mediaItems.forEach((item) => {
-      if (item?.id) map[item.id] = item;
-    });
+    allItems.forEach((item) => { if (item?.id) map[item.id] = item; });
     return map;
-  }, [mediaItems]);
+  }, [allItems]);
 
-  useEffect(() => {
-    setPersistedSelectedIds(Array.from(selectedItems));
-  }, [selectedItems, setPersistedSelectedIds]);
+  const typeCounts = useMemo(() => {
+    const c = { all: 0, photo: 0, music: 0, video: 0, podcast: 0, archive: 0 };
+    allItems.forEach((item) => {
+      c.all++;
+      const t = normalizeType(item);
+      if (t === 'photo') c.photo++;
+      else if (t === 'music' || t === 'audio') c.music++;
+      else if (t === 'video') c.video++;
+      else if (t === 'podcast') c.podcast++;
+      if (item?.archived || item?.isArchived) c.archive++;
+    });
+    return c;
+  }, [allItems]);
 
-  const fetchPage = useCallback(async ({
-    tab,
-    page,
-    size,
-    type,
-    visibility,
-    orderBy,
-    orderDirection,
-  }) => {
-    const baseFilters = {
-      mediaType: type,
-      onlyVisible: visibility,
-      sortBy: orderBy,
-      sortDir: orderDirection,
-    };
-
-    switch (tab) {
-      case 'visible':
-        return getLibrary(page, size, { ...baseFilters, onlyVisible: true });
-      case 'hidden':
-        return getLibrary(page, size, { ...baseFilters, onlyVisible: false });
-      case 'scheduled':
-        return getLibrary(page, size, { ...baseFilters, scheduledOnly: true });
-      default:
-        return getLibrary(page, size, baseFilters);
-    }
-  }, [getLibrary]);
-
-  useEffect(() => {
-    const cached = cache.read(
-      currentPage,
-      pageSize,
-      activeTab,
-      filterType,
-      visibilityFilter,
-      sortBy,
-      sortDir,
-      viewMode
-    );
-
-    if (cached.items) {
-      setMediaItems(cached.items);
-      setTotalCount(cached.total ?? cached.items.length);
-      setHydratedFromCache(true);
-    }
-
-    if (cached.stats) {
-      setStats(cached.stats);
-    }
-  }, [activeTab, cache, currentPage, filterType, pageSize, sortBy, sortDir, viewMode, visibilityFilter]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      try {
-        const response = await fetchPage({
-          tab: activeTab,
-          page: currentPage,
-          size: pageSize,
-          type: filterType,
-          visibility: visibilityFilter,
-          orderBy: sortBy,
-          orderDirection: sortDir,
-        });
-
-        if (cancelled) return;
-        const items = Array.isArray(response) ? response : (response.items || response.data || []);
-        const total = response?.totalCount ?? response?.total ?? items.length;
-
-        setMediaItems(items);
-        setTotalCount(total);
-
-        cache.write(
-          currentPage,
-          pageSize,
-          activeTab,
-          filterType,
-          visibilityFilter,
-          sortBy,
-          sortDir,
-          viewMode,
-          items,
-          total
-        );
-      } catch (loadError) {
-        console.error('Error loading media:', loadError);
-      } finally {
-        if (!cancelled) setHydratedFromCache(false);
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeTab,
-    cache,
-    currentPage,
-    fetchPage,
-    filterType,
-    pageSize,
-    sortBy,
-    sortDir,
-    viewMode,
-    visibilityFilter,
-  ]);
-
-  const refreshStats = useCallback(async () => {
-    try {
-      const data = await getLibraryStats();
-      setStats(data);
-      cache.writeStats(data);
-    } catch {
-      // Ignore transient stats fetch errors.
-    }
-  }, [cache, getLibraryStats]);
-
-  useEffect(() => {
-    refreshStats();
-  }, [refreshStats]);
-
-  const handleDeleteMedia = useCallback(async (mediaId) => {
-    if (!window.confirm('Are you sure you want to delete this media?')) return;
-
-    try {
-      await deleteMedia(mediaId);
-      setMediaItems((items) => items.filter((item) => item.id !== mediaId));
-      setSelectedItems((selected) => {
-        const next = new Set(selected);
-        next.delete(mediaId);
-        return next;
+  const filteredItems = useMemo(() => {
+    let list = [...allItems];
+    if (activeTab === 'archive') {
+      list = list.filter((i) => i?.archived || i?.isArchived);
+    } else if (activeTab === 'visible') {
+      list = list.filter((i) => i?.isVisibleInFeed === true);
+    } else if (activeTab === 'hidden') {
+      list = list.filter((i) => i?.isVisibleInFeed === false);
+    } else if (activeTab !== 'all') {
+      list = list.filter((i) => {
+        const t = normalizeType(i);
+        return activeTab === 'music' ? (t === 'music' || t === 'audio') : t === activeTab;
       });
-
-      playlistsApi.playlists.forEach((playlist) => {
-        if (playlist.items.includes(mediaId)) {
-          playlistsApi.removeFromPlaylist(playlist.id, mediaId);
-        }
-      });
-
-      cache.invalidate();
-      refreshStats();
-    } catch (deleteError) {
-      console.error('Error deleting media:', deleteError);
     }
-  }, [cache, deleteMedia, playlistsApi, refreshStats]);
+    if (filterType) {
+      list = list.filter((i) => normalizeType(i) === filterType);
+    }
+    list.sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      if (sortBy === 'title') return String(a?.title || '').localeCompare(String(b?.title || '')) * dir;
+      return (new Date(a?.[sortBy] || 0).getTime() - new Date(b?.[sortBy] || 0).getTime()) * dir;
+    });
+    return list;
+  }, [allItems, activeTab, filterType, sortBy, sortDir]);
 
-  const handleToggleVisibility = useCallback(async (mediaId, currentVisibility) => {
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredItems.slice(start, start + PAGE_SIZE);
+  }, [filteredItems, currentPage]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+
+  const loadApiItems = useCallback(async () => {
     try {
-      await toggleVisibility(mediaId, !currentVisibility);
-      setMediaItems((items) =>
-        items.map((item) => (
-          item.id === mediaId ? { ...item, isVisibleInFeed: !currentVisibility } : item
-        ))
-      );
-      refreshStats();
-    } catch (toggleError) {
-      console.error('Error toggling visibility:', toggleError);
-    }
-  }, [refreshStats, toggleVisibility]);
+      const res = await getLibrary(1, 200, { sortBy, sortDir });
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      setApiItems(items);
+    } catch { /* use local items only */ }
+  }, [getLibrary, sortBy, sortDir]);
 
-  const handleBulkToggleVisibility = useCallback(async (isVisible) => {
-    if (selectedItems.size === 0) {
-      alert('Please select media items first');
-      return;
-    }
+  useEffect(() => { loadApiItems(); }, [loadApiItems]);
 
-    try {
-      await bulkToggleVisibility(Array.from(selectedItems), isVisible);
-      setMediaItems((items) =>
-        items.map((item) => (
-          selectedItems.has(item.id) ? { ...item, isVisibleInFeed: isVisible } : item
-        ))
-      );
-      setSelectedItems(new Set());
-      refreshStats();
-    } catch (bulkError) {
-      console.error('Error in bulk toggle:', bulkError);
+  const handleLocalUpload = useCallback(() => {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) { addToast('Please select a file.', 'warning'); return; }
+    const raw = file.type;
+    let type = 'archive';
+    if (raw.startsWith('image/')) type = 'photo';
+    else if (raw.startsWith('video/')) type = 'video';
+    else if (raw.startsWith('audio/')) type = 'music';
+    const limit = LIMITS[type];
+    if (limit) {
+      const existing = allItems.filter((i) => {
+        const t = normalizeType(i);
+        return type === 'music' ? (t === 'music' || t === 'audio') : t === type;
+      }).length;
+      if (existing >= limit) { addToast(`${type} capacity full (${limit}).`, 'warning'); return; }
     }
-  }, [bulkToggleVisibility, refreshStats, selectedItems]);
+    const blobUrl = URL.createObjectURL(file);
+    const newItem = {
+      id: nextLocalId(),
+      name: file.name,
+      title: uploadTitle.trim() || file.name,
+      description: uploadDesc.trim(),
+      mediaType: type, type,
+      mediaUrl: blobUrl, blobUrl,
+      fileSizeBytes: file.size,
+      isVisibleInFeed: true,
+      createdAt: new Date().toISOString(),
+      _isLocal: true,
+    };
+    setLocalItems((prev) => [newItem, ...(prev || [])]);
+    setUploadTitle(''); setUploadDesc('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    addToast(`"${newItem.title}" added.`, 'success');
+  }, [addToast, allItems, uploadTitle, uploadDesc, setLocalItems]);
 
-  const handleSelectItem = useCallback((mediaId) => {
-    setSelectedItems((selected) => {
-      const next = new Set(selected);
-      if (next.has(mediaId)) {
-        next.delete(mediaId);
-      } else {
-        next.add(mediaId);
-      }
+  const handleSelectItem = useCallback((id) => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }, []);
 
-  const handleSelectAll = useCallback(() => {
-    setSelectedItems((selected) => (
-      selected.size === mediaItems.length
-        ? new Set()
-        : new Set(mediaItems.map((item) => item.id))
-    ));
-  }, [mediaItems]);
+  const handleToggleVisibility = useCallback(async (id, current) => {
+    try {
+      await toggleVisibility(id, !current);
+      setApiItems((prev) => prev.map((i) => (i.id === id ? { ...i, isVisibleInFeed: !current } : i)));
+    } catch { /* ignore */ }
+  }, [toggleVisibility]);
 
-  const handleMediaUploaded = useCallback(() => {
-    patchUi({ currentPage: 1 });
-    cache.invalidate();
-    refreshStats();
-  }, [cache, patchUi, refreshStats]);
+  const handleBulkToggleVisibility = useCallback(async (isVisible) => {
+    if (!selectedItems.size) { addToast('Select items first.', 'warning'); return; }
+    try {
+      await bulkToggleVisibility(Array.from(selectedItems), isVisible);
+      setApiItems((prev) =>
+        prev.map((i) => (selectedItems.has(i.id) ? { ...i, isVisibleInFeed: isVisible } : i))
+      );
+      setSelectedItems(new Set());
+    } catch { /* ignore */ }
+  }, [addToast, bulkToggleVisibility, selectedItems]);
+
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Delete this item?')) return;
+    const item = mediaLookup[id];
+    if (item?._isLocal) {
+      if (item.blobUrl) URL.revokeObjectURL(item.blobUrl);
+      setLocalItems((prev) => (prev || []).filter((i) => i.id !== id));
+    } else {
+      try { await deleteMedia(id); } catch { return; }
+      setApiItems((prev) => prev.filter((i) => i.id !== id));
+    }
+    setSelectedItems((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    if (previewItem?.id === id) setPreviewItem(null);
+  }, [deleteMedia, mediaLookup, previewItem, setLocalItems]);
 
   const handleAddSelectionToPlaylist = useCallback((playlistId) => {
     playlistsApi.addManyToPlaylist(playlistId, Array.from(selectedItems));
   }, [playlistsApi, selectedItems]);
 
   const handleCreateAndAdd = useCallback((name) => {
-    const playlistId = playlistsApi.createPlaylist(name);
-    playlistsApi.addManyToPlaylist(playlistId, Array.from(selectedItems));
+    const id = playlistsApi.createPlaylist(name);
+    playlistsApi.addManyToPlaylist(id, Array.from(selectedItems));
   }, [playlistsApi, selectedItems]);
 
-  const handleRemoveFromPlaylist = useCallback((playlistId, mediaId) => {
-    playlistsApi.removeFromPlaylist(playlistId, mediaId);
-  }, [playlistsApi]);
+  const runPublish = useCallback(async (buildPayload, platformLabel) => {
+    const selection = Array.from(selectedItems).map((id) => mediaLookup[id]).filter(Boolean);
+    if (!selection.length) { setPublishMessage(`Select items to publish to ${platformLabel}.`); return; }
+    setPublishing(true); setPublishMessage('');
+    try {
+      const results = await Promise.allSettled(selection.map((item) => {
+        const url = String(item?.mediaUrl || '').trim();
+        if (!url || url.startsWith('blob:')) throw new Error(`"${item?.title || 'Item'}" has no public URL.`);
+        return socialService.publishContent(buildPayload(item, url));
+      }));
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      const err = results.find((r) => r.status === 'rejected')?.reason?.message;
+      if (ok) { const m = `Published ${ok} item(s) to ${platformLabel}.`; setPublishMessage(m); addToast(m, 'success'); }
+      if (err) { setPublishMessage(err); addToast(err, 'warning'); }
+    } catch (e) {
+      const m = e?.message || `Failed to publish to ${platformLabel}.`;
+      setPublishMessage(m); addToast(m, 'error');
+    } finally { setPublishing(false); }
+  }, [addToast, mediaLookup, selectedItems]);
 
-  const handleReorderPlaylist = useCallback((from, to) => {
-    if (!playlistsApi.activePlaylist) return;
-    playlistsApi.reorderPlaylist(playlistsApi.activePlaylist.id, from, to);
-  }, [playlistsApi]);
+  const ensureUserPlatformAccess = useCallback(async (platform, label) => {
+    const userId = String(user?.id || '').trim();
+    if (!userId) {
+      const msg = `Sign in to connect your ${label} account.`;
+      setPublishMessage(msg);
+      addToast(msg, 'warning');
+      return false;
+    }
 
-  const handlePlayPlaylist = useCallback((playlistId) => {
-    window.dispatchEvent(new CustomEvent('media:play-playlist', { detail: { playlistId } }));
-  }, []);
+    try {
+      setConnectingPlatform(platform);
+      const statusResponse = await apiService.getSocialConnectStatus(platform, userId);
+      const status = statusResponse?.data || {};
+      const connected = Boolean(status.connected || status.isConnected || status.active || status.enabled);
+      if (connected) {
+        return true;
+      }
+
+      const startResponse = await apiService.startSocialConnect(platform, userId);
+      const authUrl = String(
+        startResponse?.data?.authorize_url
+        || startResponse?.data?.authorizeUrl
+        || startResponse?.data?.url
+        || ''
+      ).trim();
+
+      if (authUrl) {
+        const msg = `Complete ${label} access for your account to continue publishing.`;
+        setPublishMessage(msg);
+        addToast(msg, 'info');
+        window.location.assign(authUrl);
+        return false;
+      }
+
+      const fallback = `Connect your ${label} account from Settings before publishing.`;
+      setPublishMessage(fallback);
+      addToast(fallback, 'warning');
+      return false;
+    } catch (error) {
+      const msg = error?.message || `Unable to verify ${label} account access.`;
+      setPublishMessage(msg);
+      addToast(msg, 'error');
+      return false;
+    } finally {
+      setConnectingPlatform('');
+    }
+  }, [addToast, user?.id]);
+
+  const handleMetaPublish = useCallback(async () => {
+    const hasAccess = await ensureUserPlatformAccess('facebook', 'Facebook');
+    if (!hasAccess) return;
+    await runPublish(
+      (item, url) => buildMediaSharePayload({
+        message: `${item?.title || 'Media'} via WiseRavenShare`,
+        mediaUrl: url,
+        linkUrl: url,
+        publishToFacebook: true,
+        publishToInstagram: true
+      }),
+      'Meta'
+    );
+  }, [ensureUserPlatformAccess, runPublish]);
+
+  const handleTikTokPublish = useCallback(async () => {
+    const hasAccess = await ensureUserPlatformAccess('tiktok', 'TikTok');
+    if (!hasAccess) return;
+    await runPublish(
+      (item, url) => buildMediaSharePayload({
+        message: `${item?.title || 'Video'} via WiseRavenShare`,
+        mediaUrl: url,
+        linkUrl: url,
+        publishToTikTok: true
+      }),
+      'TikTok'
+    );
+  }, [ensureUserPlatformAccess, runPublish]);
+
+  const handleRedditShare = useCallback(() => {
+    const item = Array.from(selectedItems).map((id) => mediaLookup[id]).filter(Boolean)[0];
+    if (!item) { setPublishMessage('Select an item for Reddit.'); return; }
+    const url = String(item?.mediaUrl || item?.thumbnailUrl || '').trim();
+    if (!url || url.startsWith('blob:')) { addToast('Reddit requires a public URL.', 'warning'); return; }
+    window.open(`https://www.reddit.com/submit?url=${encodeURIComponent(url)}&title=${encodeURIComponent(item?.title || 'WiseRaven')}`, '_blank', 'noopener,noreferrer');
+    const m = 'Opened Reddit draft.'; setPublishMessage(m); addToast(m, 'success');
+  }, [addToast, mediaLookup, selectedItems]);
+
+  const TABS = [
+    { id: 'all', label: 'All', count: typeCounts.all },
+    { id: 'photo', label: 'Photos', count: typeCounts.photo },
+    { id: 'music', label: 'Music', count: typeCounts.music },
+    { id: 'video', label: 'Videos', count: typeCounts.video },
+    { id: 'podcast', label: 'Podcasts', count: typeCounts.podcast },
+    { id: 'visible', label: 'Visible' },
+    { id: 'hidden', label: 'Hidden' },
+    { id: 'archive', label: 'Archive', count: typeCounts.archive },
+  ];
 
   return (
     <div className="media-library">
       <header className="media-library-header">
-        <h1>📚 Media Library</h1>
-        <p className="subtitle">Organize, hide, and manage your media collection</p>
+        <h1>📀 Media Library</h1>
+        <p className="subtitle">All your photos, music, videos, and more in one unified library.
+          <br /><small>Double-click any card to preview it inline.</small>
+        </p>
       </header>
 
-      {stats && <MediaStats stats={stats} />}
+      <CapacityBar items={allItems} />
+
+      <div className="ml-upload-panel">
+        <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" className="ml-upload-file" />
+        <input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Optional title" className="ml-upload-text" />
+        <input type="text" value={uploadDesc} onChange={(e) => setUploadDesc(e.target.value)} placeholder="Optional description" className="ml-upload-text" />
+        <button className="ml-upload-btn" onClick={handleLocalUpload} type="button">⬆ Add to Library</button>
+        <button className="ml-upload-btn ml-upload-btn--outline" onClick={loadApiItems} type="button" title="Reload from server">↻ Sync</button>
+      </div>
 
       <div className={`media-library-content ${showPlaylists ? 'with-playlists' : ''}`}>
         <div className="media-library-sidebar">
-          <MediaUpload onMediaUploaded={handleMediaUploaded} />
-
-          <button
-            className="toggle-playlists-btn"
-            onClick={() => patchUi({ showPlaylists: !showPlaylists })}
-            aria-pressed={showPlaylists}
-            type="button"
-          >
+          <button className="toggle-playlists-btn" onClick={() => patchUi({ showPlaylists: !showPlaylists })} aria-pressed={showPlaylists} type="button">
             {showPlaylists ? '◀ Hide playlists' : '▶ Show playlists'}
           </button>
-
           {showPlaylists && (
             <PlaylistDrawer
               playlists={playlistsApi.playlists}
@@ -356,102 +517,101 @@ const MediaLibrary = () => {
               onCreatePlaylist={playlistsApi.createPlaylist}
               onRenamePlaylist={playlistsApi.renamePlaylist}
               onDeletePlaylist={playlistsApi.deletePlaylist}
-              onRemoveItem={handleRemoveFromPlaylist}
-              onReorderItem={handleReorderPlaylist}
-              onPlayPlaylist={handlePlayPlaylist}
+              onRemoveItem={(playlistId, mediaId) => playlistsApi.removeFromPlaylist(playlistId, mediaId)}
+              onReorderItem={(from, to) => { if (playlistsApi.activePlaylist) playlistsApi.reorderPlaylist(playlistsApi.activePlaylist.id, from, to); }}
+              onPlayPlaylist={(id) => window.dispatchEvent(new CustomEvent('media:play-playlist', { detail: { playlistId: id } }))}
             />
           )}
         </div>
 
         <main className="media-library-main">
           <div className="media-tabs" role="tablist">
-            {['all', 'visible', 'hidden', 'scheduled'].map((tab) => (
+            {TABS.map((tab) => (
               <button
-                key={tab}
-                role="tab"
-                aria-selected={activeTab === tab}
-                className={`tab ${activeTab === tab ? 'active' : ''}`}
-                onClick={() => patchUi({ activeTab: tab, currentPage: 1 })}
+                key={tab.id} role="tab" aria-selected={activeTab === tab.id}
+                className={`tab ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => { patchUi({ activeTab: tab.id }); setCurrentPage(1); }}
                 type="button"
               >
-                {tab[0].toUpperCase() + tab.slice(1)} Media
+                {tab.label}
+                {tab.count !== undefined && <span className="ml-tab-count">{tab.count}</span>}
               </button>
             ))}
           </div>
 
-          <div className="media-toolbar">
-            <MediaFilters
-              filterType={filterType}
-              onFilterTypeChange={(type) => patchUi({ filterType: type, currentPage: 1 })}
-              onClearFilters={() => patchUi({ filterType: null, visibilityFilter: null, currentPage: 1 })}
-              sortBy={sortBy}
-              sortDir={sortDir}
-              onSortChange={(by, dir) => patchUi({ sortBy: by, sortDir: dir, currentPage: 1 })}
-              viewMode={viewMode}
-              onViewModeChange={(mode) => patchUi({ viewMode: mode })}
-            />
-
+          <div className="ml-sort-row">
+            <label className="ml-sort-label">
+              Sort&nbsp;
+              <select className="ml-sort-select" value={sortBy} onChange={(e) => { patchUi({ sortBy: e.target.value }); setCurrentPage(1); }}>
+                <option value="createdAt">Date</option>
+                <option value="title">Title</option>
+                <option value="fileSizeBytes">Size</option>
+              </select>
+            </label>
+            <button className="ml-sort-dir" onClick={() => patchUi({ sortDir: sortDir === 'desc' ? 'asc' : 'desc' })} type="button">
+              {sortDir === 'desc' ? '↓' : '↑'}
+            </button>
             {selectedItems.size > 0 && (
-              <div className="bulk-actions">
-                <span className="selection-count">{selectedItems.size} selected</span>
-                <button
-                  className="btn-action btn-show"
-                  onClick={() => handleBulkToggleVisibility(true)}
-                  title="Show selected items in feed"
-                  type="button"
-                >
-                  👁️ Show ({selectedItems.size})
-                </button>
-                <button
-                  className="btn-action btn-hide"
-                  onClick={() => handleBulkToggleVisibility(false)}
-                  title="Hide selected items from feed"
-                  type="button"
-                >
-                  🙈 Hide ({selectedItems.size})
-                </button>
-                <AddToPlaylistMenu
-                  playlists={playlistsApi.playlists}
-                  onAddToExisting={handleAddSelectionToPlaylist}
-                  onCreateAndAdd={handleCreateAndAdd}
-                />
-              </div>
+              <button className="btn-action" type="button"
+                onClick={() => setSelectedItems((p) => p.size === pagedItems.length ? new Set() : new Set(pagedItems.map((i) => i.id)))}>
+                {selectedItems.size === pagedItems.length ? 'Deselect all' : `Select all (${pagedItems.length})`}
+              </button>
             )}
           </div>
 
-          {error && <div className="error-message">⚠️ {error}</div>}
+          {selectedItems.size > 0 && (
+            <div className="bulk-actions">
+              <span className="selection-count">{selectedItems.size} selected</span>
+              <button className="btn-action btn-show" onClick={() => handleBulkToggleVisibility(true)} type="button">👁️ Show</button>
+              <button className="btn-action btn-hide" onClick={() => handleBulkToggleVisibility(false)} type="button">🙈 Hide</button>
+              <AddToPlaylistMenu playlists={playlistsApi.playlists} onAddToExisting={handleAddSelectionToPlaylist} onCreateAndAdd={handleCreateAndAdd} />
+              <button className="btn-action" onClick={handleTikTokPublish} disabled={publishing || connectingPlatform === 'tiktok'} type="button">🎵 TikTok</button>
+              <button className="btn-action" onClick={handleMetaPublish} disabled={publishing || connectingPlatform === 'facebook'} type="button">📘 Meta</button>
+              <button className="btn-action" onClick={handleRedditShare} type="button">🤖 Reddit</button>
+            </div>
+          )}
 
-          {loading && !hydratedFromCache ? (
-            <div className="loading">Loading media...</div>
-          ) : mediaItems.length === 0 ? (
+          {publishMessage && <div className="ml-publish-msg">{publishMessage}</div>}
+          {apiError && <div className="error-message">⚠️ {apiError}</div>}
+
+          {apiLoading && !allItems.length ? (
+            <div className="loading">Loading library…</div>
+          ) : filteredItems.length === 0 ? (
             <div className="empty-state">
-              <p>📭 No media found</p>
-              <p className="hint">Upload or save media to get started</p>
+              <p>📭 No media in this view</p>
+              <p className="hint">Upload a file above or switch tabs.</p>
             </div>
           ) : (
-            <>
-              <MediaGrid
-                items={mediaItems}
-                viewMode={viewMode}
-                selectedItems={selectedItems}
-                onSelectItem={handleSelectItem}
-                onSelectAll={handleSelectAll}
-                onToggleVisibility={handleToggleVisibility}
-                onDelete={handleDeleteMedia}
-                onAddToPlaylist={handleAddSelectionToPlaylist}
-                playlists={playlistsApi.playlists}
-                selectAllChecked={selectedItems.size === mediaItems.length && mediaItems.length > 0}
-              />
-
-              <MediaPagination
-                currentPage={currentPage}
-                pageSize={pageSize}
-                totalCount={totalCount}
-                onPageChange={(page) => patchUi({ currentPage: page })}
-                onPageSizeChange={(size) => patchUi({ pageSize: size, currentPage: 1 })}
-              />
-            </>
+            <div className="ml-grid">
+              {pagedItems.map((item) => (
+                <MediaCard key={item.id} item={item} isSelected={selectedItems.has(item.id)} onSelect={handleSelectItem} onDoubleClick={setPreviewItem} />
+              ))}
+            </div>
           )}
+
+          {pageCount > 1 && (
+            <div className="ml-pagination">
+              <button className="btn-action" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} type="button">← Prev</button>
+              <span className="ml-page-label">Page {currentPage} / {pageCount}</span>
+              <button className="btn-action" onClick={() => setCurrentPage((p) => Math.min(pageCount, p + 1))} disabled={currentPage === pageCount} type="button">Next →</button>
+            </div>
+          )}
+
+          {selectedItems.size === 1 && (() => {
+            const [id] = selectedItems;
+            const item = mediaLookup[id];
+            if (!item) return null;
+            return (
+              <div className="ml-item-actions">
+                <button className="btn-action" onClick={() => handleToggleVisibility(item.id, item.isVisibleInFeed)} type="button">
+                  {item.isVisibleInFeed ? '🙈 Hide from feed' : '👁️ Show in feed'}
+                </button>
+                <button className="btn-action btn-danger" onClick={() => handleDelete(item.id)} type="button">🗑️ Delete</button>
+              </div>
+            );
+          })()}
+
+          <InlinePreview item={previewItem} onClose={() => setPreviewItem(null)} />
         </main>
       </div>
     </div>
@@ -459,3 +619,4 @@ const MediaLibrary = () => {
 };
 
 export default MediaLibrary;
+
