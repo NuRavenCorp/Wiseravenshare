@@ -12,6 +12,7 @@ import { resolveMediaUrl } from '../../utils/mediaUtils';
 import { sharePost } from '../../utils/socialShare';
 import { useCollaborationHub } from '../../hooks/useCollaborationHub';
 import MultimediaPlayer from './MultimediaPlayer';
+import { useSavedMedia } from '../../hooks/useSavedMedia';
 
 const attachHls = (videoEl, src) => {
     if (!src) return;
@@ -82,6 +83,7 @@ const VideoFeed = ({ onNotification }) => {
     const [monitorMirror, setMonitorMirror] = useState([true, true, true]);
     const observerRef = useRef();
     const { user } = useAuth();
+    const { saveMedia } = useSavedMedia();
     const {
         joinPodcastBridge,
         leavePodcastBridge,
@@ -297,35 +299,28 @@ const VideoFeed = ({ onNotification }) => {
     const handleSaveToLibrary = async (video) => {
         const videoId = String(video?.id || video?.videoUrl || video?.mediaUrl || '').trim();
         const mediaUrl = String(video?.videoUrl || video?.mediaUrl || '').trim();
-        if (!mediaUrl) {
-            onNotification('This feed item has no accessible media URL to save.', 'warning');
+        if (!mediaUrl || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('file:')) {
+            onNotification('This feed item has no public media URL to save.', 'warning');
             return;
         }
 
         setSavingVideoIds((prev) => [...new Set([...prev, videoId])]);
         try {
-            const response = await ravensightAPI.saveVideoReference({
-                videoUrl: mediaUrl,
+            await saveMedia({
                 title: video?.title || 'Saved Feed Video',
                 description: video?.description || '',
+                mediaType: 'video',
+                mediaUrl,
                 thumbnailUrl: video?.thumbnailUrl || '',
-                privacyStatus: video?.privacyStatus || 'unlisted',
-                destinationFolder: '/wiseravenshare/ravensight/video',
-                tags: Array.isArray(video?.tags) ? video.tags : []
+                isVisibleInFeed: false,
+                tags: Array.isArray(video?.tags) ? video.tags : [],
+                fileSizeBytes: Number(video?.fileSizeBytes || 0) || null,
+                durationSeconds: Number(video?.durationSeconds || 0) || null,
             });
-
-            if (response?.video) {
-                upsertLocalVideo({
-                    ...response.video,
-                    sourceType: RAVENSIGHT_LIBRARY_PROTOCOL.source.libraryStore,
-                    storageMode: 'permanent'
-                });
-            }
-
-            onNotification('Saved to My Library with blob-backed storage.', 'success');
+            onNotification('Saved to My Library.', 'success');
         } catch (error) {
             onNotification(
-                error?.message || 'Blob persistence unavailable. Save to Library requires blob storage and did not complete.',
+                error?.message || 'Failed to save to My Library.',
                 'error'
             );
         } finally {
