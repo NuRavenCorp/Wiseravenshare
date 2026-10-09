@@ -172,12 +172,25 @@ const sumPosts = (posts, selectors) => posts.reduce((total, post) => {
 }, 0);
 
 const SettingsPage = ({ onNavigate, showConnections }) => {
-    const { user } = useAuth();
+    const { user, refreshSocialFeeds } = useAuth();
     const { addToast } = useNotification();
     const [loading, setLoading] = useState(true);
     const [savingPlatform, setSavingPlatform] = useState('');
     const [statusByPlatform, setStatusByPlatform] = useState({});
-    const [linkDrafts, setLinkDrafts] = useState(EMPTY_LINK_DRAFTS);
+    const [linkDrafts, setLinkDrafts] = useState(() => {
+        // Eagerly initialize from the cached user object or wiseSocialFeeds in localStorage.
+        // loadSettings will overwrite with the authoritative server data once it resolves.
+        try {
+            const cached = JSON.parse(localStorage.getItem('wiseSocialFeeds') || '{}');
+            const fromAuth = user?.socialFeeds || {};
+            const merged = { ...cached, ...fromAuth };
+            const drafts = normalizeFeedDrafts(merged);
+            const hasAny = Object.values(drafts).some((d) => d.username || d.profileUrl);
+            return hasAny ? drafts : EMPTY_LINK_DRAFTS;
+        } catch {
+            return EMPTY_LINK_DRAFTS;
+        }
+    });
     const [linkSavingPlatform, setLinkSavingPlatform] = useState('');
     const [linkErrorByPlatform, setLinkErrorByPlatform] = useState({});
     const [adminMetrics, setAdminMetrics] = useState(null);
@@ -228,6 +241,8 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
                 const socialFeedsResponse = await apiService.getSocialFeeds(user.id);
                 const socialFeeds = socialFeedsResponse?.data || socialFeedsResponse || {};
                 baseDrafts = normalizeFeedDrafts(socialFeeds);
+                // Keep AuthContext + localStorage in sync with the authoritative server state.
+                refreshSocialFeeds(socialFeeds);
             } catch {
                 baseDrafts = EMPTY_LINK_DRAFTS;
             }
@@ -346,7 +361,7 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
         } finally {
             setLoading(false);
         }
-    }, [isAdminUser, user?.id, user?.followersCount, user?.followingCount]);
+    }, [isAdminUser, refreshSocialFeeds, user?.id, user?.followersCount, user?.followingCount]);
 
     useEffect(() => {
         loadSettings();
@@ -415,14 +430,9 @@ const SettingsPage = ({ onNavigate, showConnections }) => {
             const result = await apiService.updateSocialFeeds(user.id, payload);
             const updatedFeeds = result?.data || {};
 
-            // Persist updated feeds to localStorage and notify all listeners so
-            // Profile page / Sidebar pick up the change without needing a reload.
-            try {
-                localStorage.setItem('wiseSocialFeeds', JSON.stringify(updatedFeeds));
-            } catch {
-                // best effort
-            }
-            window.dispatchEvent(new Event('wiseraven:social-updated'));
+            // Sync updated feeds into AuthContext + localStorage so they survive
+            // logout/re-login without waiting for a server round-trip on next mount.
+            refreshSocialFeeds(updatedFeeds);
 
             addToast(`${CONNECTION_PLATFORMS.find((item) => item.id === platform)?.label || 'Social'} link saved.`, 'success');
             setLinkErrorByPlatform((prev) => ({ ...prev, [platform]: '' }));
