@@ -18,6 +18,7 @@ import {
 import { useNotification } from '../Contexts/NotificationContext';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
+import { buildMediaSharePayload, socialService } from '../Services/socialService';
 
 const TAB_OPTIONS = [
     { id: 'all', label: 'All' },
@@ -276,6 +277,7 @@ const MyLibraryPage = ({ onNavigate }) => {
     const [libraryState, setLibraryState] = useState({});
     const [error, setError] = useState('');
     const [selectedItem, setSelectedItem] = useState(null);
+    const [publishingByItem, setPublishingByItem] = useState({});
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -675,10 +677,71 @@ const MyLibraryPage = ({ onNavigate }) => {
         }
     };
 
+    const handleSocialPublish = useCallback(
+        async (item, targets) => {
+            const mediaUrl = String(item?.mediaUrl || '').trim();
+            if (!mediaUrl) {
+                addToast('This file does not have a public media URL yet.', 'error');
+                return;
+            }
+
+            const itemKey = getItemKey(item);
+            setPublishingByItem((prev) => ({ ...prev, [itemKey]: true }));
+
+            try {
+                const payload = buildMediaSharePayload({
+                    message: String(item.description || item.title || item.fileName || 'Shared from WiseRavenShare Media Library').trim(),
+                    mediaUrl,
+                    linkUrl: mediaUrl,
+                    publishToFacebook: Boolean(targets?.facebook),
+                    publishToInstagram: Boolean(targets?.instagram),
+                    publishToTikTok: Boolean(targets?.tiktok),
+                    publishToYouTube: Boolean(targets?.youtube)
+                });
+
+                const requestedPlatforms = [
+                    payload.publishToFacebook ? 'facebook' : null,
+                    payload.publishToInstagram ? 'instagram' : null,
+                    payload.publishToTikTok ? 'tiktok' : null,
+                    payload.publishToYouTube ? 'youtube' : null
+                ].filter(Boolean);
+
+                if (!requestedPlatforms.length) {
+                    addToast('Selected platform requires a video/photo media URL.', 'info');
+                    return;
+                }
+
+                const response = await socialService.publishContent(payload);
+                const results = Array.isArray(response?.results) ? response.results : [];
+                const succeeded = results.filter((result) => result?.success).map((result) => result.platform);
+                const failed = results.filter((result) => !result?.success);
+
+                if (succeeded.length) {
+                    addToast(`Published to ${succeeded.join(', ')}.`, 'success');
+                }
+                if (failed.length) {
+                    addToast(failed.map((result) => `${result.platform}: ${result.error || 'publish failed'}`).join(' | '), 'error');
+                }
+            } catch (publishError) {
+                addToast(publishError?.message || 'Failed to publish media.', 'error');
+            } finally {
+                setPublishingByItem((prev) => {
+                    const next = { ...prev };
+                    delete next[itemKey];
+                    return next;
+                });
+            }
+        },
+        [addToast]
+    );
+
     const renderedItems = filteredItems.map((item) => {
         const state = getItemState(item, libraryState);
         const archived = Boolean(state.archived);
         const protectedItem = Boolean(state.protected);
+        const itemKey = getItemKey(item);
+        const isPublishing = Boolean(publishingByItem[itemKey]);
+        const isVideo = item.type === 'video';
 
         return (
             <article
@@ -756,7 +819,42 @@ const MyLibraryPage = ({ onNavigate }) => {
                         <button
                             type="button"
                             style={secondaryButtonStyle}
+                            onClick={() =>
+                                handleSocialPublish(item, {
+                                    facebook: true,
+                                    instagram: true
+                                })
+                            }
+                            disabled={!item.mediaUrl || isPublishing}
+                        >
+                            {isPublishing ? 'Publishing…' : 'Publish Meta'}
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => handleSocialPublish(item, { tiktok: true })}
+                            disabled={!item.mediaUrl || !isVideo || isPublishing}
+                            title={!isVideo ? 'TikTok publishing requires video media.' : ''}
+                        >
+                            Publish TikTok
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => handleSocialPublish(item, { youtube: true })}
+                            disabled={!item.mediaUrl || !isVideo || isPublishing}
+                            title={!isVideo ? 'YouTube publishing requires video media.' : ''}
+                        >
+                            Publish YouTube
+                        </button>
+
+                        <button
+                            type="button"
+                            style={secondaryButtonStyle}
                             onClick={() => handleToggleArchive(item)}
+                            disabled={isPublishing}
                         >
                             {archived ? 'Restore' : 'Archive'}
                         </button>
@@ -765,6 +863,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                             type="button"
                             style={secondaryButtonStyle}
                             onClick={() => handleToggleProtect(item)}
+                            disabled={isPublishing}
                         >
                             {protectedItem ? 'Unprotect' : 'Protect'}
                         </button>
@@ -794,6 +893,7 @@ const MyLibraryPage = ({ onNavigate }) => {
                             type="button"
                             style={dangerButtonStyle}
                             onClick={() => handleDelete(item)}
+                            disabled={isPublishing}
                         >
                             <FiTrash2 /> Delete
                         </button>

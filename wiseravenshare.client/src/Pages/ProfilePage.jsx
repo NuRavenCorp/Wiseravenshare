@@ -2,6 +2,8 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../Contexts/AuthContext';
 import { apiService } from '../Services/api';
 import { wisecoinService } from '../Services/wisecoinService';
+import ActivityFeed from '../Components/Common/ActivityFeed.jsx';
+import FollowButton from '../Components/Common/FollowButton.jsx';
 import PostCard from '../Components/Feed/PostCard.jsx';
 import SocialFeedsTimeline from '../Components/Feed/SocialFeedsTimeline.jsx';
 import { useNotification } from '../Contexts/NotificationContext';
@@ -610,10 +612,6 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigat
 
     const isImageAvatar = isImageSource(user?.avatar);
     const focusedIsImageAvatar = isImageSource(focusedProfile?.avatar);
-    const isFollowingFocusedProfile = focusedProfile?.id
-        ? socialGraphService.isFollowing(user?.id, focusedProfile.id)
-        : false;
-
     if (!user) {
         return (
             <div style={{
@@ -678,30 +676,7 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigat
                             </div>
                         </div>
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (!focusedProfile?.id || !user?.id) return;
-                                    if (socialGraphService.isFollowing(user.id, focusedProfile.id)) {
-                                        socialGraphService.unfollowUser(user.id, focusedProfile.id);
-                                    } else {
-                                        socialGraphService.followUser(user.id, focusedProfile.id);
-                                    }
-                                    window.dispatchEvent(new Event('wiseraven:social-updated'));
-                                    setFocusedProfile((prev) => (prev ? { ...prev } : prev));
-                                }}
-                                style={{
-                                    border: '1px solid var(--border-color)',
-                                    background: isFollowingFocusedProfile ? 'rgba(255,255,255,0.06)' : 'var(--highlight-color)',
-                                    color: 'var(--text-color)',
-                                    borderRadius: '999px',
-                                    padding: '7px 12px',
-                                    cursor: 'pointer',
-                                    fontSize: '12px'
-                                }}
-                            >
-                                {isFollowingFocusedProfile ? 'Following' : 'Follow'}
-                            </button>
+                            <FollowButton targetUserId={focusedProfile.id} />
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1154,6 +1129,18 @@ const ProfilePage = ({ openEditMode = false, onEditModeHandled = null, onNavigat
                             </div>
                         );
                     })}
+                </div>
+
+                <div style={{ marginTop: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ fontWeight: 'bold' }}>
+                            Activity
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--light-color)' }}>
+                            {focusedProfile ? `Showing updates for ${focusedProfile.name}` : 'Showing your latest updates'}
+                        </div>
+                    </div>
+                    <ActivityFeed userId={focusedProfile?.id || user.id} />
                 </div>
 
                 <div style={{ marginTop: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px', border: '1px solid var(--border-color)' }}>
