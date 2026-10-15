@@ -23,3 +23,9 @@ After deploying, configure your application secrets/settings with:
 - `GET /health` — health check
 - `POST /upsert` — body: `{ table, columns, records }` — creates table if needed, upserts all records
 - `GET /fetch/:table` — returns all rows from the table
+
+## Shared schema map
+
+- Shared table definitions live in [`schemaMap.js`](./schemaMap.js).
+- When a table has a translated schema entry, `POST /upsert` can omit `columns` and the proxy will use the shared column definitions automatically.
+- `AdminAccessRequest` is the first translated WiseRavenShare-ready schema. Its source JSONC RLS rules are represented as application-layer authorization notes because this proxy only authenticates service traffic, not end-user claims.

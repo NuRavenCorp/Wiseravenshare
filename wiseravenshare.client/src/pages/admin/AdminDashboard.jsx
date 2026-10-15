@@ -18,6 +18,7 @@ import AdminTruthTrends from "@/components/admin/AdminTruthTrends";
 import AdminGoogleAnalytics from "@/components/admin/AdminGoogleAnalytics";
 import AdminFeatureReleases from "@/components/admin/AdminFeatureReleases";
 import AdminJournalism from "@/components/admin/AdminJournalism";
+import AdminEntityCatalog from "@/components/admin/AdminEntityCatalog";
 
 const tabs = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -37,6 +38,7 @@ const tabs = [
   { id: "ga-analytics", label: "Google Analytics", icon: BarChart3 },
   { id: "releases", label: "Feature Releases", icon: Rocket },
   { id: "journalism", label: "Journalism", icon: Newspaper },
+  { id: "entities", label: "Entities", icon: Database },
 ];
 
 export default function AdminDashboard() {
@@ -99,6 +101,7 @@ export default function AdminDashboard() {
           {active === "ga-analytics" && <AdminGoogleAnalytics />}
           {active === "releases" && <AdminFeatureReleases />}
           {active === "journalism" && <AdminJournalism />}
+          {active === "entities" && <AdminEntityCatalog />}
         </div>
       </main>
     </div>
