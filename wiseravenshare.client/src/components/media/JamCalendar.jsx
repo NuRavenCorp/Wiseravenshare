@@ -3,7 +3,7 @@ import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import {
   Calendar as CalIcon, ChevronLeft, ChevronRight, Clock,
-  Users, Plus, Music, Check, Loader2, X, UserCheck, CalendarPlus
+  Users, Plus, Music, Check, Loader2, UserCheck, CalendarPlus
 } from "lucide-react";
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,

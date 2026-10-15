@@ -61,6 +61,10 @@ export default function PodcastScriptEditor({ podcast, onUpdate, permissions }) 
         )}
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        Script lines feed the studio teleprompter and cue cards during recording, and can be extended live from the Record tab.
+      </p>
+
       {(viewMode || !canEdit) ? (
         <div className="min-h-[300px] p-4 rounded-lg border border-border bg-card/50 whitespace-pre-wrap text-sm text-foreground/90 leading-relaxed">
           {script || (

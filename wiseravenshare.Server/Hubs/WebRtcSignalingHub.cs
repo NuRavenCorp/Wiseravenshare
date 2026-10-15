@@ -7,7 +7,7 @@ namespace Wiseravenshare.Server.Hubs;
 [AllowAnonymous]
 public sealed class WebRtcSignalingHub : Hub
 {
-    private sealed record SessionPeer(string PeerId, string Name, string Role, string ConnectionId);
+    private sealed record SessionPeer(string PeerId, string Name, string Role, string Device, string ConnectionId);
 
     private sealed record ConnectionSession(string SessionCode, string PeerId);
 
@@ -16,12 +16,13 @@ public sealed class WebRtcSignalingHub : Hub
 
     private static readonly ConcurrentDictionary<string, ConnectionSession> ConnectionIndex = new();
 
-    public async Task JoinSession(string sessionCode, string peerId, string name, string role)
+    public async Task JoinSession(string sessionCode, string peerId, string name, string role, string? device = null)
     {
         var normalizedSessionCode = NormalizeSessionCode(sessionCode);
         var normalizedPeerId = NormalizePeerId(peerId);
         var displayName = string.IsNullOrWhiteSpace(name) ? "Guest" : name.Trim();
         var normalizedRole = string.IsNullOrWhiteSpace(role) ? "member" : role.Trim().ToLowerInvariant();
+        var normalizedDevice = string.IsNullOrWhiteSpace(device) ? string.Empty : device.Trim();
 
         await RemoveConnectionFromAnySessionAsync(Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(normalizedSessionCode));
@@ -30,7 +31,7 @@ public sealed class WebRtcSignalingHub : Hub
             normalizedSessionCode,
             _ => new ConcurrentDictionary<string, SessionPeer>(StringComparer.OrdinalIgnoreCase));
 
-        peers[normalizedPeerId] = new SessionPeer(normalizedPeerId, displayName, normalizedRole, Context.ConnectionId);
+        peers[normalizedPeerId] = new SessionPeer(normalizedPeerId, displayName, normalizedRole, normalizedDevice, Context.ConnectionId);
         ConnectionIndex[Context.ConnectionId] = new ConnectionSession(normalizedSessionCode, normalizedPeerId);
 
         await Clients.Group(GroupName(normalizedSessionCode))
@@ -64,6 +65,23 @@ public sealed class WebRtcSignalingHub : Hub
             .SendAsync("SignalReceived", sourceSession.PeerId, signalType, data);
     }
 
+    public async Task BroadcastSessionEvent(string sessionCode, string eventType, object? payload)
+    {
+        var normalizedSessionCode = NormalizeSessionCode(sessionCode);
+        var normalizedEventType = string.IsNullOrWhiteSpace(eventType)
+            ? throw new HubException("Event type is required.")
+            : eventType.Trim();
+
+        if (!ConnectionIndex.TryGetValue(Context.ConnectionId, out var sourceSession)
+            || !string.Equals(sourceSession.SessionCode, normalizedSessionCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HubException("You must join the session before broadcasting studio events.");
+        }
+
+        await Clients.Group(GroupName(normalizedSessionCode))
+            .SendAsync("SessionEventReceived", sourceSession.PeerId, normalizedEventType, payload);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         await RemoveConnectionFromAnySessionAsync(Context.ConnectionId);
@@ -74,7 +92,8 @@ public sealed class WebRtcSignalingHub : Hub
     {
         id = peer.PeerId,
         name = peer.Name,
-        role = peer.Role
+        role = peer.Role,
+        device = peer.Device
     };
 
     private async Task RemoveConnectionFromAnySessionAsync(string connectionId)

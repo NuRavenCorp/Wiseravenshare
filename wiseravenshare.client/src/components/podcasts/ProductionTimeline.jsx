@@ -10,7 +10,6 @@ import {
   Eye,
   Film,
   CheckCircle,
-  Clock,
   Loader2,
   ChevronRight,
   SkipForward,

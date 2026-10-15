@@ -316,7 +316,7 @@ CREATE INDEX IF NOT EXISTS idx_ravensight_video_comments_v2_video_id_created_at
 INSERT INTO {_videosTable} (
     id, user_id, title, description, tags, video_url, thumbnail_url, status, privacy_status,
     youtube_url, tiktok_url, facebook_url, music_track_id, music_track_title, music_track_url, music_track_artist, music_track_album, music_track_genre,
-    storage_mode, retention_status, expires_at, views, likes, comments, created_at, updated_at
+    storage_mode, retention_status, archived, protected, expires_at, views, likes, comments, created_at, updated_at
 ) VALUES (
     @id, @user_id, @title, @description, @tags, @video_url, @thumbnail_url, @status, @privacy_status,
     @youtube_url, @tiktok_url, @facebook_url, @music_track_id, @music_track_title, @music_track_url, @music_track_artist, @music_track_album, @music_track_genre,

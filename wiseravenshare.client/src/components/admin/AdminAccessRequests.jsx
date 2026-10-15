@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
-import { Loader2, CheckCircle, XCircle, Clock, Mail, UserPlus } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Mail, UserPlus } from "lucide-react";
 
 export default function AdminAccessRequests() {
   const [requests, setRequests] = useState([]);

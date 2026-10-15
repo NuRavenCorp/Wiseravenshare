@@ -1,7 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Button } from "@/components/ui/button";
+import React, { useState, useEffect } from "react";
 import {
-  Loader2,
   Lock,
   CheckCircle,
   Play,

@@ -24,6 +24,7 @@ export default function CueCardDisplay({
   scriptCues = [],
   activeScriptCueIndex = -1,
   onAdvanceScriptCue,
+  broadcastCue,
 }) {
   const [cue, setCue] = useState("");
   const [activeCue, setActiveCue] = useState(null);
@@ -44,6 +45,17 @@ export default function CueCardDisplay({
       setActiveCue(scriptCues[activeScriptCueIndex].toUpperCase());
     }
   }, [activeScriptCueIndex, scriptCues]);
+
+  useEffect(() => {
+    if (!broadcastCue) return;
+    const text =
+      typeof broadcastCue === "string"
+        ? broadcastCue
+        : broadcastCue?.text || "";
+    if (text.trim()) {
+      setActiveCue(text.toUpperCase());
+    }
+  }, [broadcastCue]);
 
   const sendCue = (text) => {
     if (!text?.trim()) return;

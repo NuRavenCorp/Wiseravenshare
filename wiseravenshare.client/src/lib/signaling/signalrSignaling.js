@@ -61,7 +61,8 @@ export function createSignalRSignaling(sessionCode, options = {}) {
       normalizedSessionCode,
       peerId,
       joinedPresence.name,
-      joinedPresence.role
+      joinedPresence.role,
+      joinedPresence.device || ""
     );
   };
 
@@ -71,6 +72,10 @@ export function createSignalRSignaling(sessionCode, options = {}) {
 
   connection.on("SignalReceived", (from, signalType, data) => {
     emit({ type: "signal", from, signalType, data });
+  });
+
+  connection.on("SessionEventReceived", (from, eventType, payload) => {
+    emit({ type: "session-event", from, eventType, payload });
   });
 
   connection.onreconnected(async () => {
@@ -122,13 +127,15 @@ export function createSignalRSignaling(sessionCode, options = {}) {
         joinedPresence = {
           name: message.name || "Guest",
           role: message.role || "member",
+          device: message.device || "",
         };
         await connection.invoke(
           "JoinSession",
           normalizedSessionCode,
           peerId,
           joinedPresence.name,
-          joinedPresence.role
+          joinedPresence.role,
+          joinedPresence.device
         );
         return;
       }
@@ -140,6 +147,16 @@ export function createSignalRSignaling(sessionCode, options = {}) {
           message.target,
           message.signalType,
           message.data
+        );
+        return;
+      }
+
+      if (message.type === "session-event") {
+        await connection.invoke(
+          "BroadcastSessionEvent",
+          normalizedSessionCode,
+          message.eventType,
+          message.data ?? null
         );
       }
     },

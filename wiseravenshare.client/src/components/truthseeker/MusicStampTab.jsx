@@ -17,7 +17,6 @@ import {
   Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Image } from "@/components/ui/image";
 
 export default function MusicStampTab() {
   const [tracks, setTracks] = useState([]);

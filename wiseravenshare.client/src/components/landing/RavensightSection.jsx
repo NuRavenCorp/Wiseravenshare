@@ -1,7 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Radio, Video, Newspaper, Mic2, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Radio, Video, Newspaper, Mic2 } from "lucide-react";
 
 const cameras = [
   { label: "Cam 01", sub: "Host" },
