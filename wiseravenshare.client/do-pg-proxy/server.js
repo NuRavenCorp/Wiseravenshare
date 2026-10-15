@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const { ALLOWED_TABLES, TABLE_SCHEMAS } = require('./schemaMap');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -15,15 +16,6 @@ if (!API_KEY) {
   console.error('FATAL: SYNC_API_KEY environment variable is required');
   process.exit(1);
 }
-
-// Allowed table names (must match the shared Postgres sync schema map)
-const ALLOWED_TABLES = new Set([
-  'Post', 'Comment', 'Podcast', 'PodcastPayment', 'UserProfile', 'MediaAsset',
-  'MusicAnalysis', 'TruthScore', 'Challenge', 'Like', 'Follow', 'Bookmark',
-  'Block', 'Notification', 'Conversation', 'Message', 'JamSession',
-  'LiveStream', 'Team', 'PlannerEvent', 'Scratchboard', 'Badge',
-  'UserBadge', 'WiseCoinTransaction', 'Invitation', 'AdminAccessRequest', 'User',
-]);
 
 function isValidIdentifier(name) {
   return typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
@@ -79,17 +71,23 @@ app.post('/upsert', async (req, res) => {
     if (!ALLOWED_TABLES.has(table) || !isValidIdentifier(table)) {
       return res.status(400).json({ error: 'Invalid table name' });
     }
-    for (const c of (columns || [])) {
+    const schemaColumns = TABLE_SCHEMAS[table]?.columns || [];
+    const resolvedColumns = Array.isArray(columns) && columns.length > 0 ? columns : schemaColumns;
+    if (!resolvedColumns.length) {
+      return res.status(400).json({ error: 'Column definitions are required for this table' });
+    }
+
+    for (const c of resolvedColumns) {
       if (!isValidIdentifier(c.name)) {
         return res.status(400).json({ error: 'Invalid column name' });
       }
     }
 
     // Create table if not exists
-    const colDefs = columns.map(c => `"${c.name}" ${c.type}`).join(', ');
+    const colDefs = resolvedColumns.map(c => `"${c.name}" ${c.type}`).join(', ');
     await pool.query(`CREATE TABLE IF NOT EXISTS "${table}" (${colDefs})`);
 
-    const colNames = columns.map(c => c.name);
+    const colNames = resolvedColumns.map(c => c.name);
     const updateCols = colNames.filter(c => c !== 'id').map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
     const placeholders = colNames.map((_, i) => `$${i + 1}`).join(', ');
     const colList = colNames.map(c => `"${c}"`).join(', ');
