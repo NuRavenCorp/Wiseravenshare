@@ -122,6 +122,17 @@ export default function AiNews() {
             <div className="grid sm:grid-cols-2 gap-4">
               {(news.articles || []).map((a, i) => (
                 <div key={i} className="p-5 rounded-2xl border border-border bg-card/50 hover:border-primary/40 transition-colors">
+                  {typeof a.imageUrl === "string" && /^https?:\/\//i.test(a.imageUrl) && (
+                    <div className="mb-3 overflow-hidden rounded-xl border border-border/60 bg-background/60">
+                      <img
+                        src={a.imageUrl}
+                        alt={a.title || "News image"}
+                        className="h-40 w-full object-cover"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mb-2">
                     {a.region && <span className="text-[10px] tracking-wider uppercase text-accent">{a.region}</span>}
                     {a.provider && (

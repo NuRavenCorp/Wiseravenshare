@@ -25,12 +25,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS server-build
 WORKDIR /src
 
 # Copy project file to cache layers for dotnet restore
-COPY Wiseravenshare.Server/*.csproj ./Wiseravenshare.Server/
-RUN dotnet restore Wiseravenshare.Server/Wiseravenshare.Server.csproj -p:DisableSpaProject=true
+COPY wiseravenshare.Server/*.csproj ./wiseravenshare.Server/
+RUN dotnet restore wiseravenshare.Server/Wiseravenshare.Server.csproj -p:DisableSpaProject=true
 
 # Copy the rest of the backend files
-COPY Wiseravenshare.Server/ ./Wiseravenshare.Server/
-RUN dotnet publish Wiseravenshare.Server/Wiseravenshare.Server.csproj \
+COPY wiseravenshare.Server/ ./wiseravenshare.Server/
+RUN dotnet publish wiseravenshare.Server/Wiseravenshare.Server.csproj \
     -c Release \
     -o /app/publish \
     -p:DisableSpaProject=true
