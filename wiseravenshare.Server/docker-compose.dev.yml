@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wiseravenshare-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wiseravenshare_db}
+      POSTGRES_USER: ${POSTGRES_USER:-wiseravenshare_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wiseravenshare_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - wiseravenshare-dev-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wiseravenshare_user} -d ${POSTGRES_DB:-wiseravenshare_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/Dockerfile.api
+    container_name: wiseravenshare-dev-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python-matrix:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+      Authentication__Jwt__Key: ${Authentication__Jwt__Key:-dev-only-change-this-secret-at-least-32-characters}
+      App__PublicBaseUrl: ${APP_PUBLIC_BASE_URL:-http://localhost:10000}
+      Persistence__RequireDatabase: "true"
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare_db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-wiseravenshare_dev_password};SSL Mode=Disable;Trust Server Certificate=true
+      PythonMatrixService__BaseUrl: ${PYTHON_MATRIX_BASE_URL:-http://python-matrix:8005}
+      PythonServices__Enabled: "false"
+    ports:
+      - "${API_PORT:-10000}:10000"
+
+  python-matrix:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: wiseravenshare-dev-python-matrix
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8005
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+    ports:
+      - "${PYTHON_MATRIX_PORT:-8005}:8005"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8005/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  wiseravenshare-dev-postgres:

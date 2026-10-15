@@ -1,0 +1,487 @@
+﻿// Wiseravenshare.Server/Controllers/PostsController.cs
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using Wiseravenshare.Server.DTOs.Post;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Exceptions;
+using Wiseravenshare.Server.Services;
+
+namespace Wiseravenshare.Server.Controllers
+{
+
+    [ApiController]
+    [Route("api/[controller]")]
+    [Authorize]
+    [Produces("application/json")]
+    public class PostsController : ControllerBase
+    {
+        private readonly IPostService _postService;
+        private readonly IUserRepository _userRepository;
+        private readonly ILogger<PostsController> _logger;
+        private readonly OutputCacheInvalidationService _cacheInvalidation;
+
+        public PostsController(
+            IPostService postService,
+            IUserRepository userRepository,
+            ILogger<PostsController> logger,
+            OutputCacheInvalidationService cacheInvalidation)
+        {
+            _postService = postService;
+            _userRepository = userRepository;
+            _logger = logger;
+            _cacheInvalidation = cacheInvalidation;
+        }
+
+        /// <summary>
+        /// Create a new post
+        /// </summary>
+        [HttpPost]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(PostDto), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> CreatePost([FromBody] CreatePostDto dto)
+        {
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var post = await _postService.CreatePostAsync(userId, dto);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
+            }
+
+            var fallbackUserId = Guid.NewGuid();
+            var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+        }
+
+        /// <summary>
+        /// Get a post by ID
+        /// </summary>
+        [HttpGet("{id}")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(PostDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetPost(Guid id)
+        {
+            var post = await _postService.GetPostAsync(id);
+            return Ok(post);
+        }
+
+        /// <summary>
+        /// Update a post
+        /// </summary>
+        [HttpPut("{id}")]
+        [ProducesResponseType(typeof(PostDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UpdatePost(Guid id, [FromBody] UpdatePostDto dto)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            var post = await _postService.UpdatePostAsync(userId, id, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return Ok(post);
+        }
+
+        /// <summary>
+        /// Delete a post
+        /// </summary>
+        [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeletePost(Guid id)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            await _postService.DeletePostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Get the user's feed
+        /// </summary>
+        [HttpGet("feed")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetFeed([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var posts = await _postService.GetFeedAsync(userId, page, pageSize);
+                return Ok(posts);
+            }
+
+            var fallbackPosts = await _postService.GetTrendingPostsAsync(Math.Max(pageSize, 10));
+            return Ok(fallbackPosts);
+        }
+
+        /// <summary>
+        /// Get posts by a specific user
+        /// </summary>
+        [HttpGet("user/{userId}")]
+        [AllowAnonymous]
+        [OutputCache(PolicyName = "PublicFeedShort")]
+        [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetUserPosts(Guid userId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var posts = await _postService.GetUserPostsAsync(userId, page, pageSize);
+            return Ok(posts);
+        }
+
+        /// <summary>
+        /// Like a post
+        /// </summary>
+        [HttpPost("{id}/like")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> LikePost(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.LikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error liking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to like post. Please try again." });
+            }
+        }
+
+        /// <summary>
+        /// Unlike a post
+        /// </summary>
+        [HttpDelete("{id}/like")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UnlikePost(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnlikePostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unliking post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to unlike post. Please try again." });
+            }
+        }
+
+        /// <summary>
+        /// Repost a post
+        /// </summary>
+        [HttpPost("{id}/repost")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> RepostPost(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.RepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
+        }
+
+        /// <summary>
+        /// Unrepost a post
+        /// </summary>
+        [HttpDelete("{id}/repost")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UnrepostPost(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnrepostPostAsync(userId, id);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unreposting post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to update repost. Please try again." });
+            }
+        }
+
+        /// <summary>
+        /// Get comments for a post
+        /// </summary>
+        [HttpGet("{id}/comments")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostCommentDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetComments(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var comments = await _postService.GetCommentsAsync(id, page, pageSize);
+            return Ok(comments);
+        }
+
+        /// <summary>
+        /// Add a comment to a post
+        /// </summary>
+        [HttpPost("{id}/comments")]
+        [ProducesResponseType(typeof(PostCommentDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> AddComment(Guid id, [FromBody] AddPostCommentDto dto)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            var comment = await _postService.AddCommentAsync(userId, id, dto);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return Ok(comment);
+        }
+
+        /// <summary>
+        /// Bookmark a post
+        /// </summary>
+        [HttpPost("{id}/bookmark")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> BookmarkPost(Guid id)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            var state = await _postService.BookmarkPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return Ok(state);
+        }
+
+        /// <summary>
+        /// Unbookmark a post
+        /// </summary>
+        [HttpDelete("{id}/bookmark")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UnbookmarkPost(Guid id)
+        {
+            var userId = await ResolveEffectiveUserIdAsync();
+            var state = await _postService.UnbookmarkPostAsync(userId, id);
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return Ok(state);
+        }
+
+        /// <summary>
+        /// Track a post view (fire-and-forget, AllowAnonymous)
+        /// </summary>
+        [HttpPost("{id}/view")]
+        [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        public async Task<IActionResult> TrackView(Guid id)
+        {
+            try
+            {
+                await _postService.TrackViewAsync(id);
+            }
+            catch
+            {
+                // View tracking is best-effort; never surface errors to client.
+            }
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Increment share count when a user shares a post externally
+        /// </summary>
+        [HttpPost("{id}/share")]
+        [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SharePost(Guid id)
+        {
+            try
+            {
+                var state = await _postService.SharePostAsync(id);
+                return Ok(state);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error recording share for post {PostId}", id);
+                return StatusCode(500, new { message = "Failed to record share." });
+            }
+        }
+
+        /// <summary>
+        /// Get trending posts
+        /// </summary>
+        [HttpGet("trending")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetTrending([FromQuery] int count = 10)
+        {
+            var posts = await _postService.GetTrendingPostsAsync(count);
+            return Ok(posts);
+        }
+
+        /// <summary>
+        /// Get post count for a user
+        /// </summary>
+        [HttpGet("count/{userId}")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetPostCount(Guid userId)
+        {
+            var count = await _postService.GetPostCountAsync(userId);
+            return Ok(count);
+        }
+
+        private async Task<Guid> ResolveEffectiveUserIdAsync()
+        {
+            var rawClaimId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub");
+
+            var hasGuidClaim = Guid.TryParse(rawClaimId, out var claimUserId) && claimUserId != Guid.Empty;
+            if (!hasGuidClaim)
+            {
+                _logger.LogWarning("Authenticated request has missing or invalid user id claim. sub={Sub}", rawClaimId ?? "<null>");
+                claimUserId = Guid.NewGuid();
+            }
+
+            if (hasGuidClaim)
+            {
+                try
+                {
+                    var byId = await _userRepository.GetByIdAsync(claimUserId);
+                    if (byId is not null)
+                    {
+                        return byId.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "User lookup by id failed for token user {UserId}; falling back to claim-based identity.", claimUserId);
+                }
+            }
+
+            var email = (User.FindFirstValue(ClaimTypes.Email)
+                ?? User.FindFirstValue("email")
+                ?? string.Empty).Trim();
+
+            var username = (User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue(ClaimTypes.Upn)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.UniqueName)
+                ?? User.FindFirstValue("preferred_username")
+                ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                try
+                {
+                    var byUsername = await _userRepository.GetByUsernameAsync(username);
+                    if (byUsername is not null)
+                    {
+                        if (!byUsername.IsActive)
+                        {
+                            byUsername.IsActive = true;
+                            await _userRepository.UpdateAsync(byUsername);
+                        }
+
+                        _logger.LogInformation("Recovered domain user mapping by username {Username}: token user {TokenUserId} -> domain user {DomainUserId}", username, claimUserId, byUsername.Id);
+                        return byUsername.Id;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "User lookup by username failed for {Username}; continuing identity resolution.", username);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                _logger.LogWarning("Unable to resolve missing domain user {UserId} because token email claim is missing.", claimUserId);
+                return claimUserId;
+            }
+
+            try
+            {
+                var byEmail = await _userRepository.GetByEmailAsync(email);
+                if (byEmail is not null)
+                {
+                    if (!byEmail.IsActive)
+                    {
+                        byEmail.IsActive = true;
+                        await _userRepository.UpdateAsync(byEmail);
+                    }
+
+                    _logger.LogInformation("Recovered domain user mapping for {Email}: token user {TokenUserId} -> domain user {DomainUserId}", email, claimUserId, byEmail.Id);
+                    return byEmail.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "User lookup by email failed for {Email}; falling back to the token identity.", email);
+                return claimUserId;
+            }
+
+            var displayName = username.Length > 0 ? username : (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
+            var usernameSeed = username.Length > 0 ? username : (displayName.Length > 0 ? displayName : email.Split('@')[0]);
+            var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(sanitizedUsername))
+            {
+                sanitizedUsername = $"localuser-{claimUserId.ToString("N")[..6]}";
+            }
+
+            try
+            {
+                var created = await _userRepository.AddAsync(new Wiseravenshare.Server.Entities.User
+                {
+                    Id = claimUserId,
+                    Email = email,
+                    Username = sanitizedUsername,
+                    DisplayName = displayName,
+                    PasswordHash = string.Empty,
+                    IsActive = true,
+                    TruthScore = 50.00m
+                });
+
+                _logger.LogInformation("Auto-provisioned missing domain user {UserId} for {Email} during post request.", created.Id, email);
+                return created.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to auto-provision missing domain user {UserId} for {Email}.", claimUserId, email);
+                try
+                {
+                    var fallbackByEmail = await _userRepository.GetByEmailAsync(email);
+                    return fallbackByEmail?.Id ?? claimUserId;
+                }
+                catch (Exception fallbackEx)
+                {
+                    _logger.LogWarning(fallbackEx, "Recovery lookup failed for {Email}; returning the token identity.", email);
+                    return claimUserId;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,194 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wiseravenshare_db}
+      POSTGRES_USER: ${POSTGRES_USER:-wiseravenshare_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wiseravenshare_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wiseravenshare_user} -d ${POSTGRES_DB:-wiseravenshare_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - wiseravenshare-net
+
+  api:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/Dockerfile.api
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python-matrix:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:10000,http://localhost:3000}
+      App__PublicBaseUrl: ${APP_PUBLIC_BASE_URL:-http://localhost:10000}
+      Authentication__Jwt__Key: ${Authentication__Jwt__Key:-WRS_Development_JWT_Secret_2026_Change_Me_1234567890}
+      Persistence__RequireDatabase: ${PERSISTENCE_REQUIRE_DATABASE:-true}
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare_db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-wiseravenshare_dev_password};SSL Mode=Disable;Trust Server Certificate=true
+      PythonMatrixService__BaseUrl: ${PYTHON_MATRIX_BASE_URL:-http://python-matrix:8005}
+      PythonServices__Enabled: ${PYTHON_SERVICES_ENABLED:-false}
+      Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
+      S3__Endpoint: ${S3_ENDPOINT:-http://minio:9000}
+      S3__AccessKey: ${S3_ACCESS_KEY:-minioadmin}
+      S3__SecretKey: ${S3_SECRET_KEY:-minioadmin123}
+      S3__ForcePathStyle: ${S3_FORCE_PATH_STYLE:-true}
+      S3__Region: ${S3_REGION:-us-east-1}
+      Storage__Blob__BucketName: ${BLOB_BUCKET_NAME:-wiseravenshare-dev}
+      Storage__Blob__ProjectFolder: ${BLOB_PROJECT_FOLDER:-wiseravenshare}
+      Storage__Blob__SiteName: ${BLOB_SITE_NAME:-wiseravenshare}
+      AiProvider: ${AI_PROVIDER:-gradient}
+      Gradient__BaseUrl: ${GRADIENT_BASE_URL:-https://ingress.do-ai.run/v1}
+      Gradient__DefaultModel: ${GRADIENT_DEFAULT_MODEL:-gpt-4o-mini}
+      Gradient__InferenceKey: ${GRADIENT_INFERENCE_KEY:-}
+      Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+    ports:
+      - "${API_PORT:-10000}:10000"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  python-matrix:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-matrix
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8005
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+    ports:
+      - "${PYTHON_MATRIX_PORT:-8005}:8005"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8005/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-ollama
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - wiseravenshare-net
+    profiles: ["with-ai"]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-ollama-init
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >
+      until ollama list >/dev/null 2>&1; do echo 'waiting for ollama...'; sleep 2; done;
+      ollama pull ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - wiseravenshare-net
+    profiles: ["with-ai"]
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - wiseravenshare-net
+    profiles: ["with-cache"]
+
+  minio:
+    image: minio/minio:latest
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - wiseravenshare-net
+    profiles: ["with-storage"]
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-minio-init
+    profiles: ["with-storage"]
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin123} &&
+      mc mb -p local/${BLOB_BUCKET_NAME:-wiseravenshare-dev} || true &&
+      mc anonymous set download local/${BLOB_BUCKET_NAME:-wiseravenshare-dev} || true
+      "
+    networks:
+      - wiseravenshare-net
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-stripe-cli
+    restart: unless-stopped
+    profiles: ["with-stripe"]
+    depends_on:
+      api:
+        condition: service_started
+    command: >
+      listen
+      --api-key ${STRIPE_SECRET_KEY:-}
+      --forward-to http://api:10000/api/payments/webhook
+    networks:
+      - wiseravenshare-net
+
+volumes:
+  postgres-data:
+  ollama-models:
+  minio-data:
+
+networks:
+  wiseravenshare-net:
+    driver: bridge

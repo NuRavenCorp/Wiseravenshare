@@ -1,0 +1,312 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
+
+namespace Wiseravenshare.Server.Services;
+
+[ApiController]
+[Route("api/[controller]")]
+public class VideoStreamingController : ControllerBase
+{
+    private readonly IWebHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
+    private readonly IBlobStorageService _blobStorageService;
+    private readonly FileExtensionContentTypeProvider _contentTypeProvider = new();
+
+    public VideoStreamingController(IWebHostEnvironment environment, IConfiguration configuration, IBlobStorageService blobStorageService)
+    {
+        _environment = environment;
+        _configuration = configuration;
+        _blobStorageService = blobStorageService;
+    }
+
+    [HttpGet("stream")]
+    public IActionResult StreamVideo([FromQuery] string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return BadRequest("fileName is required.");
+        }
+
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName))
+        {
+            return BadRequest("Invalid fileName.");
+        }
+
+        var filePath = FindLocalFile(safeFileName);
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return NotFound();
+        }
+
+        var stream = System.IO.File.OpenRead(filePath);
+        if (!_contentTypeProvider.TryGetContentType(filePath, out var contentType))
+        {
+            contentType = "application/octet-stream";
+        }
+
+        return File(stream, contentType, enableRangeProcessing: true);
+    }
+
+    [HttpGet("blob/{*fileName}")]
+    public async Task<IActionResult> StreamBlob([FromRoute] string fileName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return BadRequest();
+        }
+
+        var objectKeyCandidates = BuildObjectKeyCandidates(fileName);
+        foreach (var objectKey in objectKeyCandidates)
+        {
+            var blobStream = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+            if (blobStream is not null)
+            {
+                if (!_contentTypeProvider.TryGetContentType(fileName, out var resolvedContentType))
+                {
+                    resolvedContentType = "application/octet-stream";
+                }
+
+                return File(blobStream, resolvedContentType, enableRangeProcessing: true);
+            }
+        }
+
+        // Blob storage unavailable or object not found — try the local filesystem.
+        var safeFileName = Path.GetFileName(fileName.Replace('\\', '/'));
+        if (!string.IsNullOrWhiteSpace(safeFileName))
+        {
+            var localPath = FindLocalFile(safeFileName);
+            if (localPath is not null)
+            {
+                var localStream = System.IO.File.OpenRead(localPath);
+                if (!_contentTypeProvider.TryGetContentType(localPath, out var localContentType))
+                {
+                    localContentType = "application/octet-stream";
+                }
+                return File(localStream, localContentType, enableRangeProcessing: true);
+            }
+        }
+
+        return NotFound();
+    }
+
+    /// <summary>
+    /// Searches all configured local storage roots for a file by name.
+    /// Used as a fallback when blob storage is unavailable.
+    /// </summary>
+    private string? FindLocalFile(string safeFileName)
+    {
+        var storageFolderNames = ResolveStorageFolderNames();
+        var defaultDestinations = ResolveDefaultDestinations();
+        var candidatePaths = new List<string>();
+
+        foreach (var storageFolderName in storageFolderNames)
+        {
+            foreach (var destination in defaultDestinations)
+            {
+                var destinationParts = destination.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", "Buckets", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { _environment.ContentRootPath, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { AppContext.BaseDirectory, storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+                candidatePaths.Add(Path.Combine(new[] { Path.GetTempPath(), "Wiseravenshare", storageFolderName }.Concat(destinationParts).Append(safeFileName).ToArray()));
+            }
+        }
+
+        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "Buckets", "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "Buckets", "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "Buckets", "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(_environment.ContentRootPath, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "MediaStorage", safeFileName));
+        candidatePaths.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "MediaStorage", safeFileName));
+
+        var filePath = candidatePaths.FirstOrDefault(System.IO.File.Exists);
+        if (!string.IsNullOrWhiteSpace(filePath))
+            return filePath;
+
+        // Recursive fallback across all known storage roots.
+        var searchRoots = new List<string>();
+        foreach (var storageFolderName in storageFolderNames)
+        {
+            searchRoots.Add(Path.Combine(_environment.ContentRootPath, "Buckets", storageFolderName));
+            searchRoots.Add(Path.Combine(AppContext.BaseDirectory, "Buckets", storageFolderName));
+            searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", "Buckets", storageFolderName));
+            searchRoots.Add(Path.Combine(_environment.ContentRootPath, storageFolderName));
+            searchRoots.Add(Path.Combine(AppContext.BaseDirectory, storageFolderName));
+            searchRoots.Add(Path.Combine(Path.GetTempPath(), "Wiseravenshare", storageFolderName));
+        }
+
+        foreach (var root in searchRoots)
+        {
+            if (!Directory.Exists(root))
+                continue;
+
+            try
+            {
+                var match = Directory.EnumerateFiles(root, safeFileName, SearchOption.AllDirectories).FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(match))
+                    return match;
+            }
+            catch
+            {
+                // Continue through remaining search roots.
+            }
+        }
+
+        return null;
+    }
+
+    private IEnumerable<string> BuildObjectKeyCandidates(string fileName)
+    {
+        var normalizedFileName = Path.GetFileName(fileName.Replace('\\', '/'));
+        var rawPath = fileName.Replace('\\', '/').Trim('/');
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(rawPath))
+        {
+            candidates.Add(rawPath);
+            candidates.Add(rawPath.TrimStart('/'));
+            candidates.Add(rawPath.Replace("//", "/"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedFileName))
+        {
+            candidates.Add(normalizedFileName);
+        }
+
+        foreach (var defaultDestination in ResolveDefaultDestinations().Concat(BuildKnownBucketFolderAliases(projectFolder)))
+        {
+            var safeDestination = defaultDestination.Trim('/');
+            if (!string.IsNullOrWhiteSpace(normalizedFileName))
+            {
+                candidates.Add($"{safeDestination}/{normalizedFileName}".Replace("//", "/"));
+                candidates.Add($"{projectFolder}/{safeDestination}/{normalizedFileName}".Replace("//", "/"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(rawPath))
+            {
+                candidates.Add($"{safeDestination}/{rawPath}".Replace("//", "/"));
+                candidates.Add($"{projectFolder}/{safeDestination}/{rawPath}".Replace("//", "/"));
+                candidates.Add($"{projectFolder}/{rawPath}".Replace("//", "/"));
+                candidates.Add($"{rawPath}".Replace("//", "/"));
+            }
+        }
+
+        candidates.Add($"{projectFolder}/{normalizedFileName}".Replace("//", "/"));
+        candidates.Add(normalizedFileName);
+
+        return candidates
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> BuildKnownBucketFolderAliases(string projectFolder)
+    {
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "wiseravenshare/video",
+            "wiseravenshare/videos",
+            "wiseravenshare/photo",
+            "wiseravenshare/photos",
+            "wiseravenshare/music",
+            "wiseravenshare/Ravevesight/Video",
+            "wiseravenshare/Ravevesight/photo",
+            "wiseravenshare/Ravevesight/music",
+            "wiseravenshare/ravensight/video",
+            "wiseravenshare/ravensight/photo",
+            "wiseravenshare/ravensight/music"
+        };
+
+        if (!string.IsNullOrWhiteSpace(projectFolder))
+        {
+            aliases.Add(projectFolder.Trim('/'));
+            aliases.Add($"{projectFolder.Trim('/')}/video");
+            aliases.Add($"{projectFolder.Trim('/')}/videos");
+            aliases.Add($"{projectFolder.Trim('/')}/photo");
+            aliases.Add($"{projectFolder.Trim('/')}/photos");
+            aliases.Add($"{projectFolder.Trim('/')}/music");
+            aliases.Add($"{projectFolder.Trim('/')}/Ravevesight/Video");
+            aliases.Add($"{projectFolder.Trim('/')}/Ravevesight/photo");
+            aliases.Add($"{projectFolder.Trim('/')}/Ravevesight/music");
+            aliases.Add($"{projectFolder.Trim('/')}/ravensight/video");
+            aliases.Add($"{projectFolder.Trim('/')}/ravensight/photo");
+            aliases.Add($"{projectFolder.Trim('/')}/ravensight/music");
+        }
+
+        return aliases;
+    }
+
+    private string[] ResolveStorageFolderNames()
+    {
+        var configured = new[]
+        {
+            _configuration["Storage:Video:StorageFolderName"],
+            _configuration["Storage:Photo:StorageFolderName"],
+            _configuration["Storage:Music:StorageFolderName"]
+        };
+
+        return configured
+            .Select(value => string.IsNullOrWhiteSpace(value) ? null : value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Concat(new[] { "ravensight_videos", "ravensight_photos", "ravensight_music" })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
+    private string[] ResolveDefaultDestinations()
+    {
+        var projectFolder = StoragePathResolver.ResolveProjectFolder(_configuration, _environment.ContentRootPath, "wiseravenshare");
+        var configuredVideo = NormalizeDestinationFolder(
+            _configuration["Storage:Video:DefaultFolder"],
+            $"{projectFolder}/video");
+
+        var defaults = new[]
+        {
+            configuredVideo,
+            $"{projectFolder}/photo",
+            $"{projectFolder}/music",
+            $"{projectFolder}/videos",
+            $"{projectFolder}/photos",
+            $"{projectFolder}/Ravevesight/Video",
+            $"{projectFolder}/Ravevesight/photo",
+            $"{projectFolder}/Ravevesight/music",
+            $"{projectFolder}/ravensight/video",
+            $"{projectFolder}/ravensight/photo",
+            $"{projectFolder}/ravensight/music"
+        };
+
+        return defaults
+            .Select(value => NormalizeDestinationFolder(value, $"{projectFolder}/video"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string NormalizeDestinationFolder(string? requested, string defaultFolder)
+    {
+        var value = string.IsNullOrWhiteSpace(requested) ? defaultFolder : requested.Trim();
+        value = value.Replace('\\', '/').Trim('/');
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            value = defaultFolder;
+        }
+
+        var safeSegments = value
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => new string(segment.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.').ToArray()))
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+
+        if (safeSegments.Length == 0)
+        {
+            return defaultFolder;
+        }
+
+        return string.Join('/', safeSegments);
+    }
+}

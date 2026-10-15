@@ -1,0 +1,2929 @@
+using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.External.DeepSeekService;
+using Wiseravenshare.Server.Services.Truth;
+using Npgsql;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.AiAssistant;
+using Wiseravenshare.Server.Infrastructure.Data.Repositories;
+using Wiseravenshare.Server.Infrastructure.External;
+using Wiseravenshare.Server.Interfaces.Repositories;
+using Microsoft.Extensions.FileProviders;
+using Wiseravenshare.Server.Hubs;
+using Wiseravenshare.Server.Middleware;
+using Wiseravenshare.Server.Interfaces.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
+using Wiseravenshare.Server.Services.FM;
+using Wiseravenshare.Server.Services.Personalization;
+using Wiseravenshare.Server.Services.Crawler;
+using System.IO.Compression;
+using System.Diagnostics;
+using System.Globalization;
+using Microsoft.AspNetCore.ResponseCompression;
+
+var builder = WebApplication.CreateBuilder(args);
+
+static string NormalizeConnectionString(string connectionString)
+{
+    var value = connectionString?.Trim() ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    if (!value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+        && !value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        return value;
+    }
+
+    if (value.EndsWith("?sslmode", StringComparison.OrdinalIgnoreCase))
+    {
+        return value + "=require";
+    }
+
+    value = value.Replace("?sslmode&", "?sslmode=require&", StringComparison.OrdinalIgnoreCase);
+    value = value.Replace("&sslmode&", "&sslmode=require&", StringComparison.OrdinalIgnoreCase);
+
+    if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+    {
+        return value;
+    }
+
+    var userName = string.Empty;
+    var password = string.Empty;
+    if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+    {
+        var parts = uri.UserInfo.Split(':', 2);
+        userName = Uri.UnescapeDataString(parts[0]);
+        if (parts.Length > 1)
+        {
+            password = Uri.UnescapeDataString(parts[1]);
+        }
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Username = userName,
+        Password = password,
+        Database = uri.AbsolutePath.Trim('/'),
+        SslMode = SslMode.Require,
+        Pooling = true
+    };
+
+    var query = uri.Query?.TrimStart('?') ?? string.Empty;
+    foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var kv = segment.Split('=', 2);
+        var key = Uri.UnescapeDataString(kv[0]);
+        var val = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+        if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase)
+            && Enum.TryParse<SslMode>(val, true, out var mode))
+        {
+            builder.SslMode = mode;
+        }
+    }
+
+    return builder.ConnectionString;
+}
+
+static string ResolvePrimaryConnectionString(IConfiguration configuration)
+{
+    var databaseUrl = configuration["DATABASE_URL"];
+    if (!string.IsNullOrWhiteSpace(databaseUrl))
+    {
+        return NormalizeConnectionString(databaseUrl);
+    }
+
+    var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+        ?? configuration.GetConnectionString("DatabaseConnection")
+        ?? string.Empty;
+
+    return NormalizeConnectionString(defaultConnection);
+}
+
+static string ResolveExpectedDatabaseName(IConfiguration configuration)
+{
+    var configured = configuration["Database:ExpectedName"]?.Trim();
+    return string.IsNullOrWhiteSpace(configured) ? "defaultdb" : configured;
+}
+
+static string ExtractDatabaseName(string connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return string.Empty;
+    }
+
+    try
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        return builder.Database?.Trim() ?? string.Empty;
+    }
+    catch
+    {
+        return string.Empty;
+    }
+}
+
+static string NormalizeFolderPath(string? folder)
+{
+    var normalized = (folder ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(normalized))
+    {
+        return "wiseravenshare/";
+    }
+
+    normalized = normalized.Replace('\\', '/').Trim('/');
+    return normalized + "/";
+}
+
+static string ToSqlLiteral(string value)
+{
+    return "'" + value.Replace("'", "''") + "'";
+}
+
+static IEnumerable<string> SplitSqlStatements(string script)
+{
+    if (string.IsNullOrWhiteSpace(script))
+    {
+        yield break;
+    }
+
+    var builder = new StringBuilder();
+    var inString = false;
+    string? dollarTag = null;
+    var inLineComment = false;
+    var inBlockComment = false;
+
+    for (var index = 0; index < script.Length; index++)
+    {
+        var current = script[index];
+        var next = index + 1 < script.Length ? script[index + 1] : '\0';
+
+        if (inLineComment)
+        {
+            builder.Append(current);
+            if (current == '\n')
+            {
+                inLineComment = false;
+            }
+
+            continue;
+        }
+
+        if (inBlockComment)
+        {
+            builder.Append(current);
+            if (current == '*' && next == '/')
+            {
+                builder.Append(next);
+                index++;
+                inBlockComment = false;
+            }
+
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '-' && next == '-')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            inLineComment = true;
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '/' && next == '*')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            inBlockComment = true;
+            continue;
+        }
+
+        if (!inString && dollarTag is null && current == '$')
+        {
+            var tagEnd = script.IndexOf('$', index + 1);
+            if (tagEnd > index)
+            {
+                var possibleTag = script.Substring(index, tagEnd - index + 1);
+                if (possibleTag.Length >= 2 && possibleTag.All(ch => ch == '$' || ch == '_' || char.IsLetterOrDigit(ch)))
+                {
+                    dollarTag = possibleTag;
+                    builder.Append(possibleTag);
+                    index = tagEnd;
+                    continue;
+                }
+            }
+        }
+
+        if (dollarTag is not null)
+        {
+            if (current == '$')
+            {
+                if (index + dollarTag.Length - 1 < script.Length
+                    && string.Compare(script, index, dollarTag, 0, dollarTag.Length, StringComparison.Ordinal) == 0)
+                {
+                    builder.Append(dollarTag);
+                    index += dollarTag.Length - 1;
+                    dollarTag = null;
+                    continue;
+                }
+            }
+
+            builder.Append(current);
+            continue;
+        }
+
+        if (current == '\'' && next == '\'')
+        {
+            builder.Append(current);
+            builder.Append(next);
+            index++;
+            continue;
+        }
+
+        if (current == '\'')
+        {
+            inString = !inString;
+            builder.Append(current);
+            continue;
+        }
+
+        if (current == ';' && !inString)
+        {
+            var statement = builder.ToString().Trim();
+            if (!string.IsNullOrWhiteSpace(statement))
+            {
+                yield return statement;
+            }
+
+            builder.Clear();
+            continue;
+        }
+
+        builder.Append(current);
+    }
+
+    var trailing = builder.ToString().Trim();
+    if (!string.IsNullOrWhiteSpace(trailing))
+    {
+        yield return trailing;
+    }
+}
+
+static async Task EnsureMigrationsHistoryTableAsync(AppDbContext dbContext, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    const string historySql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+CREATE TABLE IF NOT EXISTS app_data.""__EFMigrationsHistory"" (
+    ""MigrationId"" character varying(150) NOT NULL,
+    ""ProductVersion"" character varying(32) NOT NULL,
+    CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
+);";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(historySql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task ApplyModelCreateScriptIdempotentlyAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var script = dbContext.Database.GenerateCreateScript();
+    if (string.IsNullOrWhiteSpace(script))
+    {
+        return;
+    }
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var statement in SplitSqlStatements(script))
+    {
+        await using var command = new NpgsqlCommand(statement, connection);
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException ex) when (
+            ex.SqlState == PostgresErrorCodes.DuplicateTable
+            || ex.SqlState == PostgresErrorCodes.DuplicateObject
+            || ex.SqlState == PostgresErrorCodes.DuplicateColumn)
+        {
+            // Existing objects are expected when bootstrapping over a partially provisioned database.
+            logger.LogDebug("Skipped duplicate schema statement during bootstrap: {SqlState}", ex.SqlState);
+        }
+    }
+}
+
+static async Task MarkInitialMigrationAppliedAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var migrations = dbContext.Database.GetMigrations().ToList();
+    if (migrations.Count == 0)
+    {
+        return;
+    }
+
+    var initialMigration = migrations[0];
+
+    var productVersion = typeof(DbContext).Assembly.GetName().Version is { } version
+        ? $"{version.Major}.{version.Minor}.{version.Build}"
+        : "10.0.10";
+
+    await EnsureMigrationsHistoryTableAsync(dbContext, cancellationToken);
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string insertSql = @"
+INSERT INTO app_data.""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+VALUES (@migrationId, @productVersion)
+ON CONFLICT (""MigrationId"") DO NOTHING;";
+
+    await using var command = new NpgsqlCommand(insertSql, connection);
+    command.Parameters.AddWithValue("migrationId", initialMigration);
+    command.Parameters.AddWithValue("productVersion", productVersion);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+
+    logger.LogInformation("EF migration history baseline was reconciled with initial migration {MigrationId}.", initialMigration);
+}
+
+static bool IsDuplicateMigrationConflict(Exception exception)
+{
+    if (exception is PostgresException pg)
+    {
+        return pg.SqlState == PostgresErrorCodes.DuplicateTable
+            || pg.SqlState == PostgresErrorCodes.DuplicateObject
+            || pg.SqlState == PostgresErrorCodes.DuplicateColumn;
+    }
+
+    return exception.InnerException is not null && IsDuplicateMigrationConflict(exception.InnerException);
+}
+
+/// <summary>
+/// True when every named table exists in app_data. Used to decide whether a
+/// duplicate-object migration failure can be safely skipped: if the tables the
+/// migration was supposed to create are all present, the failure is redundant;
+/// if any are missing, the migration genuinely did not complete.
+/// </summary>
+static async Task<bool> HasTablesAsync(AppDbContext dbContext, IReadOnlyCollection<string> tableNames, CancellationToken cancellationToken = default)
+{
+    if (tableNames.Count == 0)
+    {
+        return true;
+    }
+
+    const string sql = @"
+WITH expected(name) AS (
+    SELECT UNNEST(@names::text[])
+)
+SELECT COUNT(*) AS ""Value""
+FROM expected
+WHERE EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS c
+    INNER JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'app_data'
+      AND c.relkind IN ('r', 'p')
+      AND lower(c.relname) = lower(expected.name)
+);";
+
+    var result = await dbContext.Database
+        .SqlQueryRaw<int>(sql, new NpgsqlParameter("names", tableNames.ToArray()))
+        .ToListAsync(cancellationToken);
+
+    return result.FirstOrDefault() >= tableNames.Count;
+}
+
+/// <summary>
+/// The set of tables the current EF model expects in the app_data schema.
+///
+/// Derived from the model rather than by parsing migration source, so it stays
+/// correct as migrations are added. Used to tell a genuinely-redundant
+/// duplicate-object failure apart from a migration that aborted halfway.
+/// </summary>
+static IReadOnlyCollection<string> ResolveExpectedTables(AppDbContext dbContext)
+{
+    var tables = dbContext.Model.GetEntityTypes()
+        .Select(entityType => entityType.GetTableName())
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Select(name => name!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    return tables;
+}
+
+/// <summary>
+/// The subset of <paramref name="tableNames"/> that does not exist in app_data.
+/// Only used for diagnostics, so a failure here must not mask the real error.
+/// </summary>
+static async Task<IReadOnlyCollection<string>> DescribeMissingTablesAsync(
+    AppDbContext dbContext,
+    IReadOnlyCollection<string> tableNames,
+    CancellationToken cancellationToken = default)
+{
+    try
+    {
+        const string sql = @"
+WITH expected(name) AS (
+    SELECT UNNEST(@names::text[])
+)
+SELECT expected.name AS ""Value""
+FROM expected
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS c
+    INNER JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'app_data'
+      AND c.relkind IN ('r', 'p')
+      AND lower(c.relname) = lower(expected.name)
+);";
+
+        var missing = await dbContext.Database
+            .SqlQueryRaw<string>(sql, new NpgsqlParameter("names", tableNames.ToArray()))
+            .ToListAsync(cancellationToken);
+        return missing.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+    catch
+    {
+        return tableNames;
+    }
+}
+
+static async Task MarkMigrationsAppliedAsync(AppDbContext dbContext, ILogger logger, IReadOnlyCollection<string> migrationIds, CancellationToken cancellationToken = default)
+{
+    if (migrationIds.Count == 0)
+    {
+        return;
+    }
+
+    var connectionString = dbContext.Database.GetConnectionString();
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    var productVersion = typeof(DbContext).Assembly.GetName().Version is { } version
+        ? $"{version.Major}.{version.Minor}.{version.Build}"
+        : "10.0.10";
+
+    await EnsureMigrationsHistoryTableAsync(dbContext, cancellationToken);
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string insertSql = @"
+INSERT INTO app_data.""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+VALUES (@migrationId, @productVersion)
+ON CONFLICT (""MigrationId"") DO NOTHING;";
+
+    foreach (var migrationId in migrationIds)
+    {
+        await using var command = new NpgsqlCommand(insertSql, connection);
+        command.Parameters.AddWithValue("migrationId", migrationId);
+        command.Parameters.AddWithValue("productVersion", productVersion);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    logger.LogInformation("Reconciled EF migration history for existing schema objects: {MigrationIds}", string.Join(", ", migrationIds));
+}
+
+static async Task EnsureDatabaseSchemaAsync(AppDbContext dbContext, ILogger logger, CancellationToken cancellationToken = default)
+{
+    try
+    {
+        var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        if (pendingMigrations.Count > 0)
+        {
+            try
+            {
+                await dbContext.Database.MigrateAsync(cancellationToken);
+            }
+            catch (Exception migrateEx) when (IsDuplicateMigrationConflict(migrateEx))
+            {
+                // A duplicate-object failure only means "already applied" if the
+                // objects the pending migrations create are actually present.
+                // Checking the base schema instead would mark a half-applied
+                // migration as complete and permanently strand its tables.
+                var expectedTables = ResolveExpectedTables(dbContext);
+                var schemaReady = await HasTablesAsync(dbContext, expectedTables, cancellationToken);
+                if (!schemaReady)
+                {
+                    logger.LogError(
+                        migrateEx,
+                        "Migration reported a duplicate-object conflict but the expected tables are missing: {Tables}. Applying the model bootstrap script to reconcile.",
+                        string.Join(", ", expectedTables));
+                    throw;
+                }
+
+                await MarkMigrationsAppliedAsync(dbContext, logger, pendingMigrations, cancellationToken);
+                logger.LogInformation("Skipped duplicate-object migration failure because required schema already exists.");
+            }
+
+            return;
+        }
+
+        var databaseExists = await dbContext.Database.CanConnectAsync(cancellationToken);
+        if (!databaseExists)
+        {
+            logger.LogInformation("Database is not reachable; creating schema from the current EF model.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+            return;
+        }
+
+        var hasAnyTables = await dbContext.Database.SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'app_data' LIMIT 1").AnyAsync(cancellationToken);
+        var hasUsersTable = await dbContext.Database.SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'app_data' AND table_name = 'Users' LIMIT 1").AnyAsync(cancellationToken);
+
+        if (!hasAnyTables || !hasUsersTable)
+        {
+            logger.LogInformation("app_data is missing required EF tables; creating schema from the current EF model.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Schema migration failed; applying model bootstrap script and reconciling migration history.");
+        try
+        {
+            await ApplyModelCreateScriptIdempotentlyAsync(dbContext, logger, cancellationToken);
+            await MarkInitialMigrationAppliedAsync(dbContext, logger, cancellationToken);
+        }
+        catch (Exception ensureEx)
+        {
+            logger.LogError(ensureEx, "Schema bootstrap failed during model-based fallback. Attempting EnsureCreated as a final fallback.");
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+
+        try
+        {
+            var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+            if (pendingMigrations.Count > 0)
+            {
+                await dbContext.Database.MigrateAsync(cancellationToken);
+            }
+        }
+        catch (Exception migrateRetryEx) when (IsDuplicateMigrationConflict(migrateRetryEx))
+        {
+            var remainingMigrations = (await dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+            var expectedTables = ResolveExpectedTables(dbContext);
+            var schemaReady = await HasTablesAsync(dbContext, expectedTables, cancellationToken);
+            if (!schemaReady)
+            {
+                // Do not mark migrations applied while model tables are missing:
+                // that is precisely how a partially-applied migration becomes
+                // permanently recorded as complete.
+                var missing = await DescribeMissingTablesAsync(dbContext, expectedTables, cancellationToken);
+                logger.LogError(
+                    migrateRetryEx,
+                    "Final migration pass hit duplicate objects but these model tables are still missing: {Tables}",
+                    missing);
+                throw;
+            }
+
+            await MarkMigrationsAppliedAsync(dbContext, logger, remainingMigrations, cancellationToken);
+            logger.LogInformation("Final migration pass detected duplicate objects on an operational schema; migration history was reconciled.");
+        }
+        catch (Exception migrateRetryEx)
+        {
+            logger.LogWarning(migrateRetryEx, "Final migration pass after schema bootstrap was skipped because schema is already operational.");
+        }
+    }
+}
+
+static async Task EnsureBucketObjectsRegistryAsync(
+    string connectionString,
+    string bucketName,
+    string folderPath,
+    CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return;
+    }
+
+    await DatabasePrivilegeBootstrap.EnsureAppDataPrivilegesAsync(connectionString, cancellationToken);
+
+    var safeBucketName = string.IsNullOrWhiteSpace(bucketName) ? "bucket-wrs-01010" : bucketName.Trim();
+    var safeFolderPath = NormalizeFolderPath(folderPath);
+
+    var bucketLiteral = ToSqlLiteral(safeBucketName);
+    var folderLiteral = ToSqlLiteral(safeFolderPath);
+
+    var sql = $@"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.""Users"" (
+    ""Id"" UUID PRIMARY KEY,
+    ""Email"" TEXT NOT NULL UNIQUE,
+    ""Username"" TEXT NOT NULL,
+    ""DisplayName"" TEXT NOT NULL,
+    ""PasswordHash"" TEXT NOT NULL,
+    ""Bio"" TEXT NULL,
+    ""AvatarUrl"" TEXT NULL,
+    ""CoverPhotoUrl"" TEXT NULL,
+    ""Location"" TEXT NULL,
+    ""Website"" TEXT NULL,
+    ""IsVerified"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsPrivate"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Role"" INTEGER NOT NULL DEFAULT 0,
+    ""TruthScore"" NUMERIC NOT NULL DEFAULT 50.00,
+    ""ReputationPoints"" INTEGER NOT NULL DEFAULT 0,
+    ""LastLoginAt"" TIMESTAMPTZ NULL,
+    ""LastActiveAt"" TIMESTAMPTZ NULL,
+    ""RefreshToken"" TEXT NULL,
+    ""RefreshTokenExpiryTime"" TIMESTAMPTZ NULL,
+    ""PasswordResetToken"" TEXT NULL,
+    ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS app_data.bucket_objects (
+    id TEXT PRIMARY KEY,
+    owner_user_id UUID NULL,
+    provider TEXT NOT NULL DEFAULT 'digitalocean_spaces',
+    bucket_name TEXT NOT NULL DEFAULT {bucketLiteral},
+    region TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    folder_path TEXT NOT NULL DEFAULT {folderLiteral},
+    object_key TEXT NOT NULL,
+    original_file_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+    etag TEXT NULL,
+    acl TEXT NOT NULL DEFAULT 'private',
+    cdn_base_url TEXT NULL,
+    public_url TEXT NULL,
+    upload_status TEXT NOT NULL DEFAULT 'uploaded',
+    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ NULL,
+    CONSTRAINT fk_bucket_objects_owner
+        FOREIGN KEY (owner_user_id) REFERENCES app_data.""Users"" (""Id"") ON DELETE SET NULL,
+    CONSTRAINT uq_bucket_objects_bucket_key UNIQUE (bucket_name, object_key)
+);
+
+DO $$
+BEGIN
+    IF pg_catalog.has_table_privilege(current_user, 'app_data.bucket_objects', 'update') THEN
+        ALTER TABLE app_data.bucket_objects
+            ALTER COLUMN bucket_name SET DEFAULT {bucketLiteral},
+            ALTER COLUMN folder_path SET DEFAULT {folderLiteral};
+    END IF;
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_owner_created
+    ON app_data.bucket_objects (owner_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_folder_created
+    ON app_data.bucket_objects (folder_path, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_status_created
+    ON app_data.bucket_objects (upload_status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_objects_metadata_gin
+    ON app_data.bucket_objects USING GIN (metadata);
+
+DO $$
+BEGIN
+    IF to_regclass('app_data.""PostLikes""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_likes_post_user_unique
+            ON app_data.""PostLikes"" (""PostId"", ""UserId"");
+    END IF;
+
+    IF to_regclass('app_data.""PostReposts""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_reposts_post_user_unique
+            ON app_data.""PostReposts"" (""PostId"", ""UserId"");
+    END IF;
+
+    IF to_regclass('app_data.""PostBookmarks""') IS NOT NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_bookmarks_post_user_unique
+            ON app_data.""PostBookmarks"" (""PostId"", ""UserId"");
+    END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_data.set_updated_at_timestamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_bucket_objects_updated_at ON app_data.bucket_objects;
+CREATE TRIGGER trg_bucket_objects_updated_at
+BEFORE UPDATE ON app_data.bucket_objects
+FOR EACH ROW EXECUTE FUNCTION app_data.set_updated_at_timestamp();";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task EnsureCrossPlatformTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.bridge_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL UNIQUE,
+    platform VARCHAR(50) NOT NULL,
+    external_user_id VARCHAR(255) NOT NULL,
+    session_data JSONB,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_activity TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE,
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.collaboration_rooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id VARCHAR(255) NOT NULL UNIQUE,
+    room_name VARCHAR(255) NOT NULL,
+    owner_id UUID NULL,
+    platform VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.room_participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id VARCHAR(255) NOT NULL,
+    user_id UUID NULL,
+    external_user_id VARCHAR(255),
+    platform VARCHAR(50),
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    left_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE,
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS app_data.bridge_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    source VARCHAR(50) NOT NULL,
+    target VARCHAR(50) NOT NULL,
+    message_type VARCHAR(50) NOT NULL,
+    content TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    processed_at TIMESTAMPTZ,
+    is_processed BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS app_data.file_transfers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transfer_id VARCHAR(255) NOT NULL UNIQUE,
+    room_id VARCHAR(255) NOT NULL,
+    user_id UUID NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    file_type VARCHAR(100) NOT NULL,
+    file_url TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    chunk_count INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_bridge_sessions_platform_user
+    ON app_data.bridge_sessions (platform, external_user_id);
+CREATE INDEX IF NOT EXISTS idx_room_participants_room
+    ON app_data.room_participants (room_id, is_active);
+
+CREATE TABLE IF NOT EXISTS app_data.""InstrumentConnections"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(120) NOT NULL,
+    ""DeviceName"" VARCHAR(255) NOT NULL,
+    ""Transport"" VARCHAR(40) NOT NULL DEFAULT 'wired',
+    ""HardwareAddress"" VARCHAR(120),
+    ""IsPaired"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsTrusted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LastSeenAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_instrument_connections_user
+    ON app_data.""InstrumentConnections"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StreamTransfers"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""SourceApp"" VARCHAR(100) NOT NULL DEFAULT 'WiseRavenShare',
+    ""SourceContentId"" VARCHAR(200) NOT NULL,
+    ""SourceCreatorId"" VARCHAR(200) NOT NULL,
+    ""VideoUrl"" VARCHAR(2048) NOT NULL,
+    ""Title"" VARCHAR(500) NOT NULL,
+    ""Description"" VARCHAR(4000) NULL,
+    ""FileSizeBytes"" BIGINT NOT NULL DEFAULT 0,
+    ""MimeType"" VARCHAR(100) NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""StreamVideoUid"" VARCHAR(200) NULL,
+    ""PublishedAt"" TIMESTAMPTZ NULL,
+    ""RetryCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RubricResultJson"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_data.""StreamGatekeeperDecisions"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""TransferId"" UUID NOT NULL REFERENCES app_data.""StreamTransfers""(""Id"") ON DELETE CASCADE,
+    ""AdminId"" VARCHAR(200) NOT NULL,
+    ""Action"" VARCHAR(50) NOT NULL,
+    ""Rationale"" VARCHAR(2000) NOT NULL,
+    ""DecidedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stream_transfers_status
+    ON app_data.""StreamTransfers"" (""Status"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_stream_transfers_creator
+    ON app_data.""StreamTransfers"" (""SourceCreatorId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_stream_gatekeeper_transfer
+    ON app_data.""StreamGatekeeperDecisions"" (""TransferId"");
+
+ALTER TABLE IF EXISTS app_data.""StreamTransfers""
+    ADD COLUMN IF NOT EXISTS ""SourceApp"" VARCHAR(100) NOT NULL DEFAULT 'WiseRavenShare';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_instrument_connections_user_device
+    ON app_data.""InstrumentConnections"" (""UserId"", ""DeviceIdentifier"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureRigProfiles"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigName"" VARCHAR(150) NOT NULL DEFAULT 'WiseRaven Capture Rig',
+    ""AnalogInputChannels"" INTEGER NOT NULL DEFAULT 2,
+    ""HasAnalogPreamps"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasUsbCConnectivity"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasBluetoothPairing"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasMidiInOut"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""HasWifi6Streaming"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""EnableIpProtection"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Notes"" VARCHAR(1200) NULL,
+    ""LastConfiguredAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_capture_rig_profiles_user
+    ON app_data.""StudioCaptureRigProfiles"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""StudioCaptureSourceCaptures"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""RigProfileId"" UUID NULL,
+    ""SourceType"" VARCHAR(30) NOT NULL DEFAULT 'analog',
+    ""SourceName"" VARCHAR(255) NOT NULL,
+    ""DeviceIdentifier"" VARCHAR(255) NOT NULL,
+    ""FileName"" VARCHAR(255) NULL,
+    ""DurationSeconds"" NUMERIC NULL,
+    ""ChannelCount"" INTEGER NULL,
+    ""CapturedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""FingerprintHash"" VARCHAR(128) NOT NULL,
+    ""FingerprintedAtUtc"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""MetadataJson"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_user_time
+    ON app_data.""StudioCaptureSourceCaptures"" (""UserId"", ""CapturedAtUtc"" DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_capture_source_captures_rig
+    ON app_data.""StudioCaptureSourceCaptures"" (""RigProfileId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""MediaType"" INTEGER NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""FileName"" VARCHAR(255) NOT NULL,
+    ""FilePath"" VARCHAR(2048) NOT NULL,
+    ""FileUrl"" VARCHAR(2048) NOT NULL,
+    ""MimeType"" VARCHAR(255) NOT NULL,
+    ""FileSize"" BIGINT NOT NULL DEFAULT 0,
+    ""Width"" INTEGER NULL,
+    ""Height"" INTEGER NULL,
+    ""Duration"" INTEGER NULL,
+    ""ThumbnailPath"" VARCHAR(2048) NULL,
+    ""ThumbnailUrl"" VARCHAR(2048) NULL,
+    ""PreviewPath"" VARCHAR(2048) NULL,
+    ""PreviewUrl"" VARCHAR(2048) NULL,
+    ""Metadata"" JSONB NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""Views"" INTEGER NOT NULL DEFAULT 0,
+    ""Downloads"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_items_user
+    ON app_data.""MediaItems"" (""UserId"");
+CREATE INDEX IF NOT EXISTS idx_media_items_type_status
+    ON app_data.""MediaItems"" (""MediaType"", ""Status"");
+CREATE INDEX IF NOT EXISTS idx_media_items_created
+    ON app_data.""MediaItems"" (""CreatedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(100) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""UsageCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_tags_name
+    ON app_data.""MediaTags"" (""Name"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaItemTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""TagId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_item_tags_media_tag
+    ON app_data.""MediaItemTags"" (""MediaId"", ""TagId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaComments"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ParentCommentId"" UUID NULL,
+    ""Content"" VARCHAR(2000) NOT NULL,
+    ""LikesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RepliesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsSoftDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""TimestampSeconds"" INTEGER NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_comments_media
+    ON app_data.""MediaComments"" (""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_comments_user
+    ON app_data.""MediaComments"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylists"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""CoverImageUrl"" VARCHAR(2048) NULL,
+    ""ItemCount"" INTEGER NOT NULL DEFAULT 0,
+    ""Plays"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_playlists_user
+    ON app_data.""MediaPlaylists"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaylistItems"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PlaylistId"" UUID NOT NULL,
+    ""MediaId"" UUID NOT NULL,
+    ""OrderIndex"" INTEGER NOT NULL DEFAULT 0,
+    ""AddedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_media
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_playlist_items_playlist_order
+    ON app_data.""MediaPlaylistItems"" (""PlaylistId"", ""OrderIndex"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaViewHistories"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ViewedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PositionSeconds"" INTEGER NULL,
+    ""ViewDuration"" INTEGER NULL,
+    ""DeviceInfo"" VARCHAR(256) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_view_histories_media_user_time
+    ON app_data.""MediaViewHistories"" (""MediaId"", ""UserId"", ""ViewedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaPlaybackStates"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""PositionSeconds"" INTEGER NOT NULL DEFAULT 0,
+    ""IsPlaying"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Completed"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""LastPlayedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_playback_states_user_media
+    ON app_data.""MediaPlaybackStates"" (""UserId"", ""MediaId"");
+CREATE INDEX IF NOT EXISTS idx_media_playback_states_completed_last_played
+    ON app_data.""MediaPlaybackStates"" (""Completed"", ""LastPlayedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_likes_media_user
+    ON app_data.""MediaLikes"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""MediaBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""MediaId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_bookmarks_media_user
+    ON app_data.""MediaBookmarks"" (""MediaId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'FM',
+    ""City"" VARCHAR(255) NULL,
+    ""Country"" VARCHAR(255) NULL,
+    ""State"" VARCHAR(50) NULL,
+    ""Latitude"" DOUBLE PRECISION NULL,
+    ""Longitude"" DOUBLE PRECISION NULL,
+    ""StreamUrl"" VARCHAR(500) NOT NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""Genre"" VARCHAR(50) NOT NULL DEFAULT 'General',
+    ""Language"" VARCHAR(100) NOT NULL DEFAULT 'English',
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""IsFeatured"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Bitrate"" INTEGER NOT NULL DEFAULT 128,
+    ""Codec"" VARCHAR(50) NULL,
+    ""CreatedBy"" UUID NULL,
+    ""IsVerified"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""VerifiedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequency_band
+    ON app_data.""FMStations"" (""Frequency"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_frequencykey_band
+    ON app_data.""FMStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_featured
+    ON app_data.""FMStations"" (""IsFeatured"");
+CREATE INDEX IF NOT EXISTS idx_fm_stations_listeners
+    ON app_data.""FMStations"" (""Listeners"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_likes_station_user
+    ON app_data.""FMStationLikes"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_station_bookmarks_station_user
+    ON app_data.""FMStationBookmarks"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""FMStationHistory"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ListenedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fm_station_history_user_time
+    ON app_data.""FMStationHistory"" (""UserId"", ""ListenedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""FMUserPreferences"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""FavoriteGenres"" TEXT[] NULL,
+    ""FavoriteLanguages"" TEXT[] NULL,
+    ""RecentStations"" JSONB NULL,
+    ""Volume"" INTEGER NOT NULL DEFAULT 80,
+    ""AutoPlay"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowLyrics"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ShowAlbumArt"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LowQualityMode"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fm_user_preferences_user
+    ON app_data.""FMUserPreferences"" (""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""CreatorRadioStations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""Genre"" VARCHAR(255) NULL,
+    ""SubGenre"" VARCHAR(255) NULL,
+    ""LogoUrl"" VARCHAR(500) NULL,
+    ""CoverImageUrl"" VARCHAR(500) NULL,
+    ""StreamUrl"" VARCHAR(500) NULL,
+    ""StreamKey"" VARCHAR(500) NULL,
+    ""Website"" VARCHAR(500) NULL,
+    ""SocialLinks"" VARCHAR(500) NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Visibility"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""LastLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledLiveAt"" TIMESTAMPTZ NULL,
+    ""ScheduledEndAt"" TIMESTAMPTZ NULL,
+    ""Listeners"" INTEGER NOT NULL DEFAULT 0,
+    ""TotalListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""PeakListeners"" INTEGER NOT NULL DEFAULT 0,
+    ""FollowerCount"" INTEGER NOT NULL DEFAULT 0,
+    ""AllowChat"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowRequests"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""AllowShoutouts"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""RequireApproval"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Schedule"" JSONB NULL,
+    ""Playlist"" JSONB NULL,
+    ""Settings"" JSONB NULL,
+    ""IsMonetized"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""SubscriptionPrice"" NUMERIC(18,2) NULL,
+    ""AllowDonations"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DonationLink"" TEXT NULL,
+    ""IsProprietaryFrequency"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""FrequencyLockedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_creator_radio_creator
+    ON app_data.""CreatorRadioStations"" (""CreatorId"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_frequencykey_band
+    ON app_data.""CreatorRadioStations"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_creator_radio_live_status
+    ON app_data.""CreatorRadioStations"" (""IsLive"", ""Status"", ""Visibility"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationSchedules"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(500) NULL,
+    ""DayOfWeek"" INTEGER NOT NULL,
+    ""StartTime"" INTERVAL NOT NULL,
+    ""EndTime"" INTERVAL NOT NULL,
+    ""Timezone"" VARCHAR(64) NOT NULL DEFAULT 'UTC',
+    ""IsRecurring"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""SpecificDate"" TIMESTAMPTZ NULL,
+    ""HostName"" VARCHAR(255) NULL,
+    ""Genre"" VARCHAR(255) NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_schedule_station_day_start
+    ON app_data.""RadioStationSchedules"" (""StationId"", ""DayOfWeek"", ""StartTime"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationEpisodes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""ScheduleId"" UUID NULL,
+    ""Title"" VARCHAR(255) NOT NULL,
+    ""Description"" VARCHAR(2000) NULL,
+    ""AudioUrl"" VARCHAR(500) NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""BroadcastDate"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ListenCount"" INTEGER NOT NULL DEFAULT 0,
+    ""LikeCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CommentCount"" INTEGER NOT NULL DEFAULT 0,
+    ""ShareCount"" INTEGER NOT NULL DEFAULT 0,
+    ""IsLiveRecording"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsPublished"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_episode_station_broadcast
+    ON app_data.""RadioStationEpisodes"" (""StationId"", ""BroadcastDate"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFollows"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""FollowedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsNotified"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_follows_station_user
+    ON app_data.""RadioStationFollows"" (""StationId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationListens"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""StartedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""EndedAt"" TIMESTAMPTZ NULL,
+    ""Duration"" INTEGER NOT NULL DEFAULT 0,
+    ""DeviceInfo"" VARCHAR(255) NULL,
+    ""IPAddress"" VARCHAR(80) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_listens_station_started
+    ON app_data.""RadioStationListens"" (""StationId"", ""StartedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationRequests"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""SongTitle"" VARCHAR(255) NOT NULL,
+    ""ArtistName"" VARCHAR(255) NULL,
+    ""Message"" VARCHAR(500) NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""PlayedAt"" TIMESTAMPTZ NULL,
+    ""PlayedBy"" UUID NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_requests_station_status_time
+    ON app_data.""RadioStationRequests"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationShoutouts"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""Message"" VARCHAR(500) NOT NULL,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ReadAt"" TIMESTAMPTZ NULL,
+    ""AcknowledgedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_radio_shoutouts_station_status_time
+    ON app_data.""RadioStationShoutouts"" (""StationId"", ""Status"", ""RequestedAt"" DESC);
+
+CREATE TABLE IF NOT EXISTS app_data.""RadioStationFrequencyClaims"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""StationId"" UUID NOT NULL,
+    ""CreatorId"" UUID NOT NULL,
+    ""Frequency"" VARCHAR(100) NOT NULL,
+    ""Band"" VARCHAR(50) NOT NULL DEFAULT 'ONLINE',
+    ""FrequencyKey"" VARCHAR(128) NOT NULL,
+    ""IsLocked"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""LockedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_radio_freq_claims_key_band
+    ON app_data.""RadioStationFrequencyClaims"" (""FrequencyKey"", ""Band"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_station
+    ON app_data.""RadioStationFrequencyClaims"" (""StationId"");
+CREATE INDEX IF NOT EXISTS idx_radio_freq_claims_creator
+    ON app_data.""RadioStationFrequencyClaims"" (""CreatorId"");";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task EnsureColumnPatchesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+-- Users table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Users""
+    ADD COLUMN IF NOT EXISTS ""PasswordResetToken"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL;
+
+-- Posts table: columns added in later migrations
+ALTER TABLE IF EXISTS app_data.""Posts""
+    ADD COLUMN IF NOT EXISTS ""IsTruthDispatch"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""IsSensitive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthDeclarationAccepted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""TruthCorrection"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""TruthSources"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""Latitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""Longitude"" DOUBLE PRECISION NULL,
+    ADD COLUMN IF NOT EXISTS ""LocationName"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""MediaMetadata"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""SharesCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""ViewsCount"" INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""IsPinned"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""QuoteOfId"" UUID NULL;
+
+-- WiseCoins table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""WiseCoins"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Balance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""StakedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalEarned"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalSpent"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- WiseCoins: add columns that were added after initial bootstrap
+ALTER TABLE IF EXISTS app_data.""WiseCoins""
+    ADD COLUMN IF NOT EXISTS ""LockedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""EscrowedBalance"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""WorkHoursContributed"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""CurrentValuePerHour"" DECIMAL(18,8) NOT NULL DEFAULT 10,
+    ADD COLUMN IF NOT EXISTS ""HasReceivedInitialAllocation"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""InitialAllocationDate"" TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS ""InitialAllocationAmount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""BadgeMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS ""SkillMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS ""ReputationMultiplier"" DECIMAL(18,8) NOT NULL DEFAULT 1;
+
+-- CoinTransactions table (currency system)
+CREATE TABLE IF NOT EXISTS app_data.""CoinTransactions"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""WiseCoinId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""TargetUserId"" UUID NULL,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""Amount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""NetAmount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Fee"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHoursValue"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHourRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""Status"" INTEGER NOT NULL DEFAULT 0,
+    ""Description"" TEXT NOT NULL DEFAULT '',
+    ""ReferenceId"" TEXT NULL,
+    ""ReferenceType"" TEXT NULL,
+    ""Metadata"" TEXT NULL,
+    ""Hash"" TEXT NULL,
+    ""PreviousHash"" TEXT NULL,
+    ""CompletedAt"" TIMESTAMPTZ NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- CoinStakes table (WSC staking system)
+CREATE TABLE IF NOT EXISTS app_data.""CoinStakes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Amount"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""WorkHourValue"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""DurationDays"" INTEGER NOT NULL DEFAULT 0,
+    ""StartDate"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""EndDate"" TIMESTAMPTZ NULL,
+    ""StakingRewardRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""CurrentReward"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- WorkHourValuations table (WSC valuation snapshots)
+CREATE TABLE IF NOT EXISTS app_data.""WorkHourValuations"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Date"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""WSCPerHour"" DECIMAL(18,8) NOT NULL DEFAULT 10,
+    ""TotalWorkHours"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""TotalWSCInCirculation"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""ActiveUsers"" INTEGER NOT NULL DEFAULT 0,
+    ""AverageWSCPerUser"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""InflationRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""BurnRate"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""MinimumWageReference"" DECIMAL(18,8) NOT NULL DEFAULT 15,
+    ""FreelancerRateReference"" DECIMAL(18,8) NOT NULL DEFAULT 22,
+    ""ExpertRateReference"" DECIMAL(18,8) NOT NULL DEFAULT 37,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- UserBadges table (badge/achievement system)
+CREATE TABLE IF NOT EXISTS app_data.""UserBadges"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""WiseCoinId"" UUID NULL,
+    ""BadgeId"" TEXT NOT NULL DEFAULT '',
+    ""Name"" TEXT NOT NULL DEFAULT '',
+    ""Description"" TEXT NOT NULL DEFAULT '',
+    ""Tier"" INTEGER NOT NULL DEFAULT 0,
+    ""Category"" INTEGER NOT NULL DEFAULT 0,
+    ""IconUrl"" TEXT NULL,
+    ""MultiplierBonus"" DECIMAL(18,8) NOT NULL DEFAULT 0,
+    ""EarnedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ExpiresAt"" TIMESTAMPTZ NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE,
+    ""Metadata"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL
+);
+
+-- WiseCoin rollout tracking (added in rollout phase)
+CREATE TABLE IF NOT EXISTS app_data.wisecoin_rollout_tracking (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE,
+    allocated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    amount DECIMAL(18,8) NOT NULL DEFAULT 0,
+    phase TEXT NOT NULL DEFAULT 'initial',
+    notes TEXT NULL
+);
+
+-- Content crawler catalog (personalization phase 3)
+CREATE TABLE IF NOT EXISTS app_data.content_crawler_catalog (
+    id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    content_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    country_code TEXT NULL,
+    score FLOAT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task EnsureZernioWebhookTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.zernio_webhook_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id VARCHAR(100) NOT NULL UNIQUE,
+    event_type VARCHAR(120) NOT NULL,
+    account_id VARCHAR(120) NULL,
+    profile_id VARCHAR(120) NULL,
+    payload_json JSONB NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'accepted',
+    processing_error TEXT NULL,
+    received_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at_utc TIMESTAMPTZ NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_data.zernio_account_mappings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id VARCHAR(120) NOT NULL UNIQUE,
+    profile_id VARCHAR(120) NULL,
+    platform VARCHAR(40) NULL,
+    username VARCHAR(255) NULL,
+    customer_key VARCHAR(255) NULL,
+    is_connected BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_type_received
+    ON app_data.zernio_webhook_events (event_type, received_at_utc DESC);
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_account
+    ON app_data.zernio_webhook_events (account_id);
+CREATE INDEX IF NOT EXISTS idx_zernio_webhook_events_profile
+    ON app_data.zernio_webhook_events (profile_id);
+CREATE INDEX IF NOT EXISTS idx_zernio_account_mappings_profile_platform
+    ON app_data.zernio_account_mappings (profile_id, platform);
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+
+    // ── Personalization & Learning tables ─────────────────────────────────
+    const string personalizationSql = @"
+CREATE TABLE IF NOT EXISTS app_data.""UserPersonalizationProfiles"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""AgeRange"" VARCHAR(20) NULL, ""Gender"" VARCHAR(20) NULL,
+    ""Location"" VARCHAR(255) NULL, ""CountryCode"" VARCHAR(10) NULL,
+    ""RegionCode"" VARCHAR(20) NULL, ""Timezone"" VARCHAR(50) NULL,
+    ""Occupation"" VARCHAR(255) NULL, ""Languages"" TEXT NULL,
+    ""LifeStage"" INTEGER NOT NULL DEFAULT 0,
+    ""LifeInterests"" TEXT NULL, ""CurrentGoals"" TEXT NULL, ""LifeEvents"" TEXT NULL,
+    ""FavoriteGenres"" TEXT NULL, ""FavoriteTopics"" TEXT NULL,
+    ""FavoriteCreators"" TEXT NULL, ""PreferredContentTypes"" TEXT NULL,
+    ""ActiveHours"" TEXT NULL, ""ActiveDays"" TEXT NULL,
+    ""AverageSessionDurationSeconds"" INTEGER NOT NULL DEFAULT 0,
+    ""LastActiveAt"" TIMESTAMPTZ NULL,
+    ""EmbeddingVector"" TEXT NULL, ""BehavioralPatterns"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_persona_userid
+    ON app_data.""UserPersonalizationProfiles"" (""UserId"");
+CREATE TABLE IF NOT EXISTS app_data.""UserInteractionEvents"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL, ""Type"" INTEGER NOT NULL,
+    ""TargetType"" VARCHAR(64) NOT NULL, ""TargetId"" UUID NULL,
+    ""TargetTitle"" VARCHAR(500) NULL, ""TargetCategory"" VARCHAR(255) NULL,
+    ""TargetTags"" TEXT NULL, ""EngagementScore"" INTEGER NULL,
+    ""DurationSeconds"" INTEGER NULL, ""DeviceType"" VARCHAR(64) NULL,
+    ""CountryCode"" VARCHAR(10) NULL, ""RegionCode"" VARCHAR(20) NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_interaction_userid_created
+    ON app_data.""UserInteractionEvents"" (""UserId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS idx_interaction_country
+    ON app_data.""UserInteractionEvents"" (""CountryCode"", ""CreatedAt"" DESC);
+CREATE TABLE IF NOT EXISTS app_data.""PersonalizationTags"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""Name"" VARCHAR(255) NOT NULL, ""Description"" VARCHAR(500) NULL,
+    ""Category"" INTEGER NOT NULL DEFAULT 0,
+    ""Weight"" INTEGER NOT NULL DEFAULT 1, ""UsageCount"" INTEGER NOT NULL DEFAULT 0,
+    ""Synonyms"" TEXT NULL, ""RelatedTags"" TEXT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ptag_name
+    ON app_data.""PersonalizationTags"" (LOWER(""Name""));
+CREATE TABLE IF NOT EXISTS app_data.""PersonalizationTagMappings"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""TagId"" UUID NOT NULL, ""TargetType"" VARCHAR(64) NOT NULL, ""TargetId"" UUID NOT NULL,
+    ""Confidence"" INTEGER NOT NULL DEFAULT 100, ""IsAutoGenerated"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ptag_mapping_target
+    ON app_data.""PersonalizationTagMappings"" (""TargetType"", ""TargetId"");
+CREATE TABLE IF NOT EXISTS app_data.""RegionalTrendSnapshots"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""CountryCode"" VARCHAR(10) NOT NULL DEFAULT 'GLOBAL',
+    ""Category"" VARCHAR(20) NOT NULL DEFAULT 'General',
+    ""TopicsJson"" TEXT NOT NULL DEFAULT '[]',
+    ""SnapshotAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""ExpiresAt""  TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '2 hours',
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE, ""DeletedAt"" TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_regional_trend_country_cat
+    ON app_data.""RegionalTrendSnapshots"" (""CountryCode"", ""Category"", ""ExpiresAt"" DESC);
+";
+    await using var pConn = new NpgsqlConnection(connectionString);
+    await pConn.OpenAsync(cancellationToken);
+    await using var pCmd = new NpgsqlCommand(personalizationSql, pConn);
+    await pCmd.ExecuteNonQueryAsync(cancellationToken);
+}
+
+// â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
+var configuredClientOrigins = (clientOrigin ?? string.Empty)
+    .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+var fallbackClientOrigins = new[]
+{
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://localhost:5173",
+    "https://127.0.0.1:5173",
+    "http://localhost:5242",
+    "http://127.0.0.1:5242",
+    "https://localhost:7146",
+    "https://127.0.0.1:7146",
+    "https://wise-ravens.com",
+    "https://www.wise-ravens.com",
+    "https://cdn.wise-ravens.com",
+    "https://wiseravenshare.com",
+    "https://www.wiseravenshare.com"
+};
+var allowedClientOrigins = configuredClientOrigins
+    .Concat(fallbackClientOrigins)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+var defaultConnectionString = ResolvePrimaryConnectionString(builder.Configuration);
+var requireDatabase = builder.Configuration.GetValue("Persistence:RequireDatabase", true);
+var expectedDatabaseName = ResolveExpectedDatabaseName(builder.Configuration);
+var configuredBucketName = builder.Configuration["Storage:Blob:BucketName"] ?? "bucket-wrs-01010";
+var configuredProjectFolder = StoragePathResolver.ResolveProjectFolder(builder.Configuration, builder.Environment.ContentRootPath, "wiseravenshare");
+var configuredBucketsRoot = Path.Combine(builder.Environment.ContentRootPath, "Buckets");
+var cacheConnection = builder.Configuration["Cache:ConnectionString"];
+var useRedisCache = builder.Configuration.GetValue("Cache:UseRedis", false);
+var enableHostedServices = requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString);
+
+if (requireDatabase && string.IsNullOrWhiteSpace(defaultConnectionString))
+{
+    throw new InvalidOperationException("Persistence:RequireDatabase is true but no database connection string was configured. Set DATABASE_URL or ConnectionStrings:DefaultConnection.");
+}
+
+// â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
+}
+
+// â”€â”€ Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+    // Clearing networks automatically trusts the nearest proxy (e.g. docker network or cloud provider proxy)
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Emit camelCase JSON for all API responses so JS clients read counts directly.
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddMemoryCache();
+builder.Services.AddDistributedMemoryCache();
+builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Crawler"));
+builder.Services.Configure<PerformanceAnalyzerOptions>(builder.Configuration.GetSection("Crawler:Performance"));
+
+if (useRedisCache && !string.IsNullOrWhiteSpace(cacheConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = cacheConnection;
+        options.InstanceName = builder.Configuration["Cache:InstanceName"] ?? "wiseravenshare:";
+    });
+}
+
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "application/problem+json"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+
+builder.Services.AddOutputCache(options =>
+{
+    options.AddPolicy("MarketQuotes", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(30))
+            .SetVaryByQuery("symbols")
+            .Tag("market"));
+
+    options.AddPolicy("EvolutionCatalog", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(45))
+            .Tag("evolution"));
+
+    options.AddPolicy("PublicFeedShort", policy =>
+        policy
+            .Expire(TimeSpan.FromSeconds(20))
+            .Tag("feed"));
+});
+
+builder.Services.AddSignalR();
+
+// Assistant AI Service Configuration
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.AssistantOptions>(
+    builder.Configuration.GetSection("Assistant"));
+builder.Services.Configure<WiseRavenShare.Server.Infrastructure.External.OpenAiOptions>(
+    builder.Configuration.GetSection("OpenAI"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(
+    builder.Configuration.GetSection("Whisper"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.TtsOptions>(
+    builder.Configuration.GetSection("Tts"));
+builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WebGroundingOptions>(
+    builder.Configuration.GetSection("WebGrounding"));
+
+builder.Services.AddHttpClient<WiseRavenShare.Server.Infrastructure.External.OpenAiClient>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ISpeechToTextService,
+    WiseRavenShare.Server.Application.Services.Assistant.SpeechToTextService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.ITextToSpeechService,
+    WiseRavenShare.Server.Application.Services.Assistant.TextToSpeechService>();
+builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.IWebGroundingService,
+    WiseRavenShare.Server.Application.Services.Assistant.WebGroundingService>();
+
+// ── ML Microservice (behavioral recommendations) ─────────────────────────────
+builder.Services.AddHttpClient<Wiseravenshare.Server.Services.MlClient>(c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["MlService:BaseUrl"] ?? "http://localhost:8005");
+    c.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.ILlmGateway,
+    WiseRavenShare.Server.Infrastructure.External.LlmGatewayAdapter>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IEmbeddingService,
+    WiseRavenShare.Server.Application.Services.Assistant.EmbeddingService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IPgVectorStore,
+    WiseRavenShare.Server.Infrastructure.Vector.PgVectorStore>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IRagRetriever,
+    WiseRavenShare.Server.Application.Services.Assistant.RagRetriever>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantOrchestrator,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantOrchestrator>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IChatterLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.ChatterLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IFeedbackLearningService,
+    WiseRavenShare.Server.Application.Services.Assistant.FeedbackLearningService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantSafetyService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantSafetyService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.IAssistantPersonaService,
+    WiseRavenShare.Server.Application.Services.Assistant.AssistantPersonaService>();
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Assistant.PromptBuilder>();
+
+// Craft Intelligence Services
+builder.Services.AddScoped<WiseRavenShare.Server.Application.Services.Craft.ICraftCoachingService,
+    WiseRavenShare.Server.Application.Services.Craft.CraftCoachingService>();
+
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<WiseRavenShare.Server.HostedServices.ChatterLearningBackgroundService>();
+}
+
+// Cross-platform collaboration bridge (TikTok/Facebook/Instagram/Twitter webviews).
+builder.Services.AddScoped<IPlatformBridgeService, PlatformBridgeService>();
+builder.Services.AddDbContext<AppDbContext>(options =>
+{
+    options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "app_data"));
+    // Suppress PendingModelChangesWarning so MigrateAsync() can run existing
+    // migrations even when the EF model has un-migrated additions.  Tables
+    // missing from the migration history are caught at runtime via the per-
+    // service EnsureTable helpers rather than crashing startup.
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+});
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+// Generic repository open registration (currency/badge subsystems resolve IRepository<TEntity>).
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.Infrastructure.Data.Repositories.Repository<>));
+builder.Services.AddScoped<IPostRepository, PostRepository>();
+builder.Services.AddScoped<ITruthRepository, TruthRepository>();
+builder.Services.AddScoped<IAgentRepository, AgentRepository>();
+builder.Services.AddScoped<IStudioCaptureRigProfileRepository, StudioCaptureRigProfileRepository>();
+builder.Services.AddScoped<IStudioCaptureSourceCaptureRepository, StudioCaptureSourceCaptureRepository>();
+builder.Services.AddScoped<IMediaRepository, MediaRepository>();
+builder.Services.AddScoped<IPlaylistRepository, PlaylistRepository>();
+builder.Services.AddScoped<IMediaTagRepository, MediaTagRepository>();
+// Assistant repositories
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantConversationRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantConversationRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantMessageRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantMessageRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantFeedbackRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantFeedbackRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantKnowledgeRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantKnowledgeRepository>();
+builder.Services.AddScoped<WiseRavenShare.Server.Core.Interfaces.Repositories.Assistant.IAssistantLearningSampleRepository,
+    Wiseravenshare.Server.Infrastructure.Data.Repositories.AssistantLearningSampleRepository>();
+builder.Services.AddScoped<IPostService, PostService>();
+builder.Services.AddScoped<ISavedMediaService, SavedMediaService>();
+builder.Services.AddScoped<ITruthService, TruthService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Interfaces.IAuthV2Service, AuthV2Service>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, Wiseravenshare.Server.Services.Media.MediaService>();
+// Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
+builder.Services.AddSingleton<RefreshTokenStore>();
+builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<IEvolutionService, EvolutionService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
+builder.Services.AddScoped<IOpenAIService, OpenAIService>();
+builder.Services.AddScoped<IYouTubeService, YouTubeService>();
+builder.Services.AddScoped<IYouTubeCacheEngine, YouTubeCacheEngine>();
+builder.Services.AddScoped<IYouTubeTokenService, YouTubeTokenService>();
+builder.Services.AddScoped<IVideoService, VideoService>();
+builder.Services.AddScoped<IRavensightMediaPathService, RavensightMediaPathService>();
+builder.Services.AddScoped<IBlobStorageService, DigitalOceanSpacesBlobStorageService>();
+builder.Services.AddSingleton<IMediaBlobSignatureService, MediaBlobSignatureService>();
+builder.Services.AddScoped<IRavensightVideoService, RavensightVideoService>();
+builder.Services.AddScoped<IRavensightPhotoService, RavensightPhotoService>();
+builder.Services.AddScoped<IRavensightMusicService, RavensightMusicService>();
+builder.Services.AddScoped<IFrequencyIntegrityService, FrequencyIntegrityService>();
+builder.Services.AddScoped<IFMStationService, FMStationService>();
+builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationService>();
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.RadioStationActivationAgentService>();
+}
+builder.Services.AddScoped<IIcecastStreamService, IcecastStreamService>();
+builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();
+builder.Services.AddHttpClient<Wiseravenshare.Server.Interfaces.Services.External.IWebCrawlerService,
+    Wiseravenshare.Server.Services.External.WebCrawlerService>();
+builder.Services.AddScoped<IPersonalizationService, PersonalizationService>();
+builder.Services.AddScoped<IPodcastSessionService, PodcastSessionService>();
+builder.Services.AddScoped<IWorkspacePageRepository, WorkspacePageRepository>();
+builder.Services.AddScoped<IWorkspaceSessionRepository, WorkspaceSessionRepository>();
+builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
+builder.Services.AddScoped<ISiteCrawlerService, SiteCrawlerService>();
+builder.Services.AddScoped<IContentCrawlerService, ContentCrawlerService>();
+builder.Services.AddScoped<ICrawlerOrchestrator, CrawlerOrchestrator>();
+builder.Services.AddScoped<IPageFetcher, PageFetcher>();
+builder.Services.AddScoped<IHtmlParser, HtmlParser>();
+builder.Services.AddScoped<IHealthScoreCalculator, HealthScoreCalculator>();
+builder.Services.AddScoped<IReportGenerator, ReportGenerator>();
+builder.Services.AddScoped<IJavaScriptRenderer, PlaywrightJavaScriptRenderer>();
+builder.Services.AddScoped<IPageAnalyzer, SeoAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, PerformanceAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, AccessibilityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, SecurityAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, ContentAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, LinkAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, MobileAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, StructuredDataAnalyzer>();
+builder.Services.AddScoped<IPageAnalyzer, BestPracticesAnalyzer>();
+builder.Services.AddHttpClient("SiteCrawlerClient")
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        var handler = new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            AllowAutoRedirect = false
+        };
+
+        if (builder.Environment.IsDevelopment())
+        {
+            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+
+        return handler;
+    });
+builder.Services.AddScoped<IMusicLibraryStore, BucketMusicLibraryStore>();
+builder.Services.AddScoped<IMusicPlaybackStateStore, MusicPlaybackStateStore>();
+builder.Services.AddScoped<CopyrightRegistrationService>();
+builder.Services.AddScoped<CopyrightFilingService>();
+builder.Services.AddScoped<PodcastTrademarkFilingService>();
+builder.Services.AddScoped<IPPublishingAgent>();
+builder.Services.AddScoped<IPFormAutomationBot>();
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<IPPublishingAgentHostedService>();
+}
+builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.StreamBridge.IStreamTransferService, Wiseravenshare.Server.Services.StreamBridge.StreamTransferService>();
+builder.Services.AddScoped<SyntheticEngagementService>();
+builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
+builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
+builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();
+    builder.Services.AddHostedService<YouTubeSyncWorker>();
+    builder.Services.AddContentTrendingBackgroundJob(enabled: true);
+}
+builder.Services.AddHttpClient("SocialPublish");
+builder.Services.AddScoped<ISocialPublishDispatcher, SocialPublishDispatcher>();
+// Cross-platform publishing: one publisher per platform + orchestrator + repository.
+builder.Services.AddHttpClient<ICrossPlatformPublisher, FacebookPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, InstagramPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, TikTokPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, TwitterPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
+builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
+builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
+builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
+builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
+// AI assistant — select provider via AiProvider config (gradient|deepseek|digitalocean|dochatbot|do-chatbot|llamacpp).
+// DigitalOcean chatbot path is the production default.
+var aiProvider = (builder.Configuration["AiProvider"] ?? "digitalocean").Trim().ToLowerInvariant();
+if (aiProvider is "gradient" or "digitalocean" or "dochatbot" or "do-chatbot")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
+}
+else if (aiProvider is "deepseek")
+{
+    builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
+}
+else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local" or "nuravencorp" or "nuravencorp-llm" or "nrc-llm")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
+}
+else
+{
+    builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
+}
+builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
+// Background AI job queue (queue + poll + prompt cache) for bursty creator features.
+builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
+builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
+builder.Services.AddSingleton<UserStore>();
+builder.Services.AddSingleton<GrowthService>();
+builder.Services.AddSingleton<TeamAccessService>();
+builder.Services.AddSingleton<PerformanceMetricsService>();
+builder.Services.AddScoped<OutputCacheInvalidationService>();
+builder.Services.AddSingleton<VideoFeedCollaborationService>();
+builder.Services.AddSingleton<PodcastVideoBridgeStateService>();
+builder.Services.AddSingleton<VideoLibraryStore>();
+builder.Services.AddSingleton<RavensightMediaCatalogStore>();
+builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
+
+// ── Python microservice orchestrator ──────────────────────────────────────────
+// Manages venv creation, pip install, and process supervision for all Python
+// services (audio-processor :8001, karaoke-engine :8002, karaoke-speech :8003).
+// Disable via appsettings: "PythonServices": { "Enabled": false }
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<PythonServiceOrchestrator>();
+}
+builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("AudioService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["AudioService:BaseUrl"] ?? "http://localhost:8001");
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+builder.Services.AddHttpClient("KaraokeService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
+    // Stem separation takes 1-3 min when the service IS running.
+    // Set a short connect timeout via a handler instead; the operation timeout stays long.
+    client.Timeout = TimeSpan.FromMinutes(10);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(5), // fail fast if service is not running
+});
+// Dedicated client for the file-upload leg: generous timeout; connect still fails fast.
+builder.Services.AddHttpClient("KaraokeServiceUpload", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeService:BaseUrl"] ?? "http://localhost:8002");
+    client.Timeout = Timeout.InfiniteTimeSpan; // file upload + enqueue can take time on cold start
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(10), // slightly more generous for cold starts
+});
+builder.Services.AddHttpClient("KaraokeSpeechService", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["KaraokeSpeechService:BaseUrl"] ?? "http://localhost:8003");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+builder.Services.AddHttpClient("VideoProcessorService", client =>
+{
+    var baseUrl = builder.Configuration["VideoProcessorService:BaseUrl"]
+        ?? builder.Configuration["VideoProcessor__BaseUrl"]
+        ?? "http://localhost:8004";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    client.Timeout = Timeout.InfiniteTimeSpan; // HLS jobs can take several minutes
+});
+builder.Services.AddHttpClient("PythonMatrixService", client =>
+{
+    var baseUrl = builder.Configuration["PythonMatrixService:BaseUrl"]
+        ?? builder.Configuration["PythonMatrixService__BaseUrl"]
+        ?? "http://localhost:8005";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(5),
+});
+builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
+builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
+builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
+builder.Services.AddScoped<ITwilioService, TwilioService>();
+builder.Services.AddScoped<ICommunicationService, CommunicationService>();
+builder.Services.AddScoped<IEngagementNotificationService, EngagementNotificationService>();
+builder.Services.AddScoped<ICostTrackingService, CostTrackingService>();
+builder.Services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
+builder.Services.AddScoped<IConsensusService, ConsensusService>();
+// Currency system (WSC): badge-first multipliers, wallet, staking, currency agent
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinService, Wiseravenshare.Server.Services.Currency.WiseCoinService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IWiseCoinRolloutService, Wiseravenshare.Server.Services.Currency.WiseCoinRolloutService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IEngagementMultiplierService, Wiseravenshare.Server.Services.Currency.EngagementMultiplierService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.ILedgerHashService, Wiseravenshare.Server.Services.Currency.LedgerHashService>();
+// Daily ledger anchor + integrity check (hash chain tamper-evidence).
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LedgerAnchorBackgroundService>();
+}
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Currency.IBadgeService, Wiseravenshare.Server.Services.Currency.BadgeService>();
+// Register CurrencyAgentService as singleton for hosted service (requires scoped dependencies to be lazy-resolved)
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>();
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Currency.ICurrencyAgentService>(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
+}
+builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
+builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
+if (enableHostedServices)
+{
+    builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
+}
+
+// RavenCommuniqué — Twilio voice/SMS/WhatsApp + WebRTC call hub
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommuniqueCallService, Wiseravenshare.Server.Services.Communique.CommuniqueCallService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IExternalCallGateway, Wiseravenshare.Server.Services.Communique.TwilioExternalCallGateway>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ITwilioMessagingService, Wiseravenshare.Server.Services.Communique.TwilioMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ZernioMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.ICommuniqueMessagingService, Wiseravenshare.Server.Services.Communique.RoutedCommuniqueMessagingService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Communique.IWebRTCService, Wiseravenshare.Server.Services.Communique.WebRTCService>();
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Communique.ICallStateManager, Wiseravenshare.Server.Services.Communique.CallStateManager>();
+
+var jwtKey = ResolveJwtKey(builder.Configuration);
+if (string.IsNullOrWhiteSpace(jwtKey))
+{
+    throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is required.");
+}
+
+if (jwtKey.Length < 32)
+{
+    throw new InvalidOperationException("Authentication:Jwt:Key must be at least 32 characters.");
+}
+
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+
+static string ResolveJwtKey(IConfiguration configuration)
+{
+    var candidates = new[]
+    {
+        configuration["JWT_highentropykey"],
+        configuration["Authentication:Jwt:Key"],
+        configuration["Authentication__Jwt__Key"],
+        Environment.GetEnvironmentVariable("JWT_highentropykey"),
+        Environment.GetEnvironmentVariable("Authentication__Jwt__Key")
+    };
+
+    foreach (var candidate in candidates)
+    {
+        var value = (candidate ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+    }
+
+    return string.Empty;
+}
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        var configuredIssuer = builder.Configuration["Authentication:Jwt:Issuer"];
+        var configuredAudience = builder.Configuration["Authentication:Jwt:Audience"];
+        var validateIssuer = !string.IsNullOrWhiteSpace(configuredIssuer);
+        var validateAudience = !string.IsNullOrWhiteSpace(configuredAudience);
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrWhiteSpace(accessToken)
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/api/hubs/social")))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = signingKey,
+            ValidateIssuer = validateIssuer,
+            ValidIssuer = configuredIssuer,
+            ValidateAudience = validateAudience,
+            ValidAudience = configuredAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+    });
+
+// Request timeout middleware (requires .NET 8+)
+builder.Services.AddRequestTimeouts(options =>
+{
+    options.DefaultPolicy = new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = TimeSpan.FromSeconds(60)
+    };
+    // Streaming endpoints (e.g. AI chat SSE) must not be killed by the default timeout.
+    options.Policies.Add("StreamingPolicy", new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    });
+    // Karaoke backing-track generation: file upload + Python enqueue can take several minutes
+    // on a cold-start or large file. Polling endpoints are fast so they stay on the default.
+    options.Policies.Add("KaraokeUploadPolicy", new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = TimeSpan.FromMinutes(15)
+    });
+});
+
+// CORS â€” explicit origin when set, locked-down in production
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ClientPolicy", policy =>
+    {
+        policy.AllowAnyHeader().AllowAnyMethod();
+
+        if (allowedClientOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedClientOrigins)
+                  .AllowCredentials();
+        }
+        else if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowCredentials();
+        }
+        else
+        {
+            // Fail-safe: block cross-origin in production if CLIENT_ORIGIN is missing
+            policy.WithOrigins("https://wise-ravens.com", "https://www.wise-ravens.com")
+                  .AllowCredentials();
+        }
+    });
+});
+
+// Only register OpenAPI in development
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddOpenApi();
+}
+
+var app = builder.Build();
+
+var activeDatabaseName = ExtractDatabaseName(defaultConnectionString);
+if (!string.IsNullOrWhiteSpace(activeDatabaseName)
+    && !string.Equals(activeDatabaseName, expectedDatabaseName, StringComparison.OrdinalIgnoreCase))
+{
+    app.Logger.LogWarning(
+        "Active database '{ActiveDatabase}' does not match expected '{ExpectedDatabase}'. Posts may persist to the wrong database.",
+        activeDatabaseName,
+        expectedDatabaseName);
+}
+
+if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authentication:AllowSelfRegistration", false))
+{
+    app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
+}
+
+string ResolveStripeConfig(string sectionKey, params string[] envKeys)
+{
+    var value = app.Configuration[sectionKey];
+    if (!string.IsNullOrWhiteSpace(value))
+    {
+        return value.Trim();
+    }
+
+    foreach (var envKey in envKeys)
+    {
+        value = app.Configuration[envKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+    }
+
+    return string.Empty;
+}
+
+bool IsStripePriceId(string? value) =>
+    !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+
+var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+
+if (string.IsNullOrWhiteSpace(stripePublishableKey))
+{
+    app.Logger.LogWarning("Stripe publishable key is missing. Set Stripe:PublishableKey or STRIPE_PUBLISHABLE_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeSecretKey))
+{
+    app.Logger.LogWarning("Stripe secret key is missing. Set Stripe:SecretKey or STRIPE_SECRET_KEY.");
+}
+
+if (string.IsNullOrWhiteSpace(stripeWebhookSecret))
+{
+    app.Logger.LogWarning("Stripe webhook secret is missing. Set Stripe:WebhookSecret or STRIPE_WEBHOOK_SECRET.");
+}
+
+var stripePlanMappings = new[]
+{
+    new
+    {
+        Plan = "creator_pro",
+        Monthly = ResolveStripeConfig("Stripe:PriceCreatorProMonthlyId", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceCreatorProAnnualId", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "growth_suite",
+        Monthly = ResolveStripeConfig("Stripe:PriceGrowthSuiteMonthlyId", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceGrowthSuiteAnnualId", "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    },
+    new
+    {
+        Plan = "studio_plus",
+        Monthly = ResolveStripeConfig("Stripe:PriceStudioPlusMonthlyId", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual = ResolveStripeConfig("Stripe:PriceStudioPlusAnnualId", "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+    }
+};
+
+foreach (var mapping in stripePlanMappings)
+{
+    if (string.IsNullOrWhiteSpace(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} monthly.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Monthly))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} monthly must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Monthly[..Math.Min(mapping.Monthly.Length, 5)]);
+    }
+
+    if (string.IsNullOrWhiteSpace(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID is missing for {Plan} annual.", mapping.Plan);
+    }
+    else if (!IsStripePriceId(mapping.Annual))
+    {
+        app.Logger.LogWarning("Stripe price ID for {Plan} annual must start with price_. Current value starts with '{Prefix}'.", mapping.Plan, mapping.Annual[..Math.Min(mapping.Annual.Length, 5)]);
+    }
+}
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        Directory.CreateDirectory(configuredBucketsRoot);
+        Directory.CreateDirectory(Path.Combine(configuredBucketsRoot, configuredProjectFolder));
+        app.Logger.LogInformation(
+            "Bucket persistence root registered at {BucketsRoot} for bucket {BucketName} and project {ProjectFolder}.",
+            configuredBucketsRoot,
+            configuredBucketName,
+            configuredProjectFolder);
+
+        await EnsureDatabaseSchemaAsync(dbContext, app.Logger);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogCritical(ex, "Automatic EF schema upgrade failed during startup. The app will continue with the existing schema if available.");
+    }
+
+    try
+    {
+        await EnsureBucketObjectsRegistryAsync(defaultConnectionString, configuredBucketName, configuredProjectFolder);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Bucket registry table verification failed during startup.");
+    }
+
+    try
+    {
+        await EnsureCrossPlatformTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Cross-platform collaboration tables bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureZernioWebhookTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Zernio webhook tables bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureColumnPatchesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Column/table patch bootstrap failed during startup.");
+    }
+
+    // Seed default badge catalog (badge-first currency system)
+    try
+    {
+        var badgeService = scope.ServiceProvider.GetRequiredService<Wiseravenshare.Server.Services.Currency.IBadgeService>();
+        await badgeService.SeedDefaultBadgesAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Badge catalog seeding failed during startup.");
+    }
+
+    var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
+    var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
+    var mediaCatalogStore = scope.ServiceProvider.GetRequiredService<RavensightMediaCatalogStore>();
+    var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
+
+    // Bootstrap media catalog schema (photos, music, videos unified table).
+    try { await mediaCatalogStore.EnsureSchemaAsync(); }
+    catch (Exception ex) { app.Logger.LogWarning(ex, "Media catalog schema bootstrap failed at startup; will retry on first use."); }
+
+    var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
+    var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
+    var userStatus = userStore.GetPersistenceStatus();
+
+    persistenceDiagnosticsCache.SetSnapshot(new PersistenceDiagnosticsSnapshot
+    {
+        LastCheckedAtUtc = DateTime.UtcNow,
+        Users = new PersistenceDiagnosticsEntry
+        {
+            DatabaseConfigured = userStatus.DatabaseConfigured,
+            DatabaseAvailable = userStatus.DatabaseAvailable,
+            RequiresDatabase = userStatus.RequiresDatabase,
+            ActiveTable = userStatus.ActiveTable,
+            LastError = userStatus.LastError,
+            TimedOut = false
+        },
+        Videos = new PersistenceDiagnosticsEntry
+        {
+            DatabaseConfigured = !string.IsNullOrWhiteSpace(defaultConnectionString),
+            DatabaseAvailable = videoDbPersistenceAvailable,
+            RequiresDatabase = requireDatabase,
+            ActiveTable = "app_data.ravensight_videos_v2",
+            LastError = string.Empty,
+            TimedOut = false
+        }
+    });
+
+    if (!userDbPersistenceAvailable || !videoDbPersistenceAvailable)
+    {
+        app.Logger.LogCritical(
+            "Database persistence is unavailable (userStore={UserStoreAvailable}, videoStore={VideoStoreAvailable}). " +
+            "Auth and/or content retention may fall back to non-durable storage until DB grants are fixed.",
+            userDbPersistenceAvailable,
+            videoDbPersistenceAvailable);
+    }
+}
+
+// â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseForwardedHeaders();
+app.UseWebSockets();
+app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+// Security headers for all responses
+app.Use(async (context, next) =>
+{
+    var startTimestamp = Stopwatch.GetTimestamp();
+
+    context.Response.OnStarting(() =>
+    {
+        var elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        context.Response.Headers["Server-Timing"] = $"app;dur={elapsedMs.ToString("0.###", CultureInfo.InvariantCulture)}";
+        context.Response.Headers["X-Response-Time-Ms"] = elapsedMs.ToString("0.###", CultureInfo.InvariantCulture);
+        return Task.CompletedTask;
+    });
+
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "font-src 'self' data: https:; " +
+        "connect-src 'self' https: wss:; " +
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "upgrade-insecure-requests";
+    context.Response.Headers["X-XSS-Protection"] = "0"; // CSP is the modern replacement
+    if (!app.Environment.IsDevelopment())
+    {
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
+
+    await next();
+
+    var totalElapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+    if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+    {
+        var metricsService = context.RequestServices.GetRequiredService<PerformanceMetricsService>();
+        metricsService.RecordRequest(
+            context.Request.Method,
+            context.Request.Path.Value ?? string.Empty,
+            context.Response.StatusCode,
+            totalElapsedMs);
+    }
+
+    if (totalElapsedMs >= 1200)
+    {
+        app.Logger.LogWarning(
+            "Slow request detected: {Method} {Path} responded {StatusCode} in {ElapsedMs}ms.",
+            context.Request.Method,
+            context.Request.Path,
+            context.Response.StatusCode,
+            totalElapsedMs.ToString("0.###", CultureInfo.InvariantCulture));
+    }
+});
+
+app.UseCors("ClientPolicy");
+app.UseRequestTimeouts();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseMiddleware<UploadMalwareScanMiddleware>();
+app.UseResponseCompression();
+app.UseOutputCache();
+
+var configuredWebRoot = app.Environment.WebRootPath;
+var frontendDistPath = !string.IsNullOrWhiteSpace(configuredWebRoot)
+    ? Path.GetFullPath(configuredWebRoot)
+    : Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+
+if (!Directory.Exists(frontendDistPath))
+{
+    var repoDistPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "wiseravenshare.client", "dist"));
+    if (Directory.Exists(repoDistPath))
+    {
+        frontendDistPath = repoDistPath;
+    }
+}
+
+var frontendDistExists = Directory.Exists(frontendDistPath);
+var frontendIndexFile = frontendDistExists
+    ? ResolvePreferredFrontendIndex(frontendDistPath)
+    : "index.html";
+
+static string ResolvePreferredFrontendIndex(string distPath)
+{
+    var fileNames = Directory.EnumerateFiles(distPath, "*", SearchOption.TopDirectoryOnly)
+        .Select(Path.GetFileName)
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .ToArray();
+
+    // Prefer the Vite-emitted lowercase index.html when both casings exist.
+    var exactLower = fileNames.FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.Ordinal));
+    if (!string.IsNullOrWhiteSpace(exactLower))
+    {
+        return exactLower;
+    }
+
+    var caseInsensitive = fileNames.FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.OrdinalIgnoreCase));
+    return string.IsNullOrWhiteSpace(caseInsensitive) ? "index.html" : caseInsensitive;
+}
+
+static bool IsSensitiveRequestPath(PathString requestPath)
+{
+    var rawPath = requestPath.Value ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(rawPath))
+    {
+        return false;
+    }
+
+    if (rawPath.StartsWith("/App_Data", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    var fileName = Path.GetFileName(rawPath);
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return false;
+    }
+
+    if (fileName.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)
+        && fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return fileName.StartsWith(".env", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileName, "secrets.json", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileName, "launchSettings.json", StringComparison.OrdinalIgnoreCase);
+}
+
+app.Use(async (context, next) =>
+{
+    if (IsSensitiveRequestPath(context.Request.Path))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
+
+if (frontendDistExists)
+{
+    app.UseDefaultFiles(new DefaultFilesOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath),
+        DefaultFileNames = new[] { frontendIndexFile, "index.html", "Index.html" }
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+    });
+
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath),
+        OnPrepareResponse = context =>
+        {
+            var responseHeaders = context.Context.Response.Headers;
+            var extension = Path.GetExtension(context.File.Name);
+            var isHtml = string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase);
+
+            if (isHtml)
+            {
+                responseHeaders["Cache-Control"] = "no-cache, no-store, must-revalidate";
+                return;
+            }
+
+            responseHeaders["Cache-Control"] = "public,max-age=604800,stale-while-revalidate=60";
+        }
+    });
+}
+
+app.MapControllers();
+app.MapHub<EvolutionHub>("/api/hubs/evolution");
+app.MapHub<NotificationHub>("/api/hubs/notifications");
+app.MapHub<MessageHub>("/api/hubs/messages");
+app.MapHub<CrossPlatformCollaborationHub>("/api/hubs/collaboration");
+app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
+app.MapHub<WebRtcSignalingHub>("/api/hubs/webrtc");
+app.MapHub<SocialHub>("/api/hubs/social");
+
+if (frontendDistExists)
+{
+    app.MapFallbackToFile(frontendIndexFile, new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(frontendDistPath)
+    });
+}
+
+// â”€â”€ Health endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health/db", async () =>
+{
+    if (string.IsNullOrWhiteSpace(defaultConnectionString))
+    {
+        return Results.Problem("DefaultConnection is not configured.", statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(defaultConnectionString);
+        await connection.OpenAsync();
+        await using var pingCommand = new NpgsqlCommand("SELECT 1", connection);
+        var result = await pingCommand.ExecuteScalarAsync();
+
+        var expectedEfTableNames = new[]
+        {
+            "__EFMigrationsHistory",
+            "Agents",
+            "AgentEvolutions",
+            "AgentInteractions",
+            "Users",
+            "Posts",
+            "PostBookmarks",
+            "PostLikes",
+            "PostReposts",
+            "UserFollows",
+            "UserSettings",
+            "UserSubscriptions",
+            "TruthClaims",
+            "TruthDisputes",
+            "TruthVerificationVotes",
+            "Videos",
+            "VideoLike",
+            "VideoComment",
+            "Conversations",
+            "ConversationParticipants",
+            "Messages",
+            "Comment",
+            "CommentLike"
+        };
+
+        var expectedLegacyRetentionTables = new[]
+        {
+            "app_data.app_users",
+            "public.app_users",
+            "app_data.ravensight_videos_v2",
+            "public.ravensight_videos_v2",
+            "app_data.ravensight_video_comments_v2",
+            "public.ravensight_video_comments_v2",
+            "app_data.bucket_objects",
+            "public.bucket_objects"
+        };
+
+        const string tableInventorySql = @"
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE'
+  AND table_schema IN ('public', 'app_data');";
+
+        var actualTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var tablesCommand = new NpgsqlCommand(tableInventorySql, connection))
+        await using (var tablesReader = await tablesCommand.ExecuteReaderAsync())
+        {
+            while (await tablesReader.ReadAsync())
+            {
+                var schema = tablesReader.GetString(0);
+                var table = tablesReader.GetString(1);
+                actualTables.Add($"{schema}.{table}");
+            }
+        }
+
+        const string historyExistsSql = @"
+SELECT
+    (to_regclass('app_data.""__EFMigrationsHistory""') IS NOT NULL)
+    OR (to_regclass('public.""__EFMigrationsHistory""') IS NOT NULL);";
+        var historyExists = false;
+        await using (var historyExistsCommand = new NpgsqlCommand(historyExistsSql, connection))
+        {
+            var raw = await historyExistsCommand.ExecuteScalarAsync();
+            historyExists = raw is bool value && value;
+        }
+
+        var appliedMigrations = new List<string>();
+        if (historyExists)
+        {
+            var historyTable = actualTables.Contains("app_data.__EFMigrationsHistory")
+                ? "app_data.\"__EFMigrationsHistory\""
+                : "public.\"__EFMigrationsHistory\"";
+
+            var migrationsSql = $@"
+SELECT ""MigrationId""
+FROM {historyTable}
+ORDER BY ""MigrationId"";";
+
+            await using var migrationsCommand = new NpgsqlCommand(migrationsSql, connection);
+            await using var migrationsReader = await migrationsCommand.ExecuteReaderAsync();
+            while (await migrationsReader.ReadAsync())
+            {
+                appliedMigrations.Add(migrationsReader.GetString(0));
+            }
+        }
+
+        var missingEfTables = expectedEfTableNames
+            .Select(name => new
+            {
+                Name = name,
+                Exists = actualTables.Contains($"app_data.{name}") || actualTables.Contains($"public.{name}")
+            })
+            .Where(entry => !entry.Exists)
+            .Select(entry => entry.Name)
+            .ToArray();
+
+        var hasUserTable = actualTables.Contains("app_data.app_users") || actualTables.Contains("public.app_users");
+        var hasVideoTable = actualTables.Contains("app_data.ravensight_videos_v2") || actualTables.Contains("public.ravensight_videos_v2");
+        var hasVideoCommentsTable = actualTables.Contains("app_data.ravensight_video_comments_v2") || actualTables.Contains("public.ravensight_video_comments_v2");
+        var hasBucketObjectsTable = actualTables.Contains("app_data.bucket_objects") || actualTables.Contains("public.bucket_objects");
+
+        var missingLegacyRetentionTables = expectedLegacyRetentionTables
+            .Where(expected => !actualTables.Contains(expected))
+            .ToArray();
+
+        // Local helper to read simple boolean flags from environment variables.
+        static bool ParseBoolEnv(string key)
+        {
+            var v = Environment.GetEnvironmentVariable(key);
+            return !string.IsNullOrWhiteSpace(v)
+                && (v.Equals("1", StringComparison.OrdinalIgnoreCase)
+                    || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Results.Ok(new
+        {
+            status = "ok",
+            database = "postgres",
+            result,
+            migration = new
+            {
+                efHistoryExists = historyExists,
+                appliedMigrationCount = appliedMigrations.Count,
+                latestMigration = appliedMigrations.LastOrDefault() ?? string.Empty
+            },
+            connection = new
+            {
+                expectedDatabaseName,
+                activeDatabaseName,
+                databaseNameMatchesExpectation = string.IsNullOrWhiteSpace(activeDatabaseName)
+                    ? false
+                    : string.Equals(activeDatabaseName, expectedDatabaseName, StringComparison.OrdinalIgnoreCase)
+            },
+            schema = new
+            {
+                fullEfSchemaReady = missingEfTables.Length == 0,
+                missingEfTables,
+                hasUserRetentionTable = hasUserTable,
+                hasVideoRetentionTable = hasVideoTable,
+                hasVideoCommentsRetentionTable = hasVideoCommentsTable,
+
+                // Social media integration feature flags
+                supportsTikTok = ParseBoolEnv("INTEGRATION_TIKTOK_ENABLED"),
+                supportsFacebook = ParseBoolEnv("INTEGRATION_FACEBOOK_ENABLED"),
+                supportsReddit = ParseBoolEnv("INTEGRATION_REDDIT_ENABLED"),
+                supportsYouTube = ParseBoolEnv("INTEGRATION_YOUTUBE_ENABLED"),
+                supportsInstagram = ParseBoolEnv("INTEGRATION_INSTAGRAM_ENABLED"),
+
+                hasBucketRegistryTable = hasBucketObjectsTable,
+                expectedBucketName = configuredBucketName,
+                expectedProjectFolder = NormalizeFolderPath(configuredProjectFolder),
+                missingLegacyRetentionTables
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Database connectivity check failed in /health/db.");
+        return Results.Problem($"Database connectivity check failed: {ex.Message}", statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
+// Seed Craft Intelligence domains on startup when database-backed persistence is available.
+if (requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString))
+{
+    try
+    {
+        await WiseRavenShare.Server.Application.Services.Craft.CraftDomainSeeder.SeedAsync(app.Services);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Craft domain seeding failed during startup.");
+    }
+}
+
+app.Run();

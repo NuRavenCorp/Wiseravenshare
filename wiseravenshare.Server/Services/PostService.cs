@@ -1,0 +1,1184 @@
+// Wiseravenshare.Server/Services/PostService.cs
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Wiseravenshare.Server.DTOs.Post;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Currency;
+using Wiseravenshare.Server.Exceptions;
+using Wiseravenshare.Server.Interfaces.Repositories;
+using Wiseravenshare.Server.DTOs.User;
+using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.CrossPlatform;
+using Wiseravenshare.Server.Services.Communication;
+using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Services.Currency;
+
+namespace Wiseravenshare.Server.Services;
+
+public interface IPostService
+{
+    Task<PostDto> CreatePostAsync(Guid userId, CreatePostDto dto);
+    Task<PostDto> UpdatePostAsync(Guid userId, Guid postId, UpdatePostDto dto);
+    Task DeletePostAsync(Guid userId, Guid postId);
+    Task<PostDto> GetPostAsync(Guid postId);
+    Task<IEnumerable<PostDto>> GetFeedAsync(Guid userId, int page, int pageSize);
+    Task<IEnumerable<PostDto>> GetUserPostsAsync(Guid userId, int page, int pageSize);
+    Task<PostInteractionDto> LikePostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnlikePostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> RepostPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId);
+    Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId);
+    Task<IReadOnlyList<PostCommentDto>> GetCommentsAsync(Guid postId, int page, int pageSize);
+    Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto);
+    Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count);
+    Task<int> GetPostCountAsync(Guid userId);
+    Task TrackViewAsync(Guid postId);
+    Task<PostInteractionDto> SharePostAsync(Guid postId);
+}
+
+public class PostService : IPostService
+{
+    private readonly IPostRepository _postRepository;
+    private readonly IUserRepository _userRepository;
+    private readonly ITruthService _truthService;
+    private readonly ISocialPublishDispatcher _socialPublishDispatcher;
+    private readonly ICrossPlatformPublishService _crossPlatformPublishService;
+    private readonly IEngagementNotificationService _engagementNotificationService;
+    private readonly IWiseCoinService _wiseCoinService;
+    private readonly IEngagementMultiplierService _engagementMultiplierService;
+    private readonly IContentCrawlerService _contentCrawler;
+    private readonly ILogger<PostService> _logger;
+
+    public PostService(
+        IPostRepository postRepository,
+        IUserRepository userRepository,
+        ITruthService truthService,
+        ISocialPublishDispatcher socialPublishDispatcher,
+        ICrossPlatformPublishService crossPlatformPublishService,
+        IEngagementNotificationService engagementNotificationService,
+        IWiseCoinService wiseCoinService,
+        IEngagementMultiplierService engagementMultiplierService,
+        IContentCrawlerService contentCrawler,
+        ILogger<PostService> logger)
+    {
+        _postRepository = postRepository;
+        _userRepository = userRepository;
+        _truthService = truthService;
+        _socialPublishDispatcher = socialPublishDispatcher;
+        _crossPlatformPublishService = crossPlatformPublishService;
+        _engagementNotificationService = engagementNotificationService;
+        _wiseCoinService = wiseCoinService;
+        _engagementMultiplierService = engagementMultiplierService;
+        _contentCrawler = contentCrawler;
+        _logger = logger;
+    }
+
+    private static bool IsOpinionOrQuestion(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return false;
+
+        var trimmed = content.Trim();
+        if (trimmed.EndsWith('?')) return true;
+
+        var lower = trimmed.ToLowerInvariant();
+        string[] questionWords = { "who ", "what ", "where ", "when ", "why ", "how ", "if " };
+        foreach (var word in questionWords)
+        {
+            if (lower.StartsWith(word)) return true;
+        }
+
+        if (lower.StartsWith("if,")) return true;
+
+        string[] opinionPhrases = { "i think", "i believe", "my opinion", "in my opinion", "i feel", "seems to me", "i guess", "to me", "in my view" };
+        foreach (var phrase in opinionPhrases)
+        {
+            if (lower.Contains(phrase)) return true;
+        }
+
+        return false;
+    }
+
+    public async Task<PostDto> CreatePostAsync(Guid userId, CreatePostDto dto)
+    {
+        User? user = null;
+        try
+        {
+            user = await _userRepository.GetByIdAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "User lookup failed while creating post for user {UserId}; using a fallback identity.", userId);
+        }
+
+        if (user == null)
+        {
+            var fallbackUsername = $"localuser-{userId.ToString("N")[..6]}";
+            user = new User
+            {
+                Id = userId,
+                Email = $"local-{userId:N}@local",
+                Username = fallbackUsername,
+                DisplayName = fallbackUsername,
+                Role = UserRole.User,
+                IsActive = true,
+                TruthScore = 50.00m
+            };
+        }
+
+        // Create post
+        var mediaUrls = NormalizeMediaUrls(dto);
+        if (!Enum.TryParse<PostType>(dto.Type, true, out var parsedPostType))
+        {
+            _logger.LogWarning("Unknown post type '{PostType}' received during post creation for user {UserId}; defaulting to Text.", dto.Type, userId);
+            parsedPostType = PostType.Text;
+        }
+
+        var post = new Post
+        {
+            UserId = userId,
+            Content = dto.Content,
+            Type = parsedPostType,
+            MediaUrls = mediaUrls,
+            MediaMetadata = BuildMediaMetadata(dto, mediaUrls),
+            TruthSources = BuildProvenanceMetadata(dto.Provenance),
+            ReplyToId = dto.ReplyToId,
+            RepostOfId = dto.RepostOfId,
+            QuoteOfId = dto.QuoteOfId,
+            LocationName = dto.LocationName,
+            IsTruthDispatch = dto.IsTruthDispatch,
+            TruthDeclarationAccepted = dto.TruthDeclarationAccepted,
+            Latitude = dto.Latitude.HasValue ? (decimal?)dto.Latitude.Value : null,
+            Longitude = dto.Longitude.HasValue ? (decimal?)dto.Longitude.Value : null,
+            IsSensitive = dto.IsSensitive
+        };
+
+        // Analyze truth score when available, but never block post creation on the truth service.
+        if (!string.IsNullOrEmpty(dto.Content) && !IsOpinionOrQuestion(dto.Content))
+        {
+            try
+            {
+                var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
+                post.TruthScore = truthResult.TruthScore;
+                post.TruthCorrection = truthResult.Correction;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Truth analysis failed for post creation; continuing without truth metadata.");
+            }
+        }
+        else
+        {
+            // Nullify score for opinions/questions so UI ignores truth checks on them
+            post.TruthScore = null;
+            post.TruthCorrection = null;
+        }
+
+        var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
+        post.Id = createdPostId;
+
+        bool persisted = false;
+        try
+        {
+            await _postRepository.AddAsync(post);
+            persisted = true;
+            _logger.LogInformation("Post created by user {UserId}", userId);
+            DispatchSocialPublish(post);
+            DispatchCrossPlatformPublish(post);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post repository persistence failed; returning a local fallback post DTO for user {UserId}", userId);
+            return BuildPostDto(post, user);
+        }
+
+        // If repost, update the original post's repost count
+        if (dto.RepostOfId.HasValue)
+        {
+            try
+            {
+                var originalPost = await _postRepository.GetByIdAsync(dto.RepostOfId.Value);
+                if (originalPost != null)
+                {
+                    originalPost.RepostsCount++;
+                    await _postRepository.UpdateAsync(originalPost);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update repost count for post {PostId}", dto.RepostOfId.Value);
+            }
+        }
+
+        try
+        {
+            await AwardCreationRewardAsync(post, user);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
+        }
+
+        try
+        {
+            var postCount = await _postRepository.GetPostCountAsync(userId);
+            await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "post_created", postCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award post milestone badge for user {UserId}", userId);
+        }
+
+        // Ingest into content crawler for trending detection (fire-and-forget)
+        try
+        {
+            // Extract tags/hashtags from content
+            var tags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
+            _ = _contentCrawler.IngestUserContentAsync(
+                post.Id,
+                "Post",
+                post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "",
+                userId,
+                user.DisplayName ?? user.Username ?? "Unknown",
+                tags,
+                "GLOBAL"
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ingest post {PostId} into content crawler", post.Id);
+        }
+
+        if (!persisted)
+        {
+            return BuildPostDto(post, user);
+        }
+
+        try
+        {
+            return await GetPostDtoAsync(post.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post could not be reloaded after creation for user {UserId}; returning the local fallback DTO.", userId);
+            return BuildPostDto(post, user);
+        }
+    }
+
+    /// <summary>
+    /// Fire-and-forget fan-out of a new post to all configured external
+    /// platforms via the cross-platform publisher adapters. Never blocks or
+    /// fails post creation.
+    /// </summary>
+    private void DispatchCrossPlatformPublish(Post post)
+    {
+        var mediaUrl = ResolveMediaUrl(post);
+        var mediaType = post.Type switch
+        {
+            PostType.Video => "video",
+            PostType.Image => "photo",
+            PostType.Audio => "music",
+            _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
+        };
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _crossPlatformPublishService.PublishAsync(post.UserId, new CrossPlatformPublishRequest
+                {
+                    PostId = post.Id,
+                    Message = post.Content ?? string.Empty,
+                    MediaUrl = string.IsNullOrWhiteSpace(mediaUrl) ? null : mediaUrl,
+                    MediaType = mediaType
+                    // Platforms omitted -> fans out to every configured platform.
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cross-platform publish task failed for post {PostId}.", post.Id);
+            }
+        });
+    }
+
+    private async Task AwardCreationRewardAsync(Post post, User user)
+    {
+        if (post == null || user == null)
+        {
+            return;
+        }
+
+        if ((user.Email ?? string.Empty).StartsWith("local-", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var baseReward = post.Type switch
+        {
+            PostType.Video => 1.5m,
+            PostType.Audio => 1.4m,
+            PostType.Image => 1.2m,
+            PostType.Podcast => 1.35m,
+            PostType.TruthClaim => 1.25m,
+            _ => 1.0m
+        };
+
+        if (post.IsTruthDispatch)
+        {
+            baseReward += 0.25m;
+        }
+
+        var engagementMultiplier = await _engagementMultiplierService.GetPostEngagementMultiplierAsync(post.Id, user.Id);
+        var rewardAmount = decimal.Round(baseReward * engagementMultiplier, 2);
+
+        if (rewardAmount <= 0)
+        {
+            return;
+        }
+
+        var result = await _wiseCoinService.EarnWSCAsync(
+            user.Id,
+            rewardAmount,
+            TransactionType.ContentCreation,
+            $"Post reward for {post.Type} post",
+            applyMultipliers: true);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning("WiseCoin reward declined for post {PostId}: {Error}", post.Id, result.ErrorMessage);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Awarded {Amount} WSC for post {PostId} (base={BaseReward}, engagementMultiplier={Multiplier})",
+            result.Amount,
+            post.Id,
+            baseReward,
+            engagementMultiplier);
+    }
+
+    private void DispatchSocialPublish(Post post)
+    {
+        // Trigger (checklist step 1): notify the middleware asynchronously so
+        // it can download -> optimize -> publish to Facebook without blocking.
+        var mediaUrl = ResolveMediaUrl(post);
+        var mediaType = post.Type switch
+        {
+            PostType.Video => "video",
+            PostType.Image => "photo",
+            PostType.Audio => "music",
+            _ => string.IsNullOrWhiteSpace(mediaUrl) ? "text" : "photo"
+        };
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _socialPublishDispatcher.DispatchAsync(post.Id, post.Content ?? string.Empty, mediaUrl, mediaType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Social publish dispatch task failed for post {PostId}.", post.Id);
+            }
+        });
+    }
+
+    public async Task<PostDto> UpdatePostAsync(Guid userId, Guid postId, UpdatePostDto dto)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        if (post.UserId != userId)
+        {
+            throw new UnauthorizedException("You can only update your own posts");
+        }
+
+        if (!string.IsNullOrEmpty(dto.Content))
+        {
+            post.Content = dto.Content;
+
+            if (!IsOpinionOrQuestion(dto.Content))
+            {
+                // Re-analyze truth score
+                var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
+                post.TruthScore = truthResult.TruthScore;
+                post.TruthCorrection = truthResult.Correction;
+            }
+            else
+            {
+                post.TruthScore = null;
+                post.TruthCorrection = null;
+            }
+        }
+
+        if (dto.IsSensitive.HasValue)
+        {
+            post.IsSensitive = dto.IsSensitive.Value;
+        }
+
+        if (dto.IsTruthDispatch.HasValue)
+        {
+            post.IsTruthDispatch = dto.IsTruthDispatch.Value;
+        }
+
+        if (dto.TruthDeclarationAccepted.HasValue)
+        {
+            post.TruthDeclarationAccepted = dto.TruthDeclarationAccepted.Value;
+        }
+
+        await _postRepository.UpdateAsync(post);
+        _logger.LogInformation($"Post {postId} updated by user {userId}");
+
+        return await GetPostDtoAsync(post.Id);
+    }
+
+    public async Task DeletePostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        if (post.UserId != userId)
+        {
+            throw new UnauthorizedException("You can only delete your own posts");
+        }
+
+        post.IsDeleted = true;
+        post.DeletedAt = DateTime.UtcNow;
+        await _postRepository.UpdateAsync(post);
+
+        _logger.LogInformation($"Post {postId} deleted by user {userId}");
+    }
+
+    public async Task<PostDto> GetPostAsync(Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        return await GetPostDtoAsync(postId);
+    }
+
+    public async Task<IEnumerable<PostDto>> GetFeedAsync(Guid userId, int page, int pageSize)
+    {
+        try
+        {
+            var posts = await _postRepository.GetFeedAsync(userId, page, pageSize);
+            return await MapToPostDtosAsync(posts, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post feed query failed; returning an empty fallback feed for user {UserId}", userId);
+            return Array.Empty<PostDto>();
+        }
+    }
+
+    public async Task<IEnumerable<PostDto>> GetUserPostsAsync(Guid userId, int page, int pageSize)
+    {
+        var posts = await _postRepository.GetUserPostsAsync(userId, page, pageSize);
+        return await MapToPostDtosAsync(posts, userId);
+    }
+
+    public async Task<PostInteractionDto> LikePostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.LikePostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} liked post {PostId}", userId, postId);
+
+        // Award WSC to the post author for receiving a like (fire-and-forget).
+        if (post.UserId != userId)
+        {
+            var liker = await _userRepository.GetByIdAsync(userId);
+            var likerName = liker?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostLikedAsync(
+                post.UserId,
+                postId,
+                likerName,
+                post.Content ?? "your post"
+            );
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _wiseCoinService.EarnWSCAsync(
+                        post.UserId,
+                        0.25m,
+                        TransactionType.EngagementReward,
+                        $"Like reward: post received a like",
+                        applyMultipliers: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WSC like reward failed for post author {UserId}", post.UserId);
+                }
+            });
+        }
+
+        PostInteractionState interaction;
+        try
+        {
+            interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after like for post {PostId}; returning estimated state.", postId);
+            // The like was already saved — return a best-effort response so the client doesn't see a 500.
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount + 1,
+                RepostsCount = post.RepostsCount,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = true,
+                IsReposted = false,
+                IsBookmarked = false
+            };
+        }
+
+        // Update engagement in content crawler (fire-and-forget)
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, interaction.LikesCount, interaction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
+    }
+
+    public async Task<PostInteractionDto> UnlikePostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.UnlikePostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} unliked post {PostId}", userId, postId);
+
+        PostInteractionState interaction;
+        try
+        {
+            interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after unlike for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = Math.Max(0, post.LikesCount - 1),
+                RepostsCount = post.RepostsCount,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = false,
+                IsBookmarked = false
+            };
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, interaction.LikesCount, interaction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
+    }
+
+    public async Task<PostInteractionDto> RepostPostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.RepostPostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
+
+        // Award WSC to the post author for receiving a repost (fire-and-forget).
+        if (post.UserId != userId)
+        {
+            var sharedBy = await _userRepository.GetByIdAsync(userId);
+            var sharedByName = sharedBy?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostSharedAsync(
+                post.UserId,
+                postId,
+                sharedByName,
+                post.Content ?? "your post"
+            );
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _wiseCoinService.EarnWSCAsync(
+                        post.UserId,
+                        0.50m,
+                        TransactionType.EngagementReward,
+                        $"Repost reward: post was reposted",
+                        applyMultipliers: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WSC repost reward failed for post author {UserId}", post.UserId);
+                }
+            });
+        }
+
+        PostInteractionState repostInteraction;
+        try
+        {
+            repostInteraction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after repost for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount,
+                RepostsCount = post.RepostsCount + 1,
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = true,
+                IsBookmarked = false
+            };
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, repostInteraction.LikesCount, repostInteraction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = repostInteraction.LikesCount,
+            RepostsCount = repostInteraction.RepostsCount,
+            CommentsCount = repostInteraction.CommentsCount,
+            BookmarksCount = repostInteraction.BookmarksCount,
+            IsLiked = repostInteraction.IsLiked,
+            IsReposted = repostInteraction.IsReposted,
+            IsBookmarked = repostInteraction.IsBookmarked
+        };
+    }
+
+    public async Task<PostInteractionDto> UnrepostPostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.UnrepostPostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} unreposted post {PostId}", userId, postId);
+
+        PostInteractionState unrepostInteraction;
+        try
+        {
+            unrepostInteraction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetInteractionState failed after unrepost for post {PostId}; returning estimated state.", postId);
+            return new PostInteractionDto
+            {
+                PostId = postId,
+                LikesCount = post.LikesCount,
+                RepostsCount = Math.Max(0, post.RepostsCount - 1),
+                CommentsCount = post.CommentsCount,
+                BookmarksCount = post.BookmarksCount,
+                IsLiked = false,
+                IsReposted = false,
+                IsBookmarked = false
+            };
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await _contentCrawler.UpdateEngagementAsync(postId, post.ViewsCount, unrepostInteraction.LikesCount, unrepostInteraction.RepostsCount); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Content crawler engagement update failed for post {PostId}", postId); }
+        });
+
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = unrepostInteraction.LikesCount,
+            RepostsCount = unrepostInteraction.RepostsCount,
+            CommentsCount = unrepostInteraction.CommentsCount,
+            BookmarksCount = unrepostInteraction.BookmarksCount,
+            IsLiked = unrepostInteraction.IsLiked,
+            IsReposted = unrepostInteraction.IsReposted,
+            IsBookmarked = unrepostInteraction.IsBookmarked
+        };
+    }
+
+    public async Task<PostInteractionDto> BookmarkPostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.BookmarkPostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} bookmarked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
+    }
+
+    public async Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        await _postRepository.UnbookmarkPostAsync(postId, userId);
+        _logger.LogInformation("User {UserId} unbookmarked post {PostId}", userId, postId);
+        return await BuildPostInteractionDtoAsync(postId, userId);
+    }
+
+    public async Task<IReadOnlyList<PostCommentDto>> GetCommentsAsync(Guid postId, int page, int pageSize)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        var comments = await _postRepository.GetCommentsAsync(postId, page, pageSize);
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, null);
+
+        return comments
+            .Select(comment => BuildPostCommentDto(comment, interaction.CommentsCount))
+            .ToList();
+    }
+
+    public async Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null || post.IsDeleted)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        var content = (dto.Content ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new BadRequestException("Comment text is required.");
+        }
+
+        var created = await _postRepository.AddCommentAsync(postId, userId, content, dto.ParentCommentId);
+
+        if (post.UserId != userId)
+        {
+            var commenter = await _userRepository.GetByIdAsync(userId);
+            var commenterName = commenter?.DisplayName ?? "Someone";
+            _ = _engagementNotificationService.NotifyPostCommentedAsync(
+                post.UserId,
+                postId,
+                commenterName,
+                post.Content ?? "your post"
+            );
+        }
+
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+
+        try
+        {
+            await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "comment_added");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to award comment badge for user {UserId}", userId);
+        }
+        return BuildPostCommentDto(created, interaction.CommentsCount);
+    }
+
+    public async Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count)
+    {
+        try
+        {
+            var posts = await _postRepository.GetTrendingPostsAsync(count);
+            return await MapToPostDtosAsync(posts, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Trending post query failed; returning an empty fallback feed.");
+            return Array.Empty<PostDto>();
+        }
+    }
+
+    public async Task<int> GetPostCountAsync(Guid userId)
+    {
+        return await _postRepository.GetPostCountAsync(userId);
+    }
+
+    public async Task TrackViewAsync(Guid postId)
+    {
+        try
+        {
+            await _postRepository.IncrementViewAsync(postId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "View tracking failed for post {PostId}", postId);
+        }
+    }
+
+    public async Task<PostInteractionDto> SharePostAsync(Guid postId)
+    {
+        try
+        {
+            await _postRepository.IncrementShareAsync(postId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Share increment failed for post {PostId}", postId);
+        }
+
+        return await BuildPostInteractionDtoAsync(postId, null);
+    }
+
+    private async Task<PostDto> GetPostDtoAsync(Guid postId, Guid? viewerUserId = null)
+    {
+        var post = await _postRepository.GetByIdAsync(postId);
+        if (post == null)
+        {
+            throw new NotFoundException("Post not found");
+        }
+
+        var interaction = await _postRepository.GetInteractionStateAsync(post.Id, viewerUserId);
+        return BuildPostDto(post, post.User, interaction);
+    }
+
+    private PostDto BuildPostDto(Post post, User? user, PostInteractionState? interaction = null)
+    {
+        return new PostDto
+        {
+            Id = post.Id,
+            UserId = post.UserId,
+            Content = post.Content,
+            Type = post.Type.ToString(),
+            MediaUrl = ResolveMediaUrl(post),
+            MediaUrls = ResolveMediaUrls(post),
+            YoutubeUrl = ReadMediaMetadataValue(post.MediaMetadata, "youtubeUrl"),
+            TikTokUrl = ReadMediaMetadataValue(post.MediaMetadata, "tiktokUrl"),
+            FacebookUrl = ReadMediaMetadataValue(post.MediaMetadata, "facebookUrl"),
+            TruthScore = post.TruthScore,
+            TruthCorrection = post.TruthCorrection,
+            Provenance = ReadProvenanceMetadata(post.TruthSources),
+            LocationName = post.LocationName,
+            IsTruthDispatch = post.IsTruthDispatch,
+            TruthDeclarationAccepted = post.TruthDeclarationAccepted,
+            Latitude = post.Latitude.HasValue ? (double?)post.Latitude.Value : null,
+            Longitude = post.Longitude.HasValue ? (double?)post.Longitude.Value : null,
+            IsSensitive = post.IsSensitive,
+            IsPinned = post.IsPinned,
+            LikesCount = interaction?.LikesCount ?? post.LikesCount,
+            RepostsCount = interaction?.RepostsCount ?? post.RepostsCount,
+            CommentsCount = post.CommentsCount,
+            SharesCount = post.SharesCount,
+            BookmarksCount = interaction?.BookmarksCount ?? post.BookmarksCount,
+            ViewsCount = post.ViewsCount,
+            CreatedAt = post.CreatedAt,
+            IsLiked = interaction?.IsLiked ?? false,
+            IsReposted = interaction?.IsReposted ?? false,
+            IsBookmarked = interaction?.IsBookmarked ?? false,
+            User = user is null ? new UserDto() : MapToUserDto(user)
+        };
+    }
+
+    private static JsonDocument? BuildMediaMetadata(CreatePostDto dto, string[]? mediaUrls)
+    {
+        var metadata = new Dictionary<string, string?>();
+
+        if (!string.IsNullOrWhiteSpace(dto.YoutubeUrl))
+        {
+            metadata["youtubeUrl"] = dto.YoutubeUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.TikTokUrl))
+        {
+            metadata["tiktokUrl"] = dto.TikTokUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.FacebookUrl))
+        {
+            metadata["facebookUrl"] = dto.FacebookUrl.Trim();
+        }
+
+        if (mediaUrls is { Length: > 0 })
+        {
+            metadata["mediaUrl"] = mediaUrls[0];
+            metadata["mediaUrls"] = string.Join(",", mediaUrls);
+        }
+
+        if (metadata.Count == 0)
+        {
+            return null;
+        }
+
+        return JsonDocument.Parse(JsonSerializer.Serialize(metadata));
+    }
+
+    private static JsonDocument? BuildProvenanceMetadata(PostProvenanceDto? provenance)
+    {
+        if (provenance is null)
+        {
+            return null;
+        }
+
+        var sourceUrl = NormalizeMetadataValue(provenance.SourceUrl);
+        var evidenceSummary = NormalizeMetadataValue(provenance.EvidenceSummary);
+        var verificationStatus = NormalizeMetadataValue(provenance.VerificationStatus);
+        var correctionReferenceUrl = NormalizeMetadataValue(provenance.CorrectionReferenceUrl);
+        var capturedAtUtc = NormalizeMetadataValue(provenance.CapturedAtUtc) ?? DateTime.UtcNow.ToString("O");
+
+        if (sourceUrl is null && evidenceSummary is null && verificationStatus is null && correctionReferenceUrl is null)
+        {
+            return null;
+        }
+
+        var payload = new Dictionary<string, string?>
+        {
+            ["sourceUrl"] = sourceUrl,
+            ["evidenceSummary"] = evidenceSummary,
+            ["verificationStatus"] = verificationStatus,
+            ["correctionReferenceUrl"] = correctionReferenceUrl,
+            ["capturedAtUtc"] = capturedAtUtc
+        };
+
+        return JsonDocument.Parse(JsonSerializer.Serialize(payload));
+    }
+
+    private static PostProvenanceDto? ReadProvenanceMetadata(JsonDocument? metadata)
+    {
+        if (metadata?.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var provenance = new PostProvenanceDto
+        {
+            SourceUrl = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "sourceUrl")),
+            EvidenceSummary = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "evidenceSummary")),
+            VerificationStatus = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "verificationStatus")),
+            CorrectionReferenceUrl = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "correctionReferenceUrl")),
+            CapturedAtUtc = NormalizeMetadataValue(ReadMediaMetadataValue(metadata, "capturedAtUtc"))
+        };
+
+        var hasValue = provenance.SourceUrl is not null
+            || provenance.EvidenceSummary is not null
+            || provenance.VerificationStatus is not null
+            || provenance.CorrectionReferenceUrl is not null
+            || provenance.CapturedAtUtc is not null;
+
+        return hasValue ? provenance : null;
+    }
+
+    private static string? NormalizeMetadataValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string[]? NormalizeMediaUrls(CreatePostDto dto)
+    {
+        var parsed = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(dto.MediaUrl))
+        {
+            parsed.Add(dto.MediaUrl.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.MediaUrls))
+        {
+            try
+            {
+                var mediaPayload = JsonSerializer.Deserialize<JsonElement>(dto.MediaUrls);
+                var parsedMediaUrls = PostMediaPayloadParser.ParseMediaUrls(dto.MediaUrl, mediaPayload);
+                parsed.AddRange(parsedMediaUrls);
+            }
+            catch (JsonException)
+            {
+                foreach (var part in dto.MediaUrls.Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                    {
+                        parsed.Add(part);
+                    }
+                }
+            }
+        }
+
+        return parsed.Count > 0 ? parsed.Distinct(StringComparer.OrdinalIgnoreCase).ToArray() : null;
+    }
+
+    private static string? ResolveMediaUrl(Post post)
+    {
+        var resolved = ResolveMediaUrls(post);
+        return resolved?.FirstOrDefault() ?? ReadMediaMetadataValue(post.MediaMetadata, "mediaUrl");
+    }
+
+    private static string[]? ResolveMediaUrls(Post post)
+    {
+        if (post.MediaUrls is { Length: > 0 })
+        {
+            return post.MediaUrls.Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        var metadataValue = ReadMediaMetadataValue(post.MediaMetadata, "mediaUrls");
+        if (string.IsNullOrWhiteSpace(metadataValue))
+        {
+            return null;
+        }
+
+        return metadataValue.Split([','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string? ReadMediaMetadataValue(JsonDocument? metadata, string key)
+    {
+        if (metadata?.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metadata.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private async Task<IEnumerable<PostDto>> MapToPostDtosAsync(IEnumerable<Post> posts, Guid? viewerUserId)
+    {
+        var dtos = new List<PostDto>();
+        foreach (var post in posts)
+        {
+            dtos.Add(await GetPostDtoAsync(post.Id, viewerUserId));
+        }
+        return dtos;
+    }
+
+    private async Task<PostInteractionDto> BuildPostInteractionDtoAsync(Guid postId, Guid? userId)
+    {
+        var interaction = await _postRepository.GetInteractionStateAsync(postId, userId);
+        return new PostInteractionDto
+        {
+            PostId = postId,
+            LikesCount = interaction.LikesCount,
+            RepostsCount = interaction.RepostsCount,
+            CommentsCount = interaction.CommentsCount,
+            BookmarksCount = interaction.BookmarksCount,
+            ViewsCount = interaction.ViewsCount,
+            SharesCount = interaction.SharesCount,
+            IsLiked = interaction.IsLiked,
+            IsReposted = interaction.IsReposted,
+            IsBookmarked = interaction.IsBookmarked
+        };
+    }
+
+    private PostCommentDto BuildPostCommentDto(Comment comment, int commentsCount)
+    {
+        return new PostCommentDto
+        {
+            Id = comment.Id,
+            PostId = comment.PostId,
+            UserId = comment.UserId,
+            ParentCommentId = comment.ParentCommentId,
+            Content = comment.Content,
+            CreatedAt = comment.CreatedAt,
+            LikesCount = comment.LikesCount,
+            RepliesCount = comment.RepliesCount,
+            CommentsCount = commentsCount,
+            User = comment.User is null ? new UserDto() : MapToUserDto(comment.User)
+        };
+    }
+
+    private UserDto MapToUserDto(User user)
+    {
+        return new UserDto
+        {
+            Id = user.Id,
+            Email = user.Email,
+            Username = user.Username,
+            DisplayName = user.DisplayName,
+            Bio = user.Bio,
+            AvatarUrl = user.AvatarUrl,
+            CoverPhotoUrl = user.CoverPhotoUrl,
+            Location = user.Location,
+            Website = user.Website,
+            IsVerified = user.IsVerified,
+            IsPrivate = user.IsPrivate,
+            Role = user.Role.ToString(),
+            TruthScore = user.TruthScore,
+            ReputationPoints = user.ReputationPoints,
+            CreatedAt = user.CreatedAt,
+            LastActiveAt = user.LastActiveAt
+        };
+    }
+
+    private static List<string> ExtractHashtags(string content)
+    {
+        var hashtags = new List<string>();
+        if (string.IsNullOrWhiteSpace(content)) return hashtags;
+
+        // Find all words starting with # or patterns like #trending
+        var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var word in words)
+        {
+            if (word.StartsWith('#') && word.Length > 1)
+            {
+                // Remove trailing punctuation
+                var tag = word.Trim('#', '.', ',', '!', '?', ':', ';', '"', '\'');
+                if (!string.IsNullOrWhiteSpace(tag) && tag.Length > 2)
+                {
+                    hashtags.Add(tag);
+                }
+            }
+        }
+
+        return hashtags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+}

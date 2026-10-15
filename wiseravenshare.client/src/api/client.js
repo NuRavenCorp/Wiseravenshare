@@ -1,0 +1,487 @@
+const ACCESS_TOKEN_KEY = "wiseravenshare_access_token";
+
+const getApiBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  if (typeof window !== "undefined" && window.location.port === "5173") {
+    return "http://localhost:5242";
+  }
+
+  return "";
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
+let inMemoryToken = null;
+
+const readStoredToken = () => {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return inMemoryToken;
+  }
+
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY) || window.localStorage.getItem("token");
+};
+
+const writeStoredToken = (token) => {
+  inMemoryToken = token || null;
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    window.localStorage.setItem("token", token);
+  } else {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem("token");
+  }
+};
+
+export const resolveApiUrl = (path) => `${API_BASE_URL}${path}`;
+const buildUrl = resolveApiUrl;
+
+const parseResponseBody = async (response) => {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  return text ? { message: text } : null;
+};
+
+const requestJson = async (path, options = {}) => {
+  const token = readStoredToken();
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = {
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(buildUrl(path), {
+    credentials: "include",
+    ...options,
+    headers,
+  });
+
+  const data = await parseResponseBody(response);
+  if (!response.ok) {
+    const error = new Error(data?.message || `Request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+};
+
+const request = async (path, options = {}) => {
+  const token = readStoredToken();
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = {
+    ...(isFormData ? {} : {}),
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(buildUrl(path), {
+    credentials: "include",
+    ...options,
+    headers,
+  });
+
+  const data = await parseResponseBody(response);
+  if (!response.ok) {
+    const error = new Error(data?.message || `Request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+};
+
+const invokeFunction = async (name, payload = {}) => {
+  const data = await requestJson(`/api/functions/${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { data };
+};
+
+const entityClient = (entityName) => ({
+  async filter(query = {}, options = {}) {
+    const data = await requestJson(`/api/entities/${encodeURIComponent(entityName)}/filter`, {
+      method: "POST",
+      body: JSON.stringify({ query, options }),
+    });
+    if (Array.isArray(data)) {
+      return { items: data };
+    }
+    return data || { items: [] };
+  },
+  async count(query = {}) {
+    const data = await requestJson(`/api/entities/${encodeURIComponent(entityName)}/count`, {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    });
+    if (typeof data === "number") {
+      return data;
+    }
+    return data?.count ?? data?.total ?? 0;
+  },
+  async aggregate(options = {}) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/aggregate`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  },
+  async create(payload) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async update(id, payload) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  async updateMany(filter, update) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/bulk`, {
+      method: "PATCH",
+      body: JSON.stringify({ filter, update }),
+    });
+  },
+  subscribe() {
+    return () => {};
+  },
+});
+
+const entityProxy = new Proxy(
+  {},
+  {
+    get: (_, entityName) => entityClient(entityName),
+  }
+);
+
+export const apiClient = {
+  auth: {
+    setToken(token) {
+      if (!token) {
+        return;
+      }
+      writeStoredToken(token);
+    },
+    async loginViaEmailPassword(email, password) {
+      const data = await requestJson("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+      const token = data?.token || data?.access_token;
+      if (token) {
+        writeStoredToken(token);
+      }
+      return {
+        access_token: token,
+        user: data?.user || null,
+      };
+    },
+    async register(payload) {
+      return requestJson("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    async me() {
+      const token = readStoredToken();
+      if (!token) {
+        throw new Error("Not authenticated.");
+      }
+
+      const data = await requestJson("/api/auth/verify", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
+      return data?.user || null;
+    },
+    async isAuthenticated() {
+      try {
+        const user = await this.me();
+        return Boolean(user);
+      } catch {
+        return false;
+      }
+    },
+    redirectToLogin(nextUrl) {
+      if (typeof window === "undefined") {
+        return;
+      }
+      const returnTo = nextUrl ? new URL(nextUrl, window.location.origin).toString() : window.location.href;
+      window.location.href = `/login?returnTo=${encodeURIComponent(returnTo)}`;
+    },
+    async logout(redirectUrl) {
+      try {
+        await requestJson("/api/auth/logout", { method: "POST" });
+      } finally {
+        writeStoredToken(null);
+      }
+      if (typeof window !== "undefined" && redirectUrl) {
+        window.location.href = redirectUrl;
+      }
+    },
+    loginWithProvider(provider, fromUrl = "/") {
+      if (typeof window === "undefined") {
+        return;
+      }
+      const returnUrl = new URL(fromUrl, window.location.origin).toString();
+      window.location.href = buildUrl(`/api/auth/oauth/${encodeURIComponent(provider)}/start?returnUrl=${encodeURIComponent(returnUrl)}`);
+    },
+    resetPasswordRequest(email) {
+      return requestJson("/api/auth/reset-password-request", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+    },
+    resetPassword({ resetToken, newPassword }) {
+      return requestJson("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token: resetToken, newPassword }),
+      });
+    },
+  },
+  app: {
+    async getPublicSettings() {
+      return {
+        id: "wiseravenshare-local",
+        public_settings: {},
+      };
+    },
+  },
+  pythonMatrix: {
+    health() {
+      return requestJson("/api/python-matrix/health", {
+        method: "GET",
+      });
+    },
+    databaseHealth() {
+      return requestJson("/api/python-matrix/health/db", {
+        method: "GET",
+      });
+    },
+    history(limit = 10) {
+      const query = new URLSearchParams({ limit: String(limit) });
+      return requestJson(`/api/python-matrix/history?${query.toString()}`, {
+        method: "GET",
+      });
+    },
+    transpose(payload) {
+      return requestJson("/api/python-matrix/transpose", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    multiply(payload) {
+      return requestJson("/api/python-matrix/multiply", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+  },
+  ravensightMedia: {
+    listMusic() {
+      return requestJson("/api/ravensight/media/music", { method: "GET" });
+    },
+    uploadMusic(file, fields = {}) {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("title", fields.title || file.name.replace(/\.[^/.]+$/, ""));
+      body.append("artist", fields.artist || "");
+      body.append("album", fields.album || "");
+      body.append("genre", fields.genre || "");
+      body.append("destinationFolder", fields.destinationFolder || "");
+      return request("/api/ravensight/media/music/save", { method: "POST", body });
+    },
+    deleteMusic(trackId) {
+      return requestJson(`/api/ravensight/media/music/${encodeURIComponent(trackId)}`, { method: "DELETE" });
+    },
+    listVideos() {
+      return requestJson("/api/ravensight/media/videos", { method: "GET" });
+    },
+    uploadVideo(file, fields = {}) {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("title", fields.title || file.name.replace(/\.[^/.]+$/, ""));
+      body.append("description", fields.description || "");
+      body.append("destinationFolder", fields.destinationFolder || "");
+      body.append("privacy", fields.privacy || "unlisted");
+      body.append("storageMode", fields.storageMode || "temporary");
+      body.append("isPermanent", fields.isPermanent ? "true" : "false");
+      return request("/api/ravensight/media/videos/save", { method: "POST", body });
+    },
+    deleteVideo(videoId) {
+      return requestJson(`/api/ravensight/media/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" });
+    },
+    listPhotos(limit = 100) {
+      return requestJson(`/api/ravensight/media/photos?limit=${encodeURIComponent(String(limit))}`, { method: "GET" });
+    },
+    uploadPhoto(file, fields = {}) {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("caption", fields.caption || file.name.replace(/\.[^/.]+$/, ""));
+      body.append("destinationFolder", fields.destinationFolder || "");
+      return request("/api/ravensight/media/photos/save", { method: "POST", body });
+    },
+    deletePhoto(photoId) {
+      return requestJson(`/api/ravensight/media/photos/${encodeURIComponent(photoId)}`, { method: "DELETE" });
+    },
+  },
+  news: {
+    getBulletin(params = {}) {
+      const query = new URLSearchParams();
+      if (params.region) {
+        query.set("region", params.region);
+      }
+      if (params.topic) {
+        query.set("topic", params.topic);
+      }
+      if (params.language) {
+        query.set("language", params.language);
+      }
+      if (params.limit) {
+        query.set("limit", String(params.limit));
+      }
+
+      const suffix = query.toString();
+      return requestJson(`/api/news/bulletin${suffix ? `?${suffix}` : ""}`, {
+        method: "GET",
+      });
+    },
+    search(params = {}) {
+      const query = new URLSearchParams();
+      if (params.q) {
+        query.set("q", params.q);
+      }
+      if (params.language) {
+        query.set("language", params.language);
+      }
+      if (params.limit) {
+        query.set("limit", String(params.limit));
+      }
+
+      const suffix = query.toString();
+      return requestJson(`/api/news/search${suffix ? `?${suffix}` : ""}`, {
+        method: "GET",
+      });
+    },
+    trending(params = {}) {
+      const query = new URLSearchParams();
+      if (params.language) {
+        query.set("language", params.language);
+      }
+      if (params.limit) {
+        query.set("limit", String(params.limit));
+      }
+
+      const suffix = query.toString();
+      return requestJson(`/api/news/trending${suffix ? `?${suffix}` : ""}`, {
+        method: "GET",
+      });
+    },
+  },
+  payments: {
+    getConfig() {
+      return requestJson("/api/payments/config", {
+        method: "GET",
+      });
+    },
+    getCatalog() {
+      return requestJson("/api/payments/catalog", {
+        method: "GET",
+      });
+    },
+    getHealth() {
+      return requestJson("/api/payments/health", {
+        method: "GET",
+      });
+    },
+  },
+  billing: {
+    getSubscription() {
+      return requestJson("/api/billing/subscription", {
+        method: "GET",
+      });
+    },
+    createCheckoutSession(payload) {
+      return requestJson("/api/billing/checkout-session", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    createPortalSession(payload) {
+      return requestJson("/api/billing/portal-session", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+  },
+  functions: {
+    invoke: invokeFunction,
+  },
+  entities: entityProxy,
+  connectors: {
+    async connectAppUser(connectorId) {
+      const data = await requestJson(`/api/connectors/${encodeURIComponent(connectorId)}/connect`, {
+        method: "POST",
+      });
+      return data?.url || data?.connectUrl || "/settings";
+    },
+    async disconnectAppUser(connectorId) {
+      return requestJson(`/api/connectors/${encodeURIComponent(connectorId)}/disconnect`, {
+        method: "POST",
+      });
+    },
+  },
+  // Social platform connect/disconnect via server OAuth flow
+  social: {
+    getSocialConnectUrl(platform, userId, returnUrl) {
+      const params = new URLSearchParams({
+        user_id: userId,
+        return_url: returnUrl,
+      });
+      return requestJson(`/api/auth/${encodeURIComponent(platform)}/start?${params.toString()}`, {
+        method: "GET",
+      });
+    },
+    getStatus(platform) {
+      return requestJson(`/api/auth/${encodeURIComponent(platform)}/status`, {
+        method: "GET",
+      });
+    },
+    saveDetails(platform, userId, fields) {
+      return requestJson(`/api/auth/${encodeURIComponent(platform)}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, fields }),
+      });
+    },
+    disconnect(platform, userId) {
+      return requestJson(`/api/auth/${encodeURIComponent(platform)}/disconnect`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId }),
+      });
+    },
+  },
+  // Expose raw authenticated request for custom use
+  requestJson,
+};
