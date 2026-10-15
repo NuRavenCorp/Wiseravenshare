@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/api/client";
+import PodcastTeamPickerDialog from "@/components/podcasts/PodcastTeamPickerDialog";
 import {
   Loader2,
   Upload,
@@ -15,7 +16,6 @@ import {
   UserPlus,
   Trash2,
   Monitor,
-  Smartphone,
   Video,
   Mic,
   Headphones,
@@ -41,7 +41,16 @@ export const TEAM_ROLES = [
   { id: "guest", label: "Guest", icon: Users },
 ];
 
-const DEVICE_OPTIONS = ["Studio Cam A", "Studio Cam B", "Laptop Webcam", "iPhone", "Android", "USB Mic", "External Recorder"];
+const DEVICE_OPTIONS = [
+  "Studio Cam A",
+  "Studio Cam B",
+  "Studio PC",
+  "MacBook",
+  "Tablet / iPad",
+  "Android Phone",
+  "USB Mic",
+  "External Recorder",
+];
 
 const STEPS = [
   { id: "team", label: "Team & Collab", icon: Users },
@@ -53,6 +62,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Step 1: basics
   const [title, setTitle] = useState("");
@@ -69,11 +79,6 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   const [teamName, setTeamName] = useState("");
   const [purpose, setPurpose] = useState("");
   const [members, setMembers] = useState([]);
-  const [memberInput, setMemberInput] = useState("");
-  const [memberRole, setMemberRole] = useState("host");
-  const [memberDevice, setMemberDevice] = useState(DEVICE_OPTIONS[0]);
-  const [memberResp, setMemberResp] = useState("");
-  const [inviting, setInviting] = useState(false);
 
   const createdRef = useRef(null);
 
@@ -114,21 +119,6 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
     }
   };
 
-  const addMemberToList = () => {
-    if (!memberInput.trim()) return;
-    setMembers([
-      ...members,
-      {
-        identifier: memberInput.trim(),
-        role: memberRole,
-        device: memberDevice,
-        responsibility: memberResp.trim(),
-      },
-    ]);
-    setMemberInput("");
-    setMemberResp("");
-  };
-
   const removeMember = (idx) => {
     setMembers(members.filter((_, i) => i !== idx));
   };
@@ -156,13 +146,14 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
 
         // Invite each member
         for (const m of members) {
-          await apiClient.functions.invoke("InviteCollaborator", {
+          const invitePayload = {
             team_id: team.id,
             identifier: m.identifier,
-            role: m.role,
             responsibility: m.responsibility,
             device: m.device,
-          });
+            ...(m.role ? { role: m.role } : {}),
+          };
+          await apiClient.functions.invoke("InviteCollaborator", invitePayload);
         }
       }
 
@@ -176,10 +167,17 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
 
   const canNextTeam = teamName.trim() && members.length > 0;
   const canNextBasics = title && episodeNumber && subjectMatter;
-  const current = STEPS[step];
-
   return (
     <div className="space-y-6">
+      <PodcastTeamPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        members={members}
+        onMembersChange={setMembers}
+        roles={TEAM_ROLES}
+        deviceOptions={DEVICE_OPTIONS}
+      />
+
       {/* Step indicator */}
       <div className="flex items-center gap-2">
         {STEPS.map((s, i) => {
@@ -217,7 +215,9 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
         <div className="space-y-5">
           <div>
             <h3 className="font-heading text-lg text-foreground mb-1">Build Your Collaboration Team First</h3>
-            <p className="text-sm text-muted-foreground">Select team members and assign roles before episode setup.</p>
+            <p className="text-sm text-muted-foreground">
+              Select team members by email, WiseRavenShare user ID, or invite token, then assign roles now or let the crew choose later.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -233,48 +233,41 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
 
           {/* Add member form */}
           <div className="p-4 rounded-lg border border-border bg-card space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <UserPlus className="w-4 h-4 text-primary" /> Add Team Member
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <UserPlus className="w-4 h-4 text-primary" /> Team member picker
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+                <UserPlus className="w-4 h-4" /> Open Picker Window
+              </Button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Username or Email</Label>
-                <Input value={memberInput} onChange={(e) => setMemberInput(e.target.value)} placeholder="creator@email.com or @username" />
+            <p className="text-sm text-muted-foreground">
+              Use the picker window to build the episode crew, assign devices, and optionally leave roles open for self-assignment.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                <p className="text-xs text-muted-foreground">Members</p>
+                <p className="text-lg font-medium text-foreground">{members.length}</p>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Function / Role</Label>
-                <select
-                  value={memberRole}
-                  onChange={(e) => setMemberRole(e.target.value)}
-                  className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
-                >
-                  {TEAM_ROLES.map((r) => (
-                    <option key={r.id} value={r.id}>{r.label}</option>
-                  ))}
-                </select>
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                <p className="text-xs text-muted-foreground">Roles preset</p>
+                <p className="text-lg font-medium text-foreground">
+                  {members.filter((member) => member.role).length}
+                </p>
               </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Device Registered</Label>
-                <select
-                  value={memberDevice}
-                  onChange={(e) => setMemberDevice(e.target.value)}
-                  className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
-                >
-                  {DEVICE_OPTIONS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                <p className="text-xs text-muted-foreground">Self-assigned later</p>
+                <p className="text-lg font-medium text-foreground">
+                  {members.filter((member) => !member.role).length}
+                </p>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Responsibility</Label>
-                <Input value={memberResp} onChange={(e) => setMemberResp(e.target.value)} placeholder="What they handle on this episode" />
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                <p className="text-xs text-muted-foreground">Connected devices</p>
+                <p className="text-lg font-medium text-foreground">
+                  {new Set(members.map((member) => member.device)).size}
+                </p>
               </div>
             </div>
-            <Button onClick={addMemberToList} disabled={!memberInput.trim()} variant="outline" size="sm">
-              <UserPlus className="w-4 h-4" /> Add to Team
-            </Button>
           </div>
 
           {/* Member list */}
@@ -290,7 +283,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{m.identifier}</p>
-                      <p className="text-xs text-accent">{role?.label || m.role}</p>
+                      <p className="text-xs text-accent">{role?.label || "Role to be chosen by the crew"}</p>
                       <div className="flex flex-wrap gap-3 mt-1 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1"><Monitor className="w-3 h-3" /> {m.device}</span>
                         {m.responsibility && <span className="flex items-center gap-1"><Check className="w-3 h-3" /> {m.responsibility}</span>}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Loader2,
   Plus,
@@ -79,13 +78,14 @@ export default function PodcastTeamPanel({ podcast, onUpdate }) {
     if (!identifier) return;
     setInviteStatus({ ...inviteStatus, [teamId]: { type: "loading" } });
     try {
-      const res = await apiClient.functions.invoke("InviteCollaborator", {
+      const invitePayload = {
         team_id: teamId,
         identifier,
-        role: inviteRole[teamId] || "host",
         responsibility: inviteResp[teamId] || "",
         device: inviteDevice[teamId] || "",
-      });
+        ...(inviteRole[teamId] ? { role: inviteRole[teamId] } : {}),
+      };
+      const res = await apiClient.functions.invoke("InviteCollaborator", invitePayload);
       if (res.data?.error) {
         setInviteStatus({
           ...inviteStatus,
@@ -147,8 +147,7 @@ export default function PodcastTeamPanel({ podcast, onUpdate }) {
           <h3 className="text-sm font-medium">Create a Collaboration Team</h3>
         </div>
         <p className="text-xs text-muted-foreground">
-          Create a team for this podcast, then invite creators to collaborate on
-          the script and line-up.
+          Create a team for this podcast, then invite collaborators by email, WiseRavenShare user ID, or invite token. Roles can be assigned now or left blank for the crew to decide later.
         </p>
         <div className="flex gap-2">
           <Input
@@ -225,7 +224,7 @@ export default function PodcastTeamPanel({ podcast, onUpdate }) {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-foreground">{m.display_name || m.user_id}</p>
-                              <p className="text-xs text-accent">{role?.label || m.role}</p>
+                              <p className="text-xs text-accent">{role?.label || "Role to be chosen by the crew"}</p>
                               <div className="flex flex-wrap gap-3 mt-0.5 text-xs text-muted-foreground">
                                 {m.device && <span className="flex items-center gap-1"><Monitor className="w-3 h-3" /> {m.device}</span>}
                                 {m.responsibility && <span>{m.responsibility}</span>}
@@ -286,14 +285,15 @@ export default function PodcastTeamPanel({ podcast, onUpdate }) {
                     onChange={(e) =>
                       setInviteEmails({ ...inviteEmails, [team.id]: e.target.value })
                     }
-                    placeholder="Username or email"
+                    placeholder="Email, WiseRavenShare user ID, or invite token"
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <select
-                      value={inviteRole[team.id] || "host"}
+                      value={inviteRole[team.id] || ""}
                       onChange={(e) => setInviteRole({ ...inviteRole, [team.id]: e.target.value })}
                       className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
                     >
+                      <option value="">Let the crew choose later</option>
                       {TEAM_ROLES.map((r) => (
                         <option key={r.id} value={r.id}>{r.label}</option>
                       ))}

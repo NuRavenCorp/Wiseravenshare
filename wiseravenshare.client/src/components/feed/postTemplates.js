@@ -1,6 +1,6 @@
 import {
   Flame, HelpCircle, Sparkles, Megaphone, Clapperboard, ThumbsUp, BookOpen, Vote,
-  Music, Mic, Newspaper, Radio, Camera, Video, GraduationCap, Trophy, HandHeart,
+  Music, Mic, Newspaper, Radio, Camera, GraduationCap, Trophy, HandHeart,
   Users, PenLine, Disc3, Film, CalendarDays,
 } from "lucide-react";
 

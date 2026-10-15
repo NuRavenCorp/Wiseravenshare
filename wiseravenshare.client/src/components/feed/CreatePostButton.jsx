@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Feather, X } from "lucide-react";
+import React, { useState } from "react";
+import { Feather } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import PostComposer from "@/components/feed/PostComposer";
 import { useAuth } from "@/lib/AuthContext";

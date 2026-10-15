@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import Teleprompter from "@/components/podcasts/Teleprompter";
 import CueCardDisplay from "@/components/podcasts/CueCardDisplay";
 import IntroOutroControls from "@/components/podcasts/IntroOutroControls";
+import { TEAM_ROLES } from "@/components/podcasts/PodcastLaunchWizard";
+import { useWebRTCHost } from "@/hooks/useWebRTCHost";
 import {
-  Video,
   Radio,
   StopCircle,
   Loader2,
@@ -19,10 +21,15 @@ import {
   Type,
   Music,
   Scissors,
-  Eye,
   Upload,
   RadioTower,
   CloudUpload,
+  Monitor,
+  Users,
+  Copy,
+  ExternalLink,
+  Wifi,
+  Video,
 } from "lucide-react";
 
 const CAM_SLOTS = [
@@ -33,11 +40,92 @@ const CAM_SLOTS = [
 ];
 
 const DIRECTOR_ROLES = ["director", "producer", "creator"];
+const ROLE_PRIORITY = {
+  camera: 0,
+  host: 1,
+  co_host: 2,
+  director: 3,
+  producer: 4,
+  script_writer: 5,
+  audio: 6,
+  editor: 7,
+  researcher: 8,
+  guest: 9,
+};
+const ROLE_LABELS = Object.fromEntries(TEAM_ROLES.map((role) => [role.id, role.label]));
+
+function resolveRoleLabel(role) {
+  if (!role) return "Role to be chosen";
+  return ROLE_LABELS[role] || role.replace(/_/g, " ");
+}
+
+function buildScriptPipeline(script) {
+  const lines = (script || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    segment1: lines[0] || "",
+    segment2: lines[1] || "",
+    segment3: lines[2] || "",
+    segment4: lines[3] || "",
+  };
+}
+
+function normalizeParticipant(participant) {
+  return {
+    identifier:
+      participant?.identifier ||
+      participant?.user_id ||
+      participant?.userId ||
+      participant?.email ||
+      "",
+    displayName:
+      participant?.display_name ||
+      participant?.displayName ||
+      participant?.identifier ||
+      participant?.user_id ||
+      participant?.userId ||
+      "Crew member",
+    role: participant?.role || "",
+    device: participant?.device || "Device pending",
+    responsibility: participant?.responsibility || "",
+    isConnected: participant?.isConnected ?? true,
+    addedAtUtc: participant?.addedAtUtc || new Date().toISOString(),
+  };
+}
 
 function fmtTime(s) {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function generateLiveSessionCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function normalizeComparisonValue(value) {
+  return (value || "").trim().toLowerCase();
+}
+
+function matchPeerToMember(peer, member) {
+  if (!peer || !member) return false;
+
+  const peerName = normalizeComparisonValue(peer.name);
+  const peerRole = normalizeComparisonValue(peer.role);
+  const peerDevice = normalizeComparisonValue(peer.device);
+  const memberIdentifier = normalizeComparisonValue(member.identifier);
+  const memberDisplayName = normalizeComparisonValue(member.displayName);
+  const memberRole = normalizeComparisonValue(member.role);
+  const memberDevice = normalizeComparisonValue(member.device);
+
+  return (
+    (memberDisplayName && peerName === memberDisplayName) ||
+    (memberIdentifier && peerName === memberIdentifier) ||
+    (memberRole && peerRole === memberRole && memberDevice && peerDevice === memberDevice)
+  );
 }
 
 export default function RecordingSession({ podcast, onUpdate }) {
@@ -54,6 +142,18 @@ export default function RecordingSession({ podcast, onUpdate }) {
   const [deliveryMode, setDeliveryMode] = useState(podcast.recording_mode || "");
   const [scriptCueIndex, setScriptCueIndex] = useState(-1);
   const [introPrompt, setIntroPrompt] = useState(null);
+  const [studioScript, setStudioScript] = useState(podcast.script || "");
+  const [teamRoster, setTeamRoster] = useState([]);
+  const [directorNote, setDirectorNote] = useState("");
+  const [directorTarget, setDirectorTarget] = useState("all");
+  const [directorNotes, setDirectorNotes] = useState([]);
+  const [broadcastCue, setBroadcastCue] = useState(null);
+  const [liveScriptDraft, setLiveScriptDraft] = useState("");
+  const [scriptSyncing, setScriptSyncing] = useState(false);
+  const [snapshotVersion, setSnapshotVersion] = useState("");
+  const [selectionVersion, setSelectionVersion] = useState("");
+  const [liveSessionCode, setLiveSessionCode] = useState("");
+  const [copiedValue, setCopiedValue] = useState("");
 
   const streamRefs = useRef([null, null, null, null]);
   const videoRefs = useRef([null, null, null, null]);
@@ -62,12 +162,245 @@ export default function RecordingSession({ podcast, onUpdate }) {
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
 
+  const roomId = `podcast-${podcast.id}`;
+  const {
+    peers: livePeers,
+    streams: liveStreams,
+    connected: liveConnected,
+    error: liveFeedError,
+    sendSessionEvent,
+  } = useWebRTCHost(liveSessionCode);
   const segments = podcast.itinerary || [];
-  const scriptCues = (podcast.script || "")
+  const scriptCues = (studioScript || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
   const canDirect = DIRECTOR_ROLES.includes(userRole) || podcast.created_by_id === undefined;
+  const canEditStudioScript =
+    canDirect ||
+    ["script_writer", "host", "co_host", "researcher"].includes(userRole || "");
+  const sortedRoster = useMemo(
+    () =>
+      [...teamRoster].sort((left, right) => {
+        const leftPriority = ROLE_PRIORITY[left.role] ?? 99;
+        const rightPriority = ROLE_PRIORITY[right.role] ?? 99;
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+        return (left.displayName || left.identifier).localeCompare(
+          right.displayName || right.identifier
+        );
+      }),
+    [teamRoster]
+  );
+  const monitorRoster = useMemo(
+    () => CAM_SLOTS.map((_, index) => sortedRoster[index] || null),
+    [sortedRoster]
+  );
+  const remotePeers = useMemo(
+    () => livePeers.filter((peer) => peer.role !== "host"),
+    [livePeers]
+  );
+  const monitorFeeds = useMemo(() => {
+    const unmatchedPeers = [...remotePeers];
+
+    return CAM_SLOTS.map((_, index) => {
+      const member = monitorRoster[index];
+      let peerIndex = unmatchedPeers.findIndex((peer) => matchPeerToMember(peer, member));
+
+      if (peerIndex < 0 && member?.role) {
+        peerIndex = unmatchedPeers.findIndex(
+          (peer) => normalizeComparisonValue(peer.role) === normalizeComparisonValue(member.role)
+        );
+      }
+
+      if (peerIndex < 0 && !member) {
+        peerIndex = 0;
+      }
+
+      const peer = peerIndex >= 0 ? unmatchedPeers.splice(peerIndex, 1)[0] : null;
+      return {
+        member,
+        peer,
+        stream: peer ? liveStreams[peer.id] || null : null,
+      };
+    });
+  }, [liveStreams, monitorRoster, remotePeers]);
+
+  const publishStudioState = useCallback(
+    async (overrides = {}) => {
+      if (!liveSessionCode) return;
+
+      const nextSegmentIndex =
+        overrides.activeSegment ?? activeSegment;
+      const nextCueIndex =
+        overrides.scriptCueIndex ?? scriptCueIndex;
+      const nextRecording =
+        overrides.recording ?? overrides.isRecording ?? recording;
+      const nextMainCam = overrides.mainCam ?? mainCam;
+      const nextCue =
+        nextCueIndex >= 0 && nextCueIndex < scriptCues.length
+          ? scriptCues[nextCueIndex]
+          : "";
+      const nextSegment =
+        nextSegmentIndex >= 0 && nextSegmentIndex < segments.length
+          ? segments[nextSegmentIndex]
+          : null;
+      const nextFeed = monitorFeeds[nextMainCam] || null;
+      const nextAssignment = nextFeed?.member || null;
+      const nextPeer = nextFeed?.peer || null;
+      const shotPrompt = nextAssignment
+        ? `${CAM_SLOTS[nextMainCam]?.label || "Live feed"} · ${resolveRoleLabel(
+            nextAssignment.role || nextPeer?.role || ""
+          )}${nextAssignment.responsibility ? ` · ${nextAssignment.responsibility}` : ""}`
+        : `${CAM_SLOTS[nextMainCam]?.label || "Live feed"} standing by`;
+
+      await sendSessionEvent("studio-state", {
+        roomId,
+        isRecording: nextRecording,
+        deliveryMode: overrides.deliveryMode ?? deliveryMode,
+        activeSegmentIndex: nextSegmentIndex,
+        activeSegmentTitle: nextSegment?.segment_title || "",
+        currentCue: nextCue,
+        cueNumber: nextCueIndex >= 0 ? nextCueIndex + 1 : 0,
+        totalCues: scriptCues.length,
+        mainCam: nextMainCam,
+        mainCamLabel: CAM_SLOTS[nextMainCam]?.label || "",
+        shotPrompt,
+        mainAssignment: nextAssignment
+          ? {
+              identifier: nextAssignment.identifier,
+              displayName: nextAssignment.displayName,
+              role: nextAssignment.role,
+              device: nextAssignment.device,
+              responsibility: nextAssignment.responsibility,
+            }
+          : null,
+        mainPeer: nextPeer
+          ? {
+              name: nextPeer.name,
+              role: nextPeer.role,
+              device: nextPeer.device,
+            }
+          : null,
+        feeds: monitorFeeds.map((feed, index) => ({
+          slotLabel: CAM_SLOTS[index]?.label || `Cam ${index + 1}`,
+          role: feed?.member?.role || feed?.peer?.role || "",
+          device: feed?.member?.device || feed?.peer?.device || "",
+          displayName: feed?.member?.displayName || feed?.peer?.name || "",
+          responsibility: feed?.member?.responsibility || "",
+          isLive: index === nextMainCam && nextRecording,
+        })),
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [
+      activeSegment,
+      deliveryMode,
+      liveSessionCode,
+      mainCam,
+      monitorFeeds,
+      recording,
+      roomId,
+      scriptCueIndex,
+      scriptCues,
+      segments,
+      sendSessionEvent,
+    ]
+  );
+
+  const buildStudioSnapshot = useCallback(
+    (overrides = {}) => ({
+      podcastId: podcast.id,
+      roomId,
+      deliveryMode,
+      mainCam,
+      activeSegment,
+      scriptCueIndex,
+      isRecording: recording,
+      liveSessionCode,
+      directorNotes,
+      teamRoster: teamRoster.map((member) => ({
+        identifier: member.identifier,
+        displayName: member.displayName,
+        role: member.role,
+        device: member.device,
+        responsibility: member.responsibility,
+      })),
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    }),
+    [
+      podcast.id,
+      roomId,
+      deliveryMode,
+      mainCam,
+      activeSegment,
+      scriptCueIndex,
+      recording,
+      liveSessionCode,
+      directorNotes,
+      teamRoster,
+    ]
+  );
+
+  const saveStudioSnapshot = useCallback(
+    async (snapshot, version = snapshotVersion) => {
+      try {
+        const response = await apiClient.requestJson(
+          "/api/auth/team-access/podcast-session-snapshot",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              roomId,
+              snapshot,
+              version,
+            }),
+          }
+        );
+        if (response?.version) {
+          setSnapshotVersion(response.version);
+        }
+      } catch (syncError) {
+        console.error("Failed to sync podcast session snapshot.", syncError);
+      }
+    },
+    [roomId, snapshotVersion]
+  );
+
+  const saveTeamSelection = useCallback(
+    async (participants, version = selectionVersion) => {
+      try {
+        const response = await apiClient.requestJson(
+          "/api/auth/team-access/podcast-team-selection",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              roomId,
+              requestedMaxParticipants: Math.min(
+                Math.max(participants.length || 1, 1),
+                5
+              ),
+              deviceCapacity: Math.max(CAM_SLOTS.length, participants.length || 1),
+              participants: participants.map((member) => ({
+                identifier: member.identifier,
+                displayName: member.displayName,
+                role: member.role,
+                device: member.device,
+                isConnected: member.isConnected,
+                addedAtUtc: member.addedAtUtc,
+              })),
+              version,
+            }),
+          }
+        );
+        if (response?.version) {
+          setSelectionVersion(response.version);
+        }
+      } catch (syncError) {
+        console.error("Failed to sync podcast team selection.", syncError);
+      }
+    },
+    [roomId, selectionVersion]
+  );
 
   // Load user's role from team membership
   useEffect(() => {
@@ -92,12 +425,176 @@ export default function RecordingSession({ podcast, onUpdate }) {
             return;
           }
         }
-      } catch {
-        // not logged in
+      } catch (loadError) {
+        console.error("Failed to resolve podcast team role.", loadError);
       }
     };
     loadRole();
   }, [podcast.id]);
+
+  useEffect(() => {
+    setStudioScript(podcast.script || "");
+  }, [podcast.id, podcast.script]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStudioContext = async () => {
+      try {
+        const [teamPage, selectionResponse, snapshotResponse, sharedScriptResponse] =
+          await Promise.all([
+            apiClient.entities.Team.filter({}),
+            apiClient
+              .requestJson(
+                `/api/auth/team-access/podcast-team-selection?roomId=${encodeURIComponent(roomId)}`,
+                { method: "GET" }
+              )
+              .catch((syncError) => {
+                console.error("Failed to load podcast team selection.", syncError);
+                return null;
+              }),
+            apiClient
+              .requestJson(
+                `/api/auth/team-access/podcast-session-snapshot?roomId=${encodeURIComponent(roomId)}`,
+                { method: "GET" }
+              )
+              .catch((syncError) => {
+                console.error("Failed to load podcast session snapshot.", syncError);
+                return null;
+              }),
+            apiClient
+              .requestJson(
+                `/api/auth/team-access/podcast-shared-script?roomId=${encodeURIComponent(roomId)}`,
+                { method: "GET" }
+              )
+              .catch((syncError) => {
+                console.error("Failed to load shared podcast script.", syncError);
+                return null;
+              }),
+          ]);
+
+        if (cancelled) return;
+
+        const linkedTeams = (teamPage.items || []).filter((team) =>
+          podcast.team_ids?.includes(team.id)
+        );
+
+        const participantsByIdentifier = new Map();
+        linkedTeams.forEach((team) => {
+          (team.member_details || []).forEach((member) => {
+            const normalized = normalizeParticipant(member);
+            const dedupeKey =
+              normalized.identifier || normalized.displayName.toLowerCase();
+            if (!participantsByIdentifier.has(dedupeKey)) {
+              participantsByIdentifier.set(dedupeKey, normalized);
+            }
+          });
+        });
+
+        const rosterFromTeams = Array.from(participantsByIdentifier.values());
+        const selectionParticipants = selectionResponse?.hasSelection
+          ? (selectionResponse.participants || []).map((participant) =>
+              normalizeParticipant(participant)
+            )
+          : [];
+        const nextRoster =
+          selectionParticipants.length > 0 ? selectionParticipants : rosterFromTeams;
+
+        setTeamRoster(nextRoster);
+        setSelectionVersion(selectionResponse?.version || "");
+
+        if (selectionParticipants.length === 0 && rosterFromTeams.length > 0) {
+          void saveTeamSelection(rosterFromTeams, selectionResponse?.version || "");
+        }
+
+        const snapshot = snapshotResponse?.hasSnapshot
+          ? snapshotResponse.snapshot || {}
+          : null;
+        if (snapshot) {
+          if (typeof snapshot.mainCam === "number") {
+            setMainCam(Math.min(Math.max(snapshot.mainCam, 0), CAM_SLOTS.length - 1));
+          }
+          if (typeof snapshot.activeSegment === "number") {
+            setActiveSegment(snapshot.activeSegment);
+          }
+          if (typeof snapshot.scriptCueIndex === "number") {
+            setScriptCueIndex(snapshot.scriptCueIndex);
+          }
+          if (Array.isArray(snapshot.directorNotes)) {
+            setDirectorNotes(snapshot.directorNotes);
+          }
+          if (!podcast.recording_mode && typeof snapshot.deliveryMode === "string") {
+            setDeliveryMode(snapshot.deliveryMode);
+          }
+          if (typeof snapshot.liveSessionCode === "string") {
+            setLiveSessionCode(snapshot.liveSessionCode);
+          }
+          setSnapshotVersion(snapshotResponse?.version || "");
+        }
+
+        if (sharedScriptResponse?.hasSharedScript && sharedScriptResponse.scriptText) {
+          setStudioScript(sharedScriptResponse.scriptText);
+        }
+      } catch (loadError) {
+        console.error("Failed to load podcast studio context.", loadError);
+      }
+    };
+
+    loadStudioContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    podcast.id,
+    podcast.recording_mode,
+    podcast.team_ids,
+    roomId,
+    saveTeamSelection,
+  ]);
+
+  useEffect(() => {
+    videoRefs.current.forEach((videoElement, index) => {
+      if (!videoElement) return;
+
+      const remoteStream = monitorFeeds[index]?.stream || null;
+      const localStream = streamRefs.current[index] || null;
+      const nextStream = remoteStream || localStream;
+
+      if (videoElement.srcObject !== nextStream) {
+        videoElement.srcObject = nextStream;
+      }
+    });
+  }, [assignments, monitorFeeds]);
+
+  useEffect(() => {
+    if (recording) return;
+
+    const preferredIndex = monitorFeeds.findIndex((feed, index) => {
+      const resolvedRole = feed?.peer?.role || feed?.member?.role || "";
+      return (
+        (feed?.stream || streamRefs.current[index]) &&
+        ["camera", "host", "co_host", "director", "producer"].includes(resolvedRole)
+      );
+    });
+
+    if (preferredIndex >= 0) {
+      const currentFeed = monitorFeeds[mainCam];
+      const currentHasSource = Boolean(currentFeed?.stream || streamRefs.current[mainCam]);
+      if (!currentHasSource || preferredIndex !== mainCam) {
+        setMainCam(preferredIndex);
+        void saveStudioSnapshot(buildStudioSnapshot({ mainCam: preferredIndex }));
+        void publishStudioState({ mainCam: preferredIndex });
+      }
+    }
+  }, [
+    buildStudioSnapshot,
+    mainCam,
+    monitorFeeds,
+    publishStudioState,
+    recording,
+    saveStudioSnapshot,
+  ]);
 
   // Enumerate video devices (request permission first)
   useEffect(() => {
@@ -134,11 +631,36 @@ export default function RecordingSession({ podcast, onUpdate }) {
         audio: false,
       });
       streamRefs.current[slotIdx] = stream;
-      if (videoRefs.current[slotIdx]) {
-        videoRefs.current[slotIdx].srcObject = stream;
-      }
     } catch (err) {
       setError(`Failed to access camera for ${CAM_SLOTS[slotIdx].label}.`);
+    }
+  }, []);
+
+  const ensureLiveSessionCode = useCallback(() => {
+    if (liveSessionCode) {
+      return liveSessionCode;
+    }
+
+    const nextCode = generateLiveSessionCode();
+    setLiveSessionCode(nextCode);
+    void saveStudioSnapshot(
+      buildStudioSnapshot({
+        liveSessionCode: nextCode,
+      })
+    );
+    return nextCode;
+  }, [buildStudioSnapshot, liveSessionCode, saveStudioSnapshot]);
+
+  const copyText = useCallback(async (value, key) => {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedValue(key);
+      window.setTimeout(() => setCopiedValue(""), 2000);
+    } catch (copyError) {
+      console.error("Failed to copy studio link.", copyError);
+      setError("Could not copy the live feed link.");
     }
   }, []);
 
@@ -148,19 +670,27 @@ export default function RecordingSession({ podcast, onUpdate }) {
       setError("Choose Live Screening mode before starting episode capture.");
       return;
     }
-    const mainStream = streamRefs.current[mainCam];
+    const mainStream = monitorFeeds[mainCam]?.stream || streamRefs.current[mainCam];
+    const usingRemoteFeed = Boolean(monitorFeeds[mainCam]?.stream);
     if (!mainStream) {
-      setError("Assign a camera to the main slot first.");
+      setError("Assign a local camera or connect a live crew feed to the main slot first.");
       return;
     }
     try {
-      audioStreamRef.current = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      });
+      ensureLiveSessionCode();
       const combined = new MediaStream();
       mainStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-      audioStreamRef.current.getAudioTracks().forEach((t) => combined.addTrack(t));
+
+      const mainAudioTracks = mainStream.getAudioTracks();
+      if (mainAudioTracks.length > 0) {
+        mainAudioTracks.forEach((track) => combined.addTrack(track));
+      } else if (!usingRemoteFeed) {
+        audioStreamRef.current = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        audioStreamRef.current.getAudioTracks().forEach((t) => combined.addTrack(t));
+      }
 
       const mimeType = MediaRecorder.isTypeSupported("video/webm")
         ? "video/webm"
@@ -173,15 +703,29 @@ export default function RecordingSession({ podcast, onUpdate }) {
       recorder.onstop = handleUpload;
       recorderRef.current = recorder;
       recorder.start(5000);
+      const nextActiveSegment = segments.length > 0 ? 0 : -1;
+      const nextScriptCueIndex = scriptCues.length > 0 ? 0 : -1;
       setRecording(true);
       setElapsed(0);
-      setActiveSegment(segments.length > 0 ? 0 : -1);
-      setScriptCueIndex(scriptCues.length > 0 ? 0 : -1);
+      setActiveSegment(nextActiveSegment);
+      setScriptCueIndex(nextScriptCueIndex);
       setShowPanel(scriptCues.length > 0 ? "cues" : "prompter");
       if (podcast.intro_uri) {
         setIntroPrompt("live");
       }
       timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+      void saveStudioSnapshot(
+        buildStudioSnapshot({
+          isRecording: true,
+          activeSegment: nextActiveSegment,
+          scriptCueIndex: nextScriptCueIndex,
+        })
+      );
+      void publishStudioState({
+        recording: true,
+        activeSegment: nextActiveSegment,
+        scriptCueIndex: nextScriptCueIndex,
+      });
     } catch (err) {
       setError("Failed to start recording: " + (err.message || "Unknown error"));
     }
@@ -203,6 +747,8 @@ export default function RecordingSession({ podcast, onUpdate }) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    void saveStudioSnapshot(buildStudioSnapshot({ isRecording: false }));
+    void publishStudioState({ recording: false });
   };
 
   const handleUpload = async () => {
@@ -273,10 +819,165 @@ export default function RecordingSession({ podcast, onUpdate }) {
         recording_mode: mode,
       });
       onUpdate?.();
-    } catch {
-      // keep local mode even if persistence fails
+      void saveStudioSnapshot(buildStudioSnapshot({ deliveryMode: mode }));
+      void publishStudioState({ deliveryMode: mode });
+    } catch (saveError) {
+      console.error("Failed to persist recording mode.", saveError);
+      setError("Episode mode changed locally, but the update could not be saved.");
     }
   };
+
+  const appendLiveScript = async () => {
+    if (!liveScriptDraft.trim()) return;
+
+    const nextScript = [studioScript.trimEnd(), liveScriptDraft.trim()]
+      .filter(Boolean)
+      .join("\n");
+
+    setStudioScript(nextScript);
+    setLiveScriptDraft("");
+    setScriptSyncing(true);
+    setError(null);
+
+    try {
+      await apiClient.entities.Podcast.update(podcast.id, {
+        script: nextScript,
+      });
+      await apiClient.requestJson("/api/auth/team-access/podcast-shared-script", {
+        method: "POST",
+        body: JSON.stringify({
+          roomId,
+          scriptText: nextScript,
+          scriptPipeline: buildScriptPipeline(nextScript),
+        }),
+      });
+      onUpdate?.();
+      void publishStudioState();
+    } catch (syncError) {
+      console.error("Failed to sync live script updates.", syncError);
+      setError(
+        "Live script changes were applied locally, but could not be shared with the studio."
+      );
+    } finally {
+      setScriptSyncing(false);
+    }
+  };
+
+  const sendDirectorNote = async () => {
+    if (!directorNote.trim()) return;
+
+    const targetLabel =
+      directorTarget === "all"
+        ? "All feeds"
+        : CAM_SLOTS[Number(directorTarget)]?.label || "Main feed";
+    const nextEntry = {
+      id: `dir-${Date.now()}`,
+      target: targetLabel,
+      text: directorNote.trim(),
+      author: resolveRoleLabel(userRole || "director"),
+      createdAt: new Date().toISOString(),
+    };
+    const nextNotes = [nextEntry, ...directorNotes].slice(0, 8);
+
+    setDirectorNotes(nextNotes);
+    setBroadcastCue(`${targetLabel}: ${nextEntry.text}`);
+    setDirectorNote("");
+    setShowPanel("cues");
+    await sendSessionEvent("director-note", {
+      ...nextEntry,
+      roomId,
+    });
+    await saveStudioSnapshot(
+      buildStudioSnapshot({
+        directorNotes: nextNotes,
+      })
+    );
+  };
+
+  const handleSelectMainCam = (idx) => {
+    setMainCam(idx);
+    void saveStudioSnapshot(buildStudioSnapshot({ mainCam: idx }));
+    void publishStudioState({ mainCam: idx });
+  };
+
+  const handleAdvanceSegment = () => {
+    const nextSegment = Math.min(activeSegment + 1, segments.length - 1);
+    const nextCueIndex =
+      scriptCues.length > 0
+        ? Math.min(scriptCueIndex + 1, Math.max(scriptCues.length - 1, 0))
+        : scriptCueIndex;
+
+    setActiveSegment(nextSegment);
+    if (scriptCues.length > 0) {
+      setScriptCueIndex(nextCueIndex);
+    }
+
+    void saveStudioSnapshot(
+      buildStudioSnapshot({
+        activeSegment: nextSegment,
+        scriptCueIndex: nextCueIndex,
+      })
+    );
+    setBroadcastCue(
+      nextCueIndex >= 0 && nextCueIndex < scriptCues.length
+        ? scriptCues[nextCueIndex]
+        : null
+    );
+    void publishStudioState({
+      activeSegment: nextSegment,
+      scriptCueIndex: nextCueIndex,
+    });
+  };
+
+  const handleAdvanceScriptCue = () => {
+    const nextCueIndex = Math.min(
+      scriptCueIndex + 1,
+      Math.max(scriptCues.length - 1, 0)
+    );
+
+    setScriptCueIndex(nextCueIndex);
+    setBroadcastCue(
+      nextCueIndex >= 0 && nextCueIndex < scriptCues.length
+        ? scriptCues[nextCueIndex]
+        : null
+    );
+    void saveStudioSnapshot(buildStudioSnapshot({ scriptCueIndex: nextCueIndex }));
+    void publishStudioState({ scriptCueIndex: nextCueIndex });
+  };
+
+  const buildJoinLink = useCallback(
+    (member) => {
+      if (!liveSessionCode || typeof window === "undefined") return "";
+
+      const params = new URLSearchParams({
+        code: liveSessionCode,
+        name: member.displayName || member.identifier || "Team Member",
+        role: member.role || "camera",
+        device: member.device || "Tablet / iPad",
+      });
+
+      return `${window.location.origin}/join-feed?${params.toString()}`;
+    },
+    [liveSessionCode]
+  );
+
+  const rosterConnectionMap = useMemo(() => {
+    const matches = new Map();
+
+    sortedRoster.forEach((member, index) => {
+      const slotFeed = monitorFeeds.find((feed) => feed.member === member) || monitorFeeds[index];
+      if (slotFeed?.peer) {
+        matches.set(member.identifier || member.displayName, slotFeed.peer);
+      }
+    });
+
+    return matches;
+  }, [monitorFeeds, sortedRoster]);
+
+  useEffect(() => {
+    if (!liveConnected || !liveSessionCode) return;
+    void publishStudioState();
+  }, [liveConnected, liveSessionCode, publishStudioState, scriptCues.length]);
 
   useEffect(() => {
     return () => {
@@ -299,6 +1000,231 @@ export default function RecordingSession({ podcast, onUpdate }) {
 
   return (
     <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="rounded-lg border border-border bg-card p-4 space-y-1.5">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            01 · Script flow
+          </p>
+          <p className="text-sm text-foreground font-medium">
+            Script writers drive cue cards and the teleprompter.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Each non-empty line becomes a cue card, and new lines can be added live while the episode is rolling.
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4 space-y-1.5">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            02 · Crew wall
+          </p>
+          <p className="text-sm text-foreground font-medium">
+            Keep every camera, laptop, tablet, and Mac view on one screen.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            The monitor wall below highlights assigned devices so the creator can see the whole show at once.
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4 space-y-1.5">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            03 · Start episode
+          </p>
+          <p className="text-sm text-foreground font-medium">
+            Press Start Episode to take the selected camera feed live.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Director notes, cue cards, and the active segment remain visible without leaving the studio screen.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">
+            Selected team members
+          </span>
+          <span className="text-xs text-muted-foreground">
+            chosen by the episode setup owner
+          </span>
+        </div>
+        {sortedRoster.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {sortedRoster.map((member) => (
+              <div
+                key={`${member.identifier}-${member.device}`}
+                className="rounded-lg border border-border/70 bg-secondary/20 p-3 space-y-2"
+              >
+                {(() => {
+                  const matchedPeer =
+                    rosterConnectionMap.get(member.identifier || member.displayName) || null;
+                  const joinLink = buildJoinLink(member);
+                  return (
+                    <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {member.displayName}
+                  </p>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full ${
+                            matchedPeer
+                              ? "bg-green-500/15 text-green-500"
+                              : "bg-primary/10 text-primary"
+                          }`}
+                        >
+                          {matchedPeer ? "Feed live" : resolveRoleLabel(member.role)}
+                        </span>
+                      </div>
+                </div>
+                <p className="text-xs text-muted-foreground truncate">
+                  {member.identifier || "Pending identifier"}
+                </p>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Monitor className="w-3 h-3" /> {member.device}
+                  </span>
+                  {member.responsibility && <span>{member.responsibility}</span>}
+                </div>
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <span className="text-[11px] text-muted-foreground">
+                          {matchedPeer
+                            ? `${matchedPeer.name} connected`
+                            : liveSessionCode
+                            ? "Ready for join link"
+                            : "Live feed room starts when you enable crew feeds"}
+                        </span>
+                        {liveSessionCode && joinLink && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              copyText(joinLink, `join:${member.identifier || member.displayName}`)
+                            }
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            {copiedValue === `join:${member.identifier || member.displayName}`
+                              ? "Copied"
+                              : "Copy join link"}
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Add collaborators from the Team tab to assign devices, roles, and responsibilities for the monitor wall.
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-medium text-foreground">Live crew feed room</p>
+            <p className="text-xs text-muted-foreground">
+              Use one join room for tablets, Macs, and PCs. Starting the episode will automatically keep this room active.
+            </p>
+          </div>
+          {!liveSessionCode ? (
+            <Button variant="outline" onClick={ensureLiveSessionCode}>
+              <Wifi className="w-4 h-4" /> Prepare live crew feeds
+            </Button>
+          ) : (
+            <span
+              className={`text-xs px-3 py-1 rounded-full ${
+                liveConnected
+                  ? "bg-green-500/15 text-green-500"
+                  : "bg-secondary/40 text-muted-foreground"
+              }`}
+            >
+              {liveConnected ? "Host room connected" : "Connecting host room"}
+            </span>
+          )}
+        </div>
+
+        {liveFeedError && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {liveFeedError}
+          </div>
+        )}
+
+        {liveSessionCode ? (
+          <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-3">
+            <div className="rounded-lg border border-border/70 bg-secondary/20 p-3 space-y-2">
+              <p className="text-xs text-muted-foreground">Session code</p>
+              <p className="font-mono text-2xl tracking-[0.35em] text-foreground">
+                {liveSessionCode}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => copyText(liveSessionCode, "session-code")}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedValue === "session-code" ? "Copied" : "Copy code"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    typeof window !== "undefined" &&
+                    window.open(`${window.location.origin}/join-feed?code=${encodeURIComponent(liveSessionCode)}`, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open join page
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/70 bg-secondary/10 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-foreground">
+                  {remotePeers.length} live device feed{remotePeers.length === 1 ? "" : "s"} connected
+                </p>
+                <span className="text-xs text-muted-foreground">
+                  Match a join link to each camera person’s tablet, Mac, or PC.
+                </span>
+              </div>
+              {remotePeers.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {remotePeers.map((peer) => (
+                    <div
+                      key={peer.id}
+                      className="rounded-lg border border-border bg-card p-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {peer.name || "Crew feed"}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {resolveRoleLabel(peer.role)}{peer.device ? ` · ${peer.device}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-500">
+                        Live
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  No remote crew feeds are connected yet. Share a join link or the session code with your camera operators.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Prepare the live room to generate personalized join links for the selected crew.
+          </div>
+        )}
+      </div>
+
       {/* Multi-camera grid */}
       <div>
         <div className="mb-3 p-3 rounded-lg border border-border bg-card space-y-2">
@@ -361,12 +1287,27 @@ export default function RecordingSession({ podcast, onUpdate }) {
                 mainCam === idx ? "border-primary ring-1 ring-primary/40" : "border-border"
               }`}
             >
+              {!assignments[idx] && !monitorFeeds[idx]?.stream && (
+                <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center gap-2 bg-black/65 text-center px-4">
+                  <Monitor className="w-6 h-6 text-primary/80" />
+                  <div className="space-y-0.5">
+                    <p className="text-xs text-foreground">
+                      {monitorRoster[idx]?.displayName || slot.label} standby
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Waiting for {monitorRoster[idx]?.device || "tablet, Mac, or PC feed"}
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
                 <span className="text-[10px] tracking-wider text-foreground/80 bg-background/60 px-1.5 py-0.5 rounded">
                   {slot.label}
                 </span>
                 <span className="text-[10px] text-muted-foreground bg-background/60 px-1.5 py-0.5 rounded">
-                  {slot.role}
+                  {monitorRoster[idx]?.role
+                    ? resolveRoleLabel(monitorRoster[idx].role)
+                    : slot.role}
                 </span>
               </div>
               {mainCam === idx && (
@@ -397,7 +1338,7 @@ export default function RecordingSession({ podcast, onUpdate }) {
                 </select>
                 {!recording && assignments[idx] && (
                   <button
-                    onClick={() => setMainCam(idx)}
+                    onClick={() => handleSelectMainCam(idx)}
                     className={`mt-1.5 w-full text-[10px] py-1 rounded transition-colors ${
                       mainCam === idx
                         ? "bg-primary/15 text-primary"
@@ -407,6 +1348,16 @@ export default function RecordingSession({ podcast, onUpdate }) {
                     {mainCam === idx ? "★ Recording source" : "Set as main"}
                   </button>
                 )}
+                <div className="mt-2 rounded-md border border-border/60 bg-secondary/30 px-2 py-1.5 text-[11px] text-muted-foreground space-y-0.5">
+                  <p className="text-foreground truncate">
+                    {monitorRoster[idx]?.displayName || "Assign a crew member"}
+                  </p>
+                  <p className="truncate">
+                    {monitorFeeds[idx]?.peer
+                      ? `${monitorFeeds[idx].peer.name || "Live feed"} · ${monitorFeeds[idx].peer.device || "Remote device"}`
+                      : monitorRoster[idx]?.device || "No linked tablet / Mac / PC yet"}
+                  </p>
+                </div>
               </div>
             </div>
           ))}
@@ -417,7 +1368,11 @@ export default function RecordingSession({ podcast, onUpdate }) {
       {deliveryMode === "live" ? (
         <div className="flex items-center gap-3 p-4 rounded-lg border border-border bg-card">
           {!recording ? (
-            <Button onClick={startRecording} disabled={!assignments[mainCam]} className="flex-1">
+            <Button
+              onClick={startRecording}
+              disabled={!assignments[mainCam] && !monitorFeeds[mainCam]?.stream}
+              className="flex-1"
+            >
               <Radio className="w-4 h-4" /> Start Episode Recording
             </Button>
           ) : (
@@ -481,6 +1436,114 @@ export default function RecordingSession({ podcast, onUpdate }) {
         </div>
       )}
 
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-foreground">Director console</p>
+              <p className="text-xs text-muted-foreground">
+                Key in live directional notes for the crew without leaving the studio view.
+              </p>
+            </div>
+            <Megaphone className="w-4 h-4 text-primary" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[160px,1fr] gap-3">
+            <select
+              value={directorTarget}
+              onChange={(e) => setDirectorTarget(e.target.value)}
+              className="h-10 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
+              disabled={!canDirect}
+            >
+              <option value="all">All feeds</option>
+              {CAM_SLOTS.map((slot, idx) => (
+                <option key={slot.label} value={String(idx)}>
+                  {slot.label}
+                </option>
+              ))}
+            </select>
+            <Textarea
+              value={directorNote}
+              onChange={(e) => setDirectorNote(e.target.value)}
+              placeholder="Call out framing changes, pacing notes, or who should take the next question."
+              className="min-h-[92px]"
+              disabled={!canDirect}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={sendDirectorNote}
+              disabled={!canDirect || !directorNote.trim()}
+            >
+              <Megaphone className="w-4 h-4" /> Send Direction
+            </Button>
+            {!canDirect && (
+              <span className="text-xs text-muted-foreground">
+                Only directors, producers, or the creator can broadcast studio directions.
+              </span>
+            )}
+          </div>
+          {directorNotes.length > 0 && (
+            <div className="space-y-2">
+              {directorNotes.map((note) => (
+                <div
+                  key={note.id}
+                  className="rounded-md border border-border/60 bg-secondary/20 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>{note.target}</span>
+                    <span>{new Date(note.createdAt).toLocaleTimeString()}</span>
+                  </div>
+                  <p className="text-sm text-foreground mt-1">{note.text}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    {note.author}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-foreground">Live script updates</p>
+              <p className="text-xs text-muted-foreground">
+                Add fresh lines in real time so the teleprompter and cue cards stay in sync.
+              </p>
+            </div>
+            <Type className="w-4 h-4 text-primary" />
+          </div>
+          <Textarea
+            value={liveScriptDraft}
+            onChange={(e) => setLiveScriptDraft(e.target.value)}
+            placeholder="Paste new lines from the script writer here..."
+            className="min-h-[132px]"
+            disabled={!canEditStudioScript}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={appendLiveScript}
+              disabled={!canEditStudioScript || !liveScriptDraft.trim() || scriptSyncing}
+            >
+              {scriptSyncing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              Add to Studio Script
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {scriptCues.length} live cue card{scriptCues.length === 1 ? "" : "s"} ready
+            </span>
+          </div>
+          {!canEditStudioScript && (
+            <p className="text-xs text-muted-foreground">
+              Ask a script writer, director, producer, host, or creator to push live script changes.
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Studio tools: teleprompter + cues + intro/outro */}
       <div className="rounded-lg border border-border bg-card/50 overflow-hidden">
         <div className="flex border-b border-border">
@@ -503,18 +1566,15 @@ export default function RecordingSession({ podcast, onUpdate }) {
         </div>
         <div className="p-4">
           {showPanel === "prompter" && (
-            <Teleprompter script={podcast.script} autoScrollOnRecord={recording} />
+            <Teleprompter script={studioScript} autoScrollOnRecord={recording} />
           )}
           {showPanel === "cues" && (
             <CueCardDisplay
               canDirect={canDirect || !userRole}
               scriptCues={scriptCues}
               activeScriptCueIndex={scriptCueIndex}
-              onAdvanceScriptCue={() =>
-                setScriptCueIndex((idx) =>
-                  Math.min(idx + 1, Math.max(scriptCues.length - 1, 0))
-                )
-              }
+              broadcastCue={broadcastCue}
+              onAdvanceScriptCue={handleAdvanceScriptCue}
             />
           )}
           {showPanel === "intro" && (
@@ -589,14 +1649,7 @@ export default function RecordingSession({ podcast, onUpdate }) {
                 variant="outline"
                 size="sm"
                 className="w-full"
-                onClick={() => {
-                  setActiveSegment((s) => s + 1);
-                  if (scriptCues.length > 0) {
-                    setScriptCueIndex((idx) =>
-                      Math.min(idx + 1, Math.max(scriptCues.length - 1, 0))
-                    );
-                  }
-                }}
+                onClick={handleAdvanceSegment}
               >
                 Advance to Next Segment →
               </Button>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import { Image } from "@/components/ui/image";
-import { Music, Video, Play, Check, Trash2 } from "lucide-react";
+import { Music, Play, Check, Trash2 } from "lucide-react";
 
 export default function LibraryCard({ item, selected, confirming, onSelect, onPreview, onDelete }) {
   const [url, setUrl] = useState(null);

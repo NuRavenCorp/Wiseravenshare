@@ -7,7 +7,6 @@ import {
   FileText,
   MessageSquare,
   AlertTriangle,
-  ShieldAlert,
 } from "lucide-react";
 
 const truthStyles = {

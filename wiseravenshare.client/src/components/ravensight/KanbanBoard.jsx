@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/api/client";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import { Loader2, GripVertical, Clock, CheckCircle, AlertCircle, Headphones } from "lucide-react";
+import { Loader2, GripVertical, AlertCircle, Headphones } from "lucide-react";
 
 const STAGES = [
   { id: "backlog", label: "Backlog", color: "border-slate-500/40 bg-slate-500/5", dot: "bg-slate-400" },

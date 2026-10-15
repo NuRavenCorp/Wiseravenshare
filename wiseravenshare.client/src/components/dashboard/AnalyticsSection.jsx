@@ -6,7 +6,6 @@ import {
   MessageSquare,
   Shield,
   Headphones,
-  TrendingUp,
   Award,
 } from "lucide-react";
 import { apiClient } from "@/api/client";

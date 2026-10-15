@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createSignaling } from "@/lib/signaling/createSignaling";
 
 const RTC_CONFIG = {
@@ -17,6 +17,27 @@ export function useWebRTCHost(sessionCode) {
   const roomRef = useRef(null);
   const createOfferRef = useRef(null);
   const offeredRef = useRef(new Set());
+
+  const sendSessionEvent = useCallback(
+    async (eventType, payload = {}) => {
+      if (!roomRef.current || !sessionCode) {
+        return false;
+      }
+
+      try {
+        await roomRef.current.send({
+          type: "session-event",
+          eventType,
+          data: payload,
+        });
+        return true;
+      } catch (eventError) {
+        setError(eventError?.message || "Could not send a live studio update.");
+        return false;
+      }
+    },
+    [sessionCode]
+  );
 
   useEffect(() => {
     if (!sessionCode) return;
@@ -147,5 +168,5 @@ export function useWebRTCHost(sessionCode) {
       });
   }, [peers]);
 
-  return { peers, streams, connected, error };
+  return { peers, streams, connected, error, sendSessionEvent };
 }

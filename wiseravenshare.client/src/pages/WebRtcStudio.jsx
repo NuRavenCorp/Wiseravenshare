@@ -48,7 +48,9 @@ function RemoteStreamTile({ peer, stream }) {
       <div className="flex items-center justify-between px-4 py-3">
         <div>
           <p className="text-sm font-medium text-foreground">{peer.name || "Guest Camera"}</p>
-          <p className="text-xs text-muted-foreground">Role: {peer.role || "member"}</p>
+          <p className="text-xs text-muted-foreground">
+            Role: {peer.role || "member"}{peer.device ? ` · ${peer.device}` : ""}
+          </p>
         </div>
         <Badge variant={stream ? "default" : "secondary"}>{stream ? "Live" : "Connecting"}</Badge>
       </div>

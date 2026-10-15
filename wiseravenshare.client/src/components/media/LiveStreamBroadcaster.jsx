@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import {
-  Loader2,
   Radio,
   StopCircle,
   Mic,

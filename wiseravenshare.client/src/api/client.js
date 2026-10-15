@@ -111,6 +111,35 @@ const request = async (path, options = {}) => {
   return data;
 };
 
+const uploadViaMediaController = async (
+  file,
+  {
+    destinationFolder = "",
+    title = "",
+    description = "",
+  } = {}
+) => {
+  if (!file) {
+    throw new Error("No file provided for upload.");
+  }
+
+  const body = new FormData();
+  body.append("file", file);
+  body.append("destinationFolder", destinationFolder);
+  body.append("title", title || file.name?.replace(/\.[^/.]+$/, "") || "Upload");
+  body.append("description", description || "");
+
+  const data = await request("/api/media/upload", { method: "POST", body });
+  const mediaUrl = data?.mediaUrl || data?.filePath || data?.file?.mediaUrl || "";
+
+  return {
+    ...data,
+    mediaUrl,
+    file_url: mediaUrl,
+    file_uri: mediaUrl,
+  };
+};
+
 const invokeFunction = async (name, payload = {}) => {
   const data = await requestJson(`/api/functions/${encodeURIComponent(name)}`, {
     method: "POST",
@@ -326,8 +355,8 @@ export const apiClient = {
       body.append("description", fields.description || "");
       body.append("destinationFolder", fields.destinationFolder || "");
       body.append("privacy", fields.privacy || "unlisted");
-      body.append("storageMode", fields.storageMode || "temporary");
-      body.append("isPermanent", fields.isPermanent ? "true" : "false");
+      body.append("storageMode", fields.storageMode || "permanent");
+      body.append("isPermanent", fields.isPermanent === false ? "false" : "true");
       return request("/api/ravensight/media/videos/save", { method: "POST", body });
     },
     deleteVideo(videoId) {
@@ -438,6 +467,22 @@ export const apiClient = {
   },
   functions: {
     invoke: invokeFunction,
+  },
+  integrations: {
+    Core: {
+      UploadPublicFile: async ({ file, folder = "media", title = "", description = "" } = {}) =>
+        uploadViaMediaController(file, {
+          destinationFolder: folder,
+          title,
+          description,
+        }),
+      UploadPrivateFile: async ({ file, folder = "private", title = "", description = "" } = {}) =>
+        uploadViaMediaController(file, {
+          destinationFolder: folder,
+          title,
+          description,
+        }),
+    },
   },
   entities: entityProxy,
   connectors: {

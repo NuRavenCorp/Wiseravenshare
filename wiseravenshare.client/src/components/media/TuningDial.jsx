@@ -48,7 +48,7 @@ export default function TuningDial({ frequency, playing, label, sourceType }) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [frequency]);
 
   const pct = ((needle - FREQ_MIN) / (FREQ_MAX - FREQ_MIN)) * 100;

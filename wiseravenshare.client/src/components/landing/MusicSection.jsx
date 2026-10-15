@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Music4, Bluetooth, Users2, Headphones, ArrowRight } from "lucide-react";
+import { Music4, Bluetooth, Users2, Headphones } from "lucide-react";
 import { Image } from "@/components/ui/image";
 
 const FEATHER_IMG =
