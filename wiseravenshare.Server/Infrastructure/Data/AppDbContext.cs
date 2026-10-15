@@ -1,0 +1,1250 @@
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Entities.Collaboration;
+using Wiseravenshare.Server.Entities.Access;
+using Wiseravenshare.Server.Entities.Currency;
+using Wiseravenshare.Server.Entities.FM;
+using Wiseravenshare.Server.Entities.Personalization;
+using Wiseravenshare.Server.Entities.Roles;
+using Wiseravenshare.Server.Entities.CrossPlatform;
+using Wiseravenshare.Server.Entities.Crawler;
+using Wiseravenshare.Server.Entities.Stream;
+using WiseRavenShare.Server.Core.Entities.Craft;
+using WiseRavenShare.Server.Infrastructure.Data;
+using UserRole = Wiseravenshare.Server.Entities.Roles.UserRole;
+
+namespace Wiseravenshare.Server.Infrastructure.Data;
+
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Post> Posts => Set<Post>();
+    public DbSet<Video> Videos => Set<Video>();
+    public DbSet<TruthClaim> TruthClaims => Set<TruthClaim>();
+    public DbSet<AIAgent> Agents => Set<AIAgent>();
+    public DbSet<Follow> UserFollows => Set<Follow>();
+    public DbSet<UserBlock> UserBlocks => Set<UserBlock>();
+    public DbSet<PostLike> PostLikes => Set<PostLike>();
+    public DbSet<PostRepost> PostReposts => Set<PostRepost>();
+    public DbSet<PostBookmark> PostBookmarks => Set<PostBookmark>();
+    public DbSet<AgentEvolution> AgentEvolutions => Set<AgentEvolution>();
+    public DbSet<AgentInteraction> AgentInteractions => Set<AgentInteraction>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<UserCompartmentAssignment> UserCompartmentAssignments => Set<UserCompartmentAssignment>();
+    public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
+    public DbSet<UserPresence> UserPresence => Set<UserPresence>();
+    public DbSet<FeatureAuditLog> FeatureAuditLogs => Set<FeatureAuditLog>();
+    public DbSet<TruthClaim.TruthDispute> TruthDisputes => Set<TruthClaim.TruthDispute>();
+    public DbSet<TruthClaim.TruthVerificationVote> TruthVerificationVotes => Set<TruthClaim.TruthVerificationVote>();
+    public DbSet<SocialCrossPost> SocialCrossPosts => Set<SocialCrossPost>();
+    public DbSet<InstrumentConnection> InstrumentConnections => Set<InstrumentConnection>();
+    public DbSet<StudioCaptureRigProfile> StudioCaptureRigProfiles => Set<StudioCaptureRigProfile>();
+    public DbSet<StudioCaptureSourceCapture> StudioCaptureSourceCaptures => Set<StudioCaptureSourceCapture>();
+    public DbSet<MediaItem> MediaItems => Set<MediaItem>();
+    public DbSet<MediaTag> MediaTags => Set<MediaTag>();
+    public DbSet<MediaItemTag> MediaItemTags => Set<MediaItemTag>();
+    public DbSet<MediaComment> MediaComments => Set<MediaComment>();
+    public DbSet<MediaPlaylist> MediaPlaylists => Set<MediaPlaylist>();
+    public DbSet<MediaPlaylistItem> MediaPlaylistItems => Set<MediaPlaylistItem>();
+    public DbSet<MediaViewHistory> MediaViewHistories => Set<MediaViewHistory>();
+    public DbSet<MediaPlaybackState> MediaPlaybackStates => Set<MediaPlaybackState>();
+    public DbSet<MediaLike> MediaLikes => Set<MediaLike>();
+    public DbSet<MediaBookmark> MediaBookmarks => Set<MediaBookmark>();
+    public DbSet<WiseCoin> WiseCoins => Set<WiseCoin>();
+    public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
+    public DbSet<CoinStake> CoinStakes => Set<CoinStake>();
+    public DbSet<Wiseravenshare.Server.Services.Currency.LedgerAnchor> LedgerAnchors => Set<Wiseravenshare.Server.Services.Currency.LedgerAnchor>();
+    public DbSet<Badge> Badges => Set<Badge>();
+    public DbSet<UserBadge> UserBadges => Set<UserBadge>();
+    public DbSet<BadgeEvolution> BadgeEvolutions => Set<BadgeEvolution>();
+    public DbSet<WorkHourValuation> WorkHourValuations => Set<WorkHourValuation>();
+    public DbSet<WorkHourContribution> WorkHourContributions => Set<WorkHourContribution>();
+    public DbSet<CrawlJob> CrawlJobs => Set<CrawlJob>();
+    public DbSet<CrawledPage> CrawledPages => Set<CrawledPage>();
+    public DbSet<CrawlIssue> CrawlIssues => Set<CrawlIssue>();
+    public DbSet<CrawlLink> CrawlLinks => Set<CrawlLink>();
+    public DbSet<CrawlMetric> CrawlMetrics => Set<CrawlMetric>();
+    public DbSet<CrawlReportRecord> CrawlReports => Set<CrawlReportRecord>();
+
+    // Craft Intelligence
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftDomain> CraftDomains => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftDomain>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftSkill> CraftSkills => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftSkill>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPrinciple> CraftPrinciples => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPrinciple>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile> UserCraftProfiles => Set<WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.UserCraftSkillScore> UserCraftSkillScores => Set<WiseRavenShare.Server.Core.Entities.Craft.UserCraftSkillScore>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftObservation> CraftObservations => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftObservation>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftDraftReview> CraftDraftReviews => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftDraftReview>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftFeedback> CraftFeedbacks => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftFeedback>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftLesson> CraftLessons => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftLesson>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftLessonCompletion> CraftLessonCompletions => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftLessonCompletion>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPerformanceMetric> CraftPerformanceMetrics => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPerformanceMetric>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPattern> CraftPatterns => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPattern>();
+    public DbSet<WiseRavenShare.Server.Core.Entities.Craft.CraftPrincipleRefinement> CraftPrincipleRefinements => Set<WiseRavenShare.Server.Core.Entities.Craft.CraftPrincipleRefinement>();
+
+    // FM Tuner
+    public DbSet<FMStation> FMStations => Set<FMStation>();
+    public DbSet<FMStationLike> FMStationLikes => Set<FMStationLike>();
+    public DbSet<FMStationBookmark> FMStationBookmarks => Set<FMStationBookmark>();
+    public DbSet<FMStationHistory> FMStationHistories => Set<FMStationHistory>();
+    public DbSet<FMUserPreference> FMUserPreferences => Set<FMUserPreference>();
+    public DbSet<CreatorRadioStation> CreatorRadioStations => Set<CreatorRadioStation>();
+    public DbSet<RadioStationSchedule> RadioStationSchedules => Set<RadioStationSchedule>();
+    public DbSet<RadioStationEpisode> RadioStationEpisodes => Set<RadioStationEpisode>();
+    public DbSet<RadioStationFollow> RadioStationFollows => Set<RadioStationFollow>();
+    public DbSet<RadioStationListen> RadioStationListens => Set<RadioStationListen>();
+    public DbSet<RadioStationRequest> RadioStationRequests => Set<RadioStationRequest>();
+    public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
+    public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
+
+    // Personalization
+    public DbSet<UserLearningEvent> UserLearningEvents => Set<UserLearningEvent>();
+    public DbSet<ContentTagMapping> ContentTagMappings => Set<ContentTagMapping>();
+    public DbSet<Wiseravenshare.Server.Entities.Personalization.UserProfile> UserProfiles => Set<Wiseravenshare.Server.Entities.Personalization.UserProfile>();
+    public DbSet<UserInteraction> UserInteractions => Set<UserInteraction>();
+    public DbSet<Wiseravenshare.Server.Entities.Personalization.ContentTag> ContentTags => Set<Wiseravenshare.Server.Entities.Personalization.ContentTag>();
+    public DbSet<LearningModel> LearningModels => Set<LearningModel>();
+    public DbSet<ModelPrediction> ModelPredictions => Set<ModelPrediction>();
+
+    // Communique
+    public DbSet<Wiseravenshare.Server.Entities.Communique.CallLog> CallLogs => Set<Wiseravenshare.Server.Entities.Communique.CallLog>();
+    public DbSet<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences> CommunicationPreferences => Set<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>();
+    public DbSet<Wiseravenshare.Server.Entities.Communique.NotificationCost> NotificationCosts => Set<Wiseravenshare.Server.Entities.Communique.NotificationCost>();
+
+    // Collaboration
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+    public DbSet<Message> Messages => Set<Message>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectContent> ProjectContents => Set<ProjectContent>();
+    public DbSet<ProjectContentVersion> ProjectContentVersions => Set<ProjectContentVersion>();
+    public DbSet<CollaborationInvite> CollaborationInvites => Set<CollaborationInvite>();
+    public DbSet<ProjectComment> ProjectComments => Set<ProjectComment>();
+    public DbSet<ProjectActivity> ProjectActivities => Set<ProjectActivity>();
+    public DbSet<PlatformPublish> PlatformPublishes => Set<PlatformPublish>();
+    public DbSet<BridgeSession> BridgeSessions => Set<BridgeSession>();
+    public DbSet<CollaborationRoom> CollaborationRooms => Set<CollaborationRoom>();
+    public DbSet<RoomParticipant> RoomParticipants => Set<RoomParticipant>();
+    public DbSet<BridgeMessage> BridgeMessages => Set<BridgeMessage>();
+    public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
+
+    // Stream transfers
+    public DbSet<StreamTransfer> StreamTransfers => Set<StreamTransfer>();
+    public DbSet<StreamGatekeeperDecision> StreamGatekeeperDecisions => Set<StreamGatekeeperDecision>();
+
+    // Roles
+    public DbSet<Wiseravenshare.Server.Entities.Roles.UserRole> UserRoles => Set<Wiseravenshare.Server.Entities.Roles.UserRole>();
+    public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
+    // Personalization & Learning
+    public DbSet<UserPersonalizationProfile> UserPersonalizationProfiles => Set<UserPersonalizationProfile>();
+    public DbSet<UserInteractionEvent>       UserInteractionEvents        => Set<UserInteractionEvent>();
+    public DbSet<PersonalizationTag>         PersonalizationTags          => Set<PersonalizationTag>();
+    public DbSet<PersonalizationTagMapping>  PersonalizationTagMappings   => Set<PersonalizationTagMapping>();
+    public DbSet<RegionalTrendSnapshot>      RegionalTrendSnapshots       => Set<RegionalTrendSnapshot>();
+
+    // AI Assistant
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantConversation> AssistantConversations => Set<WiseRavenShare.Server.Entities.Assistant.AssistantConversation>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>      AssistantMessages      => Set<WiseRavenShare.Server.Entities.Assistant.AssistantMessage>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>     AssistantFeedbacks     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantFeedback>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>    AssistantKnowledge     => Set<WiseRavenShare.Server.Entities.Assistant.AssistantKnowledge>();
+    public DbSet<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample> AssistantLearningSamples => Set<WiseRavenShare.Server.Entities.Assistant.AssistantLearningSample>();
+
+    // Podcast Studio Sessions (Multi-Device, Persistent Team Sessions)
+    public DbSet<PodcastSession> PodcastSessions => Set<PodcastSession>();
+    public DbSet<PodcastSessionDevice> PodcastSessionDevices => Set<PodcastSessionDevice>();
+    public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
+
+    // Media Library (user saved photos, videos, music with visibility control)
+    public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
+    public DbSet<CachedYouTubeRecord> CachedYouTubeRecords => Set<CachedYouTubeRecord>();
+    public DbSet<UserActivity> UserActivities => Set<UserActivity>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.ConfigureCurrency();
+        modelBuilder.ConfigureCrawler();
+        modelBuilder.ConfigureCraft();
+
+        modelBuilder.HasDefaultSchema("app_data");
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.ToTable("Users");
+            entity.HasIndex(u => u.Email).IsUnique();
+            entity.HasIndex(u => u.Username).IsUnique();
+            entity.Property(u => u.Email).HasMaxLength(255);
+            entity.Property(u => u.Username).HasMaxLength(100);
+            entity.Property(u => u.DisplayName).HasMaxLength(200);
+            entity.Property(u => u.Bio).HasColumnType("text");
+            entity.Property(u => u.AvatarUrl).HasColumnType("text");
+            entity.Property(u => u.CoverPhotoUrl).HasColumnType("text");
+            entity.Property(u => u.Location).HasMaxLength(200);
+            entity.Property(u => u.Website).HasMaxLength(2048);
+            entity.Property(u => u.RefreshToken).HasMaxLength(512);
+            entity.Property(u => u.PasswordResetToken).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<UserSettings>(entity =>
+        {
+            entity.ToTable("UserSettings");
+            entity.Property(s => s.Theme).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<UserCompartmentAssignment>(entity =>
+        {
+            entity.ToTable("UserCompartmentAssignments");
+            entity.HasIndex(x => new { x.UserId, x.Compartment }).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureFlag>(entity =>
+        {
+            entity.ToTable("FeatureFlags");
+            entity.HasIndex(x => new { x.FeatureKey, x.Scope, x.ScopeValue }).IsUnique();
+        });
+
+        modelBuilder.Entity<UserPresence>(entity =>
+        {
+            entity.ToTable("UserPresence");
+            entity.HasIndex(x => x.UserId).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureAuditLog>(entity =>
+        {
+            entity.ToTable("FeatureAuditLogs");
+            entity.HasIndex(x => x.FeatureKey);
+        });
+
+        modelBuilder.Entity<Follow>(entity =>
+        {
+            entity.HasOne(f => f.Follower)
+                .WithMany(u => u.Following)
+                .HasForeignKey(f => f.FollowerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(f => f.Following)
+                .WithMany(u => u.Followers)
+                .HasForeignKey(f => f.FollowingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(f => new { f.FollowerId, f.FollowingId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<CachedYouTubeRecord>(entity =>
+        {
+            entity.HasIndex(r => r.CacheKey);
+            entity.HasIndex(r => r.AbsoluteExpiration);
+            entity.Property(r => r.JsonData).HasColumnType("text");
+            entity.Property(r => r.CacheKey).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<UserActivity>(entity =>
+        {
+            entity.HasIndex(a => a.ActorUserId);
+            entity.HasIndex(a => a.CreatedAt);
+            entity.Property(a => a.TargetType).HasMaxLength(64);
+            entity.Property(a => a.Summary).HasMaxLength(1000);
+            entity.HasOne(a => a.Actor)
+                .WithMany()
+                .HasForeignKey(a => a.ActorUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserBlock>(entity =>
+        {
+            entity.HasOne(b => b.Blocker)
+                .WithMany()
+                .HasForeignKey(b => b.BlockerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(b => b.Blocked)
+                .WithMany()
+                .HasForeignKey(b => b.BlockedId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(b => new { b.BlockerId, b.BlockedId })
+                .IsUnique();
+
+            entity.HasIndex(b => b.BlockerId);
+        });
+
+        modelBuilder.Entity<Post>(entity =>
+        {
+            entity.HasOne(p => p.User)
+                .WithMany(u => u.Posts)
+                .HasForeignKey(p => p.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.ReplyTo)
+                .WithMany()
+                .HasForeignKey(p => p.ReplyToId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(p => p.RepostOf)
+                .WithMany()
+                .HasForeignKey(p => p.RepostOfId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(p => p.QuoteOf)
+                .WithMany()
+                .HasForeignKey(p => p.QuoteOfId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PostLike>(entity =>
+        {
+            entity.ToTable("PostLikes");
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<PostRepost>(entity =>
+        {
+            entity.ToTable("PostReposts");
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<PostBookmark>(entity =>
+        {
+            entity.ToTable("PostBookmarks");
+            entity.HasIndex(x => new { x.PostId, x.UserId })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<Comment>(entity =>
+        {
+            entity.HasOne(c => c.Post)
+                .WithMany(p => p.Comments)
+                .HasForeignKey(c => c.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.ParentComment)
+                .WithMany(c => c.Replies)
+                .HasForeignKey(c => c.ParentCommentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Message>(entity =>
+        {
+            entity.ToTable("Messages");
+            entity.HasOne(m => m.ReplyTo)
+                .WithMany(m => m.Replies)
+                .HasForeignKey(m => m.ReplyToId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Conversation>(entity =>
+        {
+            entity.ToTable("Conversations");
+        });
+
+        modelBuilder.Entity<ConversationParticipant>(entity =>
+        {
+            entity.ToTable("ConversationParticipants");
+        });
+
+        modelBuilder.Entity<BridgeSession>(entity =>
+        {
+            entity.ToTable("bridge_sessions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.SessionId).HasColumnName("session_id").HasMaxLength(255);
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(255);
+            entity.Property(x => x.SessionDataJson).HasColumnName("session_data").HasColumnType("jsonb");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.LastActivity).HasColumnName("last_activity");
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.SessionId).IsUnique();
+        });
+
+        modelBuilder.Entity<CollaborationRoom>(entity =>
+        {
+            entity.ToTable("collaboration_rooms");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.RoomName).HasColumnName("room_name").HasMaxLength(255);
+            entity.Property(x => x.OwnerId).HasColumnName("owner_id");
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.RoomId).IsUnique();
+        });
+
+        modelBuilder.Entity<RoomParticipant>(entity =>
+        {
+            entity.ToTable("room_participants");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(255);
+            entity.Property(x => x.Platform).HasColumnName("platform").HasMaxLength(50);
+            entity.Property(x => x.JoinedAt).HasColumnName("joined_at");
+            entity.Property(x => x.LeftAt).HasColumnName("left_at");
+            entity.Property(x => x.IsActive).HasColumnName("is_active");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => new { x.RoomId, x.IsActive });
+        });
+
+        modelBuilder.Entity<BridgeMessage>(entity =>
+        {
+            entity.ToTable("bridge_messages");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.SessionId).HasColumnName("session_id").HasMaxLength(255);
+            entity.Property(x => x.Source).HasColumnName("source").HasMaxLength(50);
+            entity.Property(x => x.Target).HasColumnName("target").HasMaxLength(50);
+            entity.Property(x => x.MessageType).HasColumnName("message_type").HasMaxLength(50);
+            entity.Property(x => x.Content).HasColumnName("content").HasColumnType("text");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.ProcessedAt).HasColumnName("processed_at");
+            entity.Property(x => x.IsProcessed).HasColumnName("is_processed");
+        });
+
+        modelBuilder.Entity<FileTransfer>(entity =>
+        {
+            entity.ToTable("file_transfers");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.TransferId).HasColumnName("transfer_id").HasMaxLength(255);
+            entity.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(255);
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.FileName).HasColumnName("file_name").HasMaxLength(255);
+            entity.Property(x => x.FileSize).HasColumnName("file_size");
+            entity.Property(x => x.FileType).HasColumnName("file_type").HasMaxLength(100);
+            entity.Property(x => x.FileUrl).HasColumnName("file_url").HasColumnType("text");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
+            entity.Property(x => x.ChunkCount).HasColumnName("chunk_count");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
+            entity.Property(x => x.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
+            entity.HasIndex(x => x.TransferId).IsUnique();
+        });
+
+        modelBuilder.Entity<VideoComment>(entity =>
+        {
+            entity.HasOne(c => c.ParentComment)
+                .WithMany(c => c.Replies)
+                .HasForeignKey(c => c.ParentCommentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<UserSettings>(entity =>
+        {
+            entity.HasOne<User>()
+                .WithOne(u => u.Settings)
+                .HasForeignKey<UserSettings>(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(s => s.UserId)
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<UserSubscription>(entity =>
+        {
+            entity.HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(s => s.UserId)
+                .IsUnique();
+
+            entity.HasIndex(s => s.StripeCustomerId)
+                .IsUnique();
+
+            entity.HasIndex(s => s.StripeSubscriptionId)
+                .HasFilter("\"StripeSubscriptionId\" IS NOT NULL")
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<TruthClaim.TruthDispute>(entity =>
+        {
+            entity.HasOne(d => d.User)
+                .WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.Resolver)
+                .WithMany()
+                .HasForeignKey(d => d.ResolvedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(d => d.Post)
+                .WithMany()
+                .HasForeignKey(d => d.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TruthClaim.TruthVerificationVote>(entity =>
+        {
+            entity.HasOne(v => v.User)
+                .WithMany()
+                .HasForeignKey(v => v.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(v => v.Claim)
+                .WithMany(c => c.Votes)
+                .HasForeignKey(v => v.ClaimId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AIAgent>(entity =>
+        {
+            entity.HasMany(a => a.Interactions)
+                .WithOne(i => i.Agent)
+                .HasForeignKey(i => i.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(a => a.Evolutions)
+                .WithOne(e => e.Agent)
+                .HasForeignKey(e => e.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentInteraction>(entity =>
+        {
+            entity.HasOne(i => i.TargetAgent)
+                .WithMany()
+                .HasForeignKey(i => i.TargetAgentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.TargetUser)
+                .WithMany()
+                .HasForeignKey(i => i.TargetUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AgentEvolution>();
+
+        modelBuilder.Entity<SocialCrossPost>(entity =>
+        {
+            entity.ToTable("SocialCrossPosts");
+            entity.Property(c => c.Platform).HasMaxLength(30);
+            entity.Property(c => c.Status).HasMaxLength(20);
+            entity.Property(c => c.ErrorMessage).HasColumnType("text");
+            entity.HasIndex(c => new { c.PostId, c.Platform }).IsUnique();
+            entity.HasIndex(c => c.UserId);
+
+            entity.HasOne(c => c.Post)
+                .WithMany()
+                .HasForeignKey(c => c.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+            modelBuilder.Entity<InstrumentConnection>(entity =>
+            {
+                entity.ToTable("InstrumentConnections");
+                entity.Property(c => c.DeviceIdentifier).HasMaxLength(120);
+                entity.Property(c => c.DeviceName).HasMaxLength(255);
+                entity.Property(c => c.Transport).HasMaxLength(40);
+                entity.Property(c => c.HardwareAddress).HasMaxLength(120);
+                entity.Property(c => c.MetadataJson).HasColumnType("text");
+                entity.HasIndex(c => c.UserId);
+                entity.HasIndex(c => new { c.UserId, c.DeviceIdentifier }).IsUnique();
+
+                entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<StudioCaptureRigProfile>(entity =>
+            {
+                entity.ToTable("StudioCaptureRigProfiles");
+                entity.Property(c => c.RigName).HasMaxLength(150);
+                entity.Property(c => c.Notes).HasMaxLength(1200);
+                entity.HasIndex(c => c.UserId).IsUnique();
+                entity.HasOne(c => c.User)
+                    .WithMany()
+                    .HasForeignKey(c => c.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<StudioCaptureSourceCapture>(entity =>
+            {
+                entity.ToTable("StudioCaptureSourceCaptures");
+                entity.Property(c => c.SourceType).HasMaxLength(30);
+                entity.Property(c => c.SourceName).HasMaxLength(255);
+                entity.Property(c => c.DeviceIdentifier).HasMaxLength(255);
+                entity.Property(c => c.FileName).HasMaxLength(255);
+                entity.Property(c => c.FingerprintHash).HasMaxLength(128);
+                entity.Property(c => c.MetadataJson).HasColumnType("text");
+                entity.HasIndex(c => c.UserId);
+                entity.HasIndex(c => c.CapturedAtUtc);
+                entity.HasOne(c => c.User)
+                    .WithMany()
+                    .HasForeignKey(c => c.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(c => c.RigProfile)
+                    .WithMany()
+                    .HasForeignKey(c => c.RigProfileId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<MediaItem>(entity =>
+            {
+                entity.ToTable("MediaItems");
+                entity.Property(x => x.Title).HasMaxLength(255);
+                entity.Property(x => x.Description).HasMaxLength(2000);
+                entity.Property(x => x.FileName).HasMaxLength(255);
+                entity.Property(x => x.FilePath).HasMaxLength(2048);
+                entity.Property(x => x.FileUrl).HasMaxLength(2048);
+                entity.Property(x => x.MimeType).HasMaxLength(255);
+                entity.Property(x => x.ThumbnailPath).HasMaxLength(2048);
+                entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
+                entity.Property(x => x.PreviewPath).HasMaxLength(2048);
+                entity.Property(x => x.PreviewUrl).HasMaxLength(2048);
+                entity.Property(x => x.Metadata).HasColumnType("jsonb");
+                entity.HasIndex(x => x.UserId);
+                entity.HasIndex(x => new { x.MediaType, x.Status });
+                entity.HasIndex(x => x.CreatedAt);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaTag>(entity =>
+            {
+                entity.ToTable("MediaTags");
+                entity.Property(x => x.Name).HasMaxLength(100);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.HasIndex(x => x.Name).IsUnique();
+            });
+
+            modelBuilder.Entity<MediaItemTag>(entity =>
+            {
+                entity.ToTable("MediaItemTags");
+                entity.HasIndex(x => new { x.MediaId, x.TagId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.Tags)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.MediaTag)
+                    .WithMany(x => x.MediaItems)
+                    .HasForeignKey(x => x.TagId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaComment>(entity =>
+            {
+                entity.ToTable("MediaComments");
+                entity.Property(x => x.Content).HasMaxLength(2000);
+                entity.HasIndex(x => x.MediaId);
+                entity.HasIndex(x => x.UserId);
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.Comments)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.ParentComment)
+                    .WithMany(x => x.Replies)
+                    .HasForeignKey(x => x.ParentCommentId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<MediaPlaylist>(entity =>
+            {
+                entity.ToTable("MediaPlaylists");
+                entity.Property(x => x.Name).HasMaxLength(255);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.Property(x => x.CoverImageUrl).HasMaxLength(2048);
+                entity.HasIndex(x => x.UserId);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaPlaylistItem>(entity =>
+            {
+                entity.ToTable("MediaPlaylistItems");
+                entity.HasIndex(x => new { x.PlaylistId, x.MediaId }).IsUnique();
+                entity.HasIndex(x => new { x.PlaylistId, x.OrderIndex });
+                entity.HasOne(x => x.Playlist)
+                    .WithMany(x => x.Items)
+                    .HasForeignKey(x => x.PlaylistId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany(x => x.PlaylistItems)
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaViewHistory>(entity =>
+            {
+                entity.ToTable("MediaViewHistories");
+                entity.Property(x => x.DeviceInfo).HasMaxLength(256);
+                entity.Property(x => x.IPAddress).HasMaxLength(80);
+                entity.HasIndex(x => new { x.MediaId, x.UserId, x.ViewedAt });
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaPlaybackState>(entity =>
+            {
+                entity.ToTable("MediaPlaybackStates");
+                entity.HasIndex(x => new { x.UserId, x.MediaId }).IsUnique();
+                entity.HasIndex(x => new { x.Completed, x.LastPlayedAt });
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaLike>(entity =>
+            {
+                entity.ToTable("MediaLikes");
+                entity.HasIndex(x => new { x.MediaId, x.UserId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<MediaBookmark>(entity =>
+            {
+                entity.ToTable("MediaBookmarks");
+                entity.HasIndex(x => new { x.MediaId, x.UserId }).IsUnique();
+                entity.HasOne(x => x.MediaItem)
+                    .WithMany()
+                    .HasForeignKey(x => x.MediaId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+        // ── FM Tuner ──
+        modelBuilder.Entity<FMStation>(entity =>
+        {
+            entity.ToTable("FMStations");
+            entity.HasIndex(x => new { x.Frequency, x.Band });
+            entity.HasIndex(x => new { x.FrequencyKey, x.Band });
+            entity.HasIndex(x => x.IsFeatured);
+            entity.HasIndex(x => x.Listeners);
+            entity.Property(x => x.Name).HasMaxLength(255);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Frequency).HasMaxLength(100);
+            entity.Property(x => x.FrequencyKey).HasMaxLength(128);
+            entity.Property(x => x.Band).HasMaxLength(50);
+            entity.Property(x => x.City).HasMaxLength(255);
+            entity.Property(x => x.Country).HasMaxLength(255);
+            entity.Property(x => x.State).HasMaxLength(50);
+            entity.Property(x => x.StreamUrl).HasMaxLength(500);
+            entity.Property(x => x.Website).HasMaxLength(500);
+            entity.Property(x => x.LogoUrl).HasMaxLength(500);
+            entity.Property(x => x.CoverImageUrl).HasMaxLength(500);
+            entity.Property(x => x.Genre).HasMaxLength(50);
+            entity.Property(x => x.Language).HasMaxLength(100);
+            entity.Property(x => x.Codec).HasMaxLength(50);
+            entity.HasOne(x => x.Creator)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<FMStationLike>(entity =>
+        {
+            entity.ToTable("FMStationLikes");
+            entity.HasIndex(x => new { x.StationId, x.UserId }).IsUnique();
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Likes)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FMStationBookmark>(entity =>
+        {
+            entity.ToTable("FMStationBookmarks");
+            entity.HasIndex(x => new { x.StationId, x.UserId }).IsUnique();
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Bookmarks)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FMStationHistory>(entity =>
+        {
+            entity.ToTable("FMStationHistory");
+            entity.HasIndex(x => new { x.UserId, x.ListenedAt });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.History)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FMUserPreference>(entity =>
+        {
+            entity.ToTable("FMUserPreferences");
+            entity.HasIndex(x => x.UserId).IsUnique();
+            entity.Property(x => x.FavoriteGenres).HasColumnType("text[]");
+            entity.Property(x => x.FavoriteLanguages).HasColumnType("text[]");
+            entity.Property(x => x.RecentStations).HasColumnType("jsonb");
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CreatorRadioStation>(entity =>
+        {
+            entity.ToTable("CreatorRadioStations");
+            entity.Property(x => x.Name).HasMaxLength(255);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Frequency).HasMaxLength(100);
+            entity.Property(x => x.FrequencyKey).HasMaxLength(128);
+            entity.Property(x => x.Band).HasMaxLength(50);
+            entity.Property(x => x.Genre).HasMaxLength(255);
+            entity.Property(x => x.SubGenre).HasMaxLength(255);
+            entity.Property(x => x.LogoUrl).HasMaxLength(500);
+            entity.Property(x => x.CoverImageUrl).HasMaxLength(500);
+            entity.Property(x => x.StreamUrl).HasMaxLength(500);
+            entity.Property(x => x.StreamKey).HasMaxLength(500);
+            entity.Property(x => x.Website).HasMaxLength(500);
+            entity.Property(x => x.SocialLinks).HasMaxLength(500);
+            entity.Property(x => x.Schedule).HasColumnType("jsonb");
+            entity.Property(x => x.Playlist).HasColumnType("jsonb");
+            entity.Property(x => x.Settings).HasColumnType("jsonb");
+            entity.Property(x => x.SubscriptionPrice).HasPrecision(18, 2);
+            entity.Property(x => x.WiseCoinDeposited).HasPrecision(18, 4).HasDefaultValue(0m);
+            entity.Property(x => x.StripeProductId).HasMaxLength(255);
+            entity.HasIndex(x => x.CreatorId);
+            entity.HasIndex(x => new { x.FrequencyKey, x.Band });
+            entity.HasIndex(x => new { x.IsLive, x.Status, x.Visibility });
+            entity.HasIndex(x => new { x.Status, x.StripeSetupComplete })
+                .HasFilter("\"Status\" = 1");  // PendingApproval = 1; speeds up agent query
+            entity.HasOne(x => x.Creator)
+                .WithMany()
+                .HasForeignKey(x => x.CreatorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RadioStationSchedule>(entity =>
+        {
+            entity.ToTable("RadioStationSchedules");
+            entity.Property(x => x.Title).HasMaxLength(255);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Timezone).HasMaxLength(64);
+            entity.Property(x => x.HostName).HasMaxLength(255);
+            entity.Property(x => x.Genre).HasMaxLength(255);
+            entity.HasIndex(x => new { x.StationId, x.DayOfWeek, x.StartTime });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.ScheduledShows)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RadioStationEpisode>(entity =>
+        {
+            entity.ToTable("RadioStationEpisodes");
+            entity.Property(x => x.Title).HasMaxLength(255);
+            entity.Property(x => x.Description).HasMaxLength(2000);
+            entity.Property(x => x.AudioUrl).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StationId, x.BroadcastDate });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Episodes)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Schedule)
+                .WithMany()
+                .HasForeignKey(x => x.ScheduleId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<RadioStationFollow>(entity =>
+        {
+            entity.ToTable("RadioStationFollows");
+            entity.HasIndex(x => new { x.StationId, x.UserId }).IsUnique();
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Followers)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RadioStationListen>(entity =>
+        {
+            entity.ToTable("RadioStationListens");
+            entity.Property(x => x.DeviceInfo).HasMaxLength(255);
+            entity.Property(x => x.IPAddress).HasMaxLength(80);
+            entity.HasIndex(x => new { x.StationId, x.StartedAt });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.ListenHistory)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RadioStationRequest>(entity =>
+        {
+            entity.ToTable("RadioStationRequests");
+            entity.Property(x => x.SongTitle).HasMaxLength(255);
+            entity.Property(x => x.ArtistName).HasMaxLength(255);
+            entity.Property(x => x.Message).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StationId, x.Status, x.RequestedAt });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Requests)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.PlayedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.PlayedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<RadioStationShoutout>(entity =>
+        {
+            entity.ToTable("RadioStationShoutouts");
+            entity.Property(x => x.Message).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StationId, x.Status, x.RequestedAt });
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.Shoutouts)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RadioStationFrequencyClaim>(entity =>
+        {
+            entity.ToTable("RadioStationFrequencyClaims");
+            entity.Property(x => x.Frequency).HasMaxLength(100);
+            entity.Property(x => x.Band).HasMaxLength(50);
+            entity.Property(x => x.FrequencyKey).HasMaxLength(128);
+            entity.HasIndex(x => new { x.FrequencyKey, x.Band }).IsUnique();
+            entity.HasIndex(x => x.StationId);
+            entity.HasOne(x => x.Station)
+                .WithMany(x => x.FrequencyClaims)
+                .HasForeignKey(x => x.StationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Creator)
+                .WithMany()
+                .HasForeignKey(x => x.CreatorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Communique ──
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.CallLog>(entity =>
+        {
+            entity.ToTable("CallLogs");
+            entity.HasIndex(c => c.UserId);
+            entity.HasIndex(c => c.Timestamp);
+        });
+
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>(entity =>
+        {
+            entity.ToTable("CommunicationPreferences");
+            entity.HasIndex(cp => cp.UserId).IsUnique();
+            entity.Property(cp => cp.PreferredChannel).HasMaxLength(20);
+            entity.Property(cp => cp.VerifiedPhoneNumber).HasMaxLength(20);
+            entity.HasOne(cp => cp.User)
+                .WithOne()
+                .HasForeignKey<Wiseravenshare.Server.Entities.Communique.CommunicationPreferences>(cp => cp.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Communique.NotificationCost>(entity =>
+        {
+            entity.ToTable("NotificationCosts");
+            entity.Property(nc => nc.NotificationType).HasMaxLength(20);
+            entity.Property(nc => nc.PhoneNumber).HasMaxLength(20);
+            entity.Property(nc => nc.DeliveryStatus).HasMaxLength(20);
+            entity.Property(nc => nc.TwilioSid).HasMaxLength(255);
+            entity.Property(nc => nc.CostUsd).HasPrecision(10, 6);
+            entity.HasIndex(nc => nc.UserId);
+            entity.HasIndex(nc => nc.SentAt);
+            entity.HasIndex(nc => nc.NotificationType);
+            entity.HasOne(nc => nc.User)
+                .WithMany()
+                .HasForeignKey(nc => nc.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Collaboration ──
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasIndex(p => p.OwnerId);
+            entity.HasOne(p => p.Owner)
+                .WithMany()
+                .HasForeignKey(p => p.OwnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectMember>(entity =>
+        {
+            entity.HasIndex(m => new { m.ProjectId, m.UserId });
+            entity.HasOne(m => m.Project)
+                .WithMany(p => p.Members)
+                .HasForeignKey(m => m.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(m => m.User)
+                .WithMany()
+                .HasForeignKey(m => m.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectContent>(entity =>
+        {
+            entity.HasIndex(c => c.ProjectId);
+            entity.HasOne(c => c.Project)
+                .WithMany(p => p.Content)
+                .HasForeignKey(c => c.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectContentVersion>(entity =>
+        {
+            entity.HasIndex(v => v.ContentId);
+        });
+
+        modelBuilder.Entity<CollaborationInvite>(entity =>
+        {
+            entity.HasIndex(i => new { i.ProjectId, i.InviteeEmail });
+            entity.HasOne(i => i.Project)
+                .WithMany(p => p.Invites)
+                .HasForeignKey(i => i.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectComment>(entity =>
+        {
+            entity.HasIndex(c => c.ProjectId);
+            entity.HasOne(c => c.Project)
+                .WithMany(p => p.Comments)
+                .HasForeignKey(c => c.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectActivity>(entity =>
+        {
+            entity.HasIndex(a => a.ProjectId);
+            entity.HasOne(a => a.Project)
+                .WithMany(p => p.Activities)
+                .HasForeignKey(a => a.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformPublish>(entity =>
+        {
+            entity.HasIndex(p => p.ContentId);
+            entity.HasOne(p => p.Project)
+                .WithMany(p => p.Publications)
+                .HasForeignKey(p => p.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(p => p.Content)
+                .WithMany()
+                .HasForeignKey(p => p.ContentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Roles ──
+        modelBuilder.Entity<Entities.Roles.UserRole>(entity =>
+        {
+            entity.HasIndex(r => r.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<UserRoleAssignment>(entity =>
+        {
+            entity.HasIndex(a => a.UserId);
+            entity.HasOne(a => a.User)
+                .WithMany()
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(a => a.Role)
+                .WithMany(r => r.Assignments)
+                .HasForeignKey(a => a.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasIndex(p => p.RoleId);
+            entity.HasOne(p => p.Role)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(p => p.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Composite index for permission checks (UserId → RoleIds → ResourceType/Action)
+            entity.HasIndex(p => new { p.RoleId, p.ResourceType, p.Action });
+        });
+
+        // Role hierarchy (ParentRole self-reference)
+        modelBuilder.Entity<UserRole>(entity =>
+        {
+            entity.HasOne(r => r.ParentRole)
+                .WithMany(r => r.ChildRoles)
+                .HasForeignKey("ParentRoleId")
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Role assignments scoped per project (null = global)
+        modelBuilder.Entity<UserRoleAssignment>(entity =>
+        {
+            entity.HasIndex(a => new { a.UserId, a.RoleId, a.ProjectId });
+            entity.HasOne(a => a.AssignedBy)
+                .WithMany()
+                .HasForeignKey(a => a.AssignedById)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Podcast Studio Sessions (Multi-Device, Persistent Team Sessions)
+        modelBuilder.Entity<PodcastSession>(entity =>
+        {
+            entity.ToTable("podcast_sessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.TeamId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.InitiatedByUserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.AccessScope).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AllowedUserIds).HasColumnType("text");
+            entity.Property(e => e.StateJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.TeamId, e.Status });
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasMany(e => e.Devices)
+                .WithOne(d => d.Session)
+                .HasForeignKey(d => d.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PodcastSessionDevice>(entity =>
+        {
+            entity.ToTable("podcast_session_devices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.SessionId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.UserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.DeviceName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.DeviceType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.UserAgent).HasMaxLength(500);
+            entity.Property(e => e.LocalStateJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.SessionId, e.IsActive });
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.LastHeartbeatAt);
+        });
+
+        modelBuilder.Entity<WorkspacePage>(entity =>
+        {
+            entity.ToTable("workspace_pages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.SessionId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.TeamId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CreatedByUserId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.LastEditedByUserId).HasMaxLength(255);
+            entity.Property(e => e.PageType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.Content).HasColumnType("text");
+            entity.Property(e => e.Tags).HasMaxLength(500);
+            entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.SessionId, e.IsArchived });
+            entity.HasIndex(e => new { e.SessionId, e.PageType });
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.UpdatedAt);
+            entity.HasOne(e => e.Session)
+                .WithMany()
+                .HasForeignKey(e => e.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Saved Media Library (photos, videos, music with visibility & scheduling)
+        modelBuilder.Entity<SavedMedia>(entity =>
+        {
+            entity.ToTable("SavedMedia");
+            entity.Property(x => x.Title).HasMaxLength(500);
+            entity.Property(x => x.Description).HasColumnType("text");
+            entity.Property(x => x.MediaUrl).HasMaxLength(2048);
+            entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
+            entity.Property(x => x.MediaMetadata).HasColumnType("jsonb");
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.IsDeleted });
+            entity.HasIndex(x => new { x.UserId, x.IsVisibleInFeed });
+            entity.HasIndex(x => new { x.UserId, x.MediaType });
+            entity.HasIndex(x => x.ScheduledPublishAt)
+                .HasFilter("\"ScheduledPublishAt\" IS NOT NULL");
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SourcePost)
+                .WithMany()
+                .HasForeignKey(x => x.SourcePostId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.PublishedPost)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedPostId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+    }
+}

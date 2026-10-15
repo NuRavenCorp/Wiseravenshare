@@ -1,0 +1,15 @@
+{
+  "name": "wiseravenshare-workspace",
+  "private": true,
+  "workspaces": [
+    "wiseravenshare.client"
+  ],
+  "scripts": {
+    "client:dev": "npm --prefix wiseravenshare.client run dev",
+    "client:build": "npm --prefix wiseravenshare.client run build",
+    "client:lint": "npm --prefix wiseravenshare.client run lint",
+    "server:build": "dotnet build .\\wiseravenshare.Server\\Wiseravenshare.Server.csproj",
+    "docker:dev": "docker compose -f .\\wiseravenshare.Server\\docker-compose.dev.yml up --build",
+    "docker:prod": "docker compose -f .\\wiseravenshare.Server\\docker-compose.yml up --build"
+  }
+}

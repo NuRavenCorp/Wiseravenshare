@@ -1,0 +1,67 @@
+# Build outputs
+**/bin/
+**/obj/
+**/dist/
+**/node_modules/
+**/.vs/
+**/publish/
+**/build-verify/
+**/publish-test/
+_buildcheck*/
+
+# Compiled binaries / runtime artifacts at any level
+*.dll
+*.pdb
+*.exe
+*.nupkg
+*.runtimeconfig.json
+*.deps.json
+runtimes/
+
+# Secrets / env
+.env
+*.env
+__*.ENV__*
+__.ENV__*
+tmp.do.appspec.yaml
+tmp.do.appspec.live.yaml
+
+# Logs
+**/logs/
+*.log
+
+# Media uploads
+**/MediaStorage/
+**/Ravensight_videos/
+
+# Local dev data
+**/App_Data/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local scratch / review files
+gemma_review*.txt
+
+# Redundant Dockerfile variants and scratch docs
+Dockerfile.original
+Dockerfile.txt
+dockerfile.dockerfile
+*.md.txt
+MUSIC_SHARING_IMPLEMENTATION*
+
+# Android release artifacts (large binaries)
+*.aab
+release-artifacts/
+
+# Local OAuth credential cache for wiseravenshare.server
+.wiseravenshare/
+
+# DigitalOcean temp spec files with secrets
+.do.*.yaml
+.do.*.spec.yaml

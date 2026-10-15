@@ -1,0 +1,16 @@
+{
+  "name": "do-pg-proxy",
+  "version": "1.0.0",
+  "description": "HTTP proxy bridging HTTP-only backend functions to DigitalOcean PostgreSQL",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,108 @@
+import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/lib/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Image } from "@/components/ui/image";
+import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
+import HomeTiles from "@/components/landing/HomeTiles";
+
+const BRAND_LOGO = "https://media.apiClient.com/images/public/6acad64c240f9153977f3360/5f68aaa8d_FullLogo_Transparent_NoBuffer.png";
+const INTRO_KEY = "wrs_intro_seen";
+
+export default function Home() {
+  const { isAuthenticated, logout } = useAuth();
+  const [introSeen, setIntroSeen] = useState(true);
+  const [learnMode, setLearnMode] = useState(false);
+
+  useEffect(() => {
+    const seen = localStorage.getItem(INTRO_KEY);
+    if (!seen) {
+      setIntroSeen(false);
+      setLearnMode(true);
+    }
+  }, []);
+
+  const finishLearning = () => {
+    localStorage.setItem(INTRO_KEY, "1");
+    setIntroSeen(true);
+    setLearnMode(false);
+  };
+
+  const returnToLearn = () => setLearnMode(true);
+  const collapseLearn = () => setLearnMode(false);
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="flex items-center justify-between px-6 h-20 border-b border-border/40">
+        <div className="flex items-center gap-2.5">
+          <Image src={BRAND_LOGO} alt="WiseRavenShare" className="w-9 h-9 rounded-full" fittingType="fill" />
+          <span className="font-display text-sm tracking-[0.2em] text-foreground">
+            WISE<span className="text-accent">RAVEN</span>SHARE
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {isAuthenticated ? (
+            <>
+              <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">Studio</Link>
+              <Button onClick={() => logout()} variant="outline" className="rounded-full">
+                <LogOut className="w-4 h-4" /> Logout
+              </Button>
+            </>
+          ) : (
+            <>
+              <Link to="/register" className="text-sm text-muted-foreground hover:text-foreground">Sign up</Link>
+              <Button asChild className="rounded-full">
+                <Link to="/login"><LogIn className="w-4 h-4" /> Login</Link>
+              </Button>
+            </>
+          )}
+        </div>
+      </header>
+
+      <main className="flex-1 flex flex-col items-center justify-center px-6 py-16">
+        <div className="max-w-2xl w-full text-center space-y-6">
+          <h1 className="font-display text-4xl md:text-5xl tracking-wide text-foreground">
+            WISE<span className="text-accent">RAVEN</span>SHARE
+          </h1>
+          <p className="text-base text-muted-foreground">
+            Share, create, and verify — a creator platform built on integrity.
+          </p>
+
+          <HomeTiles detailed={learnMode} />
+
+          {learnMode ? (
+            <button
+              onClick={introSeen ? collapseLearn : finishLearning}
+              className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+            >
+              <ChevronUp className="w-3 h-3" />
+              {introSeen ? "Show compact view" : "I'm ready — hide the descriptions"}
+            </button>
+          ) : (
+            <button
+              onClick={returnToLearn}
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
+            >
+              <GraduationCap className="w-3.5 h-3.5" /> Learn about the features
+            </button>
+          )}
+
+          <div className="flex items-center justify-center gap-3 pt-2">
+            {isAuthenticated ? (
+              <Button asChild className="rounded-full px-8"><Link to="/dashboard">Enter Studio</Link></Button>
+            ) : (
+              <>
+                <Button asChild className="rounded-full px-8"><Link to="/login"><LogIn className="w-4 h-4" /> Login</Link></Button>
+                <Button asChild variant="outline" className="rounded-full px-8"><Link to="/register">Sign up</Link></Button>
+              </>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <footer className="px-6 py-6 text-center text-xs text-muted-foreground border-t border-border/40">
+        © {new Date().getFullYear()} WiseRavenShare
+      </footer>
+    </div>
+  );
+}

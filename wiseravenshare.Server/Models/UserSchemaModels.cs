@@ -1,0 +1,119 @@
+namespace Wiseravenshare.Server.Models;
+
+public sealed class UserRecord
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; } = true;
+    public string Handle { get; set; } = string.Empty;
+    public string PasswordHash { get; set; } = string.Empty;
+    public string Bio { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Website { get; set; } = string.Empty;
+    public string Avatar { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public SocialFeedSettings SocialFeeds { get; set; } = new();
+    public UserAiConnectorSettings AiConnector { get; set; } = new();
+    /// <summary>Admin-assigned privilege keys, e.g. "pro_user", "stream.publish", "moderator".</summary>
+    public List<string> Privileges { get; set; } = new();
+}
+
+public sealed class UserAiConnectorSettings
+{
+    public bool Enabled { get; set; }
+    public string Provider { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public string DefaultModel { get; set; } = "";
+    public string ApiKey { get; set; } = "";
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public string ApiKeyMasked
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ApiKey)) return string.Empty;
+            var trimmed = ApiKey.Trim();
+            if (trimmed.Length <= 8) return "********";
+            return $"{trimmed[..4]}...{trimmed[^4..]}";
+        }
+    }
+
+    public bool HasApiKey => !string.IsNullOrWhiteSpace(ApiKey);
+}
+
+public sealed class UpdateUserAiConnectorRequest
+{
+    public bool Enabled { get; set; }
+    public string Provider { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public string DefaultModel { get; set; } = "";
+    public string? ApiKey { get; set; }
+    public bool ClearApiKey { get; set; }
+}
+
+public sealed class SocialFeedSettings
+{
+    public SocialFeedConnection TikTok { get; set; } = new();
+    public SocialFeedConnection Facebook { get; set; } = new();
+    public SocialFeedConnection Instagram { get; set; } = new();
+    public SocialFeedConnection YouTube { get; set; } = new();
+    public SocialFeedConnection Twitter { get; set; } = new();
+    public SocialFeedConnection LinkedIn { get; set; } = new();
+    public SocialFeedConnection Bluesky { get; set; } = new();
+}
+
+public sealed class SocialFeedConnection
+{
+    public bool Enabled { get; set; }
+    public string Site { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string ProfileUrl { get; set; } = string.Empty;
+    public string FeedUrl { get; set; } = string.Empty;
+    public string Designation { get; set; } = string.Empty;
+    public string AccessToken { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+    public DateTimeOffset? TokenExpiresAt { get; set; }
+}
+
+public sealed class UserResponse
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName => Name;
+    public string Email { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; } = true;
+    public string Handle { get; set; } = string.Empty;
+    public string Bio { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Website { get; set; } = string.Empty;
+    public string Avatar { get; set; } = string.Empty;
+    public string AvatarUrl => Avatar;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public SocialFeedSettings SocialFeeds { get; set; } = new();
+}
+
+public sealed class UpdateUserProfileRequest
+{
+    public string? Name { get; set; }
+    public string? Bio { get; set; }
+    public string? Location { get; set; }
+    public string? Website { get; set; }
+    public string? Avatar { get; set; }
+    public string? AvatarUrl { get; set; }
+    public SocialFeedSettings? SocialFeeds { get; set; }
+}
+
+public sealed class UpdateSocialFeedsRequest
+{
+    public SocialFeedConnection? TikTok { get; set; }
+    public SocialFeedConnection? Facebook { get; set; }
+    public SocialFeedConnection? Instagram { get; set; }
+    public SocialFeedConnection? YouTube { get; set; }
+    public SocialFeedConnection? Twitter { get; set; }
+    public SocialFeedConnection? LinkedIn { get; set; }
+    public SocialFeedConnection? Bluesky { get; set; }
+}
+

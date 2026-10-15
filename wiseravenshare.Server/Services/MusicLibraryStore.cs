@@ -1,0 +1,672 @@
+using System.Text.Json;
+using Npgsql;
+using Wiseravenshare.Server.DTOs;
+using Wiseravenshare.Server.Models;
+
+namespace Wiseravenshare.Server.Services;
+
+public interface IMusicLibraryStore
+{
+    Task<IReadOnlyList<UserMusicTrackDto>> GetUserMusicAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<UserMusicTrackDto> SaveMusicAsync(
+        Guid userId,
+        IFormFile file,
+        SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
+        CancellationToken cancellationToken = default);
+
+    Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateTrackStateAsync(
+        Guid userId,
+        string trackId,
+        bool archived,
+        bool protectedState,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default);
+}
+
+public sealed class MusicLibraryDeleteResult
+{
+    public string TrackId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ObjectKey { get; init; } = string.Empty;
+    public string PublicUrl { get; init; } = string.Empty;
+}
+
+public sealed class BucketMusicLibraryStore : IMusicLibraryStore
+{
+    private readonly string _connectionString;
+    private readonly string _bucketName;
+    private readonly string _region;
+    private readonly string _endpoint;
+    private readonly string _cdnBaseUrl;
+    private readonly string _provider = "digitalocean_spaces";
+    private readonly IBlobStorageService _blobStorageService;
+    private readonly IRavensightMusicService _musicService;
+
+    public BucketMusicLibraryStore(
+        IConfiguration configuration,
+        IBlobStorageService blobStorageService,
+        IRavensightMusicService musicService)
+    {
+        _connectionString = ResolveConnectionString(configuration);
+        _bucketName = configuration["Storage:Blob:BucketName"]?.Trim() ?? "bucket-wrs-01010";
+        _region = configuration["Storage:Blob:Region"]?.Trim() ?? "nyc3";
+        _endpoint = configuration["Storage:Blob:Endpoint"]?.Trim() ?? "https://nyc3.digitaloceanspaces.com";
+        _cdnBaseUrl = configuration["Storage:Blob:CdnPublicBaseUrl"]?.Trim()
+            ?? configuration["Storage__Blob__CdnPublicBaseUrl"]?.Trim()
+            ?? configuration["Storage:Blob:PublicBaseUrl"]?.Trim()
+            ?? string.Empty;
+        _blobStorageService = blobStorageService;
+        _musicService = musicService;
+    }
+
+    public async Task<IReadOnlyList<UserMusicTrackDto>> GetUserMusicAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return Array.Empty<UserMusicTrackDto>();
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+SELECT id, object_key, original_file_name, content_type, size_bytes, public_url, metadata::text, created_at
+FROM app_data.bucket_objects
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND deleted_at IS NULL
+  AND upload_status = 'uploaded'
+  AND (
+      metadata->>'mediaType' = 'music'
+      OR folder_path ILIKE '%music%'
+  )
+ORDER BY created_at DESC;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var tracks = new List<UserMusicTrackDto>();
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var originalFileName = reader.GetString(2);
+            var metadata = ParseMetadata(reader.IsDBNull(6) ? null : reader.GetString(6));
+            var storedFileName = ReadMetadataString(metadata, "storedFileName", originalFileName);
+            var mediaUrl = ResolveMediaUrl(reader.IsDBNull(5) ? null : reader.GetString(5), objectKey, storedFileName);
+
+            tracks.Add(new UserMusicTrackDto
+            {
+                Id = reader.GetString(0),
+                Title = ReadMetadataString(metadata, "title", Path.GetFileNameWithoutExtension(originalFileName)),
+                Artist = ReadMetadataString(metadata, "artist", string.Empty),
+                Album = ReadMetadataString(metadata, "album", string.Empty),
+                Genre = ReadMetadataString(metadata, "genre", string.Empty),
+                Fingerprint = ReadMetadataString(metadata, "fingerprint", null),
+                MediaUrl = mediaUrl,
+                FileName = storedFileName,
+                RelativePath = objectKey.Replace('\\', '/').Trim('/'),
+                ObjectKey = objectKey,
+                UploadedAt = reader.GetDateTime(7).ToString("O"),
+                SizeBytes = reader.GetInt64(4),
+                Archived = ReadMetadataBool(metadata, "archived"),
+                Protected = ReadMetadataBool(metadata, "protected")
+            });
+        }
+
+        return tracks;
+    }
+
+    public async Task<UserMusicTrackDto> SaveMusicAsync(
+        Guid userId,
+        IFormFile file,
+        SaveRavensightMusicDto dto,
+        string? userStorageIdentity,
+        CancellationToken cancellationToken = default)
+    {
+        if (file is null || file.Length == 0)
+        {
+            throw new InvalidOperationException("No music file uploaded.");
+        }
+
+        var saved = await _musicService.SaveMusicAsync(file, dto.DestinationFolder, userStorageIdentity, cancellationToken);
+        var bucketObjectId = Guid.NewGuid().ToString("N");
+        var metadata = new Dictionary<string, object?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["mediaType"] = "music",
+            ["title"] = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(file.FileName) : dto.Title.Trim(),
+            ["artist"] = dto.Artist?.Trim() ?? string.Empty,
+            ["album"] = dto.Album?.Trim() ?? string.Empty,
+            ["genre"] = dto.Genre?.Trim() ?? string.Empty,
+            ["fingerprint"] = string.IsNullOrWhiteSpace(dto.Fingerprint) ? null : dto.Fingerprint.Trim(),
+            ["archived"] = false,
+            ["protected"] = false,
+            ["destinationFolder"] = saved.DestinationFolder,
+            ["sourceFileName"] = file.FileName,
+            ["storedFileName"] = saved.FileName,
+            ["mediaUrl"] = ResolveMediaUrl(saved.PublicUrl, saved.RelativePath, saved.FileName)
+        };
+
+        await InsertBucketObjectAsync(bucketObjectId, userId, file, saved, metadata, cancellationToken);
+
+        return new UserMusicTrackDto
+        {
+            Id = bucketObjectId,
+            Title = Convert.ToString(metadata["title"]) ?? Path.GetFileNameWithoutExtension(file.FileName),
+            Artist = Convert.ToString(metadata["artist"]) ?? string.Empty,
+            Album = Convert.ToString(metadata["album"]) ?? string.Empty,
+            Genre = Convert.ToString(metadata["genre"]) ?? string.Empty,
+            Fingerprint = Convert.ToString(metadata["fingerprint"]),
+            MediaUrl = Convert.ToString(metadata["mediaUrl"]) ?? ResolveMediaUrl(saved.PublicUrl, saved.RelativePath, saved.FileName),
+            FileName = saved.FileName,
+            RelativePath = saved.RelativePath.Replace('\\', '/').Trim('/'),
+            ObjectKey = saved.RelativePath,
+            UploadedAt = saved.SavedAtUtc.ToString("O"),
+            SizeBytes = saved.SizeBytes
+        };
+    }
+
+    public async Task<MusicLibraryDeleteResult?> DeleteMusicAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+        {
+            return null;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND id = @track_id
+  AND deleted_at IS NULL
+LIMIT 1;";
+
+        await using var read = new NpgsqlCommand(readSql, connection);
+        read.Parameters.AddWithValue("user_id", userId);
+        read.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        read.Parameters.AddWithValue("track_id", trackId.Trim());
+
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+        var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+        var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+        var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+        var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+        await reader.CloseAsync();
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        update.Parameters.AddWithValue("track_id", trackId.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return new MusicLibraryDeleteResult
+        {
+            TrackId = id,
+            FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+            ObjectKey = objectKey,
+            PublicUrl = publicUrl
+        };
+    }
+
+    public async Task<IReadOnlyList<MusicLibraryDeleteResult>> DeleteMusicByFileNameAsync(
+        Guid userId,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string readSql = @"
+SELECT id, object_key, original_file_name, COALESCE(metadata->>'storedFileName', ''), COALESCE(public_url, '')
+FROM app_data.bucket_objects
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  )
+ORDER BY created_at DESC;";
+
+        var results = new List<MusicLibraryDeleteResult>();
+        await using (var read = new NpgsqlCommand(readSql, connection))
+        {
+            read.Parameters.AddWithValue("user_id", userId);
+            read.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+            read.Parameters.AddWithValue("file_name", fileName.Trim());
+
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                var objectKey = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var originalFileName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                var storedFileName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+                var publicUrl = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+                results.Add(new MusicLibraryDeleteResult
+                {
+                    TrackId = id,
+                    FileName = string.IsNullOrWhiteSpace(storedFileName) ? originalFileName : storedFileName,
+                    ObjectKey = objectKey,
+                    PublicUrl = publicUrl
+                });
+            }
+        }
+
+        if (results.Count == 0)
+        {
+            return Array.Empty<MusicLibraryDeleteResult>();
+        }
+
+        const string updateSql = @"
+UPDATE app_data.bucket_objects
+SET deleted_at = @now_utc,
+    updated_at = @now_utc,
+    upload_status = 'deleted'
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND deleted_at IS NULL
+  AND (
+    original_file_name = @file_name
+    OR metadata->>'storedFileName' = @file_name
+    OR object_key ILIKE '%' || @file_name
+  );";
+
+        await using var update = new NpgsqlCommand(updateSql, connection);
+        update.Parameters.AddWithValue("now_utc", DateTime.UtcNow);
+        update.Parameters.AddWithValue("user_id", userId);
+        update.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        update.Parameters.AddWithValue("file_name", fileName.Trim());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        return results;
+    }
+
+    public async Task<bool> UpdateTrackStateAsync(
+        Guid userId,
+        string trackId,
+        bool archived,
+        bool protectedState,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+UPDATE app_data.bucket_objects
+SET metadata = jsonb_set(
+        jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{archived}',
+            to_jsonb(@archived),
+            TRUE
+        ),
+        '{protected}',
+        to_jsonb(@protected),
+        TRUE
+    ),
+    updated_at = @updated_at
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        command.Parameters.AddWithValue("track_id", trackId.Trim());
+        command.Parameters.AddWithValue("archived", archived);
+        command.Parameters.AddWithValue("protected", protectedState);
+        command.Parameters.AddWithValue("updated_at", DateTime.UtcNow);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+SELECT 1
+FROM app_data.bucket_objects
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND deleted_at IS NULL
+  AND upload_status = 'uploaded'
+  AND (
+      object_key = @object_key
+      OR object_key ILIKE '%' || @object_key
+      OR @object_key ILIKE '%' || object_key
+  )
+LIMIT 1;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        command.Parameters.AddWithValue("object_key", normalized);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
+    }
+
+    private async Task InsertBucketObjectAsync(
+        string bucketObjectId,
+        Guid userId,
+        IFormFile file,
+        RavensightSavedMediaFile saved,
+        IDictionary<string, object?> metadata,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            await ExecuteBucketObjectInsertAsync(connection, bucketObjectId, userId, file, saved, metadata, cancellationToken);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ForeignKeyViolation && string.Equals(ex.ConstraintName, "fk_bucket_objects_owner", StringComparison.OrdinalIgnoreCase))
+        {
+            await ExecuteBucketObjectInsertAsync(connection, bucketObjectId, null, file, saved, metadata, cancellationToken);
+        }
+    }
+
+    private async Task ExecuteBucketObjectInsertAsync(
+        NpgsqlConnection connection,
+        string bucketObjectId,
+        Guid? ownerUserId,
+        IFormFile file,
+        RavensightSavedMediaFile saved,
+        IDictionary<string, object?> metadata,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+INSERT INTO app_data.bucket_objects (
+    id, owner_user_id, provider, bucket_name, region, endpoint, folder_path,
+    object_key, original_file_name, content_type, size_bytes, etag, acl,
+    cdn_base_url, public_url, upload_status, metadata, created_at, updated_at, deleted_at
+) VALUES (
+    @id, @owner_user_id, @provider, @bucket_name, @region, @endpoint, @folder_path,
+    @object_key, @original_file_name, @content_type, @size_bytes, @etag, @acl,
+    @cdn_base_url, @public_url, @upload_status, CAST(@metadata AS jsonb), @created_at, @updated_at, NULL
+);";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", bucketObjectId);
+        command.Parameters.AddWithValue("owner_user_id", ownerUserId.HasValue ? ownerUserId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("provider", _provider);
+        command.Parameters.AddWithValue("bucket_name", _bucketName);
+        command.Parameters.AddWithValue("region", _region);
+        command.Parameters.AddWithValue("endpoint", _endpoint);
+        command.Parameters.AddWithValue("folder_path", NormalizeFolderPath(saved.DestinationFolder));
+        command.Parameters.AddWithValue("object_key", saved.RelativePath);
+        command.Parameters.AddWithValue("original_file_name", file.FileName);
+        command.Parameters.AddWithValue("content_type", string.IsNullOrWhiteSpace(saved.ContentType) ? file.ContentType ?? "application/octet-stream" : saved.ContentType);
+        command.Parameters.AddWithValue("size_bytes", saved.SizeBytes);
+        command.Parameters.AddWithValue("etag", DBNull.Value);
+        command.Parameters.AddWithValue("acl", "private");
+        command.Parameters.AddWithValue("cdn_base_url", string.IsNullOrWhiteSpace(_cdnBaseUrl) ? DBNull.Value : _cdnBaseUrl);
+        command.Parameters.AddWithValue("public_url", (object?)saved.PublicUrl ?? DBNull.Value);
+        command.Parameters.AddWithValue("upload_status", "uploaded");
+        command.Parameters.AddWithValue("metadata", JsonSerializer.Serialize(metadata));
+        command.Parameters.AddWithValue("created_at", saved.SavedAtUtc);
+        command.Parameters.AddWithValue("updated_at", saved.SavedAtUtc);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private string ResolveMediaUrl(string? publicUrl, string objectKey, string fileName)
+    {
+        var normalizedObjectKey = string.IsNullOrWhiteSpace(objectKey)
+            ? TryExtractObjectKeyFromUrl(publicUrl)
+            : objectKey.Replace('\\', '/').Trim('/');
+
+        if (string.IsNullOrWhiteSpace(normalizedObjectKey) && !string.IsNullOrWhiteSpace(fileName))
+        {
+            normalizedObjectKey = fileName;
+        }
+
+        // Bucket objects are typically private and should be streamed through the API when blob
+        // credentials are configured. If blob storage is unavailable, fall back to the stored
+        // public URL so playback can continue for objects that are publicly readable.
+        if (!string.IsNullOrWhiteSpace(normalizedObjectKey))
+        {
+            if (_blobStorageService.IsConfigured)
+            {
+                return BuildBlobFallbackUrl(normalizedObjectKey);
+            }
+
+            if (!string.IsNullOrWhiteSpace(publicUrl))
+            {
+                return publicUrl;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(publicUrl))
+        {
+            return publicUrl;
+        }
+
+        var resolved = _blobStorageService.ResolvePublicUrl(normalizedObjectKey);
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+
+        return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
+    }
+
+    private string TryExtractObjectKeyFromUrl(string? publicUrl)
+    {
+        var raw = publicUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        {
+            return string.Empty;
+        }
+
+        var path = uri.AbsolutePath.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_bucketName)
+            && path.StartsWith(_bucketName + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[(_bucketName.Length + 1)..];
+        }
+
+        return path.Trim('/');
+    }
+
+    private static string BuildBlobFallbackUrl(string objectKey)
+    {
+        var normalized = objectKey.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "/api/videostreaming/stream";
+        }
+
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Uri.EscapeDataString);
+
+        return $"/api/videostreaming/blob/{string.Join("/", segments)}";
+    }
+
+    private static JsonElement? ParseMetadata(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var document = JsonDocument.Parse(metadataJson);
+            return document.RootElement.Clone();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string ReadMetadataString(JsonElement? metadata, string propertyName, string? fallback)
+    {
+        if (metadata is not { } element)
+        {
+            return fallback ?? string.Empty;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString() ?? (fallback ?? string.Empty);
+        }
+
+        return fallback ?? string.Empty;
+    }
+
+    private static bool ReadMetadataBool(JsonElement? metadata, string propertyName)
+    {
+        if (metadata is not { } element)
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value))
+        {
+            if (value.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (value.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeFolderPath(string? folder)
+    {
+        var value = String.IsNullOrWhiteSpace(folder) ? "wiseravenshare/ravensight/music" : folder!.Trim();
+        value = value.Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(value) ? "wiseravenshare/ravensight/music" : value;
+    }
+
+    private static string ResolveConnectionString(IConfiguration configuration)
+    {
+        var databaseUrl = configuration["DATABASE_URL"];
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        {
+            return NormalizeConnectionString(databaseUrl);
+        }
+
+        var defaultConnection = configuration.GetConnectionString("DefaultConnection")
+            ?? configuration.GetConnectionString("DatabaseConnection")
+            ?? string.Empty;
+
+        return NormalizeConnectionString(defaultConnection);
+    }
+
+    private static string NormalizeConnectionString(string value)
+    {
+        var raw = value.Trim();
+        if (raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            || raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            var uri = new Uri(raw);
+            var userInfo = uri.UserInfo.Split(':');
+            var builder = new NpgsqlConnectionStringBuilder
+            {
+                Host = uri.Host,
+                Port = uri.Port,
+                Username = Uri.UnescapeDataString(userInfo[0]),
+                Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
+                Database = uri.AbsolutePath.Trim('/'),
+                SslMode = SslMode.Require
+            };
+
+            return builder.ConnectionString;
+        }
+
+        return raw;
+    }
+}

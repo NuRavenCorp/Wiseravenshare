@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wiseravenshare-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wiseravenshare_db}
+      POSTGRES_USER: ${POSTGRES_USER:-wiseravenshare_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wiseravenshare_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - wiseravenshare-postgres1-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wiseravenshare_user} -d ${POSTGRES_DB:-wiseravenshare_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  wiseravenshare-postgres-data:
+

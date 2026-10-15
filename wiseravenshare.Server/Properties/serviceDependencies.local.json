@@ -1,0 +1,24 @@
+{
+  "dependencies": {
+    "postgresql1": {
+      "containerPorts": "5432:5432",
+      "secretStore": "LocalSecretsFile",
+      "containerName": "postgresql",
+      "containerImage": "postgres",
+      "type": "postgresql.container",
+      "connectionId": "ConnectionStrings:DatabaseConnection"
+    },
+    "redis1": {
+      "containerPorts": "6379:6379",
+      "secretStore": "LocalSecretsFile",
+      "containerName": "redis_wrs",
+      "containerImage": "redis:alpine",
+      "type": "redis.container",
+      "connectionId": "CacheConnection"
+    },
+    "identityapp1": {
+      "connectionInfo": "App registration: WSR-NuRavenCorp, Tenant: Default Directory (arnold3spence08outlook.onmicrosoft.com - Microsoft Entra ID)",
+      "type": "identityapp.default"
+    }
+  }
+}

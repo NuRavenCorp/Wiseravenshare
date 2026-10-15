@@ -1,0 +1,86 @@
+@apiHost = http://localhost:10000
+@pythonMatrixHost = http://localhost:8005
+
+### API health
+GET {{apiHost}}/health
+Accept: application/json
+
+### API database health
+GET {{apiHost}}/health/db
+Accept: application/json
+
+### Python matrix health
+GET {{pythonMatrixHost}}/health
+Accept: application/json
+
+### Python matrix database health
+GET {{pythonMatrixHost}}/health/db
+Accept: application/json
+
+### Python matrix history
+GET {{pythonMatrixHost}}/matrix/history?limit=10
+Accept: application/json
+
+### Python matrix transpose
+POST {{pythonMatrixHost}}/matrix/transpose
+Content-Type: application/json
+
+{
+  "matrix": [
+    [1, 2, 3],
+    [4, 5, 6]
+  ]
+}
+
+### Python matrix multiply
+POST {{pythonMatrixHost}}/matrix/multiply
+Content-Type: application/json
+
+{
+  "left": [
+    [1, 2],
+    [3, 4]
+  ],
+  "right": [
+    [5, 6],
+    [7, 8]
+  ]
+}
+
+### API proxy: Python matrix health
+GET {{apiHost}}/api/python-matrix/health
+Accept: application/json
+
+### API proxy: Python matrix database health
+GET {{apiHost}}/api/python-matrix/health/db
+Accept: application/json
+
+### API proxy: Python matrix history
+GET {{apiHost}}/api/python-matrix/history?limit=10
+Accept: application/json
+
+### API proxy: Python matrix transpose
+POST {{apiHost}}/api/python-matrix/transpose
+Content-Type: application/json
+
+{
+  "matrix": [
+    [1, 2, 3],
+    [4, 5, 6]
+  ]
+}
+
+### API proxy: Python matrix multiply
+POST {{apiHost}}/api/python-matrix/multiply
+Content-Type: application/json
+
+{
+  "left": [
+    [1, 2],
+    [3, 4]
+  ],
+  "right": [
+    [5, 6],
+    [7, 8]
+  ]
+}

@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 270 32% 4%;
+    --foreground: 270 18% 93%;
+    --card: 270 26% 7%;
+    --card-foreground: 270 18% 93%;
+    --popover: 270 26% 7%;
+    --popover-foreground: 270 18% 93%;
+    --primary: 265 70% 60%;
+    --primary-foreground: 270 30% 98%;
+    --secondary: 270 24% 12%;
+    --secondary-foreground: 270 18% 93%;
+    --muted: 270 22% 12%;
+    --muted-foreground: 270 12% 62%;
+    --accent: 43 80% 64%;
+    --accent-foreground: 270 30% 8%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 270 30% 98%;
+    --border: 270 22% 16%;
+    --input: 270 22% 16%;
+    --ring: 265 70% 60%;
+    --chart-1: 265 70% 60%;
+    --chart-2: 280 60% 55%;
+    --chart-3: 43 80% 64%;
+    --chart-4: 220 70% 55%;
+    --chart-5: 320 60% 58%;
+    --radius: 0.75rem;
+    --font-heading: "Cormorant Garamond", Georgia, serif;
+    --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Cinzel", Georgia, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sidebar-background: 270 30% 5%;
+    --sidebar-foreground: 270 18% 90%;
+    --sidebar-primary: 265 70% 60%;
+    --sidebar-primary-foreground: 270 30% 98%;
+    --sidebar-accent: 270 22% 12%;
+    --sidebar-accent-foreground: 270 18% 93%;
+    --sidebar-border: 270 22% 16%;
+    --sidebar-ring: 265 70% 60%;
+  }
+
+  .dark {
+    --background: 270 32% 4%;
+    --foreground: 270 18% 93%;
+    --card: 270 26% 7%;
+    --card-foreground: 270 18% 93%;
+    --popover: 270 26% 7%;
+    --popover-foreground: 270 18% 93%;
+    --primary: 265 70% 60%;
+    --primary-foreground: 270 30% 98%;
+    --secondary: 270 24% 12%;
+    --secondary-foreground: 270 18% 93%;
+    --muted: 270 22% 12%;
+    --muted-foreground: 270 12% 62%;
+    --accent: 43 80% 64%;
+    --accent-foreground: 270 30% 8%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 270 30% 98%;
+    --border: 270 22% 16%;
+    --input: 270 22% 16%;
+    --ring: 265 70% 60%;
+    --chart-1: 265 70% 60%;
+    --chart-2: 280 60% 55%;
+    --chart-3: 43 80% 64%;
+    --chart-4: 220 70% 55%;
+    --chart-5: 320 60% 58%;
+    --sidebar-background: 270 30% 5%;
+    --sidebar-foreground: 270 18% 90%;
+    --sidebar-primary: 265 70% 60%;
+    --sidebar-primary-foreground: 270 30% 98%;
+    --sidebar-accent: 270 22% 12%;
+    --sidebar-accent-foreground: 270 18% 93%;
+    --sidebar-border: 270 22% 16%;
+    --sidebar-ring: 265 70% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 24px hsl(265 70% 60% / 0.45), 0 0 48px hsl(265 70% 60% / 0.2);
+  }
+  .text-glow-gold {
+    text-shadow: 0 0 24px hsl(43 80% 64% / 0.4), 0 0 48px hsl(43 80% 64% / 0.18);
+  }
+  .bg-grain {
+    background-image: radial-gradient(circle at 20% 20%, hsl(265 70% 60% / 0.08), transparent 45%),
+      radial-gradient(circle at 80% 60%, hsl(280 60% 55% / 0.06), transparent 45%);
+  }
+}
+
+@keyframes chirp-bar {
+  0% { height: 20%; }
+  100% { height: 100%; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes reelspin { to { transform: rotate(360deg); } }
+@keyframes vu { from { transform: scaleY(.38); transform-origin: bottom; } to { transform: scaleY(1); transform-origin: bottom; } }
+
+/* Cassette Deck Radio Player */
+.cassette-deck .reel { animation: none; }
+.cassette-deck.playing .reel { animation: reelspin 3s linear infinite; }
+.cassette-deck.playing .vu-bar { animation: vu .55s ease-in-out infinite alternate; }
+.cassette-deck.playing .vu-bar:nth-child(2n) { animation-delay: .15s; }
+.cassette-deck.playing .vu-bar:nth-child(3n) { animation-delay: .3s; }
+
+.deck-btn { cursor: pointer; border: 1px solid #51445b; background: linear-gradient(180deg, #352b3d, #211a27); color: #ddd2e9; box-shadow: 0 3px 0 #0b080e, 0 4px 7px #0006, inset 0 1px #ffffff17; transition: background .18s, box-shadow .18s, color .18s, transform .18s; display: grid; place-items: center; }
+.deck-btn:hover { color: #fff; background: linear-gradient(180deg, #48365b, #2d213a); box-shadow: 0 3px 0 #0b080e, 0 0 12px #8d52e044; }
+.deck-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #0b080e; }
+.deck-btn:focus-visible { outline: 2px solid #b98df0; outline-offset: 3px; }
+.deck-band { width: 31px; height: 28px; border-radius: 5px; font-size: 9px; }
+.deck-band.active { background: linear-gradient(180deg, #6e43a2, #482b70); color: #f4eaff; box-shadow: 0 3px 0 #21122d, 0 0 10px #8d52e055; }
+.deck-transport-btn { border-radius: 6px; width: 36px; height: 34px; }
+.deck-main-btn { width: 43px; height: 39px; background: linear-gradient(180deg, #a66be8, #7141a8); color: #fff; border-color: #b589df; box-shadow: 0 3px 0 #382149, 0 0 13px #8d52e044; }
+.deck-main-btn:hover { background: linear-gradient(180deg, #b782f2, #8050b9); }

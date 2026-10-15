@@ -1,0 +1,158 @@
+﻿// Wiseravenshare.Server/DTOs/Post/PostDto.cs
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
+
+namespace Wiseravenshare.Server.DTOs.Post
+{
+
+    public class PostProvenanceDto
+    {
+        [MaxLength(500)]
+        [JsonPropertyName("sourceUrl")]
+        public string? SourceUrl { get; set; }
+
+        [MaxLength(2000)]
+        [JsonPropertyName("evidenceSummary")]
+        public string? EvidenceSummary { get; set; }
+
+        [MaxLength(100)]
+        [JsonPropertyName("verificationStatus")]
+        public string? VerificationStatus { get; set; }
+
+        [MaxLength(500)]
+        [JsonPropertyName("correctionReferenceUrl")]
+        public string? CorrectionReferenceUrl { get; set; }
+
+        [JsonPropertyName("capturedAtUtc")]
+        public string? CapturedAtUtc { get; set; }
+    }
+
+    public class PostDto
+    {
+        public Guid Id { get; set; }
+        public Guid UserId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public string Type { get; set; } = "Text";
+        public string? MediaUrl { get; set; }
+        public string[]? MediaUrls { get; set; }
+        [JsonPropertyName("youtubeUrl")]
+        public string? YoutubeUrl { get; set; }
+
+        [JsonPropertyName("tiktokUrl")]
+        public string? TikTokUrl { get; set; }
+
+        [JsonPropertyName("facebookUrl")]
+        public string? FacebookUrl { get; set; }
+        public decimal? TruthScore { get; set; }
+        public string? TruthCorrection { get; set; }
+        [JsonPropertyName("provenance")]
+        public PostProvenanceDto? Provenance { get; set; }
+        public string? LocationName { get; set; }
+        [JsonPropertyName("truthDispatch")]
+        public bool IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool TruthDeclarationAccepted { get; set; }
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public bool IsSensitive { get; set; }
+        public bool IsPinned { get; set; }
+        public int LikesCount { get; set; }
+        public int RepostsCount { get; set; }
+        public int CommentsCount { get; set; }
+        public int SharesCount { get; set; }
+        public int BookmarksCount { get; set; }
+        public int ViewsCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public UserDto User { get; set; } = null!;
+        public PostDto? ReplyTo { get; set; }
+        public PostDto? RepostOf { get; set; }
+        public PostDto? QuoteOf { get; set; }
+        public bool IsLiked { get; set; }
+        public bool IsReposted { get; set; }
+        public bool IsBookmarked { get; set; }
+    }
+
+    public class PostInteractionDto
+    {
+        public Guid PostId { get; set; }
+        public int LikesCount { get; set; }
+        public int RepostsCount { get; set; }
+        public int CommentsCount { get; set; }
+        public int BookmarksCount { get; set; }
+        public int ViewsCount { get; set; }
+        public int SharesCount { get; set; }
+        public bool IsLiked { get; set; }
+        public bool IsReposted { get; set; }
+        public bool IsBookmarked { get; set; }
+    }
+
+    public class PostCommentDto
+    {
+        public Guid Id { get; set; }
+        public Guid PostId { get; set; }
+        public Guid UserId { get; set; }
+        public Guid? ParentCommentId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public int LikesCount { get; set; }
+        public int RepliesCount { get; set; }
+        public int CommentsCount { get; set; }
+        public UserDto User { get; set; } = new();
+    }
+
+    public class AddPostCommentDto
+    {
+        [MaxLength(500)]
+        public string Content { get; set; } = string.Empty;
+
+        public Guid? ParentCommentId { get; set; }
+    }
+
+    public class CreatePostDto
+    {
+        [MaxLength(1000)]
+        public string Content { get; set; } = string.Empty;
+
+        public string? MediaUrls { get; set; }
+        [JsonPropertyName("mediaUrl")]
+        public string? MediaUrl { get; set; }
+        [JsonPropertyName("youtubeUrl")]
+        public string? YoutubeUrl { get; set; }
+
+        [JsonPropertyName("tiktokUrl")]
+        public string? TikTokUrl { get; set; }
+
+        [JsonPropertyName("facebookUrl")]
+        public string? FacebookUrl { get; set; }
+        [JsonPropertyName("provenance")]
+        public PostProvenanceDto? Provenance { get; set; }
+        public string Type { get; set; } = "Text";
+        public Guid? ReplyToId { get; set; }
+        public Guid? RepostOfId { get; set; }
+        public Guid? QuoteOfId { get; set; }
+        public string? LocationName { get; set; }
+        [JsonPropertyName("truthDispatch")]
+        public bool IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool TruthDeclarationAccepted { get; set; }
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public bool IsSensitive { get; set; }
+    }
+
+    public class UpdatePostDto
+    {
+        [MaxLength(1000)]
+        public string? Content { get; set; }
+
+        public bool? IsSensitive { get; set; }
+
+        [JsonPropertyName("truthDispatch")]
+        public bool? IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool? TruthDeclarationAccepted { get; set; }
+    }
+}
