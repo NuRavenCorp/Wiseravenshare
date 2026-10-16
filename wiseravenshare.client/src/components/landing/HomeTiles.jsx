@@ -7,8 +7,6 @@ import {
   Scale,
   Music4,
   LayoutDashboard,
-  Calculator,
-  Video,
   ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
@@ -49,18 +47,6 @@ const tiles = [
     title: "Creator Studio",
     to: "/dashboard",
     body: "Your dashboard — posts, analytics, planner, teams, incentives, and subscriptions in one place.",
-  },
-  {
-    icon: Calculator,
-    title: "Matrix Lab",
-    to: "/matrix-lab",
-    body: "Experiment with Python-powered matrix operations, service diagnostics, and operation history stored in PostgreSQL.",
-  },
-  {
-    icon: Video,
-    title: "WebRTC Studio",
-    to: "/webrtc-studio",
-    body: "Host peer-to-peer camera sessions, share join links, and receive live remote feeds directly in the browser.",
   },
 ];
 

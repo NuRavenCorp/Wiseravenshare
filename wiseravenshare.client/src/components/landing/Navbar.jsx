@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X, MessageCircle, LogOut, Radio } from "lucide-react";
+import { Menu, X, MessageCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Image } from "@/components/ui/image";
 import { useAuth } from "@/lib/AuthContext";
@@ -97,12 +97,6 @@ export default function Navbar() {
               <Link to="/library" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 Library
               </Link>
-              <Link to="/webrtc-studio" className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5">
-                <Radio className="w-4 h-4" /> WebRTC
-              </Link>
-              <Link to="/matrix-lab" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                Matrix Lab
-              </Link>
               <Link to="/messages" className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4" /> Messages
               </Link>
@@ -161,12 +155,6 @@ export default function Navbar() {
               </Link>
               <Link to="/library" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
                 Library
-              </Link>
-              <Link to="/webrtc-studio" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground flex items-center gap-1.5">
-                <Radio className="w-4 h-4" /> WebRTC
-              </Link>
-              <Link to="/matrix-lab" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
-                Matrix Lab
               </Link>
               <Link to="/messages" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4" /> Messages

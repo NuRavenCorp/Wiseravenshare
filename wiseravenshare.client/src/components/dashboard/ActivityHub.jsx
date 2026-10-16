@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { Link } from "react-router-dom";
-import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, ArrowRight, Calculator, Radio } from "lucide-react";
+import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -231,44 +231,6 @@ export default function ActivityHub() {
         </Link>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Calculator className="w-4 h-4 text-accent" />
-          <h2 className="font-heading text-sm text-foreground tracking-wide">Labs & Tools</h2>
-        </div>
-        <div className="space-y-3">
-          <Link
-            to="/webrtc-studio"
-            className="group flex items-center gap-4 rounded-xl border border-border bg-background/50 p-4 transition-colors hover:border-primary/40 hover:bg-background"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 shrink-0">
-              <Radio className="h-5 w-5 text-primary" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">WebRTC Studio</p>
-              <p className="text-xs text-muted-foreground">
-                Launch a live browser-based camera session, share a join link, and monitor incoming remote feeds.
-              </p>
-            </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
-          </Link>
-          <Link
-            to="/matrix-lab"
-            className="group flex items-center gap-4 rounded-xl border border-border bg-background/50 p-4 transition-colors hover:border-primary/40 hover:bg-background"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 shrink-0">
-              <Calculator className="h-5 w-5 text-primary" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">Python Matrix Lab</p>
-              <p className="text-xs text-muted-foreground">
-                Run transpose and multiplication jobs, inspect service health, and review history stored in PostgreSQL.
-              </p>
-            </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
-          </Link>
-        </div>
-      </section>
     </div>
   );
 }
