@@ -166,6 +166,11 @@ public class AppDbContext : DbContext
     public DbSet<CachedYouTubeRecord> CachedYouTubeRecords => Set<CachedYouTubeRecord>();
     public DbSet<UserActivity> UserActivities => Set<UserActivity>();
 
+    // Studio
+    public DbSet<Wiseravenshare.Server.Entities.Studio.StudioProject> StudioProjects => Set<Wiseravenshare.Server.Entities.Studio.StudioProject>();
+    public DbSet<Wiseravenshare.Server.Entities.Studio.StudioTrack> StudioTracks => Set<Wiseravenshare.Server.Entities.Studio.StudioTrack>();
+    public DbSet<Wiseravenshare.Server.Entities.Studio.StudioEditEvent> StudioEditEvents => Set<Wiseravenshare.Server.Entities.Studio.StudioEditEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -1245,6 +1250,21 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.PublishedPostId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Studio
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Studio.StudioProject>(e => {
+            e.HasKey(x => x.Id);
+            e.HasMany(x => x.Tracks).WithOne(x => x.Project).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.EditHistory).WithOne(x => x.Project).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Studio.StudioTrack>(e => {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ProjectId);
+        });
+        modelBuilder.Entity<Wiseravenshare.Server.Entities.Studio.StudioEditEvent>(e => {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ProjectId);
         });
     }
 }
