@@ -6,6 +6,7 @@ WORKDIR /build/client
 
 # Copy package.json and lock file first to leverage Docker cache
 COPY wiseravenshare.client/package*.json ./
+COPY package-lock.json ./
 RUN npm ci --prefer-offline
 
 # Copy source and build with environment variables passed from build args
