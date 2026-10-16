@@ -527,6 +527,20 @@ export const apiClient = {
       });
     },
   },
+  studio: {
+    createProject(payload) { return requestJson('/api/studio-projects', { method: 'POST', body: JSON.stringify(payload) }); },
+    getProjects() { return requestJson('/api/studio-projects', { method: 'GET' }); },
+    getProject(id) { return requestJson(`/api/studio-projects/${id}`, { method: 'GET' }); },
+    updateProject(id, payload) { return requestJson(`/api/studio-projects/${id}`, { method: 'PUT', body: JSON.stringify(payload) }); },
+    deleteProject(id) { return requestJson(`/api/studio-projects/${id}`, { method: 'DELETE' }); },
+    createTrack(projectId, payload) { return requestJson(`/api/studio-projects/${projectId}/tracks`, { method: 'POST', body: JSON.stringify(payload) }); },
+    updateTrack(projectId, trackId, payload) { return requestJson(`/api/studio-projects/${projectId}/tracks/${trackId}`, { method: 'PUT', body: JSON.stringify(payload) }); },
+    deleteTrack(projectId, trackId) { return requestJson(`/api/studio-projects/${projectId}/tracks/${trackId}`, { method: 'DELETE' }); },
+    uploadRecording(projectId, file, trackName) { const fd = new FormData(); fd.append('file', file); fd.append('trackName', trackName || 'Recording'); return request(`/api/studio-projects/${projectId}/upload-recording`, { method: 'POST', body: fd }); },
+    getEditHistory(projectId) { return requestJson(`/api/studio-projects/${projectId}/history`, { method: 'GET' }); },
+    undoEdit(projectId) { return requestJson(`/api/studio-projects/${projectId}/undo`, { method: 'POST' }); },
+    redoEdit(projectId) { return requestJson(`/api/studio-projects/${projectId}/redo`, { method: 'POST' }); },
+  },
   // Expose raw authenticated request for custom use
   requestJson,
 };
