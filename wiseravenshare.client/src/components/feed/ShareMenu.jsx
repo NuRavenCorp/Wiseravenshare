@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Facebook, Twitter, Linkedin, Link2, Share2, MessageCircle, Send } from "lucide-react";
+import { Facebook, Twitter, Youtube, Link2, Share2, MessageCircle, Send } from "lucide-react";
 
 const PLATFORMS = [
   { key: "facebook", label: "Facebook", icon: Facebook, color: "text-[#1877F2]",
@@ -8,8 +8,8 @@ const PLATFORMS = [
     href: (url, text) => `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}` },
   { key: "whatsapp", label: "WhatsApp", icon: MessageCircle, color: "text-[#25D366]",
     href: (url, text) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}` },
-  { key: "linkedin", label: "LinkedIn", icon: Linkedin, color: "text-[#0A66C2]",
-    href: (url) => `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}` },
+  { key: "youtube", label: "YouTube", icon: Youtube, color: "text-[#FF0000]",
+    href: (_url, text) => `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}` },
   { key: "telegram", label: "Telegram", icon: Send, color: "text-[#0088cc]",
     href: (url, text) => `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}` },
 ];
