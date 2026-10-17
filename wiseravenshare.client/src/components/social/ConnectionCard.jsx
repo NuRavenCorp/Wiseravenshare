@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Facebook, Instagram, Linkedin, Music2, Youtube,
+  Facebook, Instagram, Music2, Youtube,
   Check, Loader2, Unlink, ExternalLink, Save,
   Sparkles, AlertCircle, Link2
 } from "lucide-react";
@@ -15,7 +15,6 @@ const PLATFORM_META = {
   instagram: { Icon: Instagram, color: "text-pink-500",   oauthSupported: true  },
   tiktok:    { Icon: Music2,    color: "text-foreground", oauthSupported: true  },
   youtube:   { Icon: Youtube,   color: "text-red-500",    oauthSupported: true  },
-  linkedin:  { Icon: Linkedin,  color: "text-sky-600",    oauthSupported: false },
 };
 
 const PLATFORM_LABELS = {
@@ -23,7 +22,6 @@ const PLATFORM_LABELS = {
   instagram: "Instagram",
   tiktok:    "TikTok",
   youtube:   "YouTube",
-  linkedin:  "LinkedIn",
 };
 
 const PLATFORM_URL_HINTS = {
@@ -31,7 +29,6 @@ const PLATFORM_URL_HINTS = {
   instagram: "https://instagram.com/yourhandle",
   tiktok:    "https://tiktok.com/@yourhandle",
   youtube:   "https://www.youtube.com/@yourchannel",
-  linkedin:  "https://linkedin.com/in/yourprofile",
 };
 
 export default function ConnectionCard({ platform }) {
@@ -207,7 +204,7 @@ export default function ConnectionCard({ platform }) {
               Connect {label}
             </Button>
           ) : (
-            /* Manual connect form for LinkedIn etc. */
+            /* Manual connect form for platforms that do not support OAuth. */
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 {label} doesn't support OAuth. Enter your profile info below and save to link.
@@ -346,7 +343,7 @@ function ProfileFields({
           className="h-9 text-sm"
         />
       </div>
-      {(platform === "facebook" || platform === "instagram" || platform === "tiktok" || platform === "youtube" || platform === "linkedin") && (
+      {(platform === "facebook" || platform === "instagram" || platform === "tiktok" || platform === "youtube") && (
         <div>
           <Label className="text-xs text-muted-foreground mb-1 block">
             Feed / Page URL <span className="text-muted-foreground/60">(optional)</span>
