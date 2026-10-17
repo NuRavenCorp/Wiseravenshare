@@ -21,7 +21,7 @@ import React, {
   useCallback, useEffect, useRef, useState,
 } from 'react';
 import { Howl, Howler } from 'howler';
-import FMTunerModule from '../Components/FM/FMTunerModule';
+import FMTunerModule from '../components/FM/FMTunerModule';
 import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
