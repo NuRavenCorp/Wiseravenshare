@@ -25,6 +25,7 @@ import FMTunerModule from '../components/FM/FMTunerModule';
 import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
+import { apiClient } from '../api/client';
 import '../Styles/FMRadioPage.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -252,6 +253,9 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
   // Playback state
   const [library,      setLibrary]      = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryUploadBusy, setLibraryUploadBusy] = useState(false);
+  const [libraryUploadError, setLibraryUploadError] = useState('');
   const [currentTrack, setCurrentTrack] = useState(null);
   const [trackIndex,   setTrackIndex]   = useState(0);
   const [isPlaying,    setIsPlaying]    = useState(false);
@@ -390,6 +394,23 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       if (Array.isArray(prev) && prev.length > 0) return prev;
       return normalized;
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.ravensightMedia.listMusic()
+      .then((items) => {
+        if (cancelled || !Array.isArray(items)) return;
+        const normalized = items.map(normalizeLibraryTrack)
+          .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
+        setLibrary(normalized);
+        lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryUploadError('Could not load your saved tracks. Try refreshing the library.');
+      })
+      .finally(() => { if (!cancelled) setLibraryLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -1106,34 +1127,55 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   }, []);
 
   // ── Upload ────────────────────────────────────────────────────────────────
-  const handleUpload = useCallback((e) => {
-    const files = Array.from(e.target.files || []).filter((f) =>
-      f.type.startsWith('audio/') ||
-      f.type.startsWith('video/') ||
-      /\.(mp3|mp4|m4a|wav|flac|ogg|oga|aac|opus|weba|webm|wma)$/i.test(f.name),
-    );
+  const handleUpload = useCallback(async (e) => {
+    const input = e.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = '';
     if (!files.length) return;
-    const tracks = files.map((f, i) => ({
-      id: `${f.name}-${f.lastModified}-${i}`,
-      name: f.name,
-      mediaUrl: '',
-      file: f,
-      objectUrl: null,
-      ...parseMeta(f.name),
-    }));
-    setLibrary((prev) => {
-      const combined = [...prev, ...tracks];
-      // Auto-load the first new file if:
-      // • no track is currently loaded, OR
-      // • the current track failed to load (loadError is set) — unplayable file is blocking the queue.
-      if (!currentTrack || loadError) {
-        const firstNewIdx = combined.findIndex(t => t.id === tracks[0].id);
-        loadTrack(combined[firstNewIdx] || tracks[0], Math.max(0, firstNewIdx), false);
+
+    const supported = /\.(mp3|m4a|wav|flac|ogg|aac)$/i;
+    const invalid = files.filter((file) => !supported.test(file.name));
+    const accepted = files.filter((file) => supported.test(file.name));
+    if (!accepted.length) {
+      setLibraryUploadError('Choose MP3, M4A, WAV, FLAC, OGG, or AAC files.');
+      return;
+    }
+
+    setLibraryUploadBusy(true);
+    setLibraryUploadError(invalid.length ? `${invalid.length} unsupported file${invalid.length === 1 ? '' : 's'} skipped.` : '');
+    try {
+      const uploaded = [];
+      for (const file of accepted) {
+        const guessed = parseMeta(file.name);
+        const response = await apiClient.ravensightMedia.uploadMusic(file, {
+          title: guessed.title || file.name.replace(/\.[^/.]+$/, ''),
+          artist: guessed.artist || '',
+          album: '',
+          genre: '',
+          destinationFolder: 'fm-radio',
+        });
+        if (response?.track) uploaded.push(normalizeLibraryTrack(response.track));
       }
-      return combined;
-    });
-    e.target.value = '';
-  }, [currentTrack, loadError, loadTrack]);
+
+      const items = await apiClient.ravensightMedia.listMusic();
+      const normalized = (Array.isArray(items) ? items : []).map(normalizeLibraryTrack)
+        .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
+      setLibrary(normalized);
+      lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
+
+      if (uploaded.length || accepted.length) {
+        const newestId = uploaded[uploaded.length - 1]?.id;
+        const index = normalized.findIndex((track) => track.id === newestId);
+        const targetIndex = index >= 0 ? index : 0;
+        if (normalized[targetIndex]) loadTrack(normalized[targetIndex], targetIndex, false);
+      }
+      if (invalid.length) setLibraryUploadError(`${invalid.length} unsupported file${invalid.length === 1 ? '' : 's'} skipped. Supported formats: MP3, M4A, WAV, FLAC, OGG, AAC.`);
+    } catch (error) {
+      setLibraryUploadError(error?.data?.message || error?.message || 'Upload failed. Your track was not saved.');
+    } finally {
+      setLibraryUploadBusy(false);
+    }
+  }, [loadTrack]);
 
   // ── Queue management ──────────────────────────────────────────────────────
   const removeTrack = useCallback((id) => {
@@ -2003,7 +2045,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
                 <button className="wr-preset-btn" onClick={clearQueue} disabled={!library.length}>Clear all</button>
               </div>
               {library.length === 0 ? (
-                <div className="wr-loading" style={{ animation: 'none', opacity: .5, padding: '10px 0' }}>Queue empty — load files below</div>
+                <div className="wr-loading" style={{ animation: 'none', opacity: .7, padding: '10px 0' }}>{libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}</div>
               ) : (
                 <div className="wr-tape-rack">
                   {library.map((t, i) => (
@@ -2026,11 +2068,12 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
           )}
 
           <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
-            accept="audio/*,video/mp4,.mp3,.mp4,.m4a,.wav,.flac,.ogg,.oga,.aac,.opus,.weba,.webm,.wma"
+            accept=".mp3,.m4a,.wav,.flac,.ogg,.aac,audio/mpeg,audio/mp4,audio/wav,audio/flac,audio/ogg,audio/aac"
             onChange={handleUpload} />
-          <button className="wr-insert-tape" onClick={() => uploadRef.current?.click()}>
-            ⏏ LOAD FILES — mp3 · mp4 · flac · wav · ogg · m4a · aac · opus · wma
+          <button className="wr-insert-tape" disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
+            {libraryUploadBusy ? 'UPLOADING TRACKS…' : '＋ UPLOAD TO YOUR MUSIC LIBRARY — MP3 · M4A · WAV · FLAC · OGG · AAC'}
           </button>
+          {libraryUploadError && <div role="alert" className="wr-upload-error">{libraryUploadError}</div>}
 
           <div className="wr-kb-help">
             <kbd>Space</kbd>play/pause &nbsp;
@@ -2256,8 +2299,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
                   <span>Queue ({library.length})</span>
                   <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear</button>
                 </div>
-                {library.length === 0 ? (
-                  <div className="mod-queue-empty">No tracks — load files below</div>
+            {library.length === 0 ? (
+                  <div className="mod-queue-empty">{libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}</div>
                 ) : (
                   <div className="mod-queue-list">
                     {library.map((t, i) => (
@@ -2280,11 +2323,12 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             )}
 
             <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
-              accept="audio/*,video/mp4,.mp3,.mp4,.m4a,.wav,.flac,.ogg,.oga,.aac,.opus,.weba,.webm,.wma"
+              accept=".mp3,.m4a,.wav,.flac,.ogg,.aac,audio/mpeg,audio/mp4,audio/wav,audio/flac,audio/ogg,audio/aac"
               onChange={handleUpload} />
-            <button className="mod-upload-btn" onClick={() => uploadRef.current?.click()}>
-              ＋ Load Files — mp3 · mp4 · flac · wav · ogg · m4a · aac · opus
+            <button className="mod-upload-btn" disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
+              {libraryUploadBusy ? 'Uploading tracks…' : '＋ Upload to your music library — MP3 · M4A · WAV · FLAC · OGG · AAC'}
             </button>
+            {libraryUploadError && <div role="alert" className="mod-upload-error">{libraryUploadError}</div>}
 
             <div className="mod-kb-hint">
               <kbd>Space</kbd>play/pause &nbsp;

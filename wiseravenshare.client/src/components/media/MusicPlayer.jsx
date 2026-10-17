@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import ReactPlayer from "react-player";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import MediaUpload from "@/components/media/MediaUpload";
@@ -37,6 +36,8 @@ export default function MusicPlayer() {
   const [playing, setPlaying] = useState(false);
   const [playUrl, setPlayUrl] = useState(null);
   const [urlLoading, setUrlLoading] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
+  const [autoPlayRequested, setAutoPlayRequested] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
@@ -73,26 +74,45 @@ export default function MusicPlayer() {
 
   // Fetch signed URL when track changes
   useEffect(() => {
+    let cancelled = false;
     if (!current) {
       setPlayUrl(null);
-      return;
+      return () => { cancelled = true; };
     }
+    setPlayUrl(null);
     setUrlLoading(true);
     setPlaying(false);
+    setPlaybackError("");
     setProgress(0);
     setDuration(0);
     getPlayableUrl(current.file_uri).then((url) => {
+      if (cancelled) return;
       setPlayUrl(url);
       setUrlLoading(false);
     });
+    return () => { cancelled = true; };
   }, [current]);
+
+  useEffect(() => {
+    if (!playUrl || !autoPlayRequested || !playerRef.current) return;
+    playerRef.current.play()
+      .then(() => setAutoPlayRequested(false))
+      .catch(() => {
+        setAutoPlayRequested(false);
+        setPlaybackError("Playback was blocked. Press play to start this track.");
+      });
+  }, [playUrl, autoPlayRequested]);
 
   const handlePlayPause = () => {
     if (!current && tracks.length > 0) {
+      setAutoPlayRequested(true);
       setCurrentIdx(0);
       return;
     }
-    setPlaying(!playing);
+    const audio = playerRef.current;
+    if (!audio) return;
+    if (playing) audio.pause();
+    else audio.play().catch(() => setPlaybackError("This track could not be played. Check the file format or try uploading it again."));
   };
 
   const handleNext = () => {
@@ -125,8 +145,10 @@ export default function MusicPlayer() {
 
   const handleEnded = () => {
     if (repeat === "one") {
-      playerRef.current?.seekTo(0, 'seconds');
-      setPlaying(true);
+      if (playerRef.current) {
+        playerRef.current.currentTime = 0;
+        playerRef.current.play().catch(() => setPlaybackError("This track could not be played."));
+      }
     } else if (repeat === "all" || currentIdx < tracks.length - 1 || shuffle) {
       handleNext();
     } else {
@@ -139,6 +161,7 @@ export default function MusicPlayer() {
   };
 
   const selectTrack = (i) => {
+    setAutoPlayRequested(true);
     setCurrentIdx(i);
   };
 
@@ -214,20 +237,19 @@ export default function MusicPlayer() {
       <MediaUpload type="music" onUploaded={fetchTracks} />
       {/* EqualizerPanel disabled: requires raw AudioContext not available via ReactPlayer */}
       {/* <EqualizerPanel audioRef={playerRef} /> */}
-      <ReactPlayer
+      <audio
         ref={playerRef}
         src={playUrl || undefined}
-        playing={playing}
+        preload="metadata"
         volume={muted ? 0 : volume}
         muted={muted}
-        width="0"
-        height="0"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
         onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime || 0)}
-        onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
-        onReady={() => setPlaying(true)}
+        onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+        onError={() => { if (playUrl) { setPlaybackError("This track could not be loaded. Check the file format or upload it again."); setPlaying(false); } }}
+        className="sr-only"
       />
 
       {/* Now Playing Bar */}
@@ -255,6 +277,7 @@ export default function MusicPlayer() {
             </p>
           </div>
         </div>
+        {playbackError && <p role="alert" className="text-sm text-destructive">{playbackError}</p>}
 
         {/* Seek Bar */}
         <div className="flex items-center gap-2">
