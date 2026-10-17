@@ -2689,6 +2689,31 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    var isAuthPage = path.Equals("/login", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/register", StringComparison.OrdinalIgnoreCase);
+
+    if (isAuthPage && context.Request.Query.TryGetValue("returnTo", out var returnToValues))
+    {
+        var returnToRaw = returnToValues.ToString();
+        var queryRaw = context.Request.QueryString.Value ?? string.Empty;
+        var hasRecursiveReturnTo = returnToRaw.Contains("login%3FreturnTo%3D", StringComparison.OrdinalIgnoreCase)
+            || returnToRaw.Contains("register%3FreturnTo%3D", StringComparison.OrdinalIgnoreCase)
+            || returnToRaw.Contains("/login?returnTo=", StringComparison.OrdinalIgnoreCase)
+            || returnToRaw.Contains("/register?returnTo=", StringComparison.OrdinalIgnoreCase);
+
+        if (hasRecursiveReturnTo || queryRaw.Length > 4096)
+        {
+            context.Response.Redirect(path);
+            return;
+        }
+    }
+
+    await next();
+});
+
 if (frontendDistExists)
 {
     app.UseDefaultFiles(new DefaultFilesOptions
