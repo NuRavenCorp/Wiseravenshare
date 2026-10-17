@@ -24,6 +24,7 @@ export default function IntroOutroControls({ podcast, onUpdate }) {
     try {
       const upload = await apiClient.ravensightMedia.uploadMusic(file, {
         title: file.name.replace(/\.[^/.]+$/, ""),
+        destinationFolder: "podcast-intros",
       });
       await apiClient.entities.Podcast.update(podcast.id, {
         [kind === "intro" ? "intro_uri" : "outro_uri"]: upload.file?.mediaUrl || upload.track?.mediaUrl || "",

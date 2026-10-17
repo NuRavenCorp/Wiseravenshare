@@ -118,6 +118,7 @@ export default function MusicStampTab() {
       // Upload to private storage and create a media asset record
       const upload = await apiClient.ravensightMedia.uploadMusic(file, {
         title: file.name.replace(/\.[^.]+$/, ""),
+        destinationFolder: "truth-stamp",
       });
       await loadTracks();
       await analyzeArrayBuffer(arrayBuffer, upload.track?.title || file.name.replace(/\.[^.]+$/, ""), upload.track?.id || "");

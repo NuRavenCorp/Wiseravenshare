@@ -33,6 +33,7 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
       for (const file of files) {
         await apiClient.ravensightMedia.uploadMusic(file, {
           title: file.name.replace(/\.[^/.]+$/, ""),
+          destinationFolder: "karaoke",
         });
       }
       await fetchTracks();
