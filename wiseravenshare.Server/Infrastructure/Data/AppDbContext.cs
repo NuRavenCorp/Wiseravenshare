@@ -618,12 +618,16 @@ public class AppDbContext : DbContext
                 entity.Property(x => x.FilePath).HasMaxLength(2048);
                 entity.Property(x => x.FileUrl).HasMaxLength(2048);
                 entity.Property(x => x.MimeType).HasMaxLength(255);
+                entity.Property(x => x.FileHash).HasMaxLength(64);
                 entity.Property(x => x.ThumbnailPath).HasMaxLength(2048);
                 entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
                 entity.Property(x => x.PreviewPath).HasMaxLength(2048);
                 entity.Property(x => x.PreviewUrl).HasMaxLength(2048);
                 entity.Property(x => x.Metadata).HasColumnType("jsonb");
                 entity.HasIndex(x => x.UserId);
+                entity.HasIndex(x => new { x.UserId, x.FileHash })
+                    .IsUnique()
+                    .HasFilter("\"FileHash\" IS NOT NULL AND \"IsDeleted\" = false");
                 entity.HasIndex(x => new { x.MediaType, x.Status });
                 entity.HasIndex(x => x.CreatedAt);
                 entity.HasOne(x => x.User)
@@ -681,6 +685,9 @@ public class AppDbContext : DbContext
                 entity.Property(x => x.Description).HasMaxLength(500);
                 entity.Property(x => x.CoverImageUrl).HasMaxLength(2048);
                 entity.HasIndex(x => x.UserId);
+                entity.HasIndex(x => new { x.UserId, x.Name })
+                    .IsUnique()
+                    .HasFilter("\"IsDeleted\" = false");
                 entity.HasOne(x => x.User)
                     .WithMany()
                     .HasForeignKey(x => x.UserId)

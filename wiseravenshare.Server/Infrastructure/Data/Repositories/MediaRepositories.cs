@@ -155,6 +155,26 @@ public sealed class MediaRepository : Repository<MediaItem>, IMediaRepository
             .CountAsync();
     }
 
+    public Task<MediaItem?> GetByUserAndFileHashAsync(Guid userId, string fileHash)
+    {
+        var normalizedHash = (fileHash ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedHash))
+        {
+            return Task.FromResult<MediaItem?>(null);
+        }
+
+        return _dbSet
+            .Include(x => x.User)
+            .Include(x => x.Comments)
+            .Include(x => x.Tags)
+            .ThenInclude(x => x.MediaTag)
+            .FirstOrDefaultAsync(x =>
+                x.UserId == userId &&
+                !x.IsDeleted &&
+                x.Status != MediaStatus.Deleted &&
+                x.FileHash == normalizedHash);
+    }
+
     public async Task LikeAsync(Guid mediaId, Guid userId)
     {
         var existing = await _context.MediaLikes.FirstOrDefaultAsync(x => x.MediaId == mediaId && x.UserId == userId);

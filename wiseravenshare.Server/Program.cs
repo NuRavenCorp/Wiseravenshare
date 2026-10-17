@@ -1946,6 +1946,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Interfaces.IAuthV2Service, AuthV2Service>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.StudioCapture.IStudioCaptureService, Wiseravenshare.Server.Services.StudioCapture.StudioCaptureService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, Wiseravenshare.Server.Services.Media.MediaService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaPlaybackQueueService, Wiseravenshare.Server.Services.Media.MediaPlaybackQueueService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
 builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();

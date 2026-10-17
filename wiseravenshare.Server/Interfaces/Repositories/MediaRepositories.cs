@@ -11,6 +11,7 @@ public interface IMediaRepository : IRepository<MediaItem>
     Task<int> CountUserMediaAsync(Guid userId);
     Task<int> CountSearchAsync(MediaSearchRequest searchRequest, Guid requestingUserId);
     Task<int> CountUserMediaByTypeAsync(Guid userId, MediaType mediaType);
+    Task<MediaItem?> GetByUserAndFileHashAsync(Guid userId, string fileHash);
     Task LikeAsync(Guid mediaId, Guid userId);
     Task UnlikeAsync(Guid mediaId, Guid userId);
     Task BookmarkAsync(Guid mediaId, Guid userId);

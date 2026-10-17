@@ -26,6 +26,9 @@ public class MediaItem : BaseEntity
     [MaxLength(255)]
     public string MimeType { get; set; } = "application/octet-stream";
 
+    [MaxLength(64)]
+    public string? FileHash { get; set; }
+
     public long FileSize { get; set; }
 
     public int? Width { get; set; }
