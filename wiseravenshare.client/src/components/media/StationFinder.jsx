@@ -46,14 +46,20 @@ export default function StationFinder() {
   };
 
   const handlePlay = (station) => {
+    setError(null);
     if (playing?.url === station.url) {
       audioRef.current?.pause();
       setPlaying(null);
       return;
     }
     if (audioRef.current) {
+      audioRef.current.pause();
       audioRef.current.src = station.url;
-      audioRef.current.play().catch(() => setError("Could not play this stream. Try another station."));
+      audioRef.current.load();  // reset decoder before attempting new stream
+      audioRef.current.play().catch((err) => {
+        setError(`Could not play "${station.name}". ${err?.message || "Try another station."}`);
+        setPlaying(null);
+      });
     }
     setPlaying(station);
   };
@@ -85,7 +91,7 @@ export default function StationFinder() {
 
   return (
     <div className="space-y-4">
-      <audio ref={audioRef} onError={() => { if (playing) setError("Stream unavailable. Try another station."); }} />
+      <audio ref={audioRef} crossOrigin="anonymous" onError={() => { if (playing) { setError(`Stream unavailable for "${playing.name}". It may require a different connection.`); setPlaying(null); } }} />
 
       {/* Tuning Dial */}
       <TuningDial
