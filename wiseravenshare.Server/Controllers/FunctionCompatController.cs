@@ -617,11 +617,6 @@ public sealed class FunctionCompatController : ControllerBase
                 : new { error = item.Error ?? "failed" };
         }
 
-        if (request.LinkedInPost)
-        {
-            response["linkedin"] = new { error = "LinkedIn direct posting is not enabled in the native publisher." };
-        }
-
         return Ok(response);
     }
 
@@ -635,7 +630,6 @@ public sealed class FunctionCompatController : ControllerBase
             facebook = statuses.FirstOrDefault(x => x.Platform.Equals("facebook", StringComparison.OrdinalIgnoreCase)),
             instagram = statuses.FirstOrDefault(x => x.Platform.Equals("instagram", StringComparison.OrdinalIgnoreCase)),
             tiktok = statuses.FirstOrDefault(x => x.Platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase)),
-            linkedin = statuses.FirstOrDefault(x => x.Platform.Equals("linkedin", StringComparison.OrdinalIgnoreCase)),
             providers = statuses
         });
     }
@@ -1336,7 +1330,6 @@ public sealed class SocialCrossPostsRequest
     public string? FacebookPageId { get; set; }
     public string? InstagramMediaUrl { get; set; }
     public string? InstagramMediaType { get; set; }
-    public bool LinkedInPost { get; set; }
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; }
 }

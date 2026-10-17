@@ -317,14 +317,6 @@ public class SocialPlatformService : ISocialPlatformService
             },
             new()
             {
-                Platform = "linkedin",
-                ReadConfigured = false,
-                PublishConfigured = false,
-                ActiveMode = "handle-link-mode",
-                Detail = "Feed card uses connected handle/link."
-            },
-            new()
-            {
                 Platform = "wiseravenstream",
                 ReadConfigured = false,
                 PublishConfigured = IsWiseRavenStreamConfigured(),
