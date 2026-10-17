@@ -30,9 +30,9 @@ public sealed class SaveRavensightMusicDto
 {
     public IFormFile? File { get; set; }
     public string Title { get; set; } = string.Empty;
-    public string Artist { get; set; } = string.Empty;
-    public string Album { get; set; } = string.Empty;
-    public string Genre { get; set; } = string.Empty;
+    public string? Artist { get; set; }
+    public string? Album { get; set; }
+    public string? Genre { get; set; }
     public string DestinationFolder { get; set; } = string.Empty;
     public string? Fingerprint { get; set; }
 }
