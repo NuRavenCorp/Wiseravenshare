@@ -154,6 +154,7 @@ export default function RecordingSession({ podcast, onUpdate }) {
   const [selectionVersion, setSelectionVersion] = useState("");
   const [liveSessionCode, setLiveSessionCode] = useState("");
   const [copiedValue, setCopiedValue] = useState("");
+  const [newDeviceAlert, setNewDeviceAlert] = useState(null);
 
   const streamRefs = useRef([null, null, null, null]);
   const videoRefs = useRef([null, null, null, null]);
@@ -596,19 +597,53 @@ export default function RecordingSession({ podcast, onUpdate }) {
     saveStudioSnapshot,
   ]);
 
-  // Enumerate video devices (request permission first)
+  // Enumerate video devices, immediately activate the first camera, detect BT/new cameras
   useEffect(() => {
+    const enumerate = async () => {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      return all.filter((d) => d.kind === "videoinput");
+    };
+
     const init = async () => {
       try {
-        const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        temp.getTracks().forEach((t) => t.stop());
-        const all = await navigator.mediaDevices.enumerateDevices();
-        setDevices(all.filter((d) => d.kind === "videoinput"));
+        // Keep the stream alive — route it to slot 0 so the camera activates immediately
+        const permStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const cams = await enumerate();
+        setDevices(cams);
+
+        if (cams.length > 0) {
+          streamRefs.current[0] = permStream;
+          setAssignments((prev) => {
+            const next = [...prev];
+            next[0] = cams[0].deviceId;
+            return next;
+          });
+        } else {
+          permStream.getTracks().forEach((t) => t.stop());
+        }
       } catch (err) {
         setError("Camera access denied. Allow camera and microphone permissions, then reload.");
       }
     };
+
     init();
+
+    // Detect BT or newly connected cameras at any time
+    const onDeviceChange = async () => {
+      try {
+        const updated = await enumerate();
+        setDevices((prev) => {
+          const prevIds = new Set(prev.map((d) => d.deviceId));
+          const newCam = updated.find((d) => !prevIds.has(d.deviceId));
+          if (newCam) {
+            setNewDeviceAlert(newCam.label || "New camera detected — select it from the camera list");
+          }
+          return updated;
+        });
+      } catch (_) {}
+    };
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
   }, []);
 
   const assignDevice = useCallback(async (slotIdx, deviceId) => {
@@ -1271,13 +1306,30 @@ export default function RecordingSession({ podcast, onUpdate }) {
           <div className="flex items-center gap-2">
             <Camera className="w-4 h-4 text-primary" />
             <span className="text-sm font-medium text-foreground">Multi-Camera Sources</span>
+            <span className="text-[11px] text-muted-foreground">({devices.length} detected)</span>
           </div>
-          {recording && (
-            <span className="flex items-center gap-1.5 text-xs text-destructive">
-              <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-              REC · {fmtTime(elapsed)}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!recording && (
+              <button
+                onClick={async () => {
+                  try {
+                    const all = await navigator.mediaDevices.enumerateDevices();
+                    setDevices(all.filter((d) => d.kind === "videoinput"));
+                  } catch (_) {}
+                }}
+                className="text-[11px] text-primary hover:text-primary/80 underline"
+                title="Re-scan for BT or newly connected cameras"
+              >
+                Refresh cameras
+              </button>
+            )}
+            {recording && (
+              <span className="flex items-center gap-1.5 text-xs text-destructive">
+                <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+                REC · {fmtTime(elapsed)}
+              </span>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           {CAM_SLOTS.map((slot, idx) => (
@@ -1387,22 +1439,63 @@ export default function RecordingSession({ podcast, onUpdate }) {
           )}
         </div>
       ) : deliveryMode === "upload" ? (
-        <div className="p-4 rounded-lg border border-border bg-card space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Upload mode selected. Use the uploader below to submit the episode media.
-          </p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "file";
-              input.accept = "video/*";
-              input.onchange = (e) => uploadEdited(e.target.files?.[0]);
-              input.click();
-            }}
-          >
-            <Upload className="w-4 h-4" /> Upload Episode Video
-          </Button>
+        <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-foreground">Record or Upload Episode</p>
+            <span className="text-xs text-muted-foreground">
+              {devices.length > 0
+                ? `${devices.length} camera${devices.length !== 1 ? "s" : ""} available`
+                : "No cameras found"}
+            </span>
+          </div>
+          {(assignments[mainCam] || monitorFeeds[mainCam]?.stream) && (
+            <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+              <video
+                ref={(el) => (videoRefs.current[mainCam] = el)}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {recording && (
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/60 rounded px-2 py-1">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-xs text-white font-mono">REC · {fmtTime(elapsed)}</span>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {!recording ? (
+              <Button
+                onClick={startRecording}
+                disabled={!assignments[mainCam] && !monitorFeeds[mainCam]?.stream}
+              >
+                <Radio className="w-4 h-4" /> Record Episode
+              </Button>
+            ) : (
+              <Button variant="destructive" onClick={stopRecording}>
+                <StopCircle className="w-4 h-4" /> Stop &amp; Save
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "video/*";
+                input.onchange = (e) => uploadEdited(e.target.files?.[0]);
+                input.click();
+              }}
+            >
+              <Upload className="w-4 h-4" /> Upload a File Instead
+            </Button>
+          </div>
+          {!assignments[mainCam] && devices.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No camera detected. Allow camera access or use file upload.
+            </p>
+          )}
         </div>
       ) : (
         <div className="p-4 rounded-lg border border-border bg-card text-sm text-muted-foreground">
@@ -1433,6 +1526,34 @@ export default function RecordingSession({ podcast, onUpdate }) {
         <div className="flex items-center gap-2 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
           <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
           <p className="text-sm text-destructive">{error}</p>
+        </div>
+      )}
+
+      {newDeviceAlert && (
+        <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-primary/40 bg-primary/5">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-primary shrink-0" />
+            <p className="text-sm text-foreground">
+              Camera connected: <span className="font-medium">{newDeviceAlert}</span>
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => {
+                setNewDeviceAlert(null);
+                if (devices.length > 0) assignDevice(0, devices[devices.length - 1].deviceId);
+              }}
+            >
+              Use it
+            </Button>
+            <button
+              onClick={() => setNewDeviceAlert(null)}
+              className="text-muted-foreground hover:text-foreground text-lg leading-none"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
