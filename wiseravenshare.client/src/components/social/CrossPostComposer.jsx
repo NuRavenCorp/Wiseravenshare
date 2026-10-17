@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,16 +15,53 @@ export default function CrossPostComposer({ accounts }) {
   const [postToYouTube, setPostToYouTube] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [jobId, setJobId] = useState("");
+  const [jobState, setJobState] = useState("");
 
   const fbPages = accounts?.facebook?.pages || [];
   const igConnected = !!accounts?.instagram;
   const youtubeConnected = !!accounts?.youtube;
+
+  useEffect(() => {
+    if (!jobId) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await apiClient.functions.invoke("SocialCrossPostStatus", { jobId });
+        const state = status.data?.state || "";
+        setJobState(state);
+        if (status.data?.results) {
+          setResult(status.data.results);
+        }
+
+        if (state === "completed" || state === "failed") {
+          if (state === "completed") {
+            const settled = status.data?.results || {};
+            const anySuccess = settled?.facebook?.success || settled?.instagram?.success || settled?.youtube?.success || settled?.tiktok?.success;
+            if (anySuccess) {
+              setContent("");
+              setIgMediaUrl("");
+              setPostToYouTube(false);
+            }
+          }
+          setJobId("");
+        }
+      } catch (e) {
+        setResult({ error: e?.message || "Failed to read publish status." });
+        setJobId("");
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [jobId]);
 
   const handlePost = async () => {
     if (!content) return;
     if (!pageId && !igMediaUrl && !postToYouTube) return;
     setBusy(true);
     setResult(null);
+    setJobId("");
+    setJobState("");
     try {
       const payload = { content };
       if (pageId) payload.facebook_page_id = pageId;
@@ -33,13 +70,20 @@ export default function CrossPostComposer({ accounts }) {
         payload.instagram_media_type = igMediaType;
       }
       if (postToYouTube) payload.publishToYouTube = true;
+      payload.queue = true;
       const res = await apiClient.functions.invoke("SocialCrossPost", payload);
-      setResult(res.data);
-      const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.youtube?.success;
-      if (anySuccess) {
-        setContent("");
-        setIgMediaUrl("");
-        setPostToYouTube(false);
+      if (res.data?.job_id) {
+        setJobId(res.data.job_id);
+        setJobState(res.data.state || "queued");
+        setResult(res.data.results || {});
+      } else {
+        setResult(res.data);
+        const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.youtube?.success;
+        if (anySuccess) {
+          setContent("");
+          setIgMediaUrl("");
+          setPostToYouTube(false);
+        }
       }
     } catch (e) {
       setResult({ error: e.message });
@@ -164,12 +208,25 @@ export default function CrossPostComposer({ accounts }) {
 
         <Button
           onClick={handlePost}
-          disabled={busy || !content || (!pageId && !igMediaUrl && !postToYouTube)}
+          disabled={busy || !!jobId || !content || (!pageId && !igMediaUrl && !postToYouTube)}
           className="w-full"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
           Post Content
         </Button>
+
+        {jobState && jobId && (
+          <p className="text-xs text-muted-foreground">
+            Publish job {jobState}… ({jobId.slice(0, 8)})
+          </p>
+        )}
+
+        {result?.facebook?.queued && <p className="text-sm text-muted-foreground">Facebook: queued…</p>}
+        {result?.instagram?.queued && <p className="text-sm text-muted-foreground">Instagram: queued…</p>}
+        {result?.youtube?.queued && <p className="text-sm text-muted-foreground">YouTube: queued…</p>}
+        {result?.facebook?.pending && <p className="text-sm text-muted-foreground">Facebook: processing…</p>}
+        {result?.instagram?.pending && <p className="text-sm text-muted-foreground">Instagram: processing…</p>}
+        {result?.youtube?.pending && <p className="text-sm text-muted-foreground">YouTube: processing…</p>}
 
         {result?.facebook?.success && (
           <p className="text-sm text-accent flex items-center gap-1">

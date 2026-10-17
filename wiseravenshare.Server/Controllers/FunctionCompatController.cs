@@ -14,6 +14,7 @@ using Wiseravenshare.Server.Services.AiAssistant;
 using Wiseravenshare.Server.Services.Currency;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.Interfaces;
+using Wiseravenshare.Server.Services.SocialPublishing;
 using Wiseravenshare.Server.Services.Truth;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -35,6 +36,7 @@ public sealed class FunctionCompatController : ControllerBase
     private readonly ISocialPlatformService _socialPlatformService;
     private readonly ISiteCrawlerService _siteCrawlerService;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly ISocialPublishQueue _socialPublishQueue;
     private readonly IConfiguration _configuration;
     private readonly ILogger<FunctionCompatController> _logger;
 
@@ -50,6 +52,7 @@ public sealed class FunctionCompatController : ControllerBase
         ISocialPlatformService socialPlatformService,
         ISiteCrawlerService siteCrawlerService,
         ISubscriptionService subscriptionService,
+        ISocialPublishQueue socialPublishQueue,
         IConfiguration configuration,
         ILogger<FunctionCompatController> logger)
     {
@@ -64,6 +67,7 @@ public sealed class FunctionCompatController : ControllerBase
         _socialPlatformService = socialPlatformService;
         _siteCrawlerService = siteCrawlerService;
         _subscriptionService = subscriptionService;
+        _socialPublishQueue = socialPublishQueue;
         _configuration = configuration;
         _logger = logger;
     }
@@ -608,16 +612,56 @@ public sealed class FunctionCompatController : ControllerBase
             PublishToBluesky = false
         };
 
-        var result = await _socialPlatformService.PublishAsync(ResolveUserId(), publishRequest);
-        var response = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in result.Results)
+        var requestedPlatforms = ResolveRequestedPlatforms(publishRequest);
+        if (!request.Queue)
         {
-            response[item.Platform] = item.Success
-                ? new { success = true, post_id = item.ExternalPostId, url = item.ExternalPostUrl }
-                : new { error = item.Error ?? "failed" };
+            var result = await _socialPlatformService.PublishAsync(ResolveUserId(), publishRequest);
+            var response = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in result.Results)
+            {
+                response[item.Platform] = item.Success
+                    ? new { success = true, post_id = item.ExternalPostId, url = item.ExternalPostUrl }
+                    : new { error = item.Error ?? "failed" };
+            }
+
+            return Ok(response);
         }
 
-        return Ok(response);
+        var queued = _socialPublishQueue.Enqueue(ResolveUserId(), publishRequest, requestedPlatforms);
+        return Ok(new
+        {
+            job_id = queued.JobId,
+            queued = true,
+            state = "queued",
+            platforms = requestedPlatforms,
+            results = queued.Results
+        });
+    }
+
+    [HttpPost("social-cross-post-status")]
+    [Authorize]
+    public IActionResult SocialCrossPostStatus([FromBody] SocialCrossPostStatusRequest request)
+    {
+        if (request.JobId == Guid.Empty)
+        {
+            return BadRequest(new { error = "job_id is required" });
+        }
+
+        var snapshot = _socialPublishQueue.Get(request.JobId, ResolveUserId());
+        if (snapshot is null)
+        {
+            return NotFound(new { error = "job not found" });
+        }
+
+        return Ok(new
+        {
+            job_id = snapshot.JobId,
+            state = snapshot.State.ToString().ToLowerInvariant(),
+            results = snapshot.Results,
+            error = snapshot.Error,
+            created_utc = snapshot.CreatedUtc,
+            completed_utc = snapshot.CompletedUtc
+        });
     }
 
     [HttpPost("social-get-accounts")]
@@ -1196,6 +1240,18 @@ public sealed class FunctionCompatController : ControllerBase
         return string.Equals(workflowSecret, providedSecret?.Trim(), StringComparison.Ordinal);
     }
 
+    private static List<string> ResolveRequestedPlatforms(PublishSocialContentRequest request)
+    {
+        var platforms = new List<string>();
+        if (request.PublishToFacebook) platforms.Add("facebook");
+        if (request.PublishToInstagram) platforms.Add("instagram");
+        if (request.PublishToTikTok) platforms.Add("tiktok");
+        if (request.PublishToYouTube) platforms.Add("youtube");
+        if (request.PublishToWiseRavenStream) platforms.Add("wiseravenstream");
+        if (request.PublishToBluesky) platforms.Add("bluesky");
+        return platforms;
+    }
+
     private Guid ResolveUserId()
     {
         var raw = User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -1332,6 +1388,12 @@ public sealed class SocialCrossPostsRequest
     public string? InstagramMediaType { get; set; }
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; }
+    public bool Queue { get; set; } = true;
+}
+
+public sealed class SocialCrossPostStatusRequest
+{
+    public Guid JobId { get; set; }
 }
 
 public sealed class SocialImportRequest
