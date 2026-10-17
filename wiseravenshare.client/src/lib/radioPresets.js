@@ -7,8 +7,8 @@ export const PRESET_CATEGORIES = [
     label: "Talk & News",
     stations: [
       { name: "BBC World Service", url: "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8", country: "United Kingdom", tags: ["News", "World", "Talk"], codec: "AAC+", bitrate: 101, preset: true },
-      { name: "BBC Radio 4 FM", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_radio_fourfm", country: "United Kingdom", tags: ["Talk", "News", "Culture"], codec: "MP3", bitrate: 128, preset: true },
-      { name: "BBC Radio 5 Live", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_radio_five_live", country: "United Kingdom", tags: ["News", "Sport", "Talk"], codec: "MP3", bitrate: 128, preset: true },
+      { name: "BBC Radio 4 FM", url: "http://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio=128000.norewind.m3u8", country: "United Kingdom", tags: ["Talk", "News", "Culture"], codec: "AAC+", bitrate: 128, preset: true },
+      { name: "BBC Radio 5 Live", url: "http://as-hls-ww-live.akamaized.net/pool_89021708/live/ww/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio%3d128000.norewind.m3u8", country: "United Kingdom", tags: ["News", "Sport", "Talk"], codec: "AAC+", bitrate: 128, preset: true },
     ],
   },
   {
@@ -27,7 +27,7 @@ export const PRESET_CATEGORIES = [
     label: "Eclectic & Indie",
     stations: [
       { name: "Radio Paradise", url: "https://stream.radioparadise.com/aac-320", country: "Internet", tags: ["Eclectic", "Indie"], codec: "AAC", bitrate: 320, preset: true },
-      { name: "BBC Radio 6 Music", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_6music", country: "United Kingdom", tags: ["Alternative", "Indie"], codec: "MP3", bitrate: 128, preset: true },
+      { name: "BBC Radio 6 Music", url: "https://a.files.bbci.co.uk/ms6/live/3441A116-B12E-4D2F-ACA8-C1984642FA4B/audio/simulcast/hls/uk/audio_syndication_med_sbr_v1/aks/bbc_6music.m3u8", country: "United Kingdom", tags: ["Alternative", "Indie"], codec: "AAC+", bitrate: 128, preset: true },
       { name: "SomaFM Indie Pop Rocks", url: "https://ice1.somafm.com/indiepop-128-mp3", country: "Internet", tags: ["Indie", "Pop"], codec: "MP3", bitrate: 128, preset: true },
     ],
   },

@@ -11,7 +11,7 @@ import LimitationsNotice from "@/components/social/LimitationsNotice";
 import { Share2, Download, Feather, Link2 } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 
-const PLATFORMS = ["facebook", "instagram", "tiktok", "linkedin"];
+const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "linkedin"];
 
 export default function SocialHub() {
   const [accounts, setAccounts] = useState(null);
@@ -44,7 +44,7 @@ export default function SocialHub() {
       <main className="max-w-4xl mx-auto px-4 py-12">
         <div className="mb-8">
           <h1 className="font-heading text-4xl text-foreground mb-2 text-glow">Social Connections</h1>
-          <p className="text-muted-foreground">Connect your social accounts, cross-post, and import content.</p>
+          <p className="text-muted-foreground">Connect Instagram, TikTok, YouTube, and the rest of your social stack.</p>
         </div>
         <LimitationsNotice />
         <div className="mb-8">
@@ -69,10 +69,9 @@ export default function SocialHub() {
           <TabsContent value="connect">
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Click <strong>Connect</strong> on each platform to link your account via OAuth. Your profile
-                info will be auto-filled — you can edit any field and save corrections.
+                Click <strong>Connect</strong> on each platform to link your account via OAuth. Instagram, TikTok, and YouTube all support the same connect flow.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {PLATFORMS.map((platform) => (
                   <ConnectionCard key={platform} platform={platform} />
                 ))}

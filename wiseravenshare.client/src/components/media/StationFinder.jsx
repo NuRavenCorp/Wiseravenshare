@@ -21,14 +21,29 @@ export default function StationFinder() {
   const resolveStationUrl = (station) => {
     if (!station?.url) return "";
 
-    if (
-      station.name?.toLowerCase() === "bbc world service" &&
-      station.url.includes("stream.live.vc.bbcmedia.co.uk")
-    ) {
-      return "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8";
+    // Map dead stream.live.vc.bbcmedia.co.uk URLs to working HLS manifests
+    const BBC_URL_MAP = {
+      "bbc_world_service": "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8",
+      "bbc_radio_fourfm": "http://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio=128000.norewind.m3u8",
+      "bbc_radio_five_live": "http://as-hls-ww-live.akamaized.net/pool_89021708/live/ww/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio%3d128000.norewind.m3u8",
+      "bbc_6music": "https://a.files.bbci.co.uk/ms6/live/3441A116-B12E-4D2F-ACA8-C1984642FA4B/audio/simulcast/hls/uk/audio_syndication_med_sbr_v1/aks/bbc_6music.m3u8",
+    };
+
+    if (station.url.includes("stream.live.vc.bbcmedia.co.uk")) {
+      const match = station.url.match(/\/v0_1\/([^/?]+)/);
+      const key = match?.[1];
+      if (key && BBC_URL_MAP[key]) return BBC_URL_MAP[key];
+      const nameKey = station.name?.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+      const nameMatch = Object.entries(BBC_URL_MAP).find(([k]) => nameKey?.includes(k.replace("bbc_", "")));
+      if (nameMatch) return nameMatch[1];
     }
 
-    return station.url;
+    // HLS manifests don't need a proxy — use them directly
+    const url = station.url;
+    if (url.endsWith('.m3u8') || url.includes('.m3u8?')) return url;
+    if (url.startsWith('/')) return url;
+    // Proxy non-HLS streams to avoid CORS + HTTP mixed-content issues
+    return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
   };
 
   const playingFreq = useMemo(() => {
@@ -107,7 +122,13 @@ export default function StationFinder() {
         config={{ file: { forceAudio: true } }}
         onError={(err) => {
           if (!playing) return;
-          setError(`Could not play "${playing.name}". ${err?.message || "Try another station."}`);
+          const msg = String(err?.message || err?.type || '').toLowerCase();
+          let hint = `Could not play "${playing.name}".`;
+          if (msg.includes('cors') || msg.includes('access-control')) hint += ' Stream blocked by browser security (CORS).';
+          else if (msg.includes('404') || msg.includes('not found')) hint += ' Station stream not found — it may be offline.';
+          else if (msg.includes('403') || msg.includes('geo')) hint += ' This station may be geo-restricted in your region.';
+          else hint += ' The station may be temporarily offline. Try another.';
+          setError(hint);
           setPlaying(null);
         }}
       />
