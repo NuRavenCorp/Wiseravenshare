@@ -6,7 +6,7 @@ export const PRESET_CATEGORIES = [
     id: "talk-news",
     label: "Talk & News",
     stations: [
-      { name: "BBC World Service", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_world_service", country: "United Kingdom", tags: ["News", "World", "Talk"], codec: "MP3", bitrate: 128, preset: true },
+      { name: "BBC World Service", url: "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8", country: "United Kingdom", tags: ["News", "World", "Talk"], codec: "AAC+", bitrate: 101, preset: true },
       { name: "BBC Radio 4 FM", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_radio_fourfm", country: "United Kingdom", tags: ["Talk", "News", "Culture"], codec: "MP3", bitrate: 128, preset: true },
       { name: "BBC Radio 5 Live", url: "https://stream.live.vc.bbcmedia.co.uk/v0_1/bbc_radio_five_live", country: "United Kingdom", tags: ["News", "Sport", "Talk"], codec: "MP3", bitrate: 128, preset: true },
     ],

@@ -1,11 +1,10 @@
 import React, { useState } from "react";
 import Navbar from "@/components/landing/Navbar";
-import { Video, Music, Radio, Globe, Mic, SatelliteDish, Film } from "lucide-react";
+import { Video, Music, Radio, Mic, SatelliteDish, Film } from "lucide-react";
 import VideoPlayer from "@/components/media/VideoPlayer";
 import VideoLibrary from "@/components/media/VideoLibrary";
 import MusicPlayer from "@/components/media/MusicPlayer";
-import RadioPlayer from "@/components/media/RadioPlayer";
-import StationFinder from "@/components/media/StationFinder";
+import FMRadioPage from "@/pages/FMRadioPage";
 import KaraokeExtractor from "@/components/media/KaraokeExtractor";
 import JamSessionPanel from "@/components/media/JamSessionPanel";
 import JamCalendar from "@/components/media/JamCalendar";
@@ -20,7 +19,6 @@ const tabs = [
   { id: "video-library", label: "Video Library", icon: Film },
   { id: "music", label: "Music", icon: Music },
   { id: "radio", label: "FM Radio", icon: Radio },
-  { id: "stations", label: "FM Stations", icon: Globe },
   { id: "karaoke", label: "Karaoke", icon: Mic },
   { id: "live", label: "Live", icon: SatelliteDish },
   { id: "rights", label: "Rights", icon: Scale },
@@ -61,8 +59,7 @@ export default function Media() {
             <JamSessionPanel />
           </div>
         )}
-        {tab === "radio" && <RadioPlayer />}
-        {tab === "stations" && <StationFinder />}
+        {tab === "radio" && <FMRadioPage />}
         {tab === "karaoke" && <KaraokeExtractor />}
         {tab === "live" && <LiveStreamPanel />}
         {tab === "rights" && <RightsManager />}
