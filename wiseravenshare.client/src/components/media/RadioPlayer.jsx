@@ -22,6 +22,7 @@ import CassetteDeck from "./CassetteDeck";
 import SpectrumAnalyser from "./SpectrumAnalyser";
 import RadioEqualizer from "./RadioEqualizer";
 import TrackQueue from "./TrackQueue";
+import MediaUpload from "./MediaUpload";
 
 const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const FAV_KEY = "radio_favorites";
@@ -59,24 +60,34 @@ export default function RadioPlayer() {
   const progressRaf = useRef(null);
   const endedRef = useRef(() => {});
 
-  // Load tracks
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.ravensightMedia.listMusic();
-        const items = (res || []).map((track) => ({
+  // Load tracks and keep the radio queue in sync with the shared music library.
+  const loadTracks = useCallback(async (selectNewest = false) => {
+    try {
+      const res = await apiClient.ravensightMedia.listMusic();
+      const items = (res || []).map((track) => ({
           ...track,
           id: track.id,
           title: track.title || track.fileName || "Untitled track",
-          file_uri: track.mediaUrl || "",
+          file_uri: track.mediaUrl || track.media_url || track.file_uri || track.relativePath || "",
         }));
-        setTracks(items);
-        setQueue(items.map((t) => t.id));
-      } finally {
-        setLoading(false);
+      setTracks(items);
+      setQueue((previous) => {
+        const retained = previous.filter((id) => items.some((track) => track.id === id));
+        const added = items.map((track) => track.id).filter((id) => !retained.includes(id));
+        return selectNewest ? items.map((track) => track.id) : [...retained, ...added];
+      });
+      if (selectNewest && items[0]) {
+        if (howlRef.current) howlRef.current.unload();
+        setCurrentId(items[0].id);
       }
-    })();
-  }, []);
+    } catch (error) {
+      toast({ title: "Could not load music", description: error?.message || "Try refreshing the library.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { loadTracks(); }, [loadTracks]);
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -231,7 +242,7 @@ export default function RadioPlayer() {
       sound.play();
     };
 
-    getPlayableUrl(current.file_uri).then(loadTrack);
+    getPlayableUrl(current.file_uri).then(loadTrack).catch(() => loadTrack(null));
 
     return () => {
       cancelled = true;
@@ -318,6 +329,7 @@ export default function RadioPlayer() {
 
   return (
     <div className="max-w-md mx-auto space-y-4">
+      <MediaUpload type="music" label="Upload track to radio library" onUploaded={() => loadTracks(true)} />
       <CassetteDeck
         playing={playing}
         trackTitle={current?.title || "No tracks available"}
