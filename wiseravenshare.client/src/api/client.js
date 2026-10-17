@@ -376,6 +376,10 @@ export const apiClient = {
       return requestJson(`/api/ravensight/media/photos/${encodeURIComponent(photoId)}`, { method: "DELETE" });
     },
   },
+  radio: {
+    getChannels() { return requestJson('/api/radio/channels', { method: 'GET' }); },
+    getChannel(id) { return requestJson(`/api/radio/channels/${encodeURIComponent(id)}`, { method: 'GET' }); },
+  },
   news: {
     getBulletin(params = {}) {
       const query = new URLSearchParams();

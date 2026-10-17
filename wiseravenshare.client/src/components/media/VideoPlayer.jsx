@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import ReactPlayer from "react-player";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import MediaUpload from "@/components/media/MediaUpload";
@@ -53,7 +54,7 @@ export default function VideoPlayer() {
   const [confirmingId, setConfirmingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const videoRef = useRef(null);
+  const playerRef = useRef(null);
   const containerRef = useRef(null);
   const { toast } = useToast();
 
@@ -100,34 +101,9 @@ export default function VideoPlayer() {
     });
   }, [current]);
 
-  // Set src and autoplay
-  useEffect(() => {
-    if (playUrl && videoRef.current) {
-      videoRef.current.src = playUrl;
-      videoRef.current.play().then(() => setPlaying(true)).catch(() => {});
-    }
-  }, [playUrl]);
-
-  // Play/pause toggle
-  useEffect(() => {
-    if (!videoRef.current || !playUrl) return;
-    if (playing) videoRef.current.play().catch(() => {});
-    else videoRef.current.pause();
-  }, [playing]);
-
-  // Volume
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.volume = muted ? 0 : volume;
-  }, [volume, muted]);
-
-  // Speed
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
-  }, [speed]);
-
   const handleSeek = (e) => {
     const time = Number(e.target.value);
-    if (videoRef.current) videoRef.current.currentTime = time;
+    playerRef.current?.seekTo(time, 'seconds');
     setProgress(time);
   };
 
@@ -142,7 +118,7 @@ export default function VideoPlayer() {
   };
 
   const captureStill = async () => {
-    const video = videoRef.current;
+    const video = playerRef.current?.getInternalPlayer();
     if (!video || !video.videoWidth) return;
     setCapturing(true);
     try {
@@ -245,28 +221,34 @@ export default function VideoPlayer() {
         <div className="space-y-3">
           <div
             ref={containerRef}
-            className="relative rounded-lg overflow-hidden border border-border bg-black flex items-center justify-center"
+            className={`relative rounded-lg overflow-hidden border border-border bg-black flex items-center justify-center ${aspectClass}`}
           >
-            <video
-              ref={videoRef}
-              className={`w-full ${aspectClass}`}
-              controls={isFullscreen}
-              onClick={() => setPlaying(!playing)}
-              onTimeUpdate={() =>
-                videoRef.current && setProgress(videoRef.current.currentTime)
-              }
-              onLoadedMetadata={(e) => {
-                setDuration(e.target.duration);
-                setVideoSize({
-                  w: e.target.videoWidth,
-                  h: e.target.videoHeight,
-                });
-              }}
+            <ReactPlayer
+              ref={playerRef}
+              url={playUrl}
+              playing={playing}
+              volume={muted ? 0 : volume}
+              playbackRate={speed}
+              width="100%"
+              height="100%"
+              style={{ position: 'absolute', top: 0, left: 0 }}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
+              onProgress={({ playedSeconds }) => setProgress(playedSeconds)}
+              onDuration={(d) => setDuration(d)}
+              onReady={() => setPlaying(true)}
+              onError={() => {}}
+              config={{
+                file: {
+                  attributes: { controlsList: 'nodownload' },
+                  hlsOptions: {},
+                },
+              }}
             />
-            {!isFullscreen && formatLabel && (
+            {!isFullscreen && (
               <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-background/80 text-foreground backdrop-blur-sm">
-                {formatLabel} {videoSize.w}x{videoSize.h}
+                Landscape
               </span>
             )}
           </div>

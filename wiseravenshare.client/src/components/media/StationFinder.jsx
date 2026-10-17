@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import TuningDial, { stationToFrequency } from "./TuningDial";
 import { PRESET_CATEGORIES, GENRE_BUTTONS } from "@/lib/radioPresets";
+import FMChannelPlayer from "@/components/media/FMChannelPlayer";
 
 export default function StationFinder() {
   const [country, setCountry] = useState("United States");
@@ -91,6 +92,11 @@ export default function StationFinder() {
 
   return (
     <div className="space-y-4">
+      {/* FM Channel Player — preset live stations with channel-pill model */}
+      <FMChannelPlayer />
+
+      <div className="border-t border-border" />
+
       <audio ref={audioRef} crossOrigin="anonymous" onError={() => { if (playing) { setError(`Stream unavailable for "${playing.name}". It may require a different connection.`); setPlaying(null); } }} />
 
       {/* Tuning Dial */}
