@@ -147,10 +147,20 @@ public sealed class RavensightVideoMediaController : ControllerBase
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SaveVideo([FromForm] SaveRavensightVideoDto dto, CancellationToken cancellationToken)
     {
-        if (dto.File is null || dto.File.Length == 0)
+        var file = dto.File;
+        if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "No video file uploaded." });
+            file = Request.Form.Files.FirstOrDefault(f =>
+                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No video file uploaded. Ensure the multipart field is named 'File'." });
+        }
+
+        dto.File = file;
 
         if (!TryResolveUserId(out var userId))
         {
@@ -166,7 +176,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
         var saved = await _videoService.SaveVideoAsync(
             userId,
-            dto.File,
+            file,
             dto.Title,
             dto.Description,
             dto.DestinationFolder,

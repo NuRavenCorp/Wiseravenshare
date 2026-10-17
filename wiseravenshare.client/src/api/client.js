@@ -366,6 +366,7 @@ export const apiClient = {
     uploadMusic(file, fields = {}) {
       const body = new FormData();
       body.append("file", file);
+      body.append("File", file);
       body.append("title", fields.title || file.name.replace(/\.[^/.]+$/, ""));
       body.append("artist", fields.artist || "");
       body.append("album", fields.album || "");
@@ -383,9 +384,10 @@ export const apiClient = {
     uploadVideo(file, fields = {}) {
       const body = new FormData();
       body.append("file", file);
+      body.append("File", file);
       body.append("title", fields.title || file.name.replace(/\.[^/.]+$/, ""));
       body.append("description", fields.description || "");
-      body.append("destinationFolder", fields.destinationFolder || "");
+      body.append("destinationFolder", fields.destinationFolder || "my-library");
       body.append("privacy", fields.privacy || "unlisted");
       body.append("storageMode", fields.storageMode || "permanent");
       body.append("isPermanent", fields.isPermanent === false ? "false" : "true");
