@@ -3,7 +3,7 @@ import Navbar from "@/components/landing/Navbar";
 import { useAuth } from "@/lib/AuthContext";
 import { Radio, Mic, Mic2, Newspaper, Film } from "lucide-react";
 import PodcastsPanel from "@/components/ravensight/PodcastsPanel";
-import KanbanBoard from "@/components/ravensight/KanbanBoard";
+import RavensightBoard from "@/components/ravensight/RavensightBoard";
 import KaraokeExtractor from "@/components/media/KaraokeExtractor";
 import JournalismPanel from "@/components/ravensight/JournalismPanel";
 import RavensightMedia from "@/components/ravensight/RavensightMedia";
@@ -49,8 +49,8 @@ export default function Ravensight() {
             Ravensight Studio
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            The creative engine — multi-camera podcasts and karaoke, all in one
-            place.
+            The creative engine — multi-camera podcasts, footage workflow,
+            karaoke, journalism, and media in one place.
           </p>
         </div>
 
@@ -76,7 +76,7 @@ export default function Ravensight() {
 
         {/* Tab content */}
         {tab === "podcasts" && <PodcastsPanel />}
-        {tab === "board" && <KanbanBoard />}
+        {tab === "board" && <RavensightBoard />}
         {tab === "karaoke" && <KaraokeExtractor currentUser={currentUser} onAuthRequired={onAuthRequired} />}
         {tab === "journalism" && <JournalismPanel />}
         {tab === "media" && <RavensightMedia />}

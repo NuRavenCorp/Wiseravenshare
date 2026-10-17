@@ -48,6 +48,7 @@ public sealed class PodcastVideoBridgeStateService
                 SourceUserName = (selection.SourceUserName ?? string.Empty).Trim(),
                 SelectedAtUtc = DateTime.UtcNow
             };
+            room.CurrentStage = "selected";
             room.UpdatedAtUtc = DateTime.UtcNow;
             PersistUnsafe();
             return ToSnapshot(room);
@@ -76,6 +77,11 @@ public sealed class PodcastVideoBridgeStateService
             };
 
             room.CommandLog.Add(safeCommand);
+            var nextStage = ResolveStageFromCommand(safeCommand.Command);
+            if (!string.IsNullOrWhiteSpace(nextStage))
+            {
+                room.CurrentStage = nextStage;
+            }
             if (room.CommandLog.Count > 100)
             {
                 room.CommandLog = room.CommandLog
@@ -177,6 +183,7 @@ public sealed class PodcastVideoBridgeStateService
         {
             RoomKey = roomKey,
             ActiveFootage = null,
+            CurrentStage = "planning",
             CommandLog = [],
             UpdatedAtUtc = DateTime.UtcNow
         };
@@ -235,11 +242,26 @@ public sealed class PodcastVideoBridgeStateService
                 SourceUserName = room.ActiveFootage.SourceUserName,
                 SelectedAtUtc = room.ActiveFootage.SelectedAtUtc
             },
+            CurrentStage = room.CurrentStage,
             CommandLog = room.CommandLog
                 .OrderBy(item => item.IssuedAtUtc)
                 .Select(CloneCommand)
                 .ToList(),
             UpdatedAtUtc = room.UpdatedAtUtc
+        };
+    }
+
+    private static string? ResolveStageFromCommand(string command)
+    {
+        return command switch
+        {
+            "plan" or "planning" => "planning",
+            "select" or "selected" => "selected",
+            "setup" or "camera_setup" or "camera-setup" => "camera_setup",
+            "record" or "start" or "live" => "recording",
+            "review" or "cut" or "edit" => "review",
+            "publish" or "export" or "wrap" => "published",
+            _ => null
         };
     }
 
@@ -279,6 +301,7 @@ public sealed class PodcastBridgeRoomState
 {
     public string RoomKey { get; set; } = "main";
     public PodcastBridgeFootageSelection? ActiveFootage { get; set; }
+    public string CurrentStage { get; set; } = "planning";
     public List<PodcastBridgeCommandRecord> CommandLog { get; set; } = [];
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
@@ -287,6 +310,7 @@ public sealed class PodcastBridgeRoomSnapshot
 {
     public string RoomKey { get; set; } = "main";
     public PodcastBridgeFootageSelection? ActiveFootage { get; set; }
+    public string CurrentStage { get; set; } = "planning";
     public List<PodcastBridgeCommandRecord> CommandLog { get; set; } = [];
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
