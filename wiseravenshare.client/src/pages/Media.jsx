@@ -33,8 +33,11 @@ export default function Media() {
     <div className="min-h-screen bg-background">
       <Navbar />
       <div className="max-w-6xl mx-auto px-4 pt-24 pb-8">
-        <h1 className="font-heading text-3xl text-foreground mb-6 text-glow">FM Radio & Media</h1>
-        <div className="flex gap-1 mb-6 border-b border-border">
+        <div className="mb-6">
+          <h1 className="font-heading text-3xl text-foreground mb-2 text-glow">FM Radio & Media</h1>
+          <p className="text-sm text-muted-foreground">Your music, radio, and media tools in one place.</p>
+        </div>
+        <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
           {tabs.map((t) => {
             const Icon = t.icon;
             return (
@@ -42,7 +45,7 @@ export default function Media() {
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px ${
-                  tab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                  tab === t.id ? "border-primary text-primary bg-primary/5" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className="w-4 h-4" /> {t.label}
@@ -54,9 +57,21 @@ export default function Media() {
         {tab === "video-library" && <VideoLibrary />}
         {tab === "music" && (
           <div className="space-y-6">
+            <section className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-sm">
+              <header className="mb-5">
+                <h2 className="text-xl font-semibold text-foreground">My Music</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Upload tracks to your library, then play and manage them here.</p>
+              </header>
             <MusicPlayer />
-            <JamCalendar />
-            <JamSessionPanel />
+            </section>
+            <section className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-sm space-y-5">
+              <header>
+                <h2 className="text-xl font-semibold text-foreground">Jam Sessions</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Plan upcoming sessions and connect with other musicians.</p>
+              </header>
+              <JamCalendar />
+              <JamSessionPanel />
+            </section>
           </div>
         )}
         {tab === "radio" && <FMRadioPage />}
