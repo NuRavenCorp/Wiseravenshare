@@ -39,6 +39,11 @@ function resolveSafeReturnPath(raw, depth = 0) {
 }
 
 export function safeReturnTo() {
-  const raw = new URLSearchParams(window.location.search).get("returnTo");
+  let raw = null;
+  try {
+    raw = new URLSearchParams(window.location.search).get("returnTo");
+  } catch {
+    raw = null;
+  }
   return resolveSafeReturnPath(raw);
 }
