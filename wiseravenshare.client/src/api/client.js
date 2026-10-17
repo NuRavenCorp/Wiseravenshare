@@ -14,6 +14,7 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+const AUTH_ROUTE_PATHS = new Set(["/login", "/register"]);
 
 let inMemoryToken = null;
 
@@ -109,6 +110,46 @@ const request = async (path, options = {}) => {
   }
 
   return data;
+};
+
+const normalizeSameOriginPath = (candidateUrl, origin) => {
+  if (candidateUrl.origin !== origin) {
+    return "/";
+  }
+
+  const path = `${candidateUrl.pathname}${candidateUrl.search}${candidateUrl.hash}`;
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return "/";
+  }
+
+  return path || "/";
+};
+
+const sanitizeReturnToForLogin = (rawTarget, depth = 0) => {
+  if (typeof window === "undefined") {
+    return "/";
+  }
+
+  if (depth > 6) {
+    return "/";
+  }
+
+  try {
+    const origin = window.location.origin;
+    const target = new URL(rawTarget || window.location.href, origin);
+    const normalizedPathname = target.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+
+    if (AUTH_ROUTE_PATHS.has(normalizedPathname)) {
+      const nested = target.searchParams.get("returnTo");
+      return nested ? sanitizeReturnToForLogin(nested, depth + 1) : "/";
+    }
+
+    target.searchParams.delete("returnTo");
+    target.searchParams.delete("from_url");
+    return normalizeSameOriginPath(target, origin);
+  } catch {
+    return "/";
+  }
 };
 
 const uploadViaMediaController = async (
@@ -288,8 +329,17 @@ export const apiClient = {
       if (typeof window === "undefined") {
         return;
       }
-      const returnTo = nextUrl ? new URL(nextUrl, window.location.origin).toString() : window.location.href;
-      window.location.href = `/login?returnTo=${encodeURIComponent(returnTo)}`;
+      const returnTo = sanitizeReturnToForLogin(nextUrl);
+      const loginUrl = new URL("/login", window.location.origin);
+      if (returnTo !== "/") {
+        loginUrl.searchParams.set("returnTo", returnTo);
+      }
+
+      const currentUrl = window.location.href;
+      const nextLoginUrl = loginUrl.toString();
+      if (currentUrl !== nextLoginUrl) {
+        window.location.href = nextLoginUrl;
+      }
     },
     async logout(redirectUrl) {
       try {
