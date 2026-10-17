@@ -35,6 +35,17 @@ const TYPE_LABELS = {
   video: "video",
 };
 
+const EXTENSION_MAP = {
+  photo: new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]),
+  music: new Set(["mp3", "wav", "m4a", "aac", "flac", "ogg"]),
+  video: new Set(["mp4", "mov", "webm"]),
+};
+
+const getFileExtension = (fileName = "") => {
+  const parts = String(fileName).toLowerCase().split(".");
+  return parts.length > 1 ? parts.at(-1) : "";
+};
+
 const normalizeLibraryItem = (type, item) => {
   if (type === "photo") {
     return {
@@ -142,10 +153,15 @@ export default function Library() {
   const handleUpload = async (type, file) => {
     if (!file) return;
     const expectedPrefix = TYPE_PREFIXES[type];
-    if (expectedPrefix && (!file.type || !file.type.startsWith(expectedPrefix))) {
+    const extension = getFileExtension(file.name);
+    const extensionAllowed = EXTENSION_MAP[type]?.has(extension) || false;
+    const hasMimeType = Boolean(file.type);
+    const mimeMatches = expectedPrefix ? file.type.startsWith(expectedPrefix) : false;
+
+    if (expectedPrefix && ((hasMimeType && !mimeMatches) || (!hasMimeType && !extensionAllowed))) {
       toast({
         title: "Wrong file type",
-        description: `This category only accepts ${TYPE_LABELS[type]} files. You selected "${file.type || "unknown"}".`,
+        description: `This category only accepts ${TYPE_LABELS[type]} files. You selected "${file.type || extension || "unknown"}".`,
         variant: "destructive",
       });
       if (fileRefs.current[type]) fileRefs.current[type].value = "";
