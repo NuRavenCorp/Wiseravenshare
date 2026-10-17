@@ -2913,6 +2913,17 @@ ORDER BY ""MigrationId"";";
     }
 });
 
+app.MapGet("/health/storage", (IBlobStorageService blobStorage) =>
+{
+    var service = blobStorage as DigitalOceanSpacesBlobStorageService;
+    return Results.Ok(new
+    {
+        provider = "DigitalOceanSpaces",
+        configured = blobStorage.IsConfigured,
+        status = blobStorage.IsConfigured ? "ready" : "not_configured — set Storage:Blob:BucketName, AccessKey, and SecretKey"
+    });
+});
+
 // Seed Craft Intelligence domains on startup when database-backed persistence is available.
 if (requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString))
 {
