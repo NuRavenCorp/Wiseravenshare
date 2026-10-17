@@ -370,7 +370,8 @@ export const apiClient = {
       body.append("artist", fields.artist || "");
       body.append("album", fields.album || "");
       body.append("genre", fields.genre || "");
-      body.append("destinationFolder", fields.destinationFolder || "");
+      body.append("destinationFolder", fields.destinationFolder || "my-library");
+      if (fields.fingerprint) body.append("fingerprint", fields.fingerprint);
       return request("/api/ravensight/media/music/save", { method: "POST", body });
     },
     deleteMusic(trackId) {

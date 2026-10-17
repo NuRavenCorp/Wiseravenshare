@@ -84,7 +84,7 @@ export default function RavensightMedia() {
       if (type === "video") {
         await apiClient.ravensightMedia.uploadVideo(file, { title: file.name.replace(/\.[^/.]+$/, "") });
       } else if (type === "music") {
-        await apiClient.ravensightMedia.uploadMusic(file, { title: file.name.replace(/\.[^/.]+$/, "") });
+        await apiClient.ravensightMedia.uploadMusic(file, { title: file.name.replace(/\.[^/.]+$/, ""), destinationFolder: "my-library" });
       } else {
         await apiClient.ravensightMedia.uploadPhoto(file, { caption: file.name.replace(/\.[^/.]+$/, "") });
       }

@@ -176,6 +176,7 @@ export default function Library() {
       } else if (type === "music") {
         await apiClient.ravensightMedia.uploadMusic(file, {
           title: file.name.replace(/\.[^/.]+$/, ""),
+          destinationFolder: "my-library",
         });
       } else {
         await apiClient.ravensightMedia.uploadVideo(file, {

@@ -22,6 +22,7 @@ export default function MediaUpload({ type, onUploaded, label }) {
       } else {
         await apiClient.ravensightMedia.uploadMusic(file, {
           title: file.name.replace(/\.[^/.]+$/, ""),
+          destinationFolder: "my-library",
         });
       }
       setSuccess(`"${file.name}" uploaded successfully`);
