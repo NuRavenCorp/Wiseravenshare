@@ -5,24 +5,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Share2, Loader2, Check, Instagram, Image, Video, Linkedin } from "lucide-react";
+import { Share2, Loader2, Check, Instagram, Image, Video, Youtube } from "lucide-react";
 
 export default function CrossPostComposer({ accounts }) {
   const [content, setContent] = useState("");
   const [pageId, setPageId] = useState("");
   const [igMediaUrl, setIgMediaUrl] = useState("");
   const [igMediaType, setIgMediaType] = useState("image");
-  const [postToLinkedIn, setPostToLinkedIn] = useState(false);
+  const [postToYouTube, setPostToYouTube] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
 
   const fbPages = accounts?.facebook?.pages || [];
   const igConnected = !!accounts?.instagram;
-  const linkedInConnected = !!accounts?.linkedin;
+  const youtubeConnected = !!accounts?.youtube;
 
   const handlePost = async () => {
     if (!content) return;
-    if (!pageId && !igMediaUrl && !postToLinkedIn) return;
+    if (!pageId && !igMediaUrl && !postToYouTube) return;
     setBusy(true);
     setResult(null);
     try {
@@ -32,14 +32,14 @@ export default function CrossPostComposer({ accounts }) {
         payload.instagram_media_url = igMediaUrl;
         payload.instagram_media_type = igMediaType;
       }
-      if (postToLinkedIn) payload.linkedin_post = true;
+      if (postToYouTube) payload.publishToYouTube = true;
       const res = await apiClient.functions.invoke("SocialCrossPost", payload);
       setResult(res.data);
-      const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.linkedin?.success;
+      const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.youtube?.success;
       if (anySuccess) {
         setContent("");
         setIgMediaUrl("");
-        setPostToLinkedIn(false);
+        setPostToYouTube(false);
       }
     } catch (e) {
       setResult({ error: e.message });
@@ -48,7 +48,7 @@ export default function CrossPostComposer({ accounts }) {
     }
   };
 
-  const hasAnyConnection = accounts?.facebook || igConnected || linkedInConnected;
+  const hasAnyConnection = accounts?.facebook || igConnected || youtubeConnected;
 
   if (!hasAnyConnection) {
     return (
@@ -142,29 +142,29 @@ export default function CrossPostComposer({ accounts }) {
           </div>
         )}
 
-        {/* LinkedIn section */}
-        {linkedInConnected && (
+        {/* YouTube section */}
+        {youtubeConnected && (
           <div className="p-4 rounded-lg border border-border bg-secondary/20">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
-                checked={postToLinkedIn}
-                onChange={(e) => setPostToLinkedIn(e.target.checked)}
+                checked={postToYouTube}
+                onChange={(e) => setPostToYouTube(e.target.checked)}
                 className="w-4 h-4 rounded border-border accent-primary"
               />
               <span className="text-sm font-medium flex items-center gap-2">
-                <Linkedin className="w-4 h-4 text-primary" /> Post to LinkedIn
+                <Youtube className="w-4 h-4 text-primary" /> Post to YouTube
               </span>
             </label>
             <p className="text-xs text-muted-foreground mt-2 ml-7">
-              Publishes a text update to the shared LinkedIn network.
+              Publishes a text update to your connected YouTube channel.
             </p>
           </div>
         )}
 
         <Button
           onClick={handlePost}
-          disabled={busy || !content || (!pageId && !igMediaUrl && !postToLinkedIn)}
+          disabled={busy || !content || (!pageId && !igMediaUrl && !postToYouTube)}
           className="w-full"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
@@ -187,13 +187,13 @@ export default function CrossPostComposer({ accounts }) {
         {result?.instagram?.error && (
           <p className="text-sm text-destructive">Instagram: {result.instagram.error}</p>
         )}
-        {result?.linkedin?.success && (
+        {result?.youtube?.success && (
           <p className="text-sm text-accent flex items-center gap-1">
-            <Check className="w-4 h-4" /> LinkedIn: Posted successfully!
+            <Check className="w-4 h-4" /> YouTube: Posted successfully!
           </p>
         )}
-        {result?.linkedin?.error && (
-          <p className="text-sm text-destructive">LinkedIn: {result.linkedin.error}</p>
+        {result?.youtube?.error && (
+          <p className="text-sm text-destructive">YouTube: {result.youtube.error}</p>
         )}
         {result?.error && (
           <p className="text-sm text-destructive">{result.error}</p>

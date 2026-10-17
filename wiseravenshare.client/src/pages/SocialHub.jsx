@@ -11,7 +11,7 @@ import LimitationsNotice from "@/components/social/LimitationsNotice";
 import { Share2, Download, Feather, Link2 } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 
-const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "linkedin"];
+const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube"];
 
 export default function SocialHub() {
   const [accounts, setAccounts] = useState(null);
