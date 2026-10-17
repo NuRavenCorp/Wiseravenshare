@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.DTOs;
 using Wiseravenshare.Server.Entities;
@@ -42,6 +43,7 @@ public interface IMediaService
 public sealed class MediaService : IMediaService
 {
     private const long MaxFileSize = 500L * 1024 * 1024;
+    private const int MaxPlaylistSize = 30;
 
     private readonly IMediaRepository _mediaRepository;
     private readonly IPlaylistRepository _playlistRepository;
@@ -100,20 +102,37 @@ public sealed class MediaService : IMediaService
         }
 
         var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".bin";
+        }
+
         var generatedFileName = $"{Guid.NewGuid():N}{extension}";
         var relativePath = Path.Combine(mediaType.ToString().ToLowerInvariant(), DateTime.UtcNow.ToString("yyyy"), DateTime.UtcNow.ToString("MM"), DateTime.UtcNow.ToString("dd"));
-        var safeRelativePath = relativePath.Replace('\\', '/');
         var root = Path.Combine(_environment.ContentRootPath, "MediaStorage", "Library");
         var targetDirectory = Path.Combine(root, relativePath);
         Directory.CreateDirectory(targetDirectory);
         var absolutePath = Path.Combine(targetDirectory, generatedFileName);
 
+        string fileHash;
+        await using (var uploadStream = request.File.OpenReadStream())
         await using (var stream = new FileStream(absolutePath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            await request.File.CopyToAsync(stream, cancellationToken);
+            fileHash = await CopyWithSha256Async(uploadStream, stream, cancellationToken);
         }
 
-        var objectKey = $"wiseravenshare/media/{safeRelativePath}/{generatedFileName}";
+        var duplicate = await _mediaRepository.GetByUserAndFileHashAsync(userId, fileHash);
+        if (duplicate is not null)
+        {
+            if (File.Exists(absolutePath))
+            {
+                File.Delete(absolutePath);
+            }
+
+            return await MapToDtoAsync(duplicate, userId);
+        }
+
+        var objectKey = BuildStorageObjectKey(userId, mediaType, fileHash, extension);
         string? publicUrl = null;
         if (_blobStorageService.IsConfigured)
         {
@@ -144,6 +163,7 @@ public sealed class MediaService : IMediaService
             FilePath = absolutePath,
             FileUrl = string.Empty,
             MimeType = string.IsNullOrWhiteSpace(request.File.ContentType) ? "application/octet-stream" : request.File.ContentType,
+            FileHash = fileHash,
             FileSize = request.File.Length,
             Width = TryReadInt(metadata, "width"),
             Height = TryReadInt(metadata, "height"),
@@ -342,9 +362,26 @@ public sealed class MediaService : IMediaService
     public async Task<PlaylistDto> CreatePlaylistAsync(CreatePlaylistRequest request, Guid userId)
     {
         var user = await _userRepository.GetByIdAsync(userId) ?? throw new NotFoundException("User not found.");
+        var trimmedName = request.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new BadRequestException("Playlist name is required.");
+        }
+
+        var nameClash = await _dbContext.MediaPlaylists
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.UserId == userId &&
+                !x.IsDeleted &&
+                x.Name.ToLower() == trimmedName.ToLower());
+        if (nameClash)
+        {
+            throw new BadRequestException("Playlist name already exists.");
+        }
+
         var playlist = new MediaPlaylist
         {
-            Name = request.Name.Trim(),
+            Name = trimmedName,
             Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             UserId = userId,
             Type = PlaylistType.Custom,
@@ -376,7 +413,25 @@ public sealed class MediaService : IMediaService
             throw new UnauthorizedException("You don't have permission to update this playlist.");
         }
 
-        playlist.Name = request.Name.Trim();
+        var trimmedName = request.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new BadRequestException("Playlist name is required.");
+        }
+
+        var nameClash = await _dbContext.MediaPlaylists
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.UserId == userId &&
+                x.Id != playlistId &&
+                !x.IsDeleted &&
+                x.Name.ToLower() == trimmedName.ToLower());
+        if (nameClash)
+        {
+            throw new BadRequestException("Playlist name already exists.");
+        }
+
+        playlist.Name = trimmedName;
         playlist.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
         playlist.Visibility = ResolvePlaylistVisibility(request.Visibility);
         await _playlistRepository.UpdateAsync(playlist);
@@ -406,9 +461,20 @@ public sealed class MediaService : IMediaService
         }
 
         var media = await _mediaRepository.GetByIdAsync(request.MediaId) ?? throw new NotFoundException("Media not found.");
+        if (media.UserId != userId || media.IsDeleted || media.Status != MediaStatus.Ready)
+        {
+            throw new UnauthorizedException("You can only add your own active media.");
+        }
+
         var existing = playlist.Items.FirstOrDefault(x => x.MediaId == request.MediaId && !x.IsDeleted);
         if (existing == null)
         {
+            var activeCount = playlist.Items.Count(x => !x.IsDeleted);
+            if (activeCount >= MaxPlaylistSize)
+            {
+                throw new BadRequestException($"Playlist is full (max {MaxPlaylistSize} tracks).");
+            }
+
             var nextIndex = playlist.Items.Count == 0 ? 0 : playlist.Items.Max(x => x.OrderIndex) + 1;
             var item = new MediaPlaylistItem
             {
@@ -774,5 +840,39 @@ public sealed class MediaService : IMediaService
         }
 
         return metadata.RootElement.TryGetProperty(propertyName, out var value) ? value.ToString() : null;
+    }
+
+    private static async Task<string> CopyWithSha256Async(Stream source, Stream destination, CancellationToken cancellationToken)
+    {
+        using var sha256 = SHA256.Create();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            sha256.TransformBlock(buffer, 0, read, null, 0);
+        }
+
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(sha256.Hash ?? Array.Empty<byte>()).ToLowerInvariant();
+    }
+
+    private static string BuildStorageObjectKey(Guid userId, MediaType mediaType, string fileHash, string extension)
+    {
+        var kind = mediaType switch
+        {
+            MediaType.Music => "music",
+            MediaType.Video => "video",
+            MediaType.Photo => "photo",
+            _ => "media"
+        };
+
+        var yyyymm = DateTime.UtcNow.ToString("yyyyMM");
+        return $"users/{userId:D}/{kind}/{yyyymm}/{fileHash}{extension}";
     }
 }

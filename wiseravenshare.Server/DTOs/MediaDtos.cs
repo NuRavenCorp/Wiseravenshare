@@ -105,7 +105,7 @@ public sealed class PlaylistDto
 public sealed class CreatePlaylistRequest
 {
     [Required]
-    [MaxLength(255)]
+    [MaxLength(120)]
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(500)]
@@ -151,6 +151,26 @@ public sealed class StreamingStatusDto
     public bool IsPlaying { get; set; }
     public decimal Progress { get; set; }
     public string? CurrentTrack { get; set; }
+}
+
+public sealed class PlaybackQueueDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public List<PlaybackEntryDto> Entries { get; set; } = [];
+}
+
+public sealed class PlaybackEntryDto
+{
+    public Guid MediaId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Artist { get; set; }
+    public string? Album { get; set; }
+    public int DurationSeconds { get; set; }
+    public string? MimeType { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public int ExpiresIn { get; set; }
 }
 
 public sealed class MediaProgressDto

@@ -13,6 +13,19 @@ const POST_TYPES = [
   { value: "music", label: "Music", icon: Music, accept: "audio/*" },
 ];
 
+const toServerPostType = (postType) => {
+  switch ((postType || "").toLowerCase()) {
+    case "photo":
+      return "Image";
+    case "video":
+      return "Video";
+    case "music":
+      return "Audio";
+    default:
+      return "Text";
+  }
+};
+
 export default function PostComposer({ onPosted, compact }) {
   const [content, setContent] = useState("");
   const [postType, setPostType] = useState("text");
@@ -66,12 +79,15 @@ export default function PostComposer({ onPosted, compact }) {
         .map((t) => t.replace(/^#/, "").trim())
         .filter(Boolean);
 
-      await apiClient.entities.Post.create({
-        content: content.trim(),
-        post_type: postType,
-        media_uris: mediaUrls,
-        hashtags: tags,
-        status: "published",
+      await apiClient.requestJson("/api/posts", {
+        method: "POST",
+        body: JSON.stringify({
+          content: content.trim(),
+          type: toServerPostType(postType),
+          mediaUrl: mediaUrls[0] || null,
+          mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
+          hashtags: tags,
+        }),
       });
       setContent("");
       setHashtags("");
