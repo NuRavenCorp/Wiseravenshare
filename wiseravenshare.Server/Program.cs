@@ -1,6 +1,7 @@
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.External.DeepSeekService;
 using Wiseravenshare.Server.Services.Truth;
+using Wiseravenshare.Server.Services.SocialPublishing;
 using Npgsql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -2071,6 +2072,8 @@ builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatS
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
 builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
 builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());
+builder.Services.AddSingleton<ISocialPublishQueue, SocialPublishQueueService>();
+builder.Services.AddHostedService(sp => (SocialPublishQueueService)sp.GetRequiredService<ISocialPublishQueue>());
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
