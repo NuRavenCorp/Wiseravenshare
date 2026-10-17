@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
+import ReactPlayer from "react-player";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import MediaUpload from "@/components/media/MediaUpload";
-import EqualizerPanel from "@/components/media/EqualizerPanel";
+// EqualizerPanel requires raw AudioContext access — incompatible with ReactPlayer; disabled for now
+// import EqualizerPanel from "@/components/media/EqualizerPanel";
 import {
   Loader2,
   Play,
@@ -44,7 +46,7 @@ export default function MusicPlayer() {
   const [confirmingId, setConfirmingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const audioRef = useRef(null);
+  const playerRef = useRef(null);
   const { toast } = useToast();
 
   const normalizeTrack = (track) => ({
@@ -85,31 +87,6 @@ export default function MusicPlayer() {
     });
   }, [current]);
 
-  // Set audio src and autoplay when URL is ready
-  useEffect(() => {
-    if (playUrl && audioRef.current) {
-      audioRef.current.src = playUrl;
-      audioRef.current
-        .play()
-        .then(() => setPlaying(true))
-        .catch(() => {});
-    }
-  }, [playUrl]);
-
-  // Play/pause toggle
-  useEffect(() => {
-    if (!audioRef.current || !playUrl) return;
-    if (playing) audioRef.current.play().catch(() => {});
-    else audioRef.current.pause();
-  }, [playing]);
-
-  // Volume
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = muted ? 0 : volume;
-    }
-  }, [volume, muted]);
-
   const handlePlayPause = () => {
     if (!current && tracks.length > 0) {
       setCurrentIdx(0);
@@ -133,8 +110,8 @@ export default function MusicPlayer() {
 
   const handlePrev = () => {
     if (tracks.length === 0) return;
-    if (audioRef.current && audioRef.current.currentTime > 3) {
-      audioRef.current.currentTime = 0;
+    if (progress > 3) {
+      playerRef.current?.seekTo(0, 'seconds');
       return;
     }
     setCurrentIdx((currentIdx - 1 + tracks.length) % tracks.length);
@@ -142,16 +119,14 @@ export default function MusicPlayer() {
 
   const handleSeek = (e) => {
     const time = Number(e.target.value);
-    if (audioRef.current) audioRef.current.currentTime = time;
+    playerRef.current?.seekTo(time, 'seconds');
     setProgress(time);
   };
 
   const handleEnded = () => {
     if (repeat === "one") {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {});
-      }
+      playerRef.current?.seekTo(0, 'seconds');
+      setPlaying(true);
     } else if (repeat === "all" || currentIdx < tracks.length - 1 || shuffle) {
       handleNext();
     } else {
@@ -237,12 +212,22 @@ export default function MusicPlayer() {
   return (
     <div className="space-y-4">
       <MediaUpload type="music" onUploaded={fetchTracks} />
-      <EqualizerPanel audioRef={audioRef} />
-      <audio
-        ref={audioRef}
+      {/* EqualizerPanel disabled: requires raw AudioContext not available via ReactPlayer */}
+      {/* <EqualizerPanel audioRef={playerRef} /> */}
+      <ReactPlayer
+        ref={playerRef}
+        url={playUrl || ''}
+        playing={playing}
+        volume={muted ? 0 : volume}
+        width="0"
+        height="0"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
         onEnded={handleEnded}
-        onTimeUpdate={() => audioRef.current && setProgress(audioRef.current.currentTime)}
-        onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)}
+        onProgress={({ playedSeconds }) => setProgress(playedSeconds)}
+        onDuration={(d) => setDuration(d)}
+        onReady={() => setPlaying(true)}
+        config={{ file: { forceAudio: true } }}
       />
 
       {/* Now Playing Bar */}
