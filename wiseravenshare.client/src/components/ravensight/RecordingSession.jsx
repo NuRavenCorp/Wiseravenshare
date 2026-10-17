@@ -701,8 +701,8 @@ export default function RecordingSession({ podcast, onUpdate }) {
 
   const startRecording = async () => {
     setError(null);
-    if (deliveryMode !== "live") {
-      setError("Choose Live Screening mode before starting episode capture.");
+    if (deliveryMode !== "live" && deliveryMode !== "upload") {
+      setError("Choose an episode mode before starting episode capture.");
       return;
     }
     const mainStream = monitorFeeds[mainCam]?.stream || streamRefs.current[mainCam];
