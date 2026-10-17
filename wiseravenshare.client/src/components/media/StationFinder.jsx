@@ -1,4 +1,5 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useMemo } from "react";
+import ReactPlayer from "react-player";
 import { apiClient } from "@/api/client";
 import { Loader2, Play, Pause, Search, Globe, Radio, Star, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,18 @@ export default function StationFinder() {
   const [error, setError] = useState(null);
   const [showPresets, setShowPresets] = useState(true);
   const [collapsedCats, setCollapsedCats] = useState({});
-  const audioRef = useRef(null);
+  const resolveStationUrl = (station) => {
+    if (!station?.url) return "";
+
+    if (
+      station.name?.toLowerCase() === "bbc world service" &&
+      station.url.includes("stream.live.vc.bbcmedia.co.uk")
+    ) {
+      return "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8";
+    }
+
+    return station.url;
+  };
 
   const playingFreq = useMemo(() => {
     if (!playing) return null;
@@ -28,7 +40,6 @@ export default function StationFinder() {
     setLoading(true);
     setError(null);
     setPlaying(null);
-    if (audioRef.current) audioRef.current.pause();
     try {
       const res = await apiClient.functions.invoke("FindStations", { country, state, tag: searchTag, limit: 30 });
       if (res.data?.error) throw new Error(res.data.error);
@@ -49,18 +60,8 @@ export default function StationFinder() {
   const handlePlay = (station) => {
     setError(null);
     if (playing?.url === station.url) {
-      audioRef.current?.pause();
       setPlaying(null);
       return;
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = station.url;
-      audioRef.current.load();  // reset decoder before attempting new stream
-      audioRef.current.play().catch((err) => {
-        setError(`Could not play "${station.name}". ${err?.message || "Try another station."}`);
-        setPlaying(null);
-      });
     }
     setPlaying(station);
   };
@@ -91,13 +92,25 @@ export default function StationFinder() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-md mx-auto space-y-4">
       {/* FM Channel Player — preset live stations with channel-pill model */}
       <FMChannelPlayer />
 
-      <div className="border-t border-border" />
+      <div className="border-t border-border/70" />
 
-      <audio ref={audioRef} crossOrigin="anonymous" onError={() => { if (playing) { setError(`Stream unavailable for "${playing.name}". It may require a different connection.`); setPlaying(null); } }} />
+      <ReactPlayer
+        key={playing?.url || "no-station"}
+        url={playing ? resolveStationUrl(playing) : ""}
+        playing={!!playing}
+        width="0"
+        height="0"
+        config={{ file: { forceAudio: true } }}
+        onError={(err) => {
+          if (!playing) return;
+          setError(`Could not play "${playing.name}". ${err?.message || "Try another station."}`);
+          setPlaying(null);
+        }}
+      />
 
       {/* Tuning Dial */}
       <TuningDial
@@ -108,7 +121,7 @@ export default function StationFinder() {
       />
 
       {/* Genre quick-search */}
-      <div className="rounded-lg border border-border bg-card p-4">
+      <div className="rounded-xl border border-border bg-card/95 p-4">
         <div className="flex items-center gap-2 mb-3">
           <Radio className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium text-foreground">Browse by Genre</span>
@@ -131,7 +144,7 @@ export default function StationFinder() {
       </div>
 
       {/* Search controls */}
-      <div className="rounded-lg border border-border bg-card p-4">
+      <div className="rounded-xl border border-border bg-card/95 p-4">
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-4 h-4 text-accent" />
           <span className="text-sm font-medium text-foreground">Digital Station Finder</span>
@@ -196,7 +209,7 @@ export default function StationFinder() {
       {!showPresets && (
         <>
           {stations.length === 0 && !loading && !error && (
-            <div className="rounded-lg border border-border bg-card p-8 text-center">
+            <div className="rounded-xl border border-border bg-card/95 p-8 text-center">
               <Radio className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">No stations found. Try a different region or genre.</p>
             </div>

@@ -212,7 +212,11 @@ const resolveTrackSourceCandidates = (track) => {
   const fileObjectUrl = track.file ? URL.createObjectURL(track.file) : '';
 
   return [...new Set([
-   1111111111111111111111111111111111111111111111111111111111111111111111    fileObjectUrl,
+    normalizedDirect,
+    blobStream,
+    fileNameStream,
+    proxy,
+    fileObjectUrl,
     ...FALLBACK_AUDIO_CANDIDATES
   ].filter(Boolean))];
 };

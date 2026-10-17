@@ -140,12 +140,43 @@ const uploadViaMediaController = async (
   };
 };
 
+const FUNCTION_ROUTE_ALIASES = {
+  SocialCrossPost: "social-cross-posts",
+  ListMusicAnalyses: "list-music-analysis",
+};
+
+const toKebabCase = (value = "") =>
+  value
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/_/g, "-")
+    .toLowerCase();
+
 const invokeFunction = async (name, payload = {}) => {
-  const data = await requestJson(`/api/functions/${encodeURIComponent(name)}`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  return { data };
+  const routeCandidates = Array.from(
+    new Set([
+      FUNCTION_ROUTE_ALIASES[name] || "",
+      toKebabCase(name),
+      name,
+    ].filter(Boolean))
+  );
+
+  let lastError = null;
+  for (const route of routeCandidates) {
+    try {
+      const data = await requestJson(`/api/functions/${encodeURIComponent(route)}`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return { data };
+    } catch (error) {
+      lastError = error;
+      if (error?.status !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error(`Function '${name}' is unavailable.`);
 };
 
 const entityClient = (entityName) => ({

@@ -27,6 +27,35 @@ export default function JournalismReportForm({ onPublished }) {
   const [scoring, setScoring] = useState(false);
   const [integrityResult, setIntegrityResult] = useState(null);
 
+  const buildJournalismPrompt = () => {
+    const lines = [
+      "Generate a structured journalism report from these field notes.",
+      `Who: ${fields.who || "Not specified"}`,
+      `What: ${fields.what || "Not specified"}`,
+      `Where: ${fields.where || "Not specified"}`,
+      `When: ${fields.when || "Not specified"}`,
+      `Why: ${fields.why || "Not specified"}`,
+      `How: ${fields.how || "Not specified"}`,
+    ];
+    if (media.length > 0) {
+      lines.push(`Media evidence: ${media.map((m) => `${m.type}: ${m.name}`).join(", ")}`);
+    }
+    lines.push("Return the report with a headline first, then the full body.");
+    return lines.join("\n");
+  };
+
+  const parseGeneratedReport = (reply) => {
+    const text = (reply || "").trim();
+    if (!text) {
+      return { headline: "Journalism Report", body: "" };
+    }
+
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const headline = (lines[0] || "Journalism Report").replace(/^#+\s*/, "");
+    const body = lines.slice(1).join("\n").trim() || text;
+    return { headline, body };
+  };
+
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
@@ -64,13 +93,22 @@ export default function JournalismReportForm({ onPublished }) {
     setError(null);
     try {
       const res = await apiClient.functions.invoke("GenerateJournalismReport", {
-        ...fields,
-        mediaDescription: media.map((m) => `${m.type}: ${m.name}`).join(", "),
+        prompt: buildJournalismPrompt(),
       });
-      setGenerated(res.data);
-      setEditedBody(res.data.body);
+      if (res?.data?.error) {
+        throw new Error(res.data.error);
+      }
+
+      const parsed = parseGeneratedReport(res?.data?.reply);
+      const generatedReport = {
+        headline: parsed.headline,
+        body: parsed.body,
+        model: res?.data?.model,
+      };
+      setGenerated(generatedReport);
+      setEditedBody(generatedReport.body);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to generate report.");
+      setError(err?.data?.error || err?.message || "Failed to generate report.");
     } finally {
       setGenerating(false);
     }
@@ -105,7 +143,7 @@ export default function JournalismReportForm({ onPublished }) {
       setScoring(true);
       try {
         const res = await apiClient.functions.invoke("ScoreTruth", {
-          post_id: post.id,
+          postId: post.id,
         });
         setIntegrityResult(res.data);
       } catch {
