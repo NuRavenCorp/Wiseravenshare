@@ -285,6 +285,9 @@ export const apiClient = {
       }
       writeStoredToken(token);
     },
+    clearToken() {
+      writeStoredToken(null);
+    },
     async loginViaEmailPassword(email, password) {
       const data = await requestJson("/api/auth/login", {
         method: "POST",
