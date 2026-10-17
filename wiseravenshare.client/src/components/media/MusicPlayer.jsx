@@ -111,7 +111,7 @@ export default function MusicPlayer() {
   const handlePrev = () => {
     if (tracks.length === 0) return;
     if (progress > 3) {
-      playerRef.current?.seekTo(0, 'seconds');
+      if (playerRef.current) playerRef.current.currentTime = 0;
       return;
     }
     setCurrentIdx((currentIdx - 1 + tracks.length) % tracks.length);
@@ -119,7 +119,7 @@ export default function MusicPlayer() {
 
   const handleSeek = (e) => {
     const time = Number(e.target.value);
-    playerRef.current?.seekTo(time, 'seconds');
+    if (playerRef.current) playerRef.current.currentTime = time;
     setProgress(time);
   };
 
@@ -216,18 +216,18 @@ export default function MusicPlayer() {
       {/* <EqualizerPanel audioRef={playerRef} /> */}
       <ReactPlayer
         ref={playerRef}
-        url={playUrl || ''}
+        src={playUrl || undefined}
         playing={playing}
         volume={muted ? 0 : volume}
+        muted={muted}
         width="0"
         height="0"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
-        onProgress={({ playedSeconds }) => setProgress(playedSeconds)}
-        onDuration={(d) => setDuration(d)}
+        onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime || 0)}
+        onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
         onReady={() => setPlaying(true)}
-        config={{ file: { forceAudio: true } }}
       />
 
       {/* Now Playing Bar */}

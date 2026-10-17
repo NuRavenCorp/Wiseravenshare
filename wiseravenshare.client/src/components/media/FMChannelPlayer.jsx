@@ -155,12 +155,11 @@ export default function FMChannelPlayer() {
       {activeChannel && (
         <ReactPlayer
           ref={playerRef}
-          url={playbackUrl}
+          src={playbackUrl}
           playing={isPlaying}
           volume={muted ? 0 : volume}
           width="0"
           height="0"
-          config={{ file: { forceAudio: true } }}
           onPlay={() => { setIsPlaying(true); setBuffering(false); }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
