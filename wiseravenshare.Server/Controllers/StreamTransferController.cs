@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Cryptography;
+using System.Text;
 using System.Security.Claims;
 using Wiseravenshare.Server.Services.StreamBridge;
 
@@ -15,11 +17,16 @@ public class StreamTransferController : ControllerBase
 {
     private readonly IStreamTransferService _svc;
     private readonly ILogger<StreamTransferController> _logger;
+    private readonly IConfiguration _configuration;
 
-    public StreamTransferController(IStreamTransferService svc, ILogger<StreamTransferController> logger)
+    public StreamTransferController(
+        IStreamTransferService svc,
+        ILogger<StreamTransferController> logger,
+        IConfiguration configuration)
     {
         _svc = svc;
         _logger = logger;
+        _configuration = configuration;
     }
 
     private string CurrentUserId =>
@@ -68,6 +75,65 @@ public class StreamTransferController : ControllerBase
     {
         await _svc.CancelAsync(id, ct);
         return NoContent();
+    }
+
+    /// <summary>Poll approved transfers from the WiseRavenStream server.</summary>
+    [HttpGet("approved")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(IReadOnlyList<TransferDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetApproved([FromQuery] int limit = 25, CancellationToken ct = default)
+    {
+        if (!HasStreamServiceAccess()) return Unauthorized(new { error = "A valid WiseRavenStream service credential is required." });
+        return Ok(await _svc.GetApprovedAsync(Math.Clamp(limit, 1, 100), ct));
+    }
+
+    /// <summary>Report upload progress or completion for a transfer.</summary>
+    [HttpPut("{id:guid}/stream-status")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(TransferDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateStreamStatus(
+        Guid id,
+        [FromBody] StreamTransferUpdateRequest req,
+        CancellationToken ct)
+    {
+        if (!HasStreamServiceAccess()) return Unauthorized(new { error = "A valid WiseRavenStream service credential is required." });
+
+        try
+        {
+            var result = await _svc.UpdateStreamStatusAsync(id, req, ct);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private bool HasStreamServiceAccess()
+    {
+        var configuredKey = (_configuration["StreamBridge:ApiKey"]
+            ?? _configuration["WISERAVENSTREAM_API_KEY"]
+            ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(configuredKey))
+        {
+            _logger.LogWarning("Rejected WiseRavenStream service request because StreamBridge:ApiKey is not configured.");
+            return false;
+        }
+
+        var providedKey = Request.Headers["X-Stream-Api-Key"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(providedKey)) return false;
+
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(configuredKey),
+            Encoding.UTF8.GetBytes(providedKey));
     }
 }
 

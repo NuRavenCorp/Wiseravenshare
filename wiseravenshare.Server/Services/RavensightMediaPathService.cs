@@ -101,6 +101,16 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed uploading {MediaType} {FileName} to blob storage", mediaType, fileName);
+                        try
+                        {
+                            File.Delete(fullPath);
+                        }
+                        catch (Exception cleanupException)
+                        {
+                            _logger.LogDebug(cleanupException, "Could not remove incomplete local copy of {FileName}.", fileName);
+                        }
+
+                        throw new InvalidOperationException("Media could not be saved to persistent storage. Please retry the upload.", ex);
                     }
                 }
                 else

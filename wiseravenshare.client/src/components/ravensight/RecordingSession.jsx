@@ -727,10 +727,16 @@ export default function RecordingSession({ podcast, onUpdate }) {
         audioStreamRef.current.getAudioTracks().forEach((t) => combined.addTrack(t));
       }
 
-      const mimeType = MediaRecorder.isTypeSupported("video/webm")
-        ? "video/webm"
-        : "video/mp4";
-      const recorder = new MediaRecorder(combined, { mimeType });
+      const supportedMimeType = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+      if (!supportedMimeType) {
+        throw new Error("This browser cannot record video in a supported format.");
+      }
+      const recorder = new MediaRecorder(combined, { mimeType: supportedMimeType });
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);

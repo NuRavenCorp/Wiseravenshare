@@ -92,12 +92,10 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       setAuthChecked(true);
       
-      // If user auth fails, it might be an expired token
+      // An expired saved token should not prevent access to public pages.
       if (error.status === 401 || error.status === 403) {
-        setAuthError({
-          type: 'auth_required',
-          message: 'Authentication required'
-        });
+        apiClient.auth.clearToken();
+        setAuthError(null);
       }
     }
   };

@@ -51,12 +51,18 @@ public sealed record GatekeeperDecisionRequest(
     string Action,       // Cleared | RequiresEdit | Escalated | Rejected
     string Rationale);
 
+public sealed record StreamTransferUpdateRequest(
+    string Status,       // Uploading | Ready | Failed
+    string? StreamVideoUid = null);
+
 // ── Interface ────────────────────────────────────────────────────────────────
 
 public interface IStreamTransferService
 {
     Task<TransferDto> InitiateAsync(InitiateTransferRequest req, CancellationToken ct = default);
     Task<TransferDto?> GetAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<TransferDto>> GetApprovedAsync(int limit, CancellationToken ct = default);
+    Task<TransferDto?> UpdateStreamStatusAsync(Guid id, StreamTransferUpdateRequest req, CancellationToken ct = default);
     Task<IReadOnlyList<TransferDto>> GetPendingReviewAsync(CancellationToken ct = default);
     Task<TransferDto> ApplyGatekeeperDecisionAsync(Guid id, string adminId, GatekeeperDecisionRequest req, CancellationToken ct = default);
     Task<bool> RetryAsync(Guid id, CancellationToken ct = default);
@@ -136,6 +142,57 @@ public sealed class StreamTransferService : IStreamTransferService
         var t = await _db.Set<StreamTransfer>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (t is null) return null;
         return ToDto(t, DeserializeRubric(t.RubricResultJson));
+    }
+
+    public async Task<IReadOnlyList<TransferDto>> GetApprovedAsync(int limit, CancellationToken ct = default)
+    {
+        var rows = await _db.Set<StreamTransfer>()
+            .AsNoTracking()
+            .Where(t => t.Status == StreamTransferStatus.Approved)
+            .OrderBy(t => t.CreatedAt)
+            .Take(Math.Clamp(limit, 1, 100))
+            .ToListAsync(ct);
+
+        return rows.Select(t => ToDto(t, DeserializeRubric(t.RubricResultJson))).ToList();
+    }
+
+    public async Task<TransferDto?> UpdateStreamStatusAsync(
+        Guid id, StreamTransferUpdateRequest req, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Status))
+            throw new ArgumentException("status is required.", nameof(req));
+
+        var transfer = await _db.Set<StreamTransfer>().FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (transfer is null) return null;
+
+        var status = req.Status.Trim().ToLowerInvariant() switch
+        {
+            "uploading" => StreamTransferStatus.Uploading,
+            "ready" => StreamTransferStatus.Ready,
+            "failed" => StreamTransferStatus.Failed,
+            _ => (StreamTransferStatus?)null
+        };
+        if (status is null) throw new ArgumentException("status must be Uploading, Ready, or Failed.", nameof(req));
+
+        if (status == StreamTransferStatus.Uploading && transfer.Status != StreamTransferStatus.Approved)
+            throw new InvalidOperationException("Only approved transfers can begin uploading.");
+        if (status == StreamTransferStatus.Ready && transfer.Status != StreamTransferStatus.Uploading)
+            throw new InvalidOperationException("Only uploading transfers can be marked ready.");
+        if (status == StreamTransferStatus.Failed && transfer.Status is not (StreamTransferStatus.Approved or StreamTransferStatus.Uploading))
+            throw new InvalidOperationException("Only approved or uploading transfers can be marked failed.");
+        if (status == StreamTransferStatus.Ready && string.IsNullOrWhiteSpace(req.StreamVideoUid))
+            throw new ArgumentException("streamVideoUid is required when status is Ready.", nameof(req));
+        if (req.StreamVideoUid?.Length > 200)
+            throw new ArgumentException("streamVideoUid must be 200 characters or fewer.", nameof(req));
+
+        transfer.Status = status.Value;
+        if (!string.IsNullOrWhiteSpace(req.StreamVideoUid))
+            transfer.StreamVideoUid = req.StreamVideoUid.Trim();
+        if (status == StreamTransferStatus.Ready)
+            transfer.PublishedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        return ToDto(transfer, DeserializeRubric(transfer.RubricResultJson));
     }
 
     public async Task<IReadOnlyList<TransferDto>> GetPendingReviewAsync(CancellationToken ct = default)
