@@ -25,6 +25,8 @@ import Ravensight from '@/pages/Ravensight';
 import Podcasts from '@/pages/Podcasts';
 import Performance from '@/pages/Performance';
 import Library from '@/pages/Library';
+import Media from '@/pages/Media';
+import FMRadioPage from '@/pages/FMRadioPage';
 import PythonMatrixLab from '@/pages/PythonMatrixLab';
 import JoinFeed from '@/pages/JoinFeed';
 import Privacy from '@/pages/Privacy';
@@ -77,7 +79,8 @@ const AuthenticatedApp = () => {
         <Route path="/ai-news" element={<AiNews />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/media" element={<Navigate to="/library" replace />} />
+        <Route path="/media" element={<Media />} />
+        <Route path="/fm-radio" element={<FMRadioPage />} />
         <Route path="/truthseeker" element={<TruthSeeker />} />
         <Route path="/journalism" element={<JournalismDashboard />} />
         <Route path="/ravensight" element={<Ravensight />} />
