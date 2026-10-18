@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -19,19 +20,22 @@ public sealed class RavensightMusicMediaController : ControllerBase
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly IBlobStorageService _blobStorageService;
     private readonly ILogger<RavensightMusicMediaController> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
         IMusicPlaybackStateStore musicPlaybackStateStore,
         RavensightMediaCatalogStore mediaCatalogStore,
         IBlobStorageService blobStorageService,
-        ILogger<RavensightMusicMediaController> logger)
+        ILogger<RavensightMusicMediaController> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
         _mediaCatalogStore = mediaCatalogStore;
         _blobStorageService = blobStorageService;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     [HttpGet]
@@ -84,6 +88,69 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         return Ok(bucketTracks.Concat(catalogTracks).ToList());
+    }
+
+    [HttpGet("{trackId}/browser-compatible")]
+    [Produces("audio/mpeg")]
+    public async Task<IActionResult> GetBrowserCompatibleTrack(string trackId, CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        string? objectKey = null;
+        string fileName = "audio-file";
+        var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        var track = tracks.FirstOrDefault(candidate => string.Equals(candidate.Id, trackId, StringComparison.OrdinalIgnoreCase));
+        if (track is not null)
+        {
+            objectKey = track.ObjectKey;
+            fileName = track.FileName;
+        }
+        else
+        {
+            var asset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
+            if (asset is null || !string.Equals(asset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
+                return NotFound(new { message = "Track not found in your library." });
+            objectKey = asset.RelativePath;
+            fileName = asset.FileName;
+        }
+
+        if (string.IsNullOrWhiteSpace(objectKey))
+            return NotFound(new { message = "The original audio file has no stored media key." });
+
+        await using var source = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+        if (source is null)
+            return NotFound(new { message = "The original audio file is no longer available in storage." });
+
+        using var client = _httpClientFactory.CreateClient("AudioService");
+        using var multipart = new MultipartFormDataContent();
+        using var fileContent = new StreamContent(source);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        multipart.Add(fileContent, "file", Path.GetFileName(fileName));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync("/browser-compatible", multipart, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Audio compatibility service unavailable for track {TrackId}.", trackId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Audio conversion is unavailable right now." });
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Audio conversion returned {Status} for track {TrackId}: {Detail}", (int)response.StatusCode, trackId, detail);
+                return StatusCode((int)response.StatusCode, new { message = "Audio conversion failed.", detail });
+            }
+
+            var converted = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            return File(converted, "audio/mpeg", $"{Path.GetFileNameWithoutExtension(fileName)}.mp3");
+        }
     }
 
     [HttpGet("player-state")]

@@ -292,11 +292,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
             conversionAttemptRef.current = String(current.id);
             setPlaybackError("This browser cannot decode this file. Preparing a compatible audio copy…");
             try {
-              const response = await fetch(playUrl, { credentials: "include" });
-              if (!response.ok) throw new Error("The original audio file could not be read.");
-              const source = await response.blob();
-              const file = new File([source], current.fileName || current.title || "audio", { type: source.type || "application/octet-stream" });
-              const compatible = await apiClient.podcastAudio.convertForBrowser(file);
+              const compatible = await apiClient.podcastAudio.convertForBrowser(current.id);
               const compatibleUrl = URL.createObjectURL(compatible);
               setPlayUrl((previous) => {
                 if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
@@ -304,7 +300,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
               });
               setPlaybackError("Compatible audio is ready. Press play to start this track.");
             } catch (error) {
-              setPlaybackError(error?.message || "Could not prepare compatible audio for this browser.");
+              setPlaybackError(error?.data?.message || error?.message || "Could not prepare compatible audio for this browser.");
             }
             setPlaying(false);
             return;
