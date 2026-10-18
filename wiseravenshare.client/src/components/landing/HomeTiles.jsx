@@ -43,6 +43,12 @@ const tiles = [
     body: "Upload tracks, connect instruments, sync recordings, and jam in real time with creators worldwide.",
   },
   {
+    icon: Radio,
+    title: "FM Radio",
+    to: "/fm-radio",
+    body: "Listen to live stations, tune in, and explore the FM Radio tools.",
+  },
+  {
     icon: LayoutDashboard,
     title: "Creator Studio",
     to: "/dashboard",
