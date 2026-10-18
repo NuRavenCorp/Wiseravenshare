@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import {
   Loader2,
   Clapperboard,
@@ -20,6 +21,9 @@ import {
   RadioTower,
   Clock3,
   Sparkles,
+  WifiOff,
+  ArrowRight,
+  Send,
 } from "lucide-react";
 
 const ROOM_KEY = "main";
@@ -109,9 +113,12 @@ const normalizeStage = (command) => {
 export default function RavensightBoard() {
   const connectionRef = useRef(null);
   const workflowRequestRef = useRef(false);
+  const footageCardRef = useRef(null);
+  const uploadInputRef = useRef(null);
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(true);
+  const [hubOffline, setHubOffline] = useState(false);
   const [error, setError] = useState("");
   const [videos, setVideos] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -119,6 +126,9 @@ export default function RavensightBoard() {
   const [commandNote, setCommandNote] = useState("");
   const [responseDrafts, setResponseDrafts] = useState({});
   const [busyCommand, setBusyCommand] = useState("");
+  const [planningNotes, setPlanningNotes] = useState("");
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const { toast } = useToast();
 
   const currentStage = snapshot?.currentStage || "planning";
   const activeFootage = snapshot?.activeFootage || null;
@@ -236,6 +246,7 @@ export default function RavensightBoard() {
       .then(() => connection.invoke("JoinPodcastBridge", ROOM_KEY))
       .catch((connectionError) => {
         if (!disposed) {
+          setHubOffline(true);
           setError(connectionError?.message || "Could not connect to the Ravensight board.");
           setLoading(false);
         }
@@ -243,6 +254,14 @@ export default function RavensightBoard() {
       .finally(() => {
         if (!disposed) setConnecting(false);
       });
+
+    // Safety timeout: if the server never sends a snapshot, stop the spinner after 5s.
+    const snapshotTimeout = setTimeout(() => {
+      if (!disposed) {
+        setLoading(false);
+        setConnecting(false);
+      }
+    }, 5000);
 
     loadVideos().catch((loadError) => {
       if (!disposed) {
@@ -252,6 +271,7 @@ export default function RavensightBoard() {
 
     return () => {
       disposed = true;
+      clearTimeout(snapshotTimeout);
       const activeConnection = connectionRef.current;
       connectionRef.current = null;
       if (activeConnection) {
@@ -283,10 +303,26 @@ export default function RavensightBoard() {
     workflowRequestRef.current = true;
     setBusyCommand(step.command);
     setError("");
+    // Optimistic update
+    const nextStage = normalizeStage(step.command) || currentStage;
+    setSnapshot((prev) => ({
+      ...(prev || { commandLog: [] }),
+      currentStage: nextStage,
+    }));
     try {
       await invokeHub("IssuePodcastCommand", ROOM_KEY, step.command, commandNote.trim() || step.description, null);
       setCommandNote("");
+      toast({ title: `Stage: ${step.label}`, description: step.description });
+      // Stage-specific side effects
+      if (step.id === "selected") {
+        setTimeout(() => footageCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+      }
+      if (step.id === "published") {
+        setShowPublishConfirm(true);
+      }
     } catch (issueError) {
+      // Revert optimistic update on failure
+      setSnapshot((prev) => ({ ...(prev || {}), currentStage: currentStage }));
       setError(issueError?.message || "Could not issue the workflow command.");
     } finally {
       workflowRequestRef.current = false;
@@ -334,7 +370,10 @@ export default function RavensightBoard() {
 
   const uploadClip = async (file) => {
     if (!file) return;
-    if (!file.type.startsWith("video/")) {
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const videoExts = ["mp4", "mov", "webm", "m4v", "avi", "mkv", "mpg", "mpeg", "3gp", "ts"];
+    const isVideo = file.type.startsWith("video/") || videoExts.includes(ext);
+    if (!isVideo) {
       setError("Choose a video clip to add it to the footage library.");
       return;
     }
@@ -343,7 +382,7 @@ export default function RavensightBoard() {
     setError("");
     try {
       const title = file.name.replace(/\.[^/.]+$/, "");
-      const upload = await apiClient.ravensightMedia.uploadVideo(file, {
+      const upload = await apiClient.ravensightMedia.uploadMedia(file, {
         title,
         destinationFolder: "ravensight-board",
       });
@@ -354,9 +393,7 @@ export default function RavensightBoard() {
         || upload?.url
         || "";
       if (!uploadedUrl) {
-        throw new Error(upload?.persistenceStatus === "degraded"
-          ? "The clip could not be saved to the video library. Please retry the upload."
-          : "The upload finished without returning a playable clip URL.");
+        throw new Error("The upload finished without returning a playable clip URL.");
       }
 
       const refreshedVideos = await loadVideos();
@@ -371,6 +408,7 @@ export default function RavensightBoard() {
       };
       setVideos((previous) => [uploadedVideo, ...previous.filter((video) => video.id !== uploadedVideo.id && normalizeUrl(video.url) !== normalizeUrl(uploadedUrl))]);
       await selectFootage(uploadedVideo);
+      toast({ title: "Clip uploaded", description: `${title} is on the board.` });
     } catch (uploadError) {
       setError(uploadError?.message || "Upload failed.");
     } finally {
@@ -386,9 +424,103 @@ export default function RavensightBoard() {
     );
   }
 
+  // Stage-specific action prompt shown below the stage grid when a stage is active.
+  const stageActions = {
+    planning: (
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+        <p className="text-sm font-medium text-foreground">Lock the shot list</p>
+        <p className="text-xs text-muted-foreground">Write your notes, angles, and creative direction. Then click <strong>Footage Selected</strong> when you have a clip chosen.</p>
+        <Textarea
+          value={planningNotes}
+          onChange={(e) => setPlanningNotes(e.target.value)}
+          placeholder="Shot list, host positions, B-roll notes..."
+          rows={3}
+        />
+        <Button
+          size="sm"
+          onClick={() => issueWorkflowStep(WORKFLOW_STEPS[1])}
+          disabled={Boolean(busyCommand)}
+        >
+          <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+          Proceed to Footage Selection
+        </Button>
+      </div>
+    ),
+    selected: (
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+        <p className="text-sm font-medium text-foreground">Select your footage clip</p>
+        <p className="text-xs text-muted-foreground">Upload a clip below or pick one from your library. Once selected, proceed to Camera Setup.</p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>
+            <Upload className="w-3.5 h-3.5 mr-1.5" />
+            Upload clip
+          </Button>
+          {activeFootage && (
+            <Button size="sm" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[2])} disabled={Boolean(busyCommand)}>
+              <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+              Camera Setup
+            </Button>
+          )}
+        </div>
+      </div>
+    ),
+    camera_setup: (
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+        <p className="text-sm font-medium text-foreground">Set up cameras and angles</p>
+        <p className="text-xs text-muted-foreground">Connect cameras via the Podcasts tab or any connected device. When cameras are ready, start the recording.</p>
+        <Button size="sm" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[3])} disabled={Boolean(busyCommand)}>
+          <RadioTower className="w-3.5 h-3.5 mr-1.5" />
+          Start Recording
+        </Button>
+      </div>
+    ),
+    recording: (
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+        <p className="text-sm font-medium text-foreground flex items-center gap-2">
+          <RadioTower className="w-4 h-4 text-red-500 animate-pulse" />
+          Take is live
+        </p>
+        <p className="text-xs text-muted-foreground">Recording in progress. When finished, proceed to review before publishing.</p>
+        <Button size="sm" variant="outline" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[4])} disabled={Boolean(busyCommand)}>
+          <Square className="w-3.5 h-3.5 mr-1.5" />
+          Stop & Review
+        </Button>
+      </div>
+    ),
+    review: (
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+        <p className="text-sm font-medium text-foreground">Review before publishing</p>
+        <p className="text-xs text-muted-foreground">Check the footage quality and notes. Publish when ready.</p>
+        <Button size="sm" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[5])} disabled={Boolean(busyCommand)}>
+          <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+          Mark as Published
+        </Button>
+      </div>
+    ),
+    published: (
+      <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 space-y-2">
+        <p className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          Footage published
+        </p>
+        <p className="text-xs text-muted-foreground">This take is complete and ready for distribution. Start a new session from Planning if you need another take.</p>
+        <Button size="sm" variant="outline" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[0])} disabled={Boolean(busyCommand)}>
+          <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+          New Take
+        </Button>
+      </div>
+    ),
+  };
+
   return (
     <div className="space-y-6">
-      {error && (
+      {hubOffline && (
+        <div className="flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-2 text-sm text-yellow-600 dark:text-yellow-400">
+          <WifiOff className="w-4 h-4 shrink-0" />
+          Live sync unavailable — board works in local mode only.
+        </div>
+      )}
+      {error && !hubOffline && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
@@ -439,14 +571,18 @@ export default function RavensightBoard() {
                       </span>
                       {busyCommand === step.command ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                      ) : isActive ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
                       ) : (
-                        <Play className="w-3.5 h-3.5 text-primary" />
+                        <Play className="w-3.5 h-3.5 text-muted-foreground" />
                       )}
                     </div>
                   </button>
                 );
               })}
             </div>
+
+            {stageActions[currentStage]}
 
             <div className="rounded-xl border border-border bg-card p-4 space-y-3">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -477,7 +613,7 @@ export default function RavensightBoard() {
             <CardContent className="space-y-3">
               {activeFootage ? (
                 <>
-                  <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
                     <p className="text-sm font-medium text-foreground line-clamp-2">
                       {activeFootage.title || "Untitled footage"}
                     </p>
@@ -496,8 +632,8 @@ export default function RavensightBoard() {
                       Camera setup
                     </Button>
                     <Button size="sm" variant="outline" className="flex-1" onClick={() => issueWorkflowStep(WORKFLOW_STEPS[3])}>
-                      <Square className="w-3.5 h-3.5 mr-1.5" />
-                      Start recording
+                      <RadioTower className="w-3.5 h-3.5 mr-1.5" />
+                      Record
                     </Button>
                   </div>
                 </>
@@ -509,7 +645,7 @@ export default function RavensightBoard() {
             </CardContent>
           </Card>
 
-          <Card className="bg-card border-border">
+          <Card className="bg-card border-border" ref={footageCardRef}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg font-heading">
                 <Upload className="w-5 h-5 text-primary" />
@@ -517,9 +653,11 @@ export default function RavensightBoard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Input
+              <input
+                ref={uploadInputRef}
                 type="file"
                 accept="video/*"
+                className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = "";
@@ -527,14 +665,17 @@ export default function RavensightBoard() {
                 }}
                 disabled={uploading}
               />
-              {uploading && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Uploading clip...
-                </div>
-              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+                {uploading ? "Uploading…" : "Choose video file"}
+              </Button>
               <p className="text-xs text-muted-foreground">
-                Upload from PC, then move the clip into the board flow immediately.
+                Upload from PC — the clip goes straight to the board and footage library.
               </p>
             </CardContent>
           </Card>
@@ -552,7 +693,13 @@ export default function RavensightBoard() {
           </CardHeader>
           <CardContent>
             {videos.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No video clips in the library yet.</p>
+              <div className="text-center py-6 space-y-3">
+                <p className="text-sm text-muted-foreground">No video clips in the library yet.</p>
+                <Button variant="outline" size="sm" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>
+                  <Upload className="w-3.5 h-3.5 mr-1.5" />
+                  Upload your first clip
+                </Button>
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {videos.map((video) => {
