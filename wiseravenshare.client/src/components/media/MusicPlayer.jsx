@@ -49,6 +49,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const playerRef = useRef(null);
+  const conversionAttemptRef = useRef(null);
   const { toast } = useToast();
   const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 
@@ -117,6 +118,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     setUrlLoading(true);
     setPlaying(false);
     setPlaybackError("");
+    conversionAttemptRef.current = null;
     setProgress(0);
     setDuration(0);
     getPlayableUrl(current.file_uri).then((url) => {
@@ -283,10 +285,31 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
         onEnded={handleEnded}
         onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime || 0)}
         onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
-        onError={(event) => {
+        onError={async (event) => {
           if (!playUrl) return;
           const code = event.currentTarget.error?.code;
-          const detail = code === 4 ? "This audio format is not supported by this browser." : "The audio stream could not be loaded. Check access or try uploading the track again.";
+          if (code === 4 && current && conversionAttemptRef.current !== String(current.id)) {
+            conversionAttemptRef.current = String(current.id);
+            setPlaybackError("This browser cannot decode this file. Preparing a compatible audio copy…");
+            try {
+              const response = await fetch(playUrl, { credentials: "include" });
+              if (!response.ok) throw new Error("The original audio file could not be read.");
+              const source = await response.blob();
+              const file = new File([source], current.fileName || current.title || "audio", { type: source.type || "application/octet-stream" });
+              const compatible = await apiClient.podcastAudio.convertForBrowser(file);
+              const compatibleUrl = URL.createObjectURL(compatible);
+              setPlayUrl((previous) => {
+                if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+                return compatibleUrl;
+              });
+              setPlaybackError("Compatible audio is ready. Press play to start this track.");
+            } catch (error) {
+              setPlaybackError(error?.message || "Could not prepare compatible audio for this browser.");
+            }
+            setPlaying(false);
+            return;
+          }
+          const detail = code === 4 ? "This audio format is not supported and conversion could not be completed." : "The audio stream could not be loaded. Check access or try uploading the track again.";
           setPlaybackError(detail);
           setPlaying(false);
         }}

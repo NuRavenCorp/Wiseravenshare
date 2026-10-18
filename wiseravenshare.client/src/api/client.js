@@ -112,6 +112,21 @@ const request = async (path, options = {}) => {
   return data;
 };
 
+const requestBlob = async (path, options = {}) => {
+  const token = readStoredToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(buildUrl(path), { credentials: "include", ...options, headers });
+  if (!response.ok) {
+    const data = await parseResponseBody(response);
+    const error = new Error(data?.message || `Request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return response.blob();
+};
+
 const normalizeSameOriginPath = (candidateUrl, origin) => {
   if (candidateUrl.origin !== origin) {
     return "/";
@@ -290,6 +305,13 @@ const entityProxy = new Proxy(
 );
 
 export const apiClient = {
+  podcastAudio: {
+    convertForBrowser(file) {
+      const body = new FormData();
+      body.append("audioFile", file, file.name || "audio");
+      return requestBlob("/api/podcast-audio/browser-compatible", { method: "POST", body });
+    },
+  },
   posts: {
     feed(page = 1, pageSize = 20) {
       return requestJson(`/api/posts/feed?page=${page}&pageSize=${pageSize}`, { method: "GET" });

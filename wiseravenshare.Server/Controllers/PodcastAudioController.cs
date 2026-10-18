@@ -23,6 +23,7 @@ public sealed class PodcastAudioController : ControllerBase
         "audio/wav", "audio/wave", "audio/x-wav",
         "audio/mpeg", "audio/mp3",
         "audio/mp4", "audio/x-m4a",
+        "video/mp4", "audio/aac", "audio/webm", "audio/opus", "audio/x-ms-wma",
         "audio/flac", "audio/x-flac",
         "audio/ogg", "audio/vorbis",
         "application/octet-stream"
@@ -103,5 +104,49 @@ public sealed class PodcastAudioController : ControllerBase
         var processed = await upstreamResponse.Content.ReadAsByteArrayAsync(cancellationToken);
         var outputName = $"processed_{Guid.NewGuid():N}.wav";
         return File(processed, "audio/wav", outputName);
+    }
+
+    /// <summary>Convert audio to broadly supported MP3 for browsers without a decoder for the source codec.</summary>
+    [HttpPost("browser-compatible")]
+    [RequestSizeLimit(524_288_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524_288_000)]
+    public async Task<IActionResult> ConvertForBrowser(IFormFile audioFile, CancellationToken cancellationToken)
+    {
+        if (audioFile is null || audioFile.Length == 0)
+            return BadRequest(new { message = "Please attach an audio file." });
+
+        if (!AllowedContentTypes.Contains(audioFile.ContentType ?? "application/octet-stream"))
+            return BadRequest(new { message = "Unsupported audio content type." });
+
+        using var client = _httpClientFactory.CreateClient("AudioService");
+        using var multipart = new MultipartFormDataContent();
+        await using var stream = audioFile.OpenReadStream();
+        var fileContent = new StreamContent(stream);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(audioFile.ContentType ?? "application/octet-stream");
+        multipart.Add(fileContent, "file", Path.GetFileName(audioFile.FileName ?? "audio"));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync("/browser-compatible", multipart, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Browser-compatible audio service is unreachable.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Audio conversion is unavailable." });
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Audio conversion returned {Status}: {Detail}", (int)response.StatusCode, detail);
+                return StatusCode((int)response.StatusCode, new { message = "Audio conversion failed.", detail });
+            }
+
+            var converted = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            return File(converted, "audio/mpeg", "browser-compatible.mp3");
+        }
     }
 }
