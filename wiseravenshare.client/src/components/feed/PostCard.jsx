@@ -153,6 +153,19 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
               {following ? "Following" : "Follow"}
             </button>
           )}
+          {!isOwn && currentUser && (
+            <button
+              onClick={handleBlock}
+              disabled={busy}
+              aria-label={blocked ? "Unblock User" : "Block User"}
+              className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors disabled:opacity-50 ${
+                blocked ? "border-border text-muted-foreground hover:text-foreground" : "border-destructive/40 text-destructive hover:bg-destructive/10"
+              }`}
+            >
+              <ShieldBan className="w-3 h-3" />
+              {blocked ? "Unblock User" : "Block User"}
+            </button>
+          )}
           {!isOwn && (
             <div className="relative" ref={menuRef}>
               <button onClick={() => setMenuOpen((o) => !o)} className="p-1.5 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground">
@@ -166,9 +179,9 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
                       {following ? "Unfollow" : "Follow"}
                     </button>
                   )}
-                  <button onClick={handleBlock} disabled={busy || blocked} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
+                  <button onClick={handleBlock} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
                     <ShieldBan className="w-4 h-4" />
-                    {blocked ? "User Blocked" : "Block User"}
+                    {blocked ? "Unblock User" : "Block User"}
                   </button>
                 </div>
               )}
@@ -204,8 +217,9 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       )}
 
       <div className="flex items-center gap-4 px-4 py-3 border-t border-border">
-        <button onClick={handleLike} disabled={busy} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
+        <button onClick={handleLike} disabled={busy} aria-label={liked ? "Unlike post" : "Like post"} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
           <Heart className={`w-4 h-4 transition-all ${liked ? "fill-red-500 text-red-500 scale-110" : "text-muted-foreground hover:text-red-500"}`} />
+          <span className={liked ? "text-red-500" : "text-muted-foreground"}>{liked ? "Liked" : "Like"}</span>
           <span className={liked ? "text-red-500" : "text-muted-foreground"}>{likeCount}</span>
         </button>
         <button onClick={handleRepost} disabled={busy} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">

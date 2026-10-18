@@ -306,10 +306,8 @@ const entityProxy = new Proxy(
 
 export const apiClient = {
   podcastAudio: {
-    convertForBrowser(file) {
-      const body = new FormData();
-      body.append("audioFile", file, file.name || "audio");
-      return requestBlob("/api/podcast-audio/browser-compatible", { method: "POST", body });
+    convertForBrowser(trackId) {
+      return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/browser-compatible`, { method: "GET" });
     },
   },
   posts: {
