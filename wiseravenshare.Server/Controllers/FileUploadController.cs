@@ -16,22 +16,38 @@ public class MediaController : ControllerBase
     private static readonly IReadOnlyDictionary<string, string[]> AllowedUploadContentTypesByExtension =
         new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
-            [".mp4"] = ["video/mp4"],
-            [".mov"] = ["video/quicktime"],
+            [".mp4"]  = ["video/mp4", "video/mpeg", "video/x-m4v"],
+            [".m4v"]  = ["video/mp4", "video/x-m4v"],
+            [".mov"]  = ["video/quicktime", "video/mov"],
             [".webm"] = ["video/webm"],
-            [".avi"] = ["video/x-msvideo", "video/avi"],
-            [".mkv"] = ["video/x-matroska"],
-            [".jpg"] = ["image/jpeg"],
+            [".avi"]  = ["video/x-msvideo", "video/avi", "video/x-avi"],
+            [".mkv"]  = ["video/x-matroska", "video/mkv"],
+            [".mpg"]  = ["video/mpeg"],
+            [".mpeg"] = ["video/mpeg"],
+            [".3gp"]  = ["video/3gpp", "video/3gp"],
+            [".3g2"]  = ["video/3gpp2"],
+            [".ts"]   = ["video/mp2t", "video/ts"],
+            [".m2ts"] = ["video/mp2t"],
+            [".flv"]  = ["video/x-flv"],
+            [".jpg"]  = ["image/jpeg"],
             [".jpeg"] = ["image/jpeg"],
-            [".png"] = ["image/png"],
+            [".png"]  = ["image/png"],
             [".webp"] = ["image/webp"],
-            [".gif"] = ["image/gif"],
-            [".mp3"] = ["audio/mpeg", "audio/mp3"],
-            [".wav"] = ["audio/wav", "audio/wave", "audio/x-wav"],
-            [".m4a"] = ["audio/mp4", "audio/x-m4a"],
-            [".aac"] = ["audio/aac", "audio/x-aac"],
-            [".ogg"] = ["audio/ogg", "audio/vorbis"],
-            [".flac"] = ["audio/flac", "audio/x-flac"]
+            [".gif"]  = ["image/gif"],
+            [".heic"] = ["image/heic", "image/heif"],
+            [".heif"] = ["image/heif", "image/heic"],
+            [".mp3"]  = ["audio/mpeg", "audio/mp3", "audio/x-mpeg"],
+            [".wav"]  = ["audio/wav", "audio/wave", "audio/x-wav"],
+            [".m4a"]  = ["audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac"],
+            [".aac"]  = ["audio/aac", "audio/x-aac", "audio/mp4"],
+            [".ogg"]  = ["audio/ogg", "audio/vorbis", "application/ogg"],
+            [".oga"]  = ["audio/ogg", "audio/vorbis"],
+            [".flac"] = ["audio/flac", "audio/x-flac"],
+            [".wma"]  = ["audio/x-ms-wma", "audio/wma"],
+            [".aiff"] = ["audio/aiff", "audio/x-aiff"],
+            [".aif"]  = ["audio/aiff", "audio/x-aiff"],
+            [".opus"] = ["audio/opus", "audio/ogg"],
+            [".caf"]  = ["audio/x-caf"],
         };
 
     private readonly IWebHostEnvironment _environment;
@@ -450,34 +466,54 @@ public class MediaController : ControllerBase
         extension = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (!AllowedUploadContentTypesByExtension.TryGetValue(extension, out var allowedContentTypes))
         {
-            error = "Invalid file type.";
+            error = $"Unsupported file type '{extension}'.";
             return false;
         }
 
-        var contentType = (file.ContentType ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(contentType))
+        // Strip content-type parameters (e.g. "video/mp4; codecs=avc1.42E01E" → "video/mp4").
+        var rawContentType = (file.ContentType ?? string.Empty).Trim();
+        var baseContentType = rawContentType.Contains(';')
+            ? rawContentType[..rawContentType.IndexOf(';')].Trim()
+            : rawContentType;
+
+        // Accept if the base type is in the explicit list, OR if it is a general
+        // video/audio/image type that matches the file's media category.
+        if (!string.IsNullOrWhiteSpace(baseContentType))
         {
-            error = "A valid content type is required.";
-            return false;
-        }
+            if (allowedContentTypes.Contains(baseContentType, StringComparer.OrdinalIgnoreCase))
+            {
+                error = string.Empty;
+                return true;
+            }
 
-        if (!allowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+            var category = allowedContentTypes[0].Split('/')[0].ToLowerInvariant();
+            var incomingCategory = baseContentType.Split('/')[0].ToLowerInvariant();
+            if (incomingCategory == category || incomingCategory == "application")
+            {
+                error = string.Empty;
+                return true;
+            }
+        }
+        else
         {
-            error = $"Unsupported content type '{contentType}' for file extension '{extension}'.";
-            return false;
+            // No content type sent by the browser — accept based on extension only.
+            error = string.Empty;
+            return true;
         }
 
-        error = string.Empty;
-        return true;
+        error = $"Unsupported content type '{baseContentType}' for '{extension}'.";
+        return false;
     }
 
     private static string ResolveManagedDestinationFolder(string extension, string userStorageIdentity)
     {
         var mediaSegment = extension switch
         {
-            ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv" => "videos",
-            ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" => "photos",
-            ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".flac" => "audio",
+            ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv" or ".m4v"
+                or ".mpg" or ".mpeg" or ".3gp" or ".3g2" or ".ts" or ".m2ts" or ".flv" => "videos",
+            ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".heic" or ".heif" => "photos",
+            ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".oga"
+                or ".flac" or ".wma" or ".aiff" or ".aif" or ".opus" or ".caf" => "audio",
             _ => "media"
         };
 
