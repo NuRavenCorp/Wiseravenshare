@@ -49,7 +49,7 @@ function MediaExperienceModal({ request, onClose }) {
           <h2 className="truncate text-sm font-semibold">{request.title}</h2>
           <button type="button" onClick={onClose} aria-label="Close media player" className="rounded p-1 text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
         </header>
-        {request.type === "music" ? <MusicPlayer initialTrack={request} />
+        {request.type === "music" ? <MusicPlayer initialTrack={request} initialQueue={request.queue} />
           : !url ? <div className="py-16 text-center text-sm text-muted-foreground">Loading media…</div>
           : request.type === "photo" ? <ZoomableImage src={url} alt={request.title} className="mx-auto max-h-[78vh] w-full rounded-lg" fittingType="fit" />
           : <video src={url} controls autoPlay playsInline className="mx-auto max-h-[78vh] w-full rounded-lg border border-border bg-black" />}

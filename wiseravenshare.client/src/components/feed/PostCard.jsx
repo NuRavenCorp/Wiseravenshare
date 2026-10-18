@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
-import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2 } from "lucide-react";
+import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import PostComments from "./PostComments";
 import ShareMenu from "./ShareMenu";
+import { useToast } from "@/components/ui/use-toast";
+import { useMediaExperience } from "@/components/media/MediaExperience";
 
 const TRUTH_STYLES = {
   verified: { label: "Verified", class: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
@@ -11,8 +13,9 @@ const TRUTH_STYLES = {
   flagged: { label: "Flagged", class: "text-red-400 bg-red-500/10 border-red-500/30" },
   challenged: { label: "Challenged", class: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
 };
+const EMPTY_BLOCKED_IDS = Object.freeze([]);
 
-export default function PostCard({ post, currentUser, onAuthRequired }) {
+export default function PostCard({ post, currentUser, onAuthRequired, onHashtagClick, onBlocked, blockedIds = EMPTY_BLOCKED_IDS }) {
   const [author, setAuthor] = useState(null);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.like_count || 0);
@@ -27,31 +30,26 @@ export default function PostCard({ post, currentUser, onAuthRequired }) {
   const [shared, setShared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const menuRef = useRef(null);
+  const { toast } = useToast();
+  const { openMedia } = useMediaExperience();
 
-  const isOwn = currentUser?.id === post.created_by_id;
+  const isOwn = String(currentUser?.id || "") === String(post.created_by_id || "");
   const truthStyle = TRUTH_STYLES[post.truth_status] || TRUTH_STYLES.unverified;
 
   useEffect(() => {
     let mounted = true;
-    apiClient.entities.UserProfile.filter({ created_by_id: post.created_by_id }, { limit: 1 })
-      .then((res) => { if (mounted) setAuthor((res.items || [])[0] || null); })
-      .catch(() => {});
+    setAuthor(post.author || post.user || null);
+    setLiked(Boolean(post.is_liked));
+    setLikeCount(post.like_count || 0);
+    setReposted(Boolean(post.is_reposted));
+    setRepostCount(post.repost_count || 0);
     if (currentUser) {
-      apiClient.entities.Like.filter({ target_id: post.id, target_type: "post", created_by_id: currentUser.id }, { limit: 1 })
-        .then((res) => { if (mounted) setLiked((res.items || []).length > 0); })
-        .catch(() => {});
-      apiClient.entities.Follow.filter({ followee_id: post.created_by_id, created_by_id: currentUser.id }, { limit: 1 })
-        .then((res) => { if (mounted) setFollowing((res.items || []).length > 0); })
-        .catch(() => {});
-      apiClient.entities.Block.filter({ blocked_id: post.created_by_id, created_by_id: currentUser.id }, { limit: 1 })
-        .then((res) => { if (mounted) setBlocked((res.items || []).length > 0); })
-        .catch(() => {});
-      apiClient.entities.Post.filter({ external_source: post.id, created_by_id: currentUser.id }, { limit: 1 })
-        .then((res) => { if (mounted) setReposted((res.items || []).length > 0); })
-        .catch(() => {});
+      apiClient.social.followStatus(post.created_by_id)
+        .then((res) => { if (mounted) setFollowing(Boolean(res.isFollowing)); }).catch(() => {});
+      setBlocked(blockedIds.includes(String(post.created_by_id)));
     }
     return () => { mounted = false; };
-  }, [post.id, post.created_by_id, currentUser?.id]);
+  }, [post.id, post.created_by_id, currentUser?.id, blockedIds]);
 
   useEffect(() => {
     const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
@@ -64,22 +62,10 @@ export default function PostCard({ post, currentUser, onAuthRequired }) {
     if (busy) return;
     setBusy(true);
     try {
-      if (liked) {
-        const res = await apiClient.entities.Like.filter({ target_id: post.id, target_type: "post", created_by_id: currentUser.id }, { limit: 1 });
-        const existing = (res.items || [])[0];
-        if (existing) await apiClient.entities.Like.delete(existing.id);
-        setLiked(false);
-        const n = Math.max(0, likeCount - 1);
-        setLikeCount(n);
-        await apiClient.entities.Post.update(post.id, { like_count: n });
-      } else {
-        await apiClient.entities.Like.create({ target_id: post.id, target_type: "post" });
-        setLiked(true);
-        const n = likeCount + 1;
-        setLikeCount(n);
-        await apiClient.entities.Post.update(post.id, { like_count: n });
-      }
-    } catch (e) { console.error("Like error:", e); } finally { setBusy(false); }
+      const state = liked ? await apiClient.posts.unlike(post.id) : await apiClient.posts.like(post.id);
+      setLiked(Boolean(state.isLiked));
+      setLikeCount(Number(state.likesCount ?? likeCount + (liked ? -1 : 1)));
+    } catch (e) { toast({ title: "Could not update like", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
   const handleFollow = async () => {
@@ -87,61 +73,37 @@ export default function PostCard({ post, currentUser, onAuthRequired }) {
     if (busy) return;
     setBusy(true);
     try {
-      if (following) {
-        const res = await apiClient.entities.Follow.filter({ followee_id: post.created_by_id, created_by_id: currentUser.id }, { limit: 1 });
-        const existing = (res.items || [])[0];
-        if (existing) await apiClient.entities.Follow.delete(existing.id);
-        setFollowing(false);
-      } else {
-        await apiClient.entities.Follow.create({ followee_id: post.created_by_id });
-        setFollowing(true);
-      }
+      const result = await apiClient.social.toggleFollow(post.created_by_id);
+      setFollowing(Boolean(result.nowFollowing));
       setMenuOpen(false);
-    } catch (e) { console.error("Follow error:", e); } finally { setBusy(false); }
+    } catch (e) { toast({ title: "Could not update follow", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
   const handleBlock = async () => {
     if (!currentUser) return onAuthRequired?.();
-    if (blocked || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
-      await apiClient.entities.Block.create({ blocked_id: post.created_by_id, reason: "Blocked from post feed" });
-      setBlocked(true);
+      if (blocked) await apiClient.social.unblockUser(post.created_by_id);
+      else await apiClient.social.blockUser(post.created_by_id);
+      setBlocked(!blocked);
       setMenuOpen(false);
-    } catch (e) { console.error("Block error:", e); } finally { setBusy(false); }
+      if (!blocked) onBlocked?.(post.created_by_id);
+    } catch (e) { toast({ title: "Could not update block", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
-  const authorName = author?.display_name || "Creator";
-  const timeAgo = new Date(post.created_date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const authorName = author?.display_name || author?.displayName || author?.username || "Creator";
+  const timeAgo = new Date(post.created_date || Date.now()).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   const handleRepost = async () => {
     if (!currentUser) return onAuthRequired?.();
     if (busy) return;
     setBusy(true);
     try {
-      if (reposted) {
-        const res = await apiClient.entities.Post.filter({ external_source: post.id, created_by_id: currentUser.id }, { limit: 1 });
-        const existing = (res.items || [])[0];
-        if (existing) await apiClient.entities.Post.delete(existing.id);
-        setReposted(false);
-        const n = Math.max(0, repostCount - 1);
-        setRepostCount(n);
-        await apiClient.entities.Post.update(post.id, { repost_count: n });
-      } else {
-        await apiClient.entities.Post.create({
-          content: post.content,
-          media_uris: post.media_uris || [],
-          hashtags: post.hashtags || [],
-          post_type: post.post_type || "text",
-          external_source: post.id,
-          status: "published",
-        });
-        setReposted(true);
-        const n = repostCount + 1;
-        setRepostCount(n);
-        await apiClient.entities.Post.update(post.id, { repost_count: n });
-      }
-    } catch (e) { console.error("Repost error:", e); } finally { setBusy(false); }
+      const state = reposted ? await apiClient.posts.unrepost(post.id) : await apiClient.posts.repost(post.id);
+      setReposted(Boolean(state.isReposted));
+      setRepostCount(Number(state.repostsCount ?? repostCount + (reposted ? -1 : 1)));
+    } catch (e) { toast({ title: "Could not update repost", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
   const shareUrl = `${window.location.origin}/social?post=${post.id}`;
@@ -152,16 +114,22 @@ export default function PostCard({ post, currentUser, onAuthRequired }) {
     setShareCount(n);
     setShared(true);
     setTimeout(() => setShared(false), 2000);
-    try { await apiClient.entities.Post.update(post.id, { share_count: n }); } catch (e) { /* ignore */ }
+    try {
+      const state = await apiClient.posts.share(post.id);
+      setShareCount(Number(state.sharesCount ?? n));
+    } catch { setShareCount((count) => Math.max(0, count - 1)); }
   };
+
+  const hashtagList = post.hashtags?.length ? post.hashtags : [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
+  const partialList = [...new Set((post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
 
   return (
     <article className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden">
       <div className="flex items-center justify-between p-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
-            {author?.avatar_uri ? (
-              <Image src={author.avatar_uri} alt={authorName} fittingType="fill" className="w-full h-full" />
+            {(author?.avatar_uri || author?.avatarUrl) ? (
+              <Image src={author.avatar_uri || author.avatarUrl} alt={authorName} fittingType="fill" className="w-full h-full" />
             ) : (
               <span className="font-heading text-lg text-primary">{authorName.charAt(0).toUpperCase()}</span>
             )}
@@ -211,18 +179,27 @@ export default function PostCard({ post, currentUser, onAuthRequired }) {
 
       <div className="px-4 pb-3">
         <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
-        {post.hashtags?.length > 0 && (
+        {hashtagList.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {post.hashtags.map((tag, i) => (
-              <span key={i} className="text-xs text-primary">#{tag}</span>
+            {hashtagList.map((tag, i) => (
+              <button key={i} onClick={() => onHashtagClick?.(tag)} className="text-xs text-primary hover:underline">#{tag}</button>
             ))}
           </div>
         )}
+        {partialList.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{partialList.map((tag) => <button key={tag} onClick={() => onHashtagClick?.(`%${tag}`)} className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20">%{tag}</button>)}</div>}
       </div>
 
       {post.media_uris?.length > 0 && (
         <div className="px-4 pb-3">
-          <Image src={post.media_uris[0]} alt="Post media" fittingType="fill" className="w-full rounded-xl max-h-80" />
+          {String(post.type || post.post_type || "").toLowerCase().includes("video") ? (
+            <video src={post.media_uris[0]} controls playsInline className="w-full max-h-96 rounded-xl bg-black" />
+          ) : String(post.type || post.post_type || "").toLowerCase().includes("audio") || String(post.type || post.post_type || "").toLowerCase().includes("music") ? (
+            <button onClick={() => openMedia({ id: post.id, title: `${authorName}'s audio post`, url: post.media_uris[0], type: "music" })} className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:bg-secondary/60">
+              <Music className="h-5 w-5 text-primary" /><span className="text-sm">Play audio post</span>
+            </button>
+          ) : (
+            <Image src={post.media_uris[0]} alt="Post media" fittingType="fill" className="w-full rounded-xl max-h-80" />
+          )}
         </div>
       )}
 

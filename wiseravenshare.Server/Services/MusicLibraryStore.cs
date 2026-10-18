@@ -514,7 +514,7 @@ INSERT INTO app_data.bucket_objects (
             return resolved;
         }
 
-        return $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(fileName)}";
+        return $"/api/media/stream?fileName={Uri.EscapeDataString(Path.GetFileName(fileName))}";
     }
 
     private string TryExtractObjectKeyFromUrl(string? publicUrl)
@@ -550,14 +550,14 @@ INSERT INTO app_data.bucket_objects (
         var normalized = objectKey.Replace('\\', '/').Trim('/');
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            return "/api/videostreaming/stream";
+            return "/api/media/stream";
         }
 
         var segments = normalized
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(Uri.EscapeDataString);
 
-        return $"/api/videostreaming/blob/{string.Join("/", segments)}";
+        return $"/api/media/blob/{string.Join("/", segments)}";
     }
 
     private static JsonElement? ParseMetadata(string? metadataJson)

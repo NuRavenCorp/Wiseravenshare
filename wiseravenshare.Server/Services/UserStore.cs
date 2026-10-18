@@ -431,7 +431,11 @@ public sealed class UserStore
             throw new KeyNotFoundException("User not found.");
         }
 
-        var current = user.SocialFeeds ?? new SocialFeedSettings();
+        var previousFeeds = user.SocialFeeds;
+        var previousUpdatedAt = user.UpdatedAtUtc;
+        // Work on fresh connection objects so a failed durable write can roll back
+        // without leaving the current process showing a connection that will vanish.
+        var current = NormalizeSocialFeeds(previousFeeds ?? new SocialFeedSettings());
 
         if (request.TikTok is not null)
         {
@@ -470,7 +474,16 @@ public sealed class UserStore
 
         user.SocialFeeds = current;
         user.UpdatedAtUtc = DateTime.UtcNow;
-        PersistUsers(user);
+        try
+        {
+            PersistUsers(user);
+        }
+        catch
+        {
+            user.SocialFeeds = previousFeeds;
+            user.UpdatedAtUtc = previousUpdatedAt;
+            throw;
+        }
         return user;
     }
 
@@ -992,7 +1005,10 @@ public sealed class UserStore
     private void PersistUsers(UserRecord? changedUser = null)
     {
         var dbSuccess = TryPersistUsersToDatabase(changedUser);
-        var filePersisted = false;
+        if (!dbSuccess && _requireDatabasePersistence)
+        {
+            throw new InvalidOperationException("User changes were not saved because the production database is unavailable. No connection was retained.");
+        }
 
         // Always sync users to local file storage backup so user state is retained across restarts
         try
@@ -1004,17 +1020,11 @@ public sealed class UserStore
                     .ToList();
                 var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
                 System.IO.File.WriteAllText(GetUsersFilePath(), json);
-                filePersisted = true;
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"PersistUsers file sync failed: {ex.Message}");
-        }
-
-        if (!dbSuccess && _requireDatabasePersistence && !filePersisted)
-        {
-            throw new InvalidOperationException("User persistence requires a reachable database. Retry after database connectivity is restored.");
         }
 
         if (!dbSuccess)

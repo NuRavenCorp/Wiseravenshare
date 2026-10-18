@@ -39,6 +39,7 @@ public sealed class MediaBlobController : ControllerBase
     }
 
     [HttpGet("blob/{**objectKey}")]
+    [HttpGet("~/api/videostreaming/blob/{**objectKey}")]
     public async Task<IActionResult> StreamBlob([FromRoute] string objectKey, [FromQuery] string? sig, CancellationToken cancellationToken)
     {
         var userId = User.GetUserId();
@@ -53,7 +54,7 @@ public sealed class MediaBlobController : ControllerBase
             return BadRequest(new { message = "Missing object key." });
         }
 
-        if (!_signatureService.VerifyKeySignature(normalizedKey, sig))
+        if (!string.IsNullOrWhiteSpace(sig) && !_signatureService.VerifyKeySignature(normalizedKey, sig))
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Invalid signature." });
         }
@@ -65,15 +66,57 @@ public sealed class MediaBlobController : ControllerBase
         }
 
         var blobStream = await _blobStorageService.OpenReadAsync(normalizedKey, cancellationToken);
-        if (blobStream is null)
+        if (blobStream is not null)
         {
-            return NotFound(new { message = "Blob missing from storage." });
+            var contentType = ResolveContentType(normalizedKey);
+            Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+            Response.Headers["X-Media-Key-Signature"] = _signatureService.SignKey(normalizedKey);
+            return File(blobStream, contentType, enableRangeProcessing: true);
         }
 
-        var contentType = ResolveContentType(normalizedKey);
-        Response.Headers.CacheControl = "private, max-age=31536000, immutable";
-        Response.Headers["X-Media-Key-Signature"] = _signatureService.SignKey(normalizedKey);
-        return File(blobStream, contentType, enableRangeProcessing: true);
+        var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, limit: 500, cancellationToken: cancellationToken);
+        var localAsset = assets.FirstOrDefault(asset =>
+            string.Equals(NormalizeObjectKey(asset.RelativePath), normalizedKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(asset.FileName, Path.GetFileName(normalizedKey), StringComparison.OrdinalIgnoreCase));
+        if (localAsset is not null && !string.IsNullOrWhiteSpace(localAsset.AbsolutePath) && System.IO.File.Exists(localAsset.AbsolutePath))
+        {
+            return PhysicalFile(localAsset.AbsolutePath, ResolveContentType(normalizedKey), enableRangeProcessing: true);
+        }
+
+        return NotFound(new { message = "Media file is no longer available in storage." });
+    }
+
+    [HttpGet("stream")]
+    [HttpGet("~/api/videostreaming/stream")]
+    public async Task<IActionResult> StreamFileByName([FromQuery] string fileName, CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+            return Unauthorized(new { message = "Invalid user session." });
+
+        var normalizedFileName = Path.GetFileName(fileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(normalizedFileName))
+            return BadRequest(new { message = "Missing file name." });
+
+        try
+        {
+            var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+            var track = tracks.FirstOrDefault(candidate => string.Equals(candidate.FileName, normalizedFileName, StringComparison.OrdinalIgnoreCase));
+            if (track is not null && !string.IsNullOrWhiteSpace(track.ObjectKey))
+                return await StreamBlob(track.ObjectKey, null, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not resolve music file {FileName} through the music library.", normalizedFileName);
+        }
+
+        var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, limit: 500, cancellationToken: cancellationToken);
+        var asset = assets.FirstOrDefault(candidate => string.Equals(candidate.FileName, normalizedFileName, StringComparison.OrdinalIgnoreCase));
+        if (asset is null)
+            return NotFound(new { message = "Media file not found." });
+
+        var objectKey = string.IsNullOrWhiteSpace(asset.RelativePath) ? asset.FileName : asset.RelativePath;
+        return await StreamBlob(objectKey, null, cancellationToken);
     }
 
     private async Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken)

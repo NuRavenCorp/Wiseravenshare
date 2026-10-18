@@ -29,14 +29,14 @@ public static class StreamingUrlHelper
 
     /// <summary>
     /// Builds a relative URL for streaming a media file by name, e.g.
-    /// <c>/api/videostreaming/stream?fileName=abc.mp4</c>
+    /// <c>/api/media/stream?fileName=abc.mp4</c>
     /// </summary>
     public static string StreamByFileName(string fileName) =>
-        $"/api/videostreaming/stream?fileName={Uri.EscapeDataString(Path.GetFileName(fileName))}";
+        $"/api/media/stream?fileName={Uri.EscapeDataString(Path.GetFileName(fileName))}";
 
     /// <summary>
     /// Builds a relative URL for streaming a media file via its blob object key, e.g.
-    /// <c>/api/videostreaming/blob/wiseravenshare/ravensight/video/abc.mp4</c>
+    /// <c>/api/media/blob/wiseravenshare/ravensight/video/abc.mp4</c>
     /// </summary>
     public static string StreamByBlobPath(string? relativePath)
     {
@@ -51,7 +51,7 @@ public static class StreamingUrlHelper
                 .Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Select(Uri.EscapeDataString));
 
-        return $"/api/videostreaming/blob/{encodedPath}";
+        return $"/api/media/blob/{encodedPath}";
     }
 
     private static bool TryIsDigitalOceanSpacesUrl(string value)
