@@ -103,14 +103,26 @@ public class MediaController : ControllerBase
 
     [HttpPost("upload")]
     [RequestSizeLimit(500_000_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
     public async Task<IActionResult> UploadMedia([FromForm] MediaUploadDto upload, CancellationToken cancellationToken)
     {
-        if (upload.File == null || upload.File.Length == 0)
+        // Resilient file resolution: accept "file" or "File" field name from any client.
+        var file = upload.File;
+        if (file is null || file.Length == 0)
         {
-            return BadRequest("No file uploaded.");
+            file = Request.Form.Files.FirstOrDefault(f =>
+                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
 
-        if (!TryValidateUpload(upload.File, out var extension, out var uploadError))
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No file uploaded. Send the file in a multipart/form-data field named 'file'." });
+        }
+
+        upload.File = file;
+
+        if (!TryValidateUpload(file, out var extension, out var uploadError))
         {
             return BadRequest(new { message = uploadError });
         }
@@ -143,7 +155,7 @@ public class MediaController : ControllerBase
         string persistedMediaUrl;
         try
         {
-            (uniqueFileName, persistedMediaUrl) = await SaveMediaFileAsync(upload.File, extension, managedDestinationFolder, cancellationToken);
+            (uniqueFileName, persistedMediaUrl) = await SaveMediaFileAsync(file, extension, managedDestinationFolder, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -257,7 +269,7 @@ public class MediaController : ControllerBase
                     ? $"users/{userIdentity}/media/music"
                     : $"users/{userIdentity}/media/videos";
             var title = string.IsNullOrWhiteSpace(upload.Title)
-                ? Path.GetFileNameWithoutExtension(upload.File.FileName)
+                ? Path.GetFileNameWithoutExtension(file.FileName)
                 : upload.Title.Trim();
 
             // 1. Unified catalog entry for all types (powers Ravensight Media tab + library views).
@@ -272,13 +284,13 @@ public class MediaController : ControllerBase
                     PublicUrl = persistedMediaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? persistedMediaUrl : null,
                     AbsolutePath = string.Empty,
                     DestinationFolder = mediaFolder,
-                    ContentType = upload.File.ContentType ?? "application/octet-stream",
-                    SizeBytes = upload.File.Length,
+                    ContentType = file.ContentType ?? "application/octet-stream",
+                    SizeBytes = file.Length,
                     SavedAtUtc = DateTime.UtcNow,
                     MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
                     {
                         title,
-                        originalFileName = upload.File.FileName,
+                        originalFileName = file.FileName,
                         mediaType = isPhoto ? "photo" : isAudio ? "music" : "video",
                         storageMode = "permanent",
                         mediaUrl = persistedMediaUrl
@@ -323,7 +335,7 @@ public class MediaController : ControllerBase
                 {
                     await _musicLibraryStore.SaveMusicAsync(
                         catalogUserGuid,
-                        upload.File,
+                        file,
                         new DTOs.SaveRavensightMusicDto
                         {
                             Title = title,
