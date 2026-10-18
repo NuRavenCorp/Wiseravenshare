@@ -108,6 +108,7 @@ const normalizeStage = (command) => {
 
 export default function RavensightBoard() {
   const connectionRef = useRef(null);
+  const workflowRequestRef = useRef(false);
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(true);
@@ -125,22 +126,32 @@ export default function RavensightBoard() {
 
   const stageCounts = useMemo(() => {
     const counts = Object.fromEntries(WORKFLOW_STEPS.map((step) => [step.id, 0]));
-    if (currentStage && counts[currentStage] !== undefined) {
-      counts[currentStage] += 1;
+    for (const command of snapshot?.commandLog || []) {
+      const stage = normalizeStage(command.command);
+      if (stage && counts[stage] !== undefined) counts[stage] += 1;
     }
     return counts;
-  }, [currentStage]);
+  }, [snapshot?.commandLog]);
 
   const loadVideos = useCallback(async () => {
-    const items = await apiClient.ravensightMedia.listVideos();
-    setVideos((items || []).map((video) => ({
-      id: video.id,
+    const response = await apiClient.ravensightMedia.listVideos();
+    const items = Array.isArray(response)
+      ? response
+      : Array.isArray(response?.items)
+        ? response.items
+        : Array.isArray(response?.data)
+          ? response.data
+          : [];
+    const mapped = items.map((video) => ({
+      id: video.id || video.videoId || video.mediaAssetId || video.fileName,
       title: video.title || video.caption || video.fileName || "Untitled clip",
-      url: video.mediaUrl || video.videoUrl || video.file_uri || "",
+      url: video.mediaUrl || video.videoUrl || video.file_uri || video.filePath || "",
       thumbnailUrl: video.thumbnailUrl || video.posterUrl || "",
       description: video.description || "",
-      createdAt: video.createdAt || video.created_date || "",
-    })));
+      createdAt: video.createdAt || video.created_date || video.savedAtUtc || "",
+    })).filter((video) => video.id && video.url);
+    setVideos(mapped);
+    return mapped;
   }, []);
 
   useEffect(() => {
@@ -268,6 +279,8 @@ export default function RavensightBoard() {
   }, []);
 
   const issueWorkflowStep = async (step) => {
+    if (workflowRequestRef.current) return;
+    workflowRequestRef.current = true;
     setBusyCommand(step.command);
     setError("");
     try {
@@ -276,6 +289,7 @@ export default function RavensightBoard() {
     } catch (issueError) {
       setError(issueError?.message || "Could not issue the workflow command.");
     } finally {
+      workflowRequestRef.current = false;
       setBusyCommand("");
     }
   };
@@ -320,30 +334,43 @@ export default function RavensightBoard() {
 
   const uploadClip = async (file) => {
     if (!file) return;
+    if (!file.type.startsWith("video/")) {
+      setError("Choose a video clip to add it to the footage library.");
+      return;
+    }
+
     setUploading(true);
     setError("");
     try {
-      const isVideo = file.type.startsWith("video/");
-      const upload = isVideo
-        ? await apiClient.ravensightMedia.uploadVideo(file, {
-            title: file.name.replace(/\.[^/.]+$/, ""),
-            destinationFolder: "ravensight-board",
-          })
-        : await apiClient.ravensightMedia.uploadMusic(file, {
-            title: file.name.replace(/\.[^/.]+$/, ""),
-            destinationFolder: "ravensight-board",
-          });
-      await loadVideos();
-      const uploadedUrl = upload?.mediaUrl || upload?.file?.mediaUrl || upload?.url || "";
-      if (uploadedUrl) {
-        const uploadedVideo = {
-          id: upload?.id || file.name,
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          url: uploadedUrl,
-          thumbnailUrl: upload?.thumbnailUrl || "",
-        };
-        setVideos((prev) => [uploadedVideo, ...prev.filter((item) => item.url !== uploadedUrl)]);
+      const title = file.name.replace(/\.[^/.]+$/, "");
+      const upload = await apiClient.ravensightMedia.uploadVideo(file, {
+        title,
+        destinationFolder: "ravensight-board",
+      });
+      const uploadedUrl = upload?.mediaUrl
+        || upload?.file?.mediaUrl
+        || upload?.video?.videoUrl
+        || upload?.filePath
+        || upload?.url
+        || "";
+      if (!uploadedUrl) {
+        throw new Error(upload?.persistenceStatus === "degraded"
+          ? "The clip could not be saved to the video library. Please retry the upload."
+          : "The upload finished without returning a playable clip URL.");
       }
+
+      const refreshedVideos = await loadVideos();
+      const normalizeUrl = (value) => String(value || "").trim().replace(/\/$/, "");
+      const uploadedVideo = refreshedVideos.find((video) => normalizeUrl(video.url) === normalizeUrl(uploadedUrl)) || {
+        id: upload?.video?.id || upload?.mediaAssetId || `upload-${Date.now()}`,
+        title,
+        url: uploadedUrl,
+        thumbnailUrl: upload?.thumbnailUrl || upload?.video?.thumbnailUrl || "",
+        description: upload?.video?.description || "",
+        createdAt: new Date().toISOString(),
+      };
+      setVideos((previous) => [uploadedVideo, ...previous.filter((video) => video.id !== uploadedVideo.id && normalizeUrl(video.url) !== normalizeUrl(uploadedUrl))]);
+      await selectFootage(uploadedVideo);
     } catch (uploadError) {
       setError(uploadError?.message || "Upload failed.");
     } finally {
@@ -387,6 +414,7 @@ export default function RavensightBoard() {
                   <button
                     key={step.id}
                     onClick={() => issueWorkflowStep(step)}
+                    disabled={Boolean(busyCommand)}
                     className={`rounded-xl border p-4 text-left transition-colors ${
                       isActive
                         ? "border-primary bg-primary/10"
@@ -492,7 +520,11 @@ export default function RavensightBoard() {
               <Input
                 type="file"
                 accept="video/*"
-                onChange={(e) => uploadClip(e.target.files?.[0])}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  void uploadClip(file);
+                }}
                 disabled={uploading}
               />
               {uploading && (
