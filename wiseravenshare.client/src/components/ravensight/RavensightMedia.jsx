@@ -53,18 +53,39 @@ export default function RavensightMedia() {
     file_uri: asset.mediaUrl || asset.imageUrl || asset.videoUrl || "",
   });
 
-  const load = async () => {
+  const load = async (assetType = type) => {
     setLoading(true);
     try {
-      if (type === "video") {
-        const page = await apiClient.ravensightMedia.listVideos();
-        setAssets((page || []).map((item) => normalizeAsset("video", item)));
-      } else if (type === "music") {
-        const page = await apiClient.ravensightMedia.listMusic();
-        setAssets((page || []).map((item) => normalizeAsset("music", item)));
+      if (assetType === "video") {
+        const response = await apiClient.ravensightMedia.listVideos();
+        const items = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.items)
+            ? response.items
+            : Array.isArray(response?.data)
+              ? response.data
+              : [];
+        setAssets(items.map((item) => normalizeAsset("video", item)));
+      } else if (assetType === "music") {
+        const response = await apiClient.ravensightMedia.listMusic();
+        const items = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.items)
+            ? response.items
+            : Array.isArray(response?.data)
+              ? response.data
+              : [];
+        setAssets(items.map((item) => normalizeAsset("music", item)));
       } else {
-        const page = await apiClient.ravensightMedia.listPhotos(50);
-        setAssets((page?.data || []).map((item) => normalizeAsset("photo", item)));
+        const response = await apiClient.ravensightMedia.listPhotos(50);
+        const items = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.data)
+            ? response.data
+            : Array.isArray(response?.items)
+              ? response.items
+              : [];
+        setAssets(items.map((item) => normalizeAsset("photo", item)));
       }
     } finally {
       setLoading(false);
@@ -79,18 +100,49 @@ export default function RavensightMedia() {
 
   const handleFile = async (file) => {
     if (!file) return;
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+    const mediaType = file.type.startsWith("video/") || ["mp4", "mov", "webm", "m4v", "avi"].includes(extension)
+      ? "video"
+      : file.type.startsWith("audio/") || ["mp3", "wav", "m4a", "aac", "flac", "ogg"].includes(extension)
+        ? "music"
+        : file.type.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(extension)
+          ? "photo"
+          : "";
+
+    if (!mediaType) {
+      toast({ title: "Unsupported media", description: "Choose a photo, audio track, or video clip.", variant: "destructive" });
+      return;
+    }
+
     setUploading(true);
     try {
-      if (type === "video") {
-        await apiClient.ravensightMedia.uploadVideo(file, { title: file.name.replace(/\.[^/.]+$/, "") });
-      } else if (type === "music") {
-        await apiClient.ravensightMedia.uploadMusic(file, { title: file.name.replace(/\.[^/.]+$/, ""), destinationFolder: "my-library" });
+      const title = file.name.replace(/\.[^/.]+$/, "");
+      if (mediaType === "video") {
+        await apiClient.ravensightMedia.uploadVideo(file, { title, destinationFolder: "my-library" });
+      } else if (mediaType === "music") {
+        await apiClient.ravensightMedia.uploadMusic(file, { title, destinationFolder: "my-library" });
       } else {
-        await apiClient.ravensightMedia.uploadPhoto(file, { caption: file.name.replace(/\.[^/.]+$/, "") });
+        await apiClient.ravensightMedia.uploadPhoto(file, { caption: title, destinationFolder: "my-library" });
       }
-      load();
-    } catch (e) {
-      console.error(e);
+
+      setType(mediaType);
+      try {
+        await load(mediaType);
+      } catch (refreshError) {
+        toast({
+          title: "Media uploaded",
+          description: `Saved successfully, but the library did not refresh: ${refreshError?.message || "refresh failed"}`,
+          variant: "default",
+        });
+        return;
+      }
+      toast({ title: "Media uploaded", description: `${file.name} was saved to your ${mediaType === "photo" ? "photo" : mediaType} library.` });
+    } catch (uploadError) {
+      toast({
+        title: "Upload failed",
+        description: uploadError?.message || `Could not save ${file.name}.`,
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -184,7 +236,7 @@ export default function RavensightMedia() {
         <input
           ref={inputRef}
           type="file"
-          accept={currentType.accept}
+          accept="image/*,audio/*,video/*"
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
@@ -198,7 +250,7 @@ export default function RavensightMedia() {
           ) : (
             <Upload className="w-4 h-4" />
           )}
-          Upload {currentType.label}
+          Upload media
         </Button>
       </div>
 
