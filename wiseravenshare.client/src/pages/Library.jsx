@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Navbar from "@/components/landing/Navbar";
 import LibraryCard from "@/components/library/LibraryCard";
-import LibraryPreview from "@/components/library/LibraryPreview";
 import CameraCapture from "@/components/library/CameraCapture";
 import TeamConnections from "@/components/library/TeamConnections";
 import { apiClient } from "@/api/client";
@@ -9,6 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Image as ImageIcon, Music, Video, Upload, Loader2, Trash2, Search, Library as LibraryIcon } from "lucide-react";
+import { useMediaExperience } from "@/components/media/MediaExperience";
 
 const FILTERS = [
   { id: "all", label: "All", icon: LibraryIcon },
@@ -19,7 +19,7 @@ const FILTERS = [
 
 const ACCEPT_MAP = {
   photo: "image/*",
-  music: "audio/*",
+  music: "audio/*,.mp4,.m4a,.aac,.flac,.ogg,.opus,.wma,.aiff",
   video: "video/*",
 };
 
@@ -37,7 +37,7 @@ const TYPE_LABELS = {
 
 const EXTENSION_MAP = {
   photo: new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]),
-  music: new Set(["mp3", "wav", "m4a", "aac", "flac", "ogg"]),
+  music: new Set(["mp3", "mp4", "wav", "m4a", "aac", "flac", "ogg", "opus", "wma", "aiff"]),
   video: new Set(["mp4", "mov", "webm"]),
 };
 
@@ -86,10 +86,10 @@ export default function Library() {
   const [confirmingId, setConfirmingId] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [confirmingBulk, setConfirmingBulk] = useState(false);
-  const [preview, setPreview] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
+  const { openMedia } = useMediaExperience();
   const fileRefs = useRef({});
 
   const fetchItems = useCallback(async () => {
@@ -158,7 +158,8 @@ export default function Library() {
     const hasMimeType = Boolean(file.type);
     const mimeMatches = expectedPrefix ? file.type.startsWith(expectedPrefix) : false;
 
-    if (expectedPrefix && ((hasMimeType && !mimeMatches) || (!hasMimeType && !extensionAllowed))) {
+    const compatibleAudioContainer = type === "music" && extensionAllowed;
+    if (expectedPrefix && ((hasMimeType && !mimeMatches && !compatibleAudioContainer) || (!hasMimeType && !extensionAllowed))) {
       toast({
         title: "Wrong file type",
         description: `This category only accepts ${TYPE_LABELS[type]} files. You selected "${file.type || extension || "unknown"}".`,
@@ -207,7 +208,6 @@ export default function Library() {
       if (item.asset_type === "photo") await apiClient.ravensightMedia.deletePhoto(item.id);
       else if (item.asset_type === "music") await apiClient.ravensightMedia.deleteMusic(item.id);
       else await apiClient.ravensightMedia.deleteVideo(item.id);
-      if (preview?.id === item.id) setPreview(null);
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.delete(item.id);
@@ -250,17 +250,19 @@ export default function Library() {
     setBulkDeleting(true);
     try {
       const selectedItems = items.filter((item) => selectedIds.has(item.id));
-      await Promise.all(selectedItems.map((item) => {
+      const results = await Promise.allSettled(selectedItems.map((item) => {
         if (item.asset_type === "photo") return apiClient.ravensightMedia.deletePhoto(item.id);
         if (item.asset_type === "music") return apiClient.ravensightMedia.deleteMusic(item.id);
         return apiClient.ravensightMedia.deleteVideo(item.id);
       }));
-      if (preview && selectedIds.has(preview.id)) setPreview(null);
-      setSelectedIds(new Set());
+      const failedItems = selectedItems.filter((_, index) => results[index].status === "rejected");
+      setSelectedIds(new Set(failedItems.map((item) => item.id)));
       setConfirmingId(null);
       fetchItems();
       fetchCounts();
-      toast({ title: "Items deleted", description: "Selected items have been removed." });
+      toast(failedItems.length
+        ? { title: "Some items could not be deleted", description: `${failedItems.length} item(s) failed. They remain selected so you can retry.`, variant: "destructive" }
+        : { title: "Items deleted", description: "Selected items have been removed." });
     } catch (e) {
       toast({
         title: "Bulk delete failed",
@@ -399,7 +401,7 @@ export default function Library() {
                   selected={selectedIds.has(item.id)}
                   confirming={confirmingId === item.id}
                   onSelect={() => toggleSelect(item.id)}
-                  onPreview={() => setPreview(item)}
+                  onPreview={() => openMedia(item)}
                   onDelete={() => handleDelete(item)}
                 />
               ))}
@@ -408,7 +410,6 @@ export default function Library() {
         )}
       </div>
 
-      {preview && <LibraryPreview item={preview} onClose={() => setPreview(null)} />}
       {showCamera && (
         <CameraCapture
           onClose={() => setShowCamera(false)}

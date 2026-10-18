@@ -19,7 +19,6 @@ import AiNews from '@/pages/AiNews';
 import SocialHub from '@/pages/SocialHub';
 import Messages from '@/pages/Messages';
 import Dashboard from '@/pages/Dashboard';
-import Media from '@/pages/Media';
 import TruthSeeker from '@/pages/TruthSeeker';
 import JournalismDashboard from '@/pages/JournalismDashboard';
 import Ravensight from '@/pages/Ravensight';
@@ -32,6 +31,7 @@ import Terms from '@/pages/Terms';
 import CookiePolicy from '@/pages/CookiePolicy';
 import AdminRoute from '@/components/AdminRoute';
 import CreatePostButton from '@/components/feed/CreatePostButton';
+import { MediaExperienceProvider } from '@/components/media/MediaExperience';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -58,7 +58,7 @@ const AuthenticatedApp = () => {
 
   // Render the main app
   return (
-    <>
+    <MediaExperienceProvider>
     <Routes>
       {/* Add your page Route elements here */}
       <Route path="/" element={<Home />} />
@@ -76,7 +76,7 @@ const AuthenticatedApp = () => {
         <Route path="/ai-news" element={<AiNews />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/media" element={<Media />} />
+        <Route path="/media" element={<Navigate to="/library" replace />} />
         <Route path="/truthseeker" element={<TruthSeeker />} />
         <Route path="/journalism" element={<JournalismDashboard />} />
         <Route path="/ravensight" element={<Ravensight />} />
@@ -88,7 +88,7 @@ const AuthenticatedApp = () => {
       <Route path="*" element={<PageNotFound />} />
     </Routes>
     <CreatePostButton />
-    </>
+    </MediaExperienceProvider>
   );
 };
 

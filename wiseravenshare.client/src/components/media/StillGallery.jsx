@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import { Image } from "@/components/ui/image";
-import ZoomableImage from "@/components/media/ZoomableImage";
-import { Camera, Download, X, Loader2, Trash2, Check } from "lucide-react";
+import { Camera, Download, Loader2, Trash2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { useMediaExperience } from "@/components/media/MediaExperience";
 
 function StillThumb({ still, onClick }) {
   const [url, setUrl] = useState(null);
@@ -26,48 +26,14 @@ function StillThumb({ still, onClick }) {
   );
 }
 
-function StillViewer({ still, onClose, onDownload }) {
-  const [url, setUrl] = useState(null);
-  useEffect(() => {
-    getPlayableUrl(still.file_uri).then(setUrl);
-  }, [still.file_uri]);
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-background/90 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div className="max-w-3xl w-full" onClick={(e) => e.stopPropagation()}>
-        {url ? (
-          <ZoomableImage src={url} alt={still.title} className="w-full rounded-lg max-h-[75vh]" fittingType="fit" />
-        ) : (
-          <div className="flex justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-primary" />
-          </div>
-        )}
-        <div className="flex items-center justify-between mt-3">
-          <p className="text-sm text-foreground">{still.title}</p>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => onDownload(still)}>
-              <Download className="w-3.5 h-3.5" /> Download
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="w-3.5 h-3.5" /> Close
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function StillGallery() {
   const [stills, setStills] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [viewing, setViewing] = useState(null);
   const [confirmingId, setConfirmingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const { toast } = useToast();
+  const { openMedia } = useMediaExperience();
 
   const isVideoStill = (photo) =>
     String(photo.caption || "").startsWith("video-still:")
@@ -119,7 +85,6 @@ export default function StillGallery() {
     setConfirmingId(null);
     try {
       await apiClient.ravensightMedia.deletePhoto(still.id);
-      if (viewing?.id === still.id) setViewing(null);
       fetchStills();
     } catch (e) {
       toast({
@@ -149,7 +114,6 @@ export default function StillGallery() {
     setBulkDeleting(true);
     try {
       await Promise.all([...selectedIds].map((id) => apiClient.ravensightMedia.deletePhoto(id)));
-      if (viewing && selectedIds.has(viewing.id)) setViewing(null);
       setSelectedIds(new Set());
       setConfirmingId(null);
       fetchStills();
@@ -216,7 +180,7 @@ export default function StillGallery() {
               onClick={(e) => e.stopPropagation()}
               className="absolute top-2 left-2 z-10 w-4 h-4 accent-primary"
             />
-            <StillThumb still={s} onClick={() => setViewing(s)} />
+            <StillThumb still={s} onClick={() => openMedia({ ...s, type: "photo", url: s.file_uri })} />
             <div className="p-2 flex items-center justify-between gap-1">
               <p className="text-xs text-foreground truncate flex-1">{s.title}</p>
               <Button
@@ -245,13 +209,6 @@ export default function StillGallery() {
         ))}
       </div>
 
-      {viewing && (
-        <StillViewer
-          still={viewing}
-          onClose={() => setViewing(null)}
-          onDownload={downloadStill}
-        />
-      )}
     </div>
   );
 }

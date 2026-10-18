@@ -5,6 +5,7 @@ import { Image } from "@/components/ui/image";
 import { Loader2, Upload, Trash2, Video, Music, Camera, Play, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { useMediaExperience } from "@/components/media/MediaExperience";
 
 const TYPES = [
   { id: "video", label: "Video", icon: Video, accept: "video/*", folder: "video" },
@@ -44,6 +45,7 @@ export default function RavensightMedia() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const inputRef = useRef(null);
   const { toast } = useToast();
+  const { openMedia } = useMediaExperience();
 
   const normalizeAsset = (assetType, asset) => ({
     ...asset,
@@ -300,7 +302,9 @@ export default function RavensightMedia() {
                   className="absolute top-2 left-2 z-10 w-4 h-4 accent-primary"
                 />
                 <div className="p-3">
-                  <AssetThumb asset={a} type={type} />
+                  <button type="button" className="block w-full text-left" onClick={() => openMedia({ ...a, type, url: a.file_uri })}>
+                    <AssetThumb asset={a} type={type} />
+                  </button>
                   <p className="text-xs font-medium text-foreground truncate mt-2">
                     {a.title}
                   </p>

@@ -129,42 +129,73 @@ public sealed class RavensightVideoMediaController : ControllerBase
             return BadRequest(new { message = "videoId is required." });
         }
 
-        var userVideos = await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken);
+        IReadOnlyList<VideoLibraryVideo> userVideos = Array.Empty<VideoLibraryVideo>();
+        try
+        {
+            userVideos = await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read video library rows during deletion for user {UserId}; trying the media catalog.", userId);
+        }
         var video = userVideos.FirstOrDefault(v => string.Equals(v.Id, normalizedVideoId, StringComparison.OrdinalIgnoreCase));
 
-        var deleted = await _videoLibraryStore.DeleteVideoAsync(normalizedVideoId, userId.ToString(), cancellationToken);
+        var deleted = false;
+        try
+        {
+            deleted = await _videoLibraryStore.DeleteVideoAsync(normalizedVideoId, userId.ToString(), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not remove video library row {VideoId} for user {UserId}; trying the media catalog.", normalizedVideoId, userId);
+        }
         var removedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var blobDeleted = false;
 
-        if (video is not null)
+        if (video is not null && !string.IsNullOrWhiteSpace(video.Title))
         {
-            if (!string.IsNullOrWhiteSpace(video.Title))
-            {
-                removedFileNames.Add(video.Title);
-            }
+            removedFileNames.Add(video.Title);
+        }
 
-            var matchingAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "video", 500, cancellationToken);
-            foreach (var asset in matchingAssets.Where(a =>
-                         string.Equals(a.FileName, Path.GetFileName(video.VideoUrl), StringComparison.OrdinalIgnoreCase)
-                         || string.Equals(StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, StreamingUrlHelper.StreamByFileName(a.FileName)), video.VideoUrl, StringComparison.OrdinalIgnoreCase)
-                         || string.Equals(StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, StreamingUrlHelper.StreamByBlobPath(a.RelativePath) ?? string.Empty), video.VideoUrl, StringComparison.OrdinalIgnoreCase)))
+        IReadOnlyList<RavensightMediaAssetRecord> matchingAssets = Array.Empty<RavensightMediaAssetRecord>();
+        try
+        {
+            matchingAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "video", 500, cancellationToken);
+            var directAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, normalizedVideoId, cancellationToken);
+            if (directAsset is not null && !matchingAssets.Any(a => a.Id == directAsset.Id))
+                matchingAssets = matchingAssets.Append(directAsset).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read media catalog rows during deletion for video {VideoId}.", normalizedVideoId);
+        }
+
+        var videoFileName = video is null ? string.Empty : Uri.TryCreate(video.VideoUrl, UriKind.Absolute, out var videoUri)
+                ? Path.GetFileName(videoUri.AbsolutePath)
+                : Path.GetFileName(video.VideoUrl);
+        foreach (var asset in matchingAssets.Where(a =>
+                     string.Equals(a.Id, normalizedVideoId, StringComparison.OrdinalIgnoreCase)
+                     || (video is not null && string.Equals(a.FileName, videoFileName, StringComparison.OrdinalIgnoreCase))
+                     || (video is not null && string.Equals(StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, StreamingUrlHelper.StreamByFileName(a.FileName)), video.VideoUrl, StringComparison.OrdinalIgnoreCase))
+                     || (video is not null && string.Equals(StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, StreamingUrlHelper.StreamByBlobPath(a.RelativePath) ?? string.Empty), video.VideoUrl, StringComparison.OrdinalIgnoreCase)))
+                 )
+        {
+            var objectKey = string.IsNullOrWhiteSpace(asset.RelativePath) ? null : asset.RelativePath;
+            if (!string.IsNullOrWhiteSpace(objectKey))
             {
-                var objectKey = string.IsNullOrWhiteSpace(asset.RelativePath) ? null : asset.RelativePath;
-                if (!string.IsNullOrWhiteSpace(objectKey))
+                try
                 {
-                    try
-                    {
-                        blobDeleted = await _blobStorageService.DeleteAsync(objectKey, cancellationToken) || blobDeleted;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to delete video blob for asset {AssetId}", asset.Id);
-                    }
+                    blobDeleted = await _blobStorageService.DeleteAsync(objectKey, cancellationToken) || blobDeleted;
                 }
-
-                await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken);
-                removedFileNames.Add(asset.FileName);
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete video blob for asset {AssetId}", asset.Id);
+                }
             }
+
+            try { await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to mark video asset {AssetId} deleted.", asset.Id); }
+            removedFileNames.Add(asset.FileName);
         }
 
         if (!deleted && removedFileNames.Count == 0)
