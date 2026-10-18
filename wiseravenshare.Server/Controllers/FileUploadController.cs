@@ -151,8 +151,13 @@ public class MediaController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to save uploaded file to storage." });
         }
 
-        var isVideo = extension is ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv";
-        var isAudio = extension is ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".flac";
+        var isVideo = extension is
+            ".mp4" or ".mov" or ".webm" or ".avi" or ".mkv" or ".m4v"
+            or ".mpg" or ".mpeg" or ".3gp" or ".3g2" or ".ts" or ".m2ts" or ".flv";
+        var isAudio = extension is
+            ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".oga"
+            or ".flac" or ".wma" or ".aiff" or ".aif" or ".opus" or ".caf";
+        var isPhoto = extension is ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".heic" or ".heif";
         if (upload.PublishToYouTube && string.IsNullOrWhiteSpace(upload.YouTubeChannelOrEmail))
         {
             return BadRequest("YouTube details are required when publishing to YouTube.");
@@ -188,7 +193,6 @@ public class MediaController : ControllerBase
         string? facebookUrl = null;
         PublishSocialContentResponse? socialShare = null;
 
-        var isPhoto = extension is ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif";
         var mediaType = isPhoto
             ? SocialMediaType.Photo
             : isAudio
@@ -241,102 +245,96 @@ public class MediaController : ControllerBase
         }
 
         VideoLibraryVideo? video = null;
-        if (isVideo)
+        // ── Persist to all relevant stores (best-effort, never blocks the upload response) ──
+        if (Guid.TryParse(userId, out var catalogUserGuid) && catalogUserGuid != Guid.Empty)
         {
-            if (string.IsNullOrWhiteSpace(userId))
-            {
-                return Unauthorized("Unable to determine current user for video library save.");
-            }
+            var displayName = User.FindFirstValue(ClaimTypes.Name);
+            var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+            var userIdentity = StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId);
+            var mediaFolder = isPhoto
+                ? $"users/{userIdentity}/media/photos"
+                : isAudio
+                    ? $"users/{userIdentity}/media/music"
+                    : $"users/{userIdentity}/media/videos";
+            var title = string.IsNullOrWhiteSpace(upload.Title)
+                ? Path.GetFileNameWithoutExtension(upload.File.FileName)
+                : upload.Title.Trim();
 
-            var absoluteVideoUrl = persistedMediaUrl;
+            // 1. Unified catalog entry for all types (powers Ravensight Media tab + library views).
             try
             {
-                video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
                 {
-                    UserId = userId,
-                    Title = string.IsNullOrWhiteSpace(upload.Title) ? Path.GetFileNameWithoutExtension(upload.File.FileName) : upload.Title,
-                    Description = upload.Description ?? string.Empty,
-                    VideoUrl = absoluteVideoUrl,
-                    PrivacyStatus = "unlisted",
-                    Status = "published",
-                    YouTubeUrl = youtubeUrl,
-                    TikTokUrl = tiktokUrl,
-                    FacebookUrl = facebookUrl
+                    UserId = catalogUserGuid,
+                    MediaType = isPhoto ? RavensightMediaType.Photo : isAudio ? RavensightMediaType.Music : RavensightMediaType.Video,
+                    FileName = uniqueFileName,
+                    RelativePath = $"{mediaFolder}/{uniqueFileName}",
+                    PublicUrl = persistedMediaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? persistedMediaUrl : null,
+                    AbsolutePath = string.Empty,
+                    DestinationFolder = mediaFolder,
+                    ContentType = upload.File.ContentType ?? "application/octet-stream",
+                    SizeBytes = upload.File.Length,
+                    SavedAtUtc = DateTime.UtcNow,
+                    MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        title,
+                        originalFileName = upload.File.FileName,
+                        mediaType = isPhoto ? "photo" : isAudio ? "music" : "video",
+                        storageMode = "permanent",
+                        mediaUrl = persistedMediaUrl
+                    })
                 }, cancellationToken);
-            }
-            catch (PostgresException ex)
-            {
-                _logger.LogError(ex, "Video library save failed at DB layer for user {UserId}.", userId);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Video library database is temporarily unavailable." });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Video library save failed unexpectedly for user {UserId}.", userId);
-                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to save video metadata to library." });
+                _logger.LogWarning(ex, "Catalog write failed for {MediaType} upload by user {UserId}; upload still succeeded.", isPhoto ? "photo" : isAudio ? "audio" : "video", catalogUserGuid);
             }
-        }
 
-        var mediaUrl = persistedMediaUrl;
-
-        // Register photos and music in the user catalog so they appear in My Library.
-        if (isPhoto || isAudio)
-        {
-            var catalogUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? User.FindFirstValue("sub")
-                ?? User.FindFirstValue("id");
-            if (Guid.TryParse(catalogUserId, out var catalogUserGuid) && catalogUserGuid != Guid.Empty)
+            // 2. Video library entry (powers /ravensight/media/videos listing).
+            if (isVideo)
             {
-                var displayName = User.FindFirstValue(ClaimTypes.Name);
-                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
-                var userIdentity = StoragePathResolver.ResolveUserStorageIdentity(displayName, email, catalogUserId);
-                var mediaFolder = isPhoto ? $"users/{userIdentity}/media/photos" : $"users/{userIdentity}/media/music";
-
                 try
                 {
-                    await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+                    video = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
                     {
-                        UserId = catalogUserGuid,
-                        MediaType = isPhoto ? RavensightMediaType.Photo : RavensightMediaType.Music,
-                        FileName = uniqueFileName,
-                        RelativePath = $"{mediaFolder}/{uniqueFileName}",
-                        PublicUrl = null,
-                        AbsolutePath = string.Empty,
-                        DestinationFolder = mediaFolder,
-                        ContentType = upload.File.ContentType ?? "application/octet-stream",
-                        SizeBytes = upload.File.Length,
-                        SavedAtUtc = DateTime.UtcNow,
-                        MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            title = upload.Title ?? Path.GetFileNameWithoutExtension(upload.File.FileName),
-                            originalFileName = upload.File.FileName,
-                            mediaType = isPhoto ? "photo" : "music"
-                        })
+                        UserId = userId,
+                        Title = title,
+                        Description = upload.Description ?? string.Empty,
+                        VideoUrl = persistedMediaUrl,
+                        PrivacyStatus = "unlisted",
+                        Status = "published",
+                        StorageMode = "permanent",
+                        IsPermanent = true,
+                        YouTubeUrl = youtubeUrl,
+                        TikTokUrl = tiktokUrl,
+                        FacebookUrl = facebookUrl
                     }, cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to register {MediaType} upload in catalog for user {UserId}.", isPhoto ? "photo" : "music", catalogUserGuid);
+                    _logger.LogWarning(ex, "Video library write failed for user {UserId}; upload still succeeded.", userId);
                 }
+            }
 
-                if (isAudio && _musicLibraryStore is not null)
+            // 3. Music bucket store entry (powers FM radio + music player listings).
+            if (isAudio && _musicLibraryStore is not null)
+            {
+                try
                 {
-                    try
-                    {
-                        await _musicLibraryStore.SaveMusicAsync(
-                            catalogUserGuid,
-                            upload.File,
-                            new DTOs.SaveRavensightMusicDto
-                            {
-                                Title = upload.Title ?? Path.GetFileNameWithoutExtension(upload.File.FileName),
-                                DestinationFolder = mediaFolder
-                            },
-                            userIdentity,
-                            cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to register audio upload in bucket store for user {UserId}.", catalogUserGuid);
-                    }
+                    await _musicLibraryStore.SaveMusicAsync(
+                        catalogUserGuid,
+                        upload.File,
+                        new DTOs.SaveRavensightMusicDto
+                        {
+                            Title = title,
+                            DestinationFolder = mediaFolder
+                        },
+                        userIdentity,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Music bucket write failed for user {UserId}; upload still succeeded.", catalogUserGuid);
                 }
             }
         }
@@ -346,8 +344,8 @@ public class MediaController : ControllerBase
         return Ok(new
         {
             fileName = uniqueFileName,
-            filePath = mediaUrl,
-            mediaUrl,
+            filePath = persistedMediaUrl,
+            mediaUrl = persistedMediaUrl,
             youtubeUrl,
             tiktokUrl,
             facebookUrl,
