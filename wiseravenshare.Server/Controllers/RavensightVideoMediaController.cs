@@ -189,7 +189,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
         var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
             saved.File.PublicUrl,
-            StreamingUrlHelper.StreamByFileName(saved.File.FileName));
+            StreamingUrlHelper.StreamByBlobPath(saved.File.RelativePath));
         var persistenceStatus = "ready";
         var response = new RavensightSavedMediaDto
         {

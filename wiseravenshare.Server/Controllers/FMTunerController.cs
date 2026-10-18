@@ -95,7 +95,7 @@ public sealed class FMTunerController : ControllerBase
 
     /// <summary>
     /// Returns stations filtered by country and/or genre tag from Radio Browser.
-    /// Passes https=true so only HTTPS-capable streams are returned, preventing
+    /// Passes is_https=true so only HTTPS-capable streams are returned, preventing
     /// mixed-content blocks in the browser.
     /// </summary>
     [HttpGet("rb/stations")]
@@ -103,6 +103,8 @@ public sealed class FMTunerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRadioBrowserStations(
         [FromQuery] string? countryCode = null,
+        [FromQuery] string? state = null,
+        [FromQuery] string? name = null,
         [FromQuery] string? tag = null,
         [FromQuery] int limit = 30,
         CancellationToken cancellationToken = default)
@@ -112,11 +114,13 @@ public sealed class FMTunerController : ControllerBase
         var query = System.Web.HttpUtility.ParseQueryString(string.Empty);
         query["order"]       = "clickcount";
         query["reverse"]     = "true";
+        query["is_https"]    = "true";
+        query["limit"]       = Math.Clamp(limit, 1, 100).ToString();
         query["hidebroken"]  = "true";
-        query["https"]       = "true";   // ← guarantees HTTPS streams only
-        query["limit"]       = limit.ToString();
 
         if (!string.IsNullOrWhiteSpace(countryCode)) query["countrycode"] = countryCode.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(state))       query["state"]       = state.Trim();
+        if (!string.IsNullOrWhiteSpace(name))        query["name"]        = name.Trim();
         if (!string.IsNullOrWhiteSpace(tag))         query["tag"]         = tag.Trim().ToLowerInvariant();
 
         var url = $"{RadioBrowserBaseUrl}/json/stations/search?{query}";
