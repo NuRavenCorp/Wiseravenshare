@@ -158,6 +158,12 @@ const uploadViaMediaController = async (
     destinationFolder = "",
     title = "",
     description = "",
+    publishToYouTube = false,
+    publishToTikTok = false,
+    publishToFacebook = false,
+    youtubeChannelOrEmail = "",
+    tiktokUsername = "",
+    facebookPageOrProfile = "",
   } = {}
 ) => {
   if (!file) {
@@ -169,6 +175,12 @@ const uploadViaMediaController = async (
   body.append("destinationFolder", destinationFolder);
   body.append("title", title || file.name?.replace(/\.[^/.]+$/, "") || "Upload");
   body.append("description", description || "");
+  body.append("publishToYouTube", publishToYouTube ? "true" : "false");
+  body.append("publishToTikTok", publishToTikTok ? "true" : "false");
+  body.append("publishToFacebook", publishToFacebook ? "true" : "false");
+  body.append("YouTubeChannelOrEmail", youtubeChannelOrEmail || "");
+  body.append("TikTokUsername", tiktokUsername || "");
+  body.append("FacebookPageOrProfile", facebookPageOrProfile || "");
 
   const data = await request("/api/media/upload", { method: "POST", body });
   const mediaUrl = data?.mediaUrl || data?.filePath || data?.file?.mediaUrl || "";
@@ -413,6 +425,9 @@ export const apiClient = {
     },
   },
   ravensightMedia: {
+    uploadMedia(file, fields = {}) {
+      return uploadViaMediaController(file, fields);
+    },
     listMusic() {
       return requestJson("/api/ravensight/media/music", { method: "GET" });
     },
