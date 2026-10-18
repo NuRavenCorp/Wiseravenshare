@@ -290,6 +290,29 @@ const entityProxy = new Proxy(
 );
 
 export const apiClient = {
+  posts: {
+    feed(page = 1, pageSize = 20) {
+      return requestJson(`/api/posts/feed?page=${page}&pageSize=${pageSize}`, { method: "GET" });
+    },
+    trending(count = 20) {
+      return requestJson(`/api/posts/trending?count=${count}`, { method: "GET" });
+    },
+    like(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "POST" });
+    },
+    unlike(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "DELETE" });
+    },
+    repost(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/repost`, { method: "POST" });
+    },
+    unrepost(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/repost`, { method: "DELETE" });
+    },
+    share(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/share`, { method: "POST" });
+    },
+  },
   auth: {
     setToken(token) {
       if (!token) {
@@ -425,6 +448,9 @@ export const apiClient = {
     },
   },
   ravensightMedia: {
+    backup() {
+      return requestJson("/api/ravensight/media/backup", { method: "POST" });
+    },
     uploadMedia(file, fields = {}) {
       return uploadViaMediaController(file, fields);
     },
@@ -605,6 +631,24 @@ export const apiClient = {
   },
   // Social platform connect/disconnect via server OAuth flow
   social: {
+    followStatus(userId) {
+      return requestJson(`/api/follow/status/${encodeURIComponent(userId)}`, { method: "GET" });
+    },
+    toggleFollow(userId) {
+      return requestJson("/api/follow/toggle", { method: "POST", body: JSON.stringify({ targetUserId: userId }) });
+    },
+    myBlocks() {
+      return requestJson("/api/users/me/blocks", { method: "GET" });
+    },
+    getUser(userId) {
+      return requestJson(`/api/users/${encodeURIComponent(userId)}`, { method: "GET" });
+    },
+    blockUser(userId) {
+      return requestJson(`/api/users/${encodeURIComponent(userId)}/block`, { method: "POST" });
+    },
+    unblockUser(userId) {
+      return requestJson(`/api/users/${encodeURIComponent(userId)}/block`, { method: "DELETE" });
+    },
     getSocialConnectUrl(platform, userId, returnUrl) {
       const params = new URLSearchParams({
         user_id: userId,

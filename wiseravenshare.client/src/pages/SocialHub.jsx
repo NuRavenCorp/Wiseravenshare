@@ -10,6 +10,7 @@ import TodaysVibe from "@/components/vibe/TodaysVibe";
 import LimitationsNotice from "@/components/social/LimitationsNotice";
 import { Share2, Download, Feather, Link2 } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
+import PostsFeed from "@/components/feed/PostsFeed";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube"];
 
@@ -43,15 +44,18 @@ export default function SocialHub() {
       <Navbar />
       <main className="max-w-4xl mx-auto px-4 py-12">
         <div className="mb-8">
-          <h1 className="font-heading text-4xl text-foreground mb-2 text-glow">Social Connections</h1>
-          <p className="text-muted-foreground">Connect Instagram, TikTok, YouTube, and the rest of your social stack.</p>
+          <h1 className="font-heading text-4xl text-foreground mb-2 text-glow">Your Social Hub</h1>
+          <p className="text-muted-foreground">Follow creators, share posts, explore what is trending, and connect your other social accounts.</p>
         </div>
         <LimitationsNotice />
         <div className="mb-8">
           <TodaysVibe />
         </div>
-        <Tabs defaultValue="connect">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+        <Tabs defaultValue="feed">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
+            <TabsTrigger value="feed" className="flex items-center gap-2">
+              <Feather className="w-4 h-4" /> Feed
+            </TabsTrigger>
             <TabsTrigger value="connect" className="flex items-center gap-2">
               <Link2 className="w-4 h-4" /> Connect
             </TabsTrigger>
@@ -65,6 +69,10 @@ export default function SocialHub() {
               <Download className="w-4 h-4" /> Import
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="feed">
+            <PostsFeed />
+          </TabsContent>
 
           <TabsContent value="connect">
             <div className="space-y-4">

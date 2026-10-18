@@ -12,7 +12,7 @@ const formatDateGroup = (dateStr) => {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 };
 
-export default function PostTimeline({ posts, currentUser, onAuthRequired }) {
+export default function PostTimeline({ posts, currentUser, onAuthRequired, onHashtagClick, onBlocked, blockedIds }) {
   if (!posts || posts.length === 0) return null;
 
   const groups = {};
@@ -41,7 +41,7 @@ export default function PostTimeline({ posts, currentUser, onAuthRequired }) {
               {groups[day].map((post) => (
                 <div key={post.id} className="relative">
                   <div className="absolute -left-[2.25rem] top-6 w-2.5 h-2.5 rounded-full bg-primary border-2 border-background shadow-[0_0_8px_hsl(265_70%_60%/0.4)]" />
-                  <PostCard post={post} currentUser={currentUser} onAuthRequired={onAuthRequired} />
+                  <PostCard post={post} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={onHashtagClick} onBlocked={onBlocked} onAuthRequired={onAuthRequired} />
                 </div>
               ))}
             </div>

@@ -25,6 +25,7 @@ import Ravensight from '@/pages/Ravensight';
 import Podcasts from '@/pages/Podcasts';
 import Performance from '@/pages/Performance';
 import Library from '@/pages/Library';
+import PythonMatrixLab from '@/pages/PythonMatrixLab';
 import JoinFeed from '@/pages/JoinFeed';
 import Privacy from '@/pages/Privacy';
 import Terms from '@/pages/Terms';
@@ -83,6 +84,7 @@ const AuthenticatedApp = () => {
         <Route path="/podcasts" element={<Podcasts />} />
         <Route path="/performance" element={<Performance />} />
         <Route path="/library" element={<Library />} />
+        <Route path="/python-features" element={<PythonMatrixLab />} />
         <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
       </Route>
       <Route path="*" element={<PageNotFound />} />

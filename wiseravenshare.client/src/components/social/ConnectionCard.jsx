@@ -44,6 +44,7 @@ export default function ConnectionCard({ platform }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
 
   // Editable fields – auto-filled from status.details after connect
   const [username, setUsername]       = useState("");
@@ -67,17 +68,22 @@ export default function ConnectionCard({ platform }) {
   }, []);
 
   const fetchStatus = useCallback(async () => {
+    setStatusError("");
     try {
       const me = await apiClient.auth.me();
-      if (!me) return;
+      if (!me) {
+        setStatusError("Could not identify your account to check this connection.");
+        return;
+      }
       setUserId(me.id);
       const data = await apiClient.social.getStatus(platform);
       setStatus(data);
       if (data?.connected) {
         applyDetails(data.details);
       }
-    } catch {
-      setStatus({ connected: false });
+    } catch (fetchError) {
+      setStatus(null);
+      setStatusError(fetchError?.message || "Could not check this connection. Retry in a moment.");
     } finally {
       setLoading(false);
     }
@@ -91,6 +97,15 @@ export default function ConnectionCard({ platform }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const justConnected = params.get("social_connected");
+    const authError = params.get("socialAuthError");
+    const authProvider = params.get("authProvider");
+    if (authError && (!authProvider || authProvider === platform)) {
+      setError(authError);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("socialAuthError");
+      cleanUrl.searchParams.delete("authProvider");
+      window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+    }
     if (justConnected === platform) {
       fetchStatus();
       // Clean up the query param without a reload
@@ -172,6 +187,8 @@ export default function ConnectionCard({ platform }) {
               <CardDescription className="text-xs flex items-center gap-1 mt-0.5">
                 {loading ? (
                   <Loader2 className="w-3 h-3 animate-spin" />
+                ) : statusError ? (
+                  <><AlertCircle className="w-3 h-3 text-amber-500" /> Status unavailable</>
                 ) : isConnected ? (
                   <><Check className="w-3 h-3 text-green-500" /> Connected</>
                 ) : (
@@ -191,7 +208,14 @@ export default function ConnectionCard({ platform }) {
           </div>
         )}
 
-        {!loading && !isConnected && (
+        {!loading && statusError && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">{statusError}</p>
+            <Button variant="outline" size="sm" className="w-full" onClick={fetchStatus}>Retry status check</Button>
+          </div>
+        )}
+
+        {!loading && !statusError && !isConnected && (
           oauthSupported ? (
             <Button
               onClick={handleConnect}

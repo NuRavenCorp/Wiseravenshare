@@ -30,6 +30,7 @@ export default function PostComposer({ onPosted, compact }) {
   const [content, setContent] = useState("");
   const [postType, setPostType] = useState("text");
   const [hashtags, setHashtags] = useState("");
+  const [partials, setPartials] = useState("");
   const [mediaUrls, setMediaUrls] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -42,6 +43,7 @@ export default function PostComposer({ onPosted, compact }) {
     setContent(tpl.content);
     setPostType(tpl.postType);
     setHashtags(tpl.hashtags.join(", "));
+    setPartials("");
     setMediaUrls([]);
   };
 
@@ -77,12 +79,19 @@ export default function PostComposer({ onPosted, compact }) {
       const tags = hashtags
         .split(/[,\s]+/)
         .map((t) => t.replace(/^#/, "").trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((tag) => `#${tag}`);
+      const partialTags = partials
+        .split(/[ ,\s]+/)
+        .map((value) => value.replace(/^%/, "").trim())
+        .filter(Boolean)
+        .map((tag) => `%${tag}`);
+      const taggedContent = [content.trim(), ...tags, ...partialTags].join(" ");
 
       await apiClient.requestJson("/api/posts", {
         method: "POST",
         body: JSON.stringify({
-          content: content.trim(),
+          content: taggedContent,
           type: toServerPostType(postType),
           mediaUrl: mediaUrls[0] || null,
           mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
@@ -91,6 +100,7 @@ export default function PostComposer({ onPosted, compact }) {
       });
       setContent("");
       setHashtags("");
+      setPartials("");
       setMediaUrls([]);
       setPostType("text");
       onPosted?.();
@@ -198,6 +208,17 @@ export default function PostComposer({ onPosted, compact }) {
           onChange={(e) => setHashtags(e.target.value)}
           placeholder="hashtags (comma separated)"
           className="text-sm"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="w-4 text-center text-sm font-semibold text-accent">%</span>
+        <Input
+          value={partials}
+          onChange={(e) => setPartials(e.target.value)}
+          placeholder="partials (e.g. %human, %truth, %in-progress)"
+          className="text-sm"
+          aria-label="Partials"
         />
       </div>
 

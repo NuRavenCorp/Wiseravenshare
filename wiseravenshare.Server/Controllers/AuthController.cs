@@ -889,6 +889,13 @@ public class AuthController : ControllerBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Unable to activate social feed settings for {Provider} on {Email}.", normalizedProvider, normalizedEmail);
+                if (stateRecord.IsSocialConnect)
+                {
+                    return Redirect(BuildOAuthErrorRedirect(
+                        stateRecord.ReturnUrl,
+                        normalizedProvider,
+                        "The account was authorized, but WiseRavenShare could not save the connection. Please retry when database service is restored."));
+                }
             }
         }
 

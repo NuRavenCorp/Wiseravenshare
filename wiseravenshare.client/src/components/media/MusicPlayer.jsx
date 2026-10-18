@@ -28,8 +28,9 @@ const formatTime = (s) => {
   const sec = Math.floor(s % 60);
   return `${m}:${String(sec).padStart(2, "0")}`;
 };
+const EMPTY_QUEUE = Object.freeze([]);
 
-export default function MusicPlayer({ initialTrack = null }) {
+export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_QUEUE }) {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentIdx, setCurrentIdx] = useState(-1);
@@ -37,7 +38,7 @@ export default function MusicPlayer({ initialTrack = null }) {
   const [playUrl, setPlayUrl] = useState(null);
   const [urlLoading, setUrlLoading] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
-  const [autoPlayRequested, setAutoPlayRequested] = useState(false);
+  const [nativeControlsFallback, setNativeControlsFallback] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
@@ -49,6 +50,16 @@ export default function MusicPlayer({ initialTrack = null }) {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const playerRef = useRef(null);
   const { toast } = useToast();
+  const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+  useEffect(() => {
+    const audio = playerRef.current;
+    if (!audio) return;
+    audio.muted = muted;
+    if (!isIOS) {
+      try { audio.volume = volume; } catch { /* iOS manages playback volume through system controls. */ }
+    }
+  }, [volume, muted, isIOS]);
 
   const normalizeTrack = (track) => ({
     ...track,
@@ -60,7 +71,9 @@ export default function MusicPlayer({ initialTrack = null }) {
   const fetchTracks = async () => {
     try {
       const res = await apiClient.ravensightMedia.listMusic();
-      setTracks((res || []).map(normalizeTrack));
+      const loadedTracks = (res || []).map(normalizeTrack);
+      setTracks(loadedTracks);
+      if (!initialTrack && loadedTracks.length > 0) setCurrentIdx(0);
     } finally {
       setLoading(false);
     }
@@ -72,6 +85,12 @@ export default function MusicPlayer({ initialTrack = null }) {
 
   useEffect(() => {
     if (!initialTrack || tracks.length === 0) return;
+    if (Array.isArray(initialQueue) && initialQueue.length > 1) {
+      const queue = initialQueue.map(normalizeTrack);
+      setTracks(queue);
+      setCurrentIdx(Math.max(0, queue.findIndex((track) => String(track.id) === String(initialTrack.id))));
+      return;
+    }
     const index = tracks.findIndex((track) =>
       (initialTrack.id && String(track.id) === String(initialTrack.id))
       || (initialTrack.url && track.file_uri === initialTrack.url)
@@ -83,8 +102,7 @@ export default function MusicPlayer({ initialTrack = null }) {
       setTracks((currentTracks) => [...currentTracks, externalTrack]);
       setCurrentIdx(tracks.length);
     }
-    setAutoPlayRequested(true);
-  }, [initialTrack, tracks.length]);
+  }, [initialTrack, initialQueue, tracks.length]);
 
   const current = currentIdx >= 0 ? tracks[currentIdx] : null;
 
@@ -103,32 +121,33 @@ export default function MusicPlayer({ initialTrack = null }) {
     setDuration(0);
     getPlayableUrl(current.file_uri).then((url) => {
       if (cancelled) return;
+      if (!url) throw new Error("The media URL is unavailable.");
       setPlayUrl(url);
       setUrlLoading(false);
+    }).catch((error) => {
+      if (cancelled) return;
+      setUrlLoading(false);
+      setPlaybackError(error?.message || "Could not prepare this track for playback.");
     });
     return () => { cancelled = true; };
   }, [current]);
 
-  useEffect(() => {
-    if (!playUrl || !autoPlayRequested || !playerRef.current) return;
-    playerRef.current.play()
-      .then(() => setAutoPlayRequested(false))
-      .catch(() => {
-        setAutoPlayRequested(false);
-        setPlaybackError("Playback was blocked. Press play to start this track.");
-      });
-  }, [playUrl, autoPlayRequested]);
-
   const handlePlayPause = () => {
     if (!current && tracks.length > 0) {
-      setAutoPlayRequested(true);
       setCurrentIdx(0);
       return;
     }
     const audio = playerRef.current;
     if (!audio) return;
     if (playing) audio.pause();
-    else audio.play().catch(() => setPlaybackError("This track could not be played. Check the file format or try uploading it again."));
+    else audio.play().catch((error) => {
+      if (error?.name === "NotAllowedError") {
+        setNativeControlsFallback(true);
+        setPlaybackError("Your browser blocked this play request. Tap the audio controls below to start playback.");
+      } else if (error?.name !== "AbortError") {
+        setPlaybackError("This track could not be played. Check the file format or try uploading it again.");
+      }
+    });
   };
 
   const handleNext = () => {
@@ -177,7 +196,6 @@ export default function MusicPlayer({ initialTrack = null }) {
   };
 
   const selectTrack = (i) => {
-    setAutoPlayRequested(true);
     setCurrentIdx(i);
   };
 
@@ -257,15 +275,22 @@ export default function MusicPlayer({ initialTrack = null }) {
         ref={playerRef}
         src={playUrl || undefined}
         preload="metadata"
-        volume={muted ? 0 : volume}
+        playsInline
+        controls={isIOS || nativeControlsFallback}
         muted={muted}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={handleEnded}
         onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime || 0)}
         onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
-        onError={() => { if (playUrl) { setPlaybackError("This track could not be loaded. Check the file format or upload it again."); setPlaying(false); } }}
-        className="sr-only"
+        onError={(event) => {
+          if (!playUrl) return;
+          const code = event.currentTarget.error?.code;
+          const detail = code === 4 ? "This audio format is not supported by this browser." : "The audio stream could not be loaded. Check access or try uploading the track again.";
+          setPlaybackError(detail);
+          setPlaying(false);
+        }}
+        className={isIOS || nativeControlsFallback ? "mx-auto h-12 w-full rounded-md bg-secondary" : "sr-only"}
       />
 
       {/* Now Playing Bar */}
@@ -336,7 +361,7 @@ export default function MusicPlayer({ initialTrack = null }) {
             <Button
               size="icon"
               onClick={handlePlayPause}
-              disabled={tracks.length === 0 || urlLoading}
+              disabled={!current || urlLoading}
             >
               {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             </Button>
@@ -359,7 +384,7 @@ export default function MusicPlayer({ initialTrack = null }) {
           </div>
 
           {/* Volume */}
-          <div className="flex items-center gap-2">
+          {!isIOS && <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
@@ -384,7 +409,7 @@ export default function MusicPlayer({ initialTrack = null }) {
               }}
               className="w-20 accent-primary"
             />
-          </div>
+          </div>}
         </div>
       </div>
 
