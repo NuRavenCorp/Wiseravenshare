@@ -29,7 +29,7 @@ const formatTime = (s) => {
   return `${m}:${String(sec).padStart(2, "0")}`;
 };
 
-export default function MusicPlayer() {
+export default function MusicPlayer({ initialTrack = null }) {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentIdx, setCurrentIdx] = useState(-1);
@@ -54,7 +54,7 @@ export default function MusicPlayer() {
     ...track,
     id: track.id,
     title: track.title || track.fileName || "Untitled track",
-    file_uri: track.mediaUrl || "",
+    file_uri: track.mediaUrl || track.file_uri || track.url || "",
   });
 
   const fetchTracks = async () => {
@@ -69,6 +69,22 @@ export default function MusicPlayer() {
   useEffect(() => {
     fetchTracks();
   }, []);
+
+  useEffect(() => {
+    if (!initialTrack || tracks.length === 0) return;
+    const index = tracks.findIndex((track) =>
+      (initialTrack.id && String(track.id) === String(initialTrack.id))
+      || (initialTrack.url && track.file_uri === initialTrack.url)
+      || (initialTrack.file_uri && track.file_uri === initialTrack.file_uri));
+    if (index >= 0) {
+      setCurrentIdx(index);
+    } else {
+      const externalTrack = normalizeTrack(initialTrack);
+      setTracks((currentTracks) => [...currentTracks, externalTrack]);
+      setCurrentIdx(tracks.length);
+    }
+    setAutoPlayRequested(true);
+  }, [initialTrack, tracks.length]);
 
   const current = currentIdx >= 0 ? tracks[currentIdx] : null;
 

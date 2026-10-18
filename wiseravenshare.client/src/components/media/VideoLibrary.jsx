@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
-import { getPlayableUrl } from "@/lib/mediaUtils";
 import MediaUpload from "@/components/media/MediaUpload";
 import { Loader2, Play, Trash2, Check, Video, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { useMediaExperience } from "@/components/media/MediaExperience";
 
 export default function VideoLibrary() {
   const [videos, setVideos] = useState([]);
@@ -12,11 +12,8 @@ export default function VideoLibrary() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewVideo, setPreviewVideo] = useState(null);
-  const [ended, setEnded] = useState(false);
   const { toast } = useToast();
+  const { openMedia } = useMediaExperience();
 
   const normalizeVideo = (video) => ({
     ...video,
@@ -38,25 +35,7 @@ export default function VideoLibrary() {
     fetchVideos();
   }, []);
 
-  const openPreview = async (v) => {
-    setPreviewVideo(v);
-    setPreviewLoading(true);
-    setPreviewUrl(null);
-    try {
-      const url = await getPlayableUrl(v.file_uri);
-      setPreviewUrl(url);
-    } catch (e) {
-      toast({ title: "Could not load video", variant: "destructive" });
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
-  const closePreview = () => {
-    setPreviewUrl(null);
-    setPreviewVideo(null);
-    setEnded(false);
-  };
+  const openPreview = (video) => openMedia({ ...video, type: "video", url: video.file_uri });
 
   const handleDelete = async (v) => {
     if (confirmingId !== v.id) {
@@ -66,7 +45,6 @@ export default function VideoLibrary() {
     setConfirmingId(null);
     try {
       await apiClient.ravensightMedia.deleteVideo(v.id);
-      if (previewVideo?.id === v.id) closePreview();
       fetchVideos();
     } catch (e) {
       toast({
@@ -96,7 +74,6 @@ export default function VideoLibrary() {
     setBulkDeleting(true);
     try {
       await Promise.all([...selectedIds].map((id) => apiClient.ravensightMedia.deleteVideo(id)));
-      if (previewVideo && selectedIds.has(previewVideo.id)) closePreview();
       setSelectedIds(new Set());
       setConfirmingId(null);
       fetchVideos();
@@ -122,46 +99,6 @@ export default function VideoLibrary() {
   return (
     <div className="space-y-4">
       <MediaUpload type="video" onUploaded={fetchVideos} />
-
-      {/* Preview Modal */}
-      {previewVideo && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={closePreview}>
-          <div className="relative max-w-4xl w-full" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={closePreview}
-              className="absolute -top-10 right-0 text-sm text-muted-foreground hover:text-foreground"
-            >
-              Close ✕
-            </button>
-            {previewLoading ? (
-              <div className="aspect-video rounded-lg border border-border bg-card flex items-center justify-center">
-                <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              </div>
-            ) : previewUrl ? (
-              <video
-                key={previewUrl}
-                src={previewUrl}
-                controls
-                autoPlay
-                onEnded={() => setEnded(true)}
-                onPlay={() => setEnded(false)}
-                className="w-full rounded-lg border border-border bg-black"
-              />
-            ) : null}
-            <div className="flex items-center justify-between gap-3 mt-2">
-              <p className="text-sm text-foreground truncate">{previewVideo.title}</p>
-              {previewUrl && ended && (
-                <button
-                  onClick={() => { setEnded(false); setPreviewUrl(null); setTimeout(() => setPreviewUrl(previewUrl), 10); }}
-                  className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline shrink-0"
-                >
-                  <Play className="w-3 h-3" /> Replay
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Library Header */}
       <div className="flex items-center justify-between">

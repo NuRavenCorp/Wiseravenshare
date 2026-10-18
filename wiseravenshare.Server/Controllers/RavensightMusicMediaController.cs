@@ -182,7 +182,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var deletedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var blobDeleted = false;
 
-        var bucketDeleted = await _musicLibraryStore.DeleteMusicAsync(userId, normalizedTrackId, cancellationToken);
+        MusicLibraryDeleteResult? bucketDeleted = null;
+        try
+        {
+            bucketDeleted = await _musicLibraryStore.DeleteMusicAsync(userId, normalizedTrackId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not remove music library row {TrackId} for user {UserId}; trying the media catalog.", normalizedTrackId, userId);
+        }
         if (bucketDeleted is not null)
         {
             if (!string.IsNullOrWhiteSpace(bucketDeleted.FileName))
@@ -207,7 +215,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
             }
         }
 
-        var catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, normalizedTrackId, cancellationToken);
+        RavensightMediaAssetRecord? catalogAsset = null;
+        try
+        {
+            catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, normalizedTrackId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read catalog row for music track {TrackId}; continuing with bucket deletion result.", normalizedTrackId);
+        }
         if (catalogAsset is not null && string.Equals(catalogAsset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
         {
             deletedFileNames.Add(catalogAsset.FileName);
@@ -228,12 +244,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
                 }
             }
 
-            await _mediaCatalogStore.MarkAssetDeletedAsync(catalogAsset.Id, DateTime.UtcNow, cancellationToken);
+            try { await _mediaCatalogStore.MarkAssetDeletedAsync(catalogAsset.Id, DateTime.UtcNow, cancellationToken); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to mark music asset {AssetId} deleted.", catalogAsset.Id); }
         }
 
         foreach (var fileName in deletedFileNames)
         {
-            var bucketRows = await _musicLibraryStore.DeleteMusicByFileNameAsync(userId, fileName, cancellationToken);
+            IReadOnlyList<MusicLibraryDeleteResult> bucketRows = Array.Empty<MusicLibraryDeleteResult>();
+            try { bucketRows = await _musicLibraryStore.DeleteMusicByFileNameAsync(userId, fileName, cancellationToken); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to clean up additional bucket rows for music file {FileName}.", fileName); }
             foreach (var row in bucketRows)
             {
                 var objectKey = string.IsNullOrWhiteSpace(row.ObjectKey)
@@ -256,11 +275,16 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         if (deletedFileNames.Count > 0)
         {
-            var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 500, cancellationToken);
-            foreach (var asset in assets.Where(a => deletedFileNames.Contains(a.FileName)))
+            try
             {
-                await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken);
+                var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 500, cancellationToken);
+                foreach (var asset in assets.Where(a => deletedFileNames.Contains(a.FileName)))
+                {
+                    try { await _mediaCatalogStore.MarkAssetDeletedAsync(asset.Id, DateTime.UtcNow, cancellationToken); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to mark music asset {AssetId} deleted.", asset.Id); }
+                }
             }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to reconcile catalog rows after deleting music track {TrackId}.", normalizedTrackId); }
         }
 
         if (bucketDeleted is null && catalogAsset is null)
