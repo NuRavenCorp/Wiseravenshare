@@ -100,17 +100,14 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed uploading {MediaType} {FileName} to blob storage", mediaType, fileName);
-                        try
-                        {
-                            File.Delete(fullPath);
-                        }
-                        catch (Exception cleanupException)
-                        {
-                            _logger.LogDebug(cleanupException, "Could not remove incomplete local copy of {FileName}.", fileName);
-                        }
-
-                        throw new InvalidOperationException("Media could not be saved to persistent storage. Please retry the upload.", ex);
+                        // Blob upload failed — fall back to local disk so the upload isn't
+                        // silently lost. Files saved here won't survive a container restart
+                        // but are immediately playable via the streaming endpoint.
+                        _logger.LogWarning(
+                            ex,
+                            "Blob storage upload failed for {MediaType} {FileName}; serving from local disk. " +
+                            "Check Storage:Blob credentials and bucket permissions.",
+                            mediaType, fileName);
                     }
                 }
                 else
