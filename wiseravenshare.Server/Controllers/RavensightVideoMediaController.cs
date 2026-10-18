@@ -45,8 +45,48 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
         try
         {
-            var videos = await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken);
-            return Ok(videos);
+            var videos = (await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken)).ToList();
+            try
+            {
+                // Durable catalog entries survive when the secondary video-library write degrades.
+                var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "video", 200, cancellationToken);
+                var knownUrls = videos
+                    .Select(video => NormalizeMediaUrl(video.VideoUrl))
+                    .Where(url => !string.IsNullOrWhiteSpace(url))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var asset in assets)
+                {
+                    var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
+                        asset.PublicUrl,
+                        StreamingUrlHelper.StreamByBlobPath(asset.RelativePath) ?? StreamingUrlHelper.StreamByFileName(asset.FileName));
+                    var normalizedUrl = NormalizeMediaUrl(mediaUrl);
+                    if (string.IsNullOrWhiteSpace(normalizedUrl) || !knownUrls.Add(normalizedUrl)) continue;
+
+                    videos.Add(new VideoLibraryVideo
+                    {
+                        Id = asset.Id,
+                        UserId = userId.ToString(),
+                        Title = TryReadMetadataString(asset.MetadataJson, "title", Path.GetFileNameWithoutExtension(asset.FileName)),
+                        Description = TryReadMetadataString(asset.MetadataJson, "description", string.Empty),
+                        VideoUrl = mediaUrl,
+                        ThumbnailUrl = string.Empty,
+                        Status = "published",
+                        PrivacyStatus = "unlisted",
+                        StorageMode = TryReadMetadataString(asset.MetadataJson, "storageMode", "temporary"),
+                        Archived = TryReadMetadataBool(asset.MetadataJson, "archived"),
+                        Protected = TryReadMetadataBool(asset.MetadataJson, "protected"),
+                        CreatedAt = asset.SavedAtUtc,
+                        UpdatedAt = asset.SavedAtUtc
+                    });
+                }
+            }
+            catch (Exception catalogException)
+            {
+                _logger.LogWarning(catalogException, "Could not merge media catalog rows into video listing for user {UserId}.", userId);
+            }
+
+            return Ok(videos.OrderByDescending(video => video.CreatedAt).ToList());
         }
         catch (Exception ex)
         {
@@ -439,6 +479,8 @@ public sealed class RavensightVideoMediaController : ControllerBase
         return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
     }
 
+    private static string NormalizeMediaUrl(string? mediaUrl) =>
+        string.IsNullOrWhiteSpace(mediaUrl) ? string.Empty : mediaUrl.Trim().TrimEnd('/');
     private static string TryReadMetadataString(string? metadataJson, string key, string fallback)
     {
         if (string.IsNullOrWhiteSpace(metadataJson))
