@@ -45,11 +45,13 @@ export const getPopularTags = async (countrycode, limit = 40) => {
 
 export const getStationsByRegionAndGenre = async ({
   countrycode,
+  state,
+  name,
   tag,
   limit = 30,
 } = {}) => {
   const data = await apiClient.requestJson(
-    `/api/fmtuner/rb/stations${query({ countryCode: countrycode, tag, limit })}`,
+    `/api/fmtuner/rb/stations${query({ countryCode: countrycode, state, name, tag, limit })}`,
     { method: "GET" }
   );
   return Array.isArray(data) ? data : [];

@@ -21,7 +21,7 @@ import React, {
   useCallback, useEffect, useRef, useState,
 } from 'react';
 import { Howl, Howler } from 'howler';
-import FMTunerModule from '../components/FM/FMTunerModule';
+import StationFinder from '../components/media/StationFinder';
 import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
@@ -326,16 +326,6 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   const [creatorScanStations, setCreatorScanStations] = useState([]);
   const [creatorUnusedFrequencies, setCreatorUnusedFrequencies] = useState([]);
   const [creatorUnusedInternetSlots, setCreatorUnusedInternetSlots] = useState([]);
-
-  const syncTunedFrequency = useCallback((value) => {
-    const parsed = Number.parseFloat(String(value ?? ''));
-    if (!Number.isFinite(parsed)) {
-      return;
-    }
-
-    const clamped = Math.min(FM_HIGH, Math.max(FM_LOW, parsed));
-    setTunedFreq((previous) => (Math.abs(previous - clamped) < 0.05 ? previous : clamped));
-  }, []);
 
   // Refs
   const howlRef         = useRef(null);   // current Howl instance
@@ -1930,7 +1920,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
-      {tab === 'radio' && <div className="wr-fm-section"><FMTunerModule onFrequencyChange={syncTunedFrequency} /></div>}
+      {tab === 'radio' && <div className="wr-fm-section"><StationFinder /></div>}
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
@@ -2185,22 +2175,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       </div>
 
       {tab === 'radio' && (
-        <div className="mod-fm">
-          <div className="mod-freq-card">
-            <div className="mod-freq-display">
-              <span className="mod-freq-num">{tunedFreq.toFixed(1)}</span>
-              <span className="mod-freq-unit">MHz</span>
-              {anyPlaying && <span className="mod-live-pill">◉ LIVE</span>}
-            </div>
-            <input type="range" className="mod-freq-slider"
-              min={FM_LOW} max={FM_HIGH} step={0.1} value={tunedFreq}
-              onChange={(e) => setTunedFreq(parseFloat(e.target.value))} />
-            <div className="mod-freq-scale">
-              {[88, 92, 96, 100, 104, 108].map((n) => <span key={n}>{n}</span>)}
-            </div>
-          </div>
-          <FMTunerModule onFrequencyChange={syncTunedFrequency} />
-        </div>
+        <div className="mod-fm"><StationFinder /></div>
       )}
 
       {tab === 'cassette' && (

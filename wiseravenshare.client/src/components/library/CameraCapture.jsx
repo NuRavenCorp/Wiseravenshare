@@ -75,8 +75,11 @@ export default function CameraCapture({ onClose, onSaved }) {
           recorder.stop();
         });
       }
-      const blob = new Blob(chunksRef.current, { type: "video/webm" });
-      const file = new File([blob], `recording-${Date.now()}.webm`, { type: "video/webm" });
+      const mimeType = recorder?.mimeType || chunksRef.current.find((chunk) => chunk.type)?.type || "video/webm";
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      if (!blob.size) throw new Error("The recording is empty. Record a few seconds and try again.");
+      const extension = mimeType.toLowerCase().includes("mp4") ? "mp4" : "webm";
+      const file = new File([blob], `recording-${Date.now()}.${extension}`, { type: mimeType });
       await apiClient.ravensightMedia.uploadVideo(file, {
         title: `Recording ${new Date().toLocaleString()}`,
       });
@@ -84,7 +87,12 @@ export default function CameraCapture({ onClose, onSaved }) {
       onSaved?.();
       onClose?.();
     } catch (e) {
-      toast({ title: "Save failed", description: e?.message, variant: "destructive" });
+      const validationErrors = Object.values(e?.data?.errors || {}).flat().filter(Boolean);
+      toast({
+        title: "Save failed",
+        description: validationErrors.join(" ") || e?.data?.message || e?.message || "Could not save this recording.",
+        variant: "destructive",
+      });
       setSaving(false);
     }
   };
