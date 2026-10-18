@@ -16,9 +16,9 @@ public sealed class RavensightMediaPathService : IRavensightMediaPathService
 {
     private static readonly Dictionary<RavensightMediaType, HashSet<string>> AllowedExtensions = new()
     {
-        [RavensightMediaType.Video] = new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".mov", ".webm" },
+        [RavensightMediaType.Video] = new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv", ".mpg", ".mpeg", ".3gp", ".3g2", ".ts", ".m2ts" },
         [RavensightMediaType.Photo] = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif" },
-        [RavensightMediaType.Music] = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg" }
+        [RavensightMediaType.Music] = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".aiff", ".aif", ".oga", ".opus", ".caf" }
     };
 
     private readonly IWebHostEnvironment _environment;

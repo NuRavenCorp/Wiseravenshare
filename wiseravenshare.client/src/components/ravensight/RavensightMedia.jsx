@@ -117,13 +117,10 @@ export default function RavensightMedia() {
     setUploading(true);
     try {
       const title = file.name.replace(/\.[^/.]+$/, "");
-      if (mediaType === "video") {
-        await apiClient.ravensightMedia.uploadVideo(file, { title, destinationFolder: "my-library" });
-      } else if (mediaType === "music") {
-        await apiClient.ravensightMedia.uploadMusic(file, { title, destinationFolder: "my-library" });
-      } else {
-        await apiClient.ravensightMedia.uploadPhoto(file, { caption: title, destinationFolder: "my-library" });
-      }
+      await apiClient.ravensightMedia.uploadMedia(file, {
+        title,
+        destinationFolder: "my-library",
+      });
 
       setType(mediaType);
       try {
