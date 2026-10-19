@@ -16,7 +16,14 @@ const getStationStream = (station) => {
   // Use iHeart's HLS rendition so browsers with no raw-AAC decoder can play it.
   if (/power\s*105(?:\.1)?|\bWWPR(?:-FM)?\b/i.test(identity)) {
     url = "https://stream.revma.ihrhls.com/zc1481/hls.m3u8";
+  } else if (/radio\s*paradise/i.test(identity)) {
+    // The raw AAC 320 endpoint is inconsistently decoded by browser players;
+    // Radio Paradise's official MP3 direct stream has wider player support.
+    url = "https://stream-tx1.radioparadise.com/mp3-128";
   } else {
+    // SomaFM's official current direct links use ice5 (main) and ice6 (alt);
+    // older Radio Browser records still return retired ice1 URLs.
+    url = url.replace(/^https?:\/\/ice1\.somafm\.com\//i, "https://ice5.somafm.com/");
     const iheartStream = url.match(/^https?:\/\/(?:stream\.)?revma\.ihrhls\.com\/(zc\d+)\/?(?:\?.*)?$/i);
     if (iheartStream) url = `https://stream.revma.ihrhls.com/${iheartStream[1]}/hls.m3u8`;
   }
@@ -295,7 +302,7 @@ export default function StationFinder() {
       {showPresets && PRESET_CATEGORIES.map((category) => (
         <section key={category.id} className="space-y-2">
           <h4 className="text-sm font-semibold text-foreground">{category.label}</h4>
-          {category.stations.map((station, index) => renderStation({ ...station, id: station.name, tags: station.tags || [] }, index))}
+          {category.stations.map((station, index) => renderStation(normalizeStation({ ...station, id: station.name, tags: station.tags || [] }), index))}
         </section>
       ))}
       {!showPresets && <Button variant="outline" size="sm" className="w-full" onClick={() => setShowPresets(true)}><Star className="h-3.5 w-3.5" /> Show global presets</Button>}

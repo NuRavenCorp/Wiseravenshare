@@ -517,15 +517,15 @@ public sealed class FMTunerController : ControllerBase
         }
     }
 
-    /// <summary>Same-origin HLS proxy for iHeart playlists and their nested segments/keys.</summary>
+    /// <summary>Same-origin HLS proxy for supported radio providers and nested playlist assets.</summary>
     [HttpGet("hls-proxy")]
     [AllowAnonymous]
     public async Task HlsProxy([FromQuery] string url, CancellationToken cancellationToken)
     {
-        if (!TryAllowedIHeartUri(url, out var uri))
+        if (!TryAllowedHlsUri(url, out var uri))
         {
             Response.StatusCode = StatusCodes.Status400BadRequest;
-            await Response.WriteAsync("Only iHeart Revma HLS URLs are supported.", cancellationToken);
+            await Response.WriteAsync("This HLS provider is not supported by the radio proxy.", cancellationToken);
             return;
         }
 
@@ -542,7 +542,7 @@ public sealed class FMTunerController : ControllerBase
 
             using var upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var finalUri = upstream.RequestMessage?.RequestUri ?? uri;
-            if (!IsAllowedIHeartUri(finalUri))
+            if (!IsAllowedHlsUri(finalUri))
             {
                 Response.StatusCode = StatusCodes.Status502BadGateway;
                 await Response.WriteAsync("The HLS provider redirected to an unsupported host.", cancellationToken);
@@ -605,23 +605,31 @@ public sealed class FMTunerController : ControllerBase
         }
     }
 
-    private static bool TryAllowedIHeartUri(string rawUrl, out Uri uri)
+    private static bool TryAllowedHlsUri(string rawUrl, out Uri uri)
     {
-        return Uri.TryCreate(rawUrl, UriKind.Absolute, out uri!) && IsAllowedIHeartUri(uri);
+        return Uri.TryCreate(rawUrl, UriKind.Absolute, out uri!) && IsAllowedHlsUri(uri);
     }
 
-    private static bool IsAllowedIHeartUri(Uri uri)
+    private static bool IsAllowedHlsUri(Uri uri)
     {
         return uri.Scheme == Uri.UriSchemeHttps
-            && (uri.Host.Equals("revma.ihrhls.com", StringComparison.OrdinalIgnoreCase)
-                || uri.Host.EndsWith(".revma.ihrhls.com", StringComparison.OrdinalIgnoreCase));
+            && (IsHostOrSubdomain(uri.Host, "revma.ihrhls.com")
+                || IsHostOrSubdomain(uri.Host, "bbcmedia.co.uk")
+                || IsHostOrSubdomain(uri.Host, "bbci.co.uk")
+                || IsHostOrSubdomain(uri.Host, "bbc.co.uk"));
+    }
+
+    private static bool IsHostOrSubdomain(string host, string domain)
+    {
+        return host.Equals(domain, StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith($".{domain}", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ProxyHlsReference(string reference, Uri playlistUri)
     {
         if (reference.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return reference;
         var resolved = Uri.TryCreate(playlistUri, reference, out var candidate) ? candidate : null;
-        if (resolved is null || !IsAllowedIHeartUri(resolved)) return reference;
+        if (resolved is null || !IsAllowedHlsUri(resolved)) return reference;
         var localUrl = $"/api/fmtuner/hls-proxy?url={Uri.EscapeDataString(resolved.ToString())}";
         return localUrl;
     }
@@ -632,3 +640,4 @@ public sealed class FMTunerController : ControllerBase
         return userId == Guid.Empty ? Guid.Empty : userId;
     }
 }
+
