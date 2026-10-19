@@ -68,7 +68,7 @@ function MediaExperienceModal({ request, onClose }) {
           : (
             <div>
               <ReactPlayer
-                src={url}
+                url={url}
                 controls
                 playsInline
                 preload="metadata"

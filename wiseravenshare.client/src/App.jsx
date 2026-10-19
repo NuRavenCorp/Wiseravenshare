@@ -27,14 +27,8 @@ import Performance from '@/pages/Performance';
 import Library from '@/pages/Library';
 import Media from '@/pages/Media';
 import FMRadioPage from '@/pages/FMRadioPage';
-import PythonMatrixLab from '@/pages/PythonMatrixLab';
 import JoinFeed from '@/pages/JoinFeed';
 import Privacy from '@/pages/Privacy';
-import Terms from '@/pages/Terms';
-import CookiePolicy from '@/pages/CookiePolicy';
-import AdminRoute from '@/components/AdminRoute';
-import CreatePostButton from '@/components/feed/CreatePostButton';
-import { MediaExperienceProvider } from '@/components/media/MediaExperience';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -87,7 +81,7 @@ const AuthenticatedApp = () => {
         <Route path="/podcasts" element={<Podcasts />} />
         <Route path="/performance" element={<Performance />} />
         <Route path="/library" element={<Library />} />
-        <Route path="/python-features" element={<PythonMatrixLab />} />
+        <Route path="/python-features" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
       </Route>
       <Route path="*" element={<PageNotFound />} />

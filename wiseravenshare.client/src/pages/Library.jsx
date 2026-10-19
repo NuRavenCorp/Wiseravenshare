@@ -7,8 +7,7 @@ import { apiClient } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Image as ImageIcon, Music, Video, Upload, Loader2, Trash2, Search, Library as LibraryIcon, ListMusic, Play, Clapperboard, Database, Code2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Image as ImageIcon, Music, Video, Upload, Loader2, Trash2, Search, Library as LibraryIcon, ListMusic, Play, Clapperboard, Database } from "lucide-react";
 import { useMediaExperience } from "@/components/media/MediaExperience";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 
@@ -416,7 +415,6 @@ export default function Library() {
           </Button>
           <Button variant="outline" size="sm" onClick={playAll} disabled={!items.some((item) => item.asset_type === "music")}><Play className="w-4 h-4" /> Play All</Button>
           <Button variant="outline" size="sm" onClick={backupLibrary} disabled={backupBusy}><Database className="w-4 h-4" /> {backupBusy ? "Backing up…" : "Back Up Media"}</Button>
-          <Link to="/python-features"><Button variant="outline" size="sm"><Code2 className="w-4 h-4" /> Python Features</Button></Link>
         </div>
 
         {dragging && <div className="mb-4 rounded-xl border-2 border-dashed border-primary bg-primary/10 p-8 text-center text-sm font-medium text-primary">Drop photos, music, or videos here to upload</div>}
