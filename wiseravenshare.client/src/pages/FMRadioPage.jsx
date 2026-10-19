@@ -26,6 +26,7 @@ import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
 import { apiClient } from '../api/client';
+import { useMediaExperience } from '../components/media/MediaExperience';
 import '../Styles/FMRadioPage.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -229,6 +230,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     const validTabs = new Set(['radio', 'cassette', 'creator', 'caption']);
     return validTabs.has(initialTab) ? initialTab : 'radio';
   });
+
+  const { openMedia } = useMediaExperience();
 
   // FM tuner display
   const [tunedFreq,    setTunedFreq]    = useState(98.5);
@@ -2190,7 +2193,18 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             ) : (
               <div className="mod-queue-list">
                 {library.map((t, i) => (
-                  <div key={t.id} className="mod-queue-item">
+                  <div
+                    key={t.id}
+                    className="mod-queue-item"
+                    onDoubleClick={() => openMedia({ ...t, type: 'music', url: t.mediaUrl || t.url || '', queue: library })}
+                  >
+                    <button
+                      className="mod-q-play"
+                      title="Play"
+                      onClick={() => openMedia({ ...t, type: 'music', url: t.mediaUrl || t.url || '', queue: library })}
+                    >
+                      ▶
+                    </button>
                     <span className="mod-q-name">
                       {isFav(t) && '⭐ '}{t.title || t.name}
                     </span>
