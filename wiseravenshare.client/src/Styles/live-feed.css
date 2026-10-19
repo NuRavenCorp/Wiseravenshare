@@ -1,0 +1,86 @@
+.live-feed {
+  display: grid;
+  gap: 16px;
+}
+
+.live-feed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.live-feed-header h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.live-feed-header button {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 10px;
+}
+
+.live-feed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.live-card {
+  position: relative;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  overflow: hidden;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  text-decoration: none;
+}
+
+.live-card-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+}
+
+.live-card-body {
+  padding: 40px 12px 12px;
+}
+
+.live-card-body h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.live-card-body p {
+  margin: 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.live-feed-loading,
+.live-feed-empty,
+.live-feed-error {
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
+  padding: 16px;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.live-feed-error {
+  color: hsl(var(--destructive));
+}

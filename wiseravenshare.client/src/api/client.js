@@ -467,6 +467,17 @@ export const apiClient = {
       });
     },
   },
+  live: {
+    feed(viewerId, limit = 50) {
+      const query = new URLSearchParams({
+        viewer_id: String(viewerId || ""),
+        limit: String(limit),
+      });
+      return requestJson(`/api/live/feed?${query.toString()}`, {
+        method: "GET",
+      });
+    },
+  },
   ravensightMedia: {
     backup() {
       return requestJson("/api/ravensight/media/backup", { method: "POST" });

@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: wiseravenshare
+namePrefix: wiseravenshare-
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - ingress.yaml
+
+configMapGenerator:
+  - name: site-config
+    literals:
+      - SITE_KEY=wiseravenshare
+      - SITE_NAME=WiseRavenShare
+      - SITE_THEME=share
+      - SITE_DOMAIN=wiseravenshare-wiseravenshare.com
+      - SPACES_BUCKET=nuravencorpllm-sites
+      - SPACES_PREFIX=wiseravenshare
+      - FolderKnowledge__RootPath=/data/sites
+
+images:
+  - name: registry.digitalocean.com/nuravencorpllm/api
+    newTag: wiseravenshare

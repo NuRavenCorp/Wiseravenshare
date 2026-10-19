@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import LiveStreamBroadcaster from "@/components/media/LiveStreamBroadcaster";
 import LiveStreamViewer from "@/components/media/LiveStreamViewer";
+import LiveFeed from "@/components/media/LiveFeed";
 import { Radio, Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -55,6 +56,9 @@ export default function LiveStreamPanel() {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-card p-4">
+        <LiveFeed />
+      </div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Radio className="w-4 h-4 text-primary" />

@@ -1,0 +1,6 @@
+@NuRavenCorpLLM.Server_HostAddress = http://localhost:5011
+
+GET {{NuRavenCorpLLM.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
