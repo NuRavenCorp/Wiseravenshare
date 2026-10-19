@@ -88,7 +88,7 @@ export default function PostComposer({ onPosted, compact }) {
         .map((tag) => `%${tag}`);
       const taggedContent = [content.trim(), ...tags, ...partialTags].join(" ");
 
-      await apiClient.requestJson("/api/posts", {
+      const createdPost = await apiClient.requestJson("/api/posts", {
         method: "POST",
         body: JSON.stringify({
           content: taggedContent,
@@ -103,7 +103,7 @@ export default function PostComposer({ onPosted, compact }) {
       setPartials("");
       setMediaUrls([]);
       setPostType("text");
-      onPosted?.();
+      onPosted?.(createdPost);
     } catch (err) {
       setError(err.message || "Failed to post. Please try again.");
     } finally {

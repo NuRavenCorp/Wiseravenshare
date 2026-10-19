@@ -71,6 +71,20 @@ namespace Wiseravenshare.Server.DTOs.Post
         public bool IsLiked { get; set; }
         public bool IsReposted { get; set; }
         public bool IsBookmarked { get; set; }
+        [JsonPropertyName("engagementUsers")]
+        public IReadOnlyList<PostEngagementUserDto> EngagementUsers { get; set; } = Array.Empty<PostEngagementUserDto>();
+    }
+
+    public class PostEngagementUserDto
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = string.Empty;
+
+        [JsonPropertyName("engagedAt")]
+        public DateTime EngagedAt { get; set; }
+
+        [JsonPropertyName("user")]
+        public UserDto User { get; set; } = new();
     }
 
     public class PostInteractionDto

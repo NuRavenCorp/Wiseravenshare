@@ -127,6 +127,20 @@ public sealed class RavensightMusicMediaController : ControllerBase
         return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
     }
 
+    [HttpGet("{trackId}/stream")]
+    [Produces("audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/flac", "audio/ogg", "application/json")]
+    public async Task<IActionResult> StreamTrackById(string trackId, CancellationToken cancellationToken)
+    {
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        var source = await ResolveTrackSourceAsync(userId, trackId, cancellationToken);
+        if (source.ErrorResult is not null)
+            return source.ErrorResult;
+
+        return File(source.AudioBytes, ResolveAudioContentType(source.FileName), source.FileName);
+    }
+
     [HttpGet("{trackId}/browser-compatible")]
     [Produces("audio/mpeg", "application/json")]
     public async Task<IActionResult> GetBrowserCompatibleTrack(string trackId, CancellationToken cancellationToken)
@@ -134,6 +148,69 @@ public sealed class RavensightMusicMediaController : ControllerBase
         if (!TryResolveUserId(out var userId))
             return Unauthorized(new { message = "Unable to determine current user." });
 
+        var source = await ResolveTrackSourceAsync(userId, trackId, cancellationToken);
+        if (source.ErrorResult is not null)
+            return source.ErrorResult;
+
+        var originalAudio = source.AudioBytes;
+        var fileName = source.FileName;
+
+        using var client = _httpClientFactory.CreateClient("AudioService");
+        using var multipart = new MultipartFormDataContent();
+        using var fileContent = new ByteArrayContent(originalAudio);
+        using var conversionRequest = new HttpRequestMessage(HttpMethod.Post, "/browser-compatible");
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        multipart.Add(fileContent, "file", Path.GetFileName(fileName));
+        conversionRequest.Content = multipart;
+        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/mpeg"));
+        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json", 0.9));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(conversionRequest, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Audio compatibility service unavailable for track {TrackId}.", trackId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Browser-compatible conversion is unavailable right now. Please try again shortly."
+            });
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Audio conversion returned {Status} for track {TrackId}. Detail: {Detail}", (int)response.StatusCode, trackId, detail);
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Audio conversion failed for this track.",
+                    detail
+                });
+            }
+
+            var converted = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            if (converted.Length == 0)
+            {
+                _logger.LogWarning("Audio conversion returned an empty payload for track {TrackId}.", trackId);
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Audio conversion produced an empty file."
+                });
+            }
+
+            return File(converted, "audio/mpeg", $"{Path.GetFileNameWithoutExtension(fileName)}.mp3");
+        }
+    }
+
+    private async Task<(byte[] AudioBytes, string FileName, IActionResult? ErrorResult)> ResolveTrackSourceAsync(
+        Guid userId,
+        string trackId,
+        CancellationToken cancellationToken)
+    {
         string? objectKey = null;
         string fileName = "audio-file";
         RavensightMediaAssetRecord? catalogAsset = null;
@@ -148,14 +225,11 @@ public sealed class RavensightMusicMediaController : ControllerBase
         {
             catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
             if (catalogAsset is null || !string.Equals(catalogAsset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
-                return NotFound(new { message = "Track not found in your library." });
+                return (Array.Empty<byte>(), string.Empty, NotFound(new { message = "Track not found in your library." }));
             objectKey = catalogAsset.RelativePath;
             fileName = catalogAsset.FileName;
         }
 
-        // Some music uploads are cataloged in both bucket_objects and the unified
-        // media catalog. Resolve the catalog row by ID or filename so local and
-        // backup copies remain usable when the primary Spaces object has expired.
         if (catalogAsset is null)
         {
             catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
@@ -176,7 +250,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
             fileName);
 
         if (objectKeyCandidates.Count == 0)
-            return NotFound(new { message = "The original audio file has no stored media key." });
+            return (Array.Empty<byte>(), string.Empty, NotFound(new { message = "The original audio file has no stored media key." }));
 
         Stream? source = null;
         foreach (var candidateKey in objectKeyCandidates)
@@ -252,7 +326,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         if (source is null)
-            return NotFound(new { message = "The original audio file is no longer available in primary storage or its configured backup. Re-upload the file to restore playback." });
+            return (Array.Empty<byte>(), string.Empty, NotFound(new { message = "The original audio file is no longer available in primary storage or its configured backup. Re-upload the file to restore playback." }));
 
         byte[] originalAudio;
         await using (source)
@@ -263,41 +337,9 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         if (originalAudio.Length == 0)
-            return NotFound(new { message = "The original audio file could not be read from storage." });
+            return (Array.Empty<byte>(), string.Empty, NotFound(new { message = "The original audio file could not be read from storage." }));
 
-        using var client = _httpClientFactory.CreateClient("AudioService");
-        using var multipart = new MultipartFormDataContent();
-        using var fileContent = new ByteArrayContent(originalAudio);
-        using var conversionRequest = new HttpRequestMessage(HttpMethod.Post, "/browser-compatible");
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        multipart.Add(fileContent, "file", Path.GetFileName(fileName));
-        conversionRequest.Content = multipart;
-        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/mpeg"));
-        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json", 0.9));
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.SendAsync(conversionRequest, cancellationToken);
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "Audio compatibility service unavailable for track {TrackId}; serving original source.", trackId);
-            return File(originalAudio, ResolveAudioContentType(fileName), fileName);
-        }
-
-        using (response)
-        {
-            if (!response.IsSuccessStatusCode)
-            {
-                var detail = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Audio conversion returned {Status} for track {TrackId}; serving original source. Detail: {Detail}", (int)response.StatusCode, trackId, detail);
-                return File(originalAudio, ResolveAudioContentType(fileName), fileName);
-            }
-
-            var converted = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-            return File(converted, "audio/mpeg", $"{Path.GetFileNameWithoutExtension(fileName)}.mp3");
-        }
+        return (originalAudio, fileName, null);
     }
 
     private async Task<Stream?> OpenMediaBackupAsync(Guid userId, string assetId, string fileName, CancellationToken cancellationToken)

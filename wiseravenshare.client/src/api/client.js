@@ -488,6 +488,9 @@ export const apiClient = {
     listMusic() {
       return requestJson("/api/ravensight/media/music", { method: "GET" });
     },
+    streamMusic(trackId) {
+      return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/stream`, { method: "GET" });
+    },
     uploadMusic(file, fields = {}) {
       const body = new FormData();
       body.append("file", file);

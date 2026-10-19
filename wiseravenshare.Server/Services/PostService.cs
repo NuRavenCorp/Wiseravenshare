@@ -889,10 +889,15 @@ public class PostService : IPostService
         }
 
         var interaction = await _postRepository.GetInteractionStateAsync(post.Id, viewerUserId);
-        return BuildPostDto(post, post.User, interaction);
+        var engagementUsers = await BuildPostEngagementUsersAsync(post.Id);
+        return BuildPostDto(post, post.User, interaction, engagementUsers);
     }
 
-    private PostDto BuildPostDto(Post post, User? user, PostInteractionState? interaction = null)
+    private PostDto BuildPostDto(
+        Post post,
+        User? user,
+        PostInteractionState? interaction = null,
+        IReadOnlyList<PostEngagementUserDto>? engagementUsers = null)
     {
         return new PostDto
         {
@@ -925,8 +930,33 @@ public class PostService : IPostService
             IsLiked = interaction?.IsLiked ?? false,
             IsReposted = interaction?.IsReposted ?? false,
             IsBookmarked = interaction?.IsBookmarked ?? false,
-            User = user is null ? new UserDto() : MapToUserDto(user)
+            User = user is null ? new UserDto() : MapToUserDto(user),
+            EngagementUsers = engagementUsers ?? Array.Empty<PostEngagementUserDto>()
         };
+    }
+
+    private async Task<IReadOnlyList<PostEngagementUserDto>> BuildPostEngagementUsersAsync(Guid postId)
+    {
+        var actors = await _postRepository.GetRecentEngagementActorsAsync(postId, 3);
+        if (actors.Count == 0)
+        {
+            return Array.Empty<PostEngagementUserDto>();
+        }
+
+        var userIds = actors.Select(actor => actor.UserId).Distinct().ToArray();
+        var users = await _userRepository.FindAsync(user => userIds.Contains(user.Id));
+        var userMap = users.ToDictionary(user => user.Id, user => MapToUserDto(user));
+
+        return actors
+            .Where(actor => userMap.ContainsKey(actor.UserId))
+            .OrderByDescending(actor => actor.CreatedAt)
+            .Select(actor => new PostEngagementUserDto
+            {
+                Type = actor.EngagementType,
+                EngagedAt = actor.CreatedAt,
+                User = userMap[actor.UserId]
+            })
+            .ToList();
     }
 
     private static JsonDocument? BuildMediaMetadata(CreatePostDto dto, string[]? mediaUrls)

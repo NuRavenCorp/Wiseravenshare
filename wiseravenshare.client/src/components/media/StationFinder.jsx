@@ -25,7 +25,41 @@ const proxyStreamUrl = (url) => {
   if (!url) return "";
   if (url.startsWith("/")) return url;
   if (shouldUseHlsProxy(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
-  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:") return url;
+    if (parsed.protocol === "http:") return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+  } catch {
+    // Leave unknown forms unchanged so the browser can still attempt playback.
+  }
+  return url;
+};
+
+const buildPlaybackCandidates = (url) => {
+  if (!url) return [];
+  if (url.startsWith("/")) return [url];
+  const candidates = [];
+  if (shouldUseHlsProxy(url)) {
+    candidates.push(`/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`);
+    candidates.push(url);
+    return [...new Set(candidates)];
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:") {
+      candidates.push(url);
+      candidates.push(`/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`);
+      return [...new Set(candidates)];
+    }
+    if (parsed.protocol === "http:") {
+      candidates.push(`/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`);
+      candidates.push(url);
+      return [...new Set(candidates)];
+    }
+  } catch {
+    return [url];
+  }
+  return [url];
 };
 
 const getStationStream = (station) => {
@@ -74,6 +108,8 @@ const normalizeStation = (station) => {
       ? station.tags
       : String(station.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
     bitrate: Number(station.bitrate) || 0,
+    playbackCandidates: buildPlaybackCandidates(getStationStream(station)),
+    playbackCandidateIndex: 0,
   };
 };
 
@@ -261,10 +297,29 @@ export default function StationFinder() {
     </button>
   );
 
-  const playbackUrl = playing?.url || "";
+  const playbackCandidates = Array.isArray(playing?.playbackCandidates) && playing.playbackCandidates.length
+    ? playing.playbackCandidates
+    : [playing?.url].filter(Boolean);
+  const playbackUrl = playbackCandidates[Math.max(0, Number(playing?.playbackCandidateIndex) || 0)] || "";
   const handlePlaybackError = () => {
+    const currentCandidateIndex = Math.max(0, Number(playing?.playbackCandidateIndex) || 0);
+    if (currentCandidateIndex + 1 < playbackCandidates.length) {
+      setPlaying((current) => current ? { ...current, playbackCandidateIndex: currentCandidateIndex + 1, autoplayFailed: false } : current);
+      setError(`Trying another stream source for ${playing?.name || "this station"}…`);
+      return;
+    }
     if (playing?.alternateUrl && !playing.alternateAttempted) {
-      setPlaying((current) => current ? { ...current, url: current.alternateUrl, alternateUrl: "", alternateAttempted: true } : current);
+      setPlaying((current) => current
+        ? {
+            ...current,
+            url: current.alternateUrl,
+            playbackCandidates: buildPlaybackCandidates(current.alternateUrl),
+            playbackCandidateIndex: 0,
+            alternateUrl: "",
+            alternateAttempted: true,
+            autoplayFailed: false
+          }
+        : current);
       setError(`The main stream for ${playing?.name || "this station"} failed. Trying its alternate server…`);
       return;
     }
