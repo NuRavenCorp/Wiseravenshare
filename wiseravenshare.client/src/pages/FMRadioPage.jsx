@@ -2179,141 +2179,38 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       )}
 
       {tab === 'cassette' && (
-        <div className="mod-player">
-          <div className="mod-player-left">
-            <div className="mod-art">
-              <canvas ref={canvasRef} className="mod-viz-canvas" width={220} height={220} />
-              {!isPlaying && (
-                <div className="mod-art-idle" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                  <span style={{ fontSize: '4rem' }}>{isFav(currentTrack) ? '⭐' : '🎵'}</span>
-                  {currentTrack && <span className="mod-art-hint">Press play</span>}
-                </div>
-              )}
+        <div className="mod-library">
+          <div className="mod-queue">
+            <div className="mod-queue-head">
+              <span>Saved Tracks ({library.length})</span>
+              <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear all</button>
             </div>
-            <div className="mod-track-info">
-              <div className="mod-track-title">{meta?.title || 'No track loaded'}</div>
-              <div className="mod-track-artist">{meta?.artist || '—'}</div>
-            </div>
-
-            <div className="mod-progress-wrap">
-              <span className="mod-time">{fmt(currentTime)}</span>
-              <div className="mod-progress-bar" onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                seek(((e.clientX - rect.left) / rect.width) * (duration || 0));
-              }}>
-                <div className="mod-progress-fill" style={{ width: `${progress}%` }} />
-                <div className="mod-progress-thumb" style={{ left: `${progress}%` }} />
-              </div>
-              <span className="mod-time">{fmt(duration)}</span>
-            </div>
-
-            <div className="mod-transport">
-              <button className={`mod-ctrl sm${shuffle ? ' on' : ''}`} onClick={() => setShuffle((s) => !s)} title="Shuffle">⇄</button>
-              <button className="mod-ctrl" onClick={skipPrev} disabled={!library.length}>⏮</button>
-              <button className="mod-ctrl" onClick={rewind} disabled={!currentTrack}>−10s</button>
-              <button className={`mod-ctrl play${isPlaying ? ' playing' : ''}`} onClick={isPlaying ? pause : play} disabled={!currentTrack}>{isPlaying ? '⏸' : '▶'}</button>
-              <button className="mod-ctrl" onClick={stop} disabled={!currentTrack}>⏹</button>
-              <button className="mod-ctrl" onClick={fastForward} disabled={!currentTrack}>+10s</button>
-              <button className="mod-ctrl" onClick={skipNext} disabled={!library.length}>⏭</button>
-              <button className={`mod-ctrl sm${repeat !== 'off' ? ' on' : ''}`} onClick={cycleRepeat} title={`Repeat: ${repeat}`}>
-                {repeat === 'one' ? '↺¹' : '↺'}
-              </button>
-            </div>
-
-            <div className="mod-vol-row">
-              <button className="mod-ctrl sm" onClick={() => setIsMuted((m) => !m)}>{isMuted ? '🔇' : '🔊'}</button>
-              <input type="range" className="mod-vol-slider" min={0} max={1} step={0.01}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }} />
-              <span className="mod-vol-pct">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button className={`mod-fav-btn${isFav(currentTrack) ? ' on' : ''}`} onClick={() => toggleFav(currentTrack)} disabled={!currentTrack}>
-                {isFav(currentTrack) ? '★ Favorited' : '☆ Favorite'}
-              </button>
-            </div>
-            {loadError && <div className="mod-error">⚠ {loadError} <button onClick={() => setLoadError('')}>✕</button></div>}
-          </div>
-
-          <div className="mod-player-right">
-            <div className="mod-pills">
-              <button className={`mod-pill${showEq ? ' on' : ''}`} onClick={() => setShowEq((x) => !x)}>EQ</button>
-              <button className={`mod-pill${showQueue ? ' on' : ''}`} onClick={() => setShowQueue((x) => !x)}>Queue</button>
-              <button className="mod-pill" onClick={() => {
-                if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().catch(() => {});
-                else document.exitFullscreen?.().catch(() => {});
-              }}>⛶</button>
-            </div>
-
-            {showEq && (
-              <div className="mod-eq">
-                <div className="mod-eq-presets">
-                  {Object.keys(EQ_PRESETS).map((p) => (
-                    <button key={p} className={`mod-eq-preset${eqPreset === p ? ' on' : ''}`} onClick={() => applyPreset(p)}>{p}</button>
-                  ))}
-                  <button className="mod-eq-preset" onClick={() => applyPreset('flat')}>Reset</button>
-                </div>
-                <div className="mod-eq-bands">
-                  {EQ_BANDS.map((band, i) => (
-                    <div key={band.freq} className="mod-eq-band">
-                      <span className="mod-eq-val">{eqGains[i] > 0 ? '+' : ''}{(eqGains[i] || 0).toFixed(0)}</span>
-                      <input type="range" orient="vertical" className="mod-eq-slider"
-                        min={-12} max={12} step={0.5} value={eqGains[i] ?? 0}
-                        onChange={(e) => setEqBand(i, parseFloat(e.target.value))} />
-                      <span className="mod-eq-label">{band.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {showQueue && (
-              <div className="mod-queue">
-                <div className="mod-queue-head">
-                  <span>Queue ({library.length})</span>
-                  <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear</button>
-                </div>
             {library.length === 0 ? (
-                  <div className="mod-queue-empty">{libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}</div>
-                ) : (
-                  <div className="mod-queue-list">
-                    {library.map((t, i) => (
-                      <div key={t.id} className={`mod-queue-item${currentTrack?.id === t.id ? ' active' : ''}`}>
-                        <button className="mod-q-play" onClick={() => loadTrack(t, i, true)}>
-                          {currentTrack?.id === t.id && isPlaying ? '▶' : '·'}
-                        </button>
-                        <span className="mod-q-name" onClick={() => loadTrack(t, i, true)}>
-                          {isFav(t) && '⭐ '}{t.title || t.name}
-                        </span>
-                        <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'up')}>↑</button>
-                        <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'down')}>↓</button>
-                        <button className={`mod-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)}>★</button>
-                        <button className="mod-q-btn rm" onClick={() => removeTrack(t.id)}>✕</button>
-                      </div>
-                    ))}
+              <div className="mod-queue-empty">{libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}</div>
+            ) : (
+              <div className="mod-queue-list">
+                {library.map((t, i) => (
+                  <div key={t.id} className="mod-queue-item">
+                    <span className="mod-q-name">
+                      {isFav(t) && '⭐ '}{t.title || t.name}
+                    </span>
+                    <button className={`mod-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)}>★</button>
+                    <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'up')}>↑</button>
+                    <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'down')}>↓</button>
+                    <button className="mod-q-btn rm" onClick={() => removeTrack(t.id)}>✕</button>
                   </div>
-                )}
+                ))}
               </div>
             )}
-
-            <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
-              accept=".mp3,.m4a,.wav,.flac,.ogg,.aac,audio/mpeg,audio/mp4,audio/wav,audio/flac,audio/ogg,audio/aac"
-              onChange={handleUpload} />
-            <button className="mod-upload-btn" disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
-              {libraryUploadBusy ? 'Uploading tracks…' : '＋ Upload to your music library — MP3 · M4A · WAV · FLAC · OGG · AAC'}
-            </button>
-            {libraryUploadError && <div role="alert" className="mod-upload-error">{libraryUploadError}</div>}
-
-            <div className="mod-kb-hint">
-              <kbd>Space</kbd>play/pause &nbsp;
-              <kbd>←/→</kbd>seek &nbsp;
-              <kbd>Shift+←/→</kbd>skip &nbsp;
-              <kbd>E</kbd>eq &nbsp;
-              <kbd>Q</kbd>queue &nbsp;
-              <kbd>M</kbd>mute
-            </div>
           </div>
+
+          <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
+            accept=".mp3,.m4a,.wav,.flac,.ogg,.aac,audio/mpeg,audio/mp4,audio/wav,audio/flac,audio/ogg,audio/aac"
+            onChange={handleUpload} />
+          <button className="mod-upload-btn" disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
+            {libraryUploadBusy ? 'Uploading tracks…' : '＋ Upload to your music library — MP3 · M4A · WAV · FLAC · OGG · AAC'}
+          </button>
+          {libraryUploadError && <div role="alert" className="mod-upload-error">{libraryUploadError}</div>}
         </div>
       )}
 
