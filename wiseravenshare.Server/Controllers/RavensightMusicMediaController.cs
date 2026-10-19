@@ -194,7 +194,34 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         if (source is null)
-            source = await OpenMediaBackupAsync(userId, catalogAsset?.Id ?? track?.Id ?? trackId, fileName, cancellationToken);
+        {
+            var backupAssetIds = new List<string>();
+            AddBackupAssetIdCandidate(backupAssetIds, catalogAsset?.Id);
+            AddBackupAssetIdCandidate(backupAssetIds, track?.Id);
+            AddBackupAssetIdCandidate(backupAssetIds, trackId);
+            foreach (var sameFileTrack in tracks.Where(candidate =>
+                         string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase)))
+            {
+                AddBackupAssetIdCandidate(backupAssetIds, sameFileTrack.Id);
+            }
+
+            if (catalogAsset is null)
+            {
+                var userAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 10000, cancellationToken);
+                foreach (var sameFileAsset in userAssets.Where(asset =>
+                             string.Equals(asset.FileName, fileName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    AddBackupAssetIdCandidate(backupAssetIds, sameFileAsset.Id);
+                }
+            }
+
+            foreach (var backupAssetId in backupAssetIds)
+            {
+                source = await OpenMediaBackupAsync(userId, backupAssetId, fileName, cancellationToken);
+                if (source is not null)
+                    break;
+            }
+        }
 
         if (source is null)
             return NotFound(new { message = "The original audio file is no longer available in primary storage or its configured backup. Re-upload the file to restore playback." });
@@ -810,6 +837,19 @@ public sealed class RavensightMusicMediaController : ControllerBase
             if (!keys.Contains(projectScoped, StringComparer.OrdinalIgnoreCase))
                 keys.Add(projectScoped);
         }
+    }
+
+    private static void AddBackupAssetIdCandidate(ICollection<string> ids, string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+            return;
+
+        var normalized = Path.GetFileName(candidate.Trim());
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        if (!ids.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            ids.Add(normalized);
     }
 
     private static string ReadMusicMeta(string? metadataJson, string key)
