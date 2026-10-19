@@ -1165,8 +1165,11 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       if (uploaded.length || accepted.length) {
         const newestId = uploaded[uploaded.length - 1]?.id;
         const index = normalized.findIndex((track) => track.id === newestId);
-        const targetIndex = index >= 0 ? index : 0;
-        if (normalized[targetIndex]) loadTrack(normalized[targetIndex], targetIndex, false);
+        const targetTrack = normalized[index >= 0 ? index : 0];
+        if (targetTrack) {
+          // Open the music player popup for the newly uploaded track
+          openMedia({ ...targetTrack, type: 'music', url: targetTrack.mediaUrl || targetTrack.url || '', queue: normalized });
+        }
       }
       if (invalid.length) setLibraryUploadError(`${invalid.length} unsupported file${invalid.length === 1 ? '' : 's'} skipped. Supported formats: MP3, M4A, WAV, FLAC, OGG, AAC.`);
     } catch (error) {
@@ -1908,27 +1911,70 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
   const renderCreatorPaymentGate = (isModern = false) => (
     <div className={isModern ? 'mod-creator-shell' : 'wr-creator-shell'}>
-      <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'}>
-        <h3>Radio Creator is Payment-Gated</h3>
-        <p className="wr-creator-empty">
-          Station creation is temporarily locked here until a Creator payment is active.
-          Your FM Radio and Canvas Studio flows remain available.
-        </p>
-        <ul className="wr-creator-guide-list">
-          {RADIO_CREATOR_PAYMENT_STEPS.map((step) => (
-            <li key={step}>{step}</li>
+      <section className={isModern ? 'mod-creator-card' : 'wr-creator-card'} style={{ maxWidth: 640, margin: '0 auto', padding: '28px 24px' }}>
+
+        {/* Hero */}
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🎙</div>
+          <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700 }}>Radio Creator</h3>
+          <p style={{ margin: 0, opacity: 0.65, fontSize: 13, lineHeight: 1.5 }}>
+            Your own broadcast station — live streaming, track scheduling, and frequency ownership in one place.
+          </p>
+        </div>
+
+        {/* Feature teaser grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
+          {[
+            { icon: '📡', title: 'Broadcast Live',  body: 'Stream live from your browser or connect OBS, BUTT, or Liquidsoap as a source client.' },
+            { icon: '📻', title: 'Claim a Frequency', body: 'Register your FM/Internet frequency and defend it with timestamp proof on every session.' },
+            { icon: '🎵', title: 'Auto-DJ',          body: 'Schedule tracks from your Music Library to fill dead air between live sets.' },
+            { icon: '📋', title: 'Script Cards',     body: 'Load teleprompter-style script cards that sync across all your devices during a live show.' },
+            { icon: '🎬', title: 'Canvas Studio',    body: 'Add overlays, captions, and visuals from Caption Studio — then clip directly to social.' },
+            { icon: '📈', title: 'Station Analytics', body: 'See live listener counts, peak hours, and replays from one dashboard.' },
+          ].map(({ icon, title, body }) => (
+            <div key={title} style={{
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 10,
+              padding: '14px 12px',
+              background: 'rgba(255,255,255,0.04)',
+            }}>
+              <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{title}</div>
+              <div style={{ fontSize: 11, opacity: 0.55, lineHeight: 1.5 }}>{body}</div>
+            </div>
           ))}
-        </ul>
-        <div className="wr-creator-actions">
-          <button className="wr-insert-tape" onClick={() => (typeof onNavigate === 'function' ? onNavigate('wisecoin') : null)}>
-            Open Subscription & Payment
+        </div>
+
+        {/* Setup steps preview */}
+        <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '14px 16px', marginBottom: 20, background: 'rgba(255,255,255,0.03)' }}>
+          <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 12, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            How it works
+          </p>
+          {RADIO_CREATOR_PAYMENT_STEPS.map((step, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 13, minWidth: 18, color: 'var(--primary, #a855f7)' }}>{i + 1}.</span>
+              <span style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.5 }}>{step}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* CTAs */}
+        <div className="wr-creator-actions" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            className="wr-insert-tape"
+            style={{ width: '100%', padding: '12px 0', fontSize: 14, fontWeight: 600 }}
+            onClick={() => (typeof onNavigate === 'function' ? onNavigate('wisecoin') : null)}
+          >
+            🚀 Unlock Radio Creator — Subscribe
           </button>
-          <button className="wr-mode-btn" onClick={openCaptionKeyboard}>
-            Open Caption + Keyboard
-          </button>
-          <button className="wr-mode-btn" onClick={jumpToCanvasStudio}>
-            Open Canvas Studio
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="wr-mode-btn" style={{ flex: 1 }} onClick={openCaptionKeyboard}>
+              Caption + Keyboard
+            </button>
+            <button className="wr-mode-btn" style={{ flex: 1 }} onClick={jumpToCanvasStudio}>
+              Canvas Studio
+            </button>
+          </div>
         </div>
       </section>
     </div>
