@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://+:8080
+  FolderKnowledge__IncludeSubdirectories: "true"
+  FolderKnowledge__ScanIntervalMinutes: "15"
+  FolderKnowledge__MaxFileCharacters: "200000"
+  FolderKnowledge__AllowedExtensions: .txt,.md,.json,.csv,.xml,.yml,.yaml,.html,.htm
+  SPACES_ENDPOINT: nyc3.digitaloceanspaces.com

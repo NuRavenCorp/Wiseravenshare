@@ -80,6 +80,8 @@ services:
     environment:
       PORT: 8005
       DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+      NURAVEN_CORP_LLM_SCORER_URL: ${NURAVEN_CORP_LLM_SCORER_URL:-}
+      RANKER_MODEL_TIMEOUT_SECONDS: ${RANKER_MODEL_TIMEOUT_SECONDS:-1.5}
     ports:
       - "${PYTHON_MATRIX_PORT:-8005}:8005"
     networks:

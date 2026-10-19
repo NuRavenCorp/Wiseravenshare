@@ -1,0 +1,17 @@
+environment = "prod"
+region      = "nyc3"
+
+site_domains = {
+  wiseravenshare = {
+    domain = "wiseravenshare-wiseravenshare.com"
+    site   = "wiseravenshare"
+  }
+  voteralliance = {
+    domain = "voteralliance-voterallianceus.com"
+    site   = "voteralliance"
+  }
+  wiseravenstream = {
+    domain = "wiseravenstream-wiseravenstream.com"
+    site   = "wiseravenstream"
+  }
+}
