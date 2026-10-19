@@ -27,6 +27,7 @@ import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Se
 import { apiService } from '../Services/api';
 import { apiClient } from '../api/client';
 import { useMediaExperience } from '../components/media/MediaExperience';
+import { getPlayableUrl } from '../lib/mediaUtils';
 import '../Styles/FMRadioPage.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1018,6 +1019,20 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         sourceUrl = URL.createObjectURL(track.file);
         generatedTrackObjectUrlsRef.current.push(sourceUrl);
         track.objectUrl = sourceUrl;
+      }
+
+      if (sourceUrl && !sourceUrl.startsWith('blob:') && !sourceUrl.startsWith('data:')) {
+        try {
+          const playable = await getPlayableUrl(sourceUrl);
+          if (playable) {
+            sourceUrl = playable;
+            if (playable.startsWith('blob:')) {
+              generatedTrackObjectUrlsRef.current.push(playable);
+            }
+          }
+        } catch {
+          // Keep original URL fallback if helper resolution fails.
+        }
       }
 
       if (!sourceUrl) {
