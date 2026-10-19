@@ -492,6 +492,12 @@ export const apiClient = {
     deleteMusic(trackId) {
       return requestJson(`/api/ravensight/media/music/${encodeURIComponent(trackId)}`, { method: "DELETE" });
     },
+    updateMusicInfo(trackId, info = {}) {
+      return requestJson(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/info`, {
+        method: "PATCH",
+        body: JSON.stringify(info),
+      });
+    },
     listVideos() {
       return requestJson("/api/ravensight/media/videos", { method: "GET" });
     },

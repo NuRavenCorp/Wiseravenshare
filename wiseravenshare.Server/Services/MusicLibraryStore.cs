@@ -33,6 +33,12 @@ public interface IMusicLibraryStore
         bool protectedState,
         CancellationToken cancellationToken = default);
 
+    Task<bool> UpdateTrackInfoAsync(
+        Guid userId,
+        string trackId,
+        Wiseravenshare.Server.DTOs.UpdateMusicTrackInfoRequest info,
+        CancellationToken cancellationToken = default);
+
     Task<bool> UserOwnsObjectKeyAsync(Guid userId, string objectKey, CancellationToken cancellationToken = default);
 }
 
@@ -364,6 +370,45 @@ WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_
         command.Parameters.AddWithValue("track_id", trackId.Trim());
         command.Parameters.AddWithValue("archived", archived);
         command.Parameters.AddWithValue("protected", protectedState);
+        command.Parameters.AddWithValue("updated_at", DateTime.UtcNow);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task<bool> UpdateTrackInfoAsync(
+        Guid userId,
+        string trackId,
+        Wiseravenshare.Server.DTOs.UpdateMusicTrackInfoRequest info,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(_connectionString) || string.IsNullOrWhiteSpace(trackId))
+            return false;
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = @"
+UPDATE app_data.bucket_objects
+SET metadata = metadata
+    || jsonb_build_object(
+        'title',  COALESCE(@title::text,  metadata->>'title',  ''),
+        'artist', COALESCE(@artist::text, metadata->>'artist', ''),
+        'album',  COALESCE(@album::text,  metadata->>'album',  ''),
+        'genre',  COALESCE(@genre::text,  metadata->>'genre',  '')
+    ),
+    updated_at = @updated_at
+WHERE (owner_user_id = @user_id OR COALESCE(metadata->>'userId', '') = @user_id_text)
+  AND id = @track_id
+  AND deleted_at IS NULL;";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("user_id", userId);
+        command.Parameters.AddWithValue("user_id_text", userId.ToString("D"));
+        command.Parameters.AddWithValue("track_id", trackId.Trim());
+        command.Parameters.AddWithValue("title", (object?)info.Title ?? DBNull.Value);
+        command.Parameters.AddWithValue("artist", (object?)info.Artist ?? DBNull.Value);
+        command.Parameters.AddWithValue("album", (object?)info.Album ?? DBNull.Value);
+        command.Parameters.AddWithValue("genre", (object?)info.Genre ?? DBNull.Value);
         command.Parameters.AddWithValue("updated_at", DateTime.UtcNow);
 
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
