@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import Metronome from "@/components/media/Metronome";
-import JamWebRTCPanel from "@/components/media/JamWebRTCPanel";
 import { Users, Plus, Radio, Music, LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -119,12 +118,6 @@ export default function JamSessionPanel() {
           initialBpm={activeSession.bpm || 120}
           onBpmChange={updateSessionBpm}
         />
-        <div className="border-t border-border pt-4">
-          <p className="text-xs text-muted-foreground font-medium mb-3 flex items-center gap-1.5">
-            <Radio className="w-3.5 h-3.5 text-primary" /> Real-time Jam Sync
-          </p>
-          <JamWebRTCPanel jamId={activeSession.id} />
-        </div>
         {activeSession.track_uris && activeSession.track_uris.length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-2">Shared Tracks</p>
