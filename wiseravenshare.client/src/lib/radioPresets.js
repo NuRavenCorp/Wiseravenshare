@@ -15,7 +15,7 @@ export const PRESET_CATEGORIES = [
     id: "chill",
     label: "Chill & Ambient",
     stations: [
-      { name: "SomaFM Groove Salad", url: "https://ice1.somafm.com/groovesalad-128-mp3", country: "Internet", tags: ["Ambient", "Chill"], codec: "MP3", bitrate: 128, preset: true },
+      { name: "SomaFM Groove Salad", url: "https://ice5.somafm.com/groovesalad-128-mp3", country: "Internet", tags: ["Ambient", "Chill"], codec: "MP3", bitrate: 128, preset: true },
       { name: "SomaFM Drone Zone", url: "https://ice1.somafm.com/dronezone-128-mp3", country: "Internet", tags: ["Drone", "Ambient"], codec: "MP3", bitrate: 128, preset: true },
       { name: "SomaFM Lush", url: "https://ice1.somafm.com/lush-128-mp3", country: "Internet", tags: ["Vocals", "Chill"], codec: "MP3", bitrate: 128, preset: true },
       { name: "SomaFM Space Station", url: "https://ice1.somafm.com/spacestation-128-mp3", country: "Internet", tags: ["Space", "Ambient"], codec: "MP3", bitrate: 128, preset: true },
@@ -26,7 +26,7 @@ export const PRESET_CATEGORIES = [
     id: "eclectic",
     label: "Eclectic & Indie",
     stations: [
-      { name: "Radio Paradise", url: "https://stream.radioparadise.com/aac-320", country: "Internet", tags: ["Eclectic", "Indie"], codec: "AAC", bitrate: 320, preset: true },
+      { name: "Radio Paradise", url: "https://stream-tx1.radioparadise.com/mp3-128", country: "Internet", tags: ["Eclectic", "Indie"], codec: "MP3", bitrate: 128, preset: true },
       { name: "BBC Radio 6 Music", url: "https://a.files.bbci.co.uk/ms6/live/3441A116-B12E-4D2F-ACA8-C1984642FA4B/audio/simulcast/hls/uk/audio_syndication_med_sbr_v1/aks/bbc_6music.m3u8", country: "United Kingdom", tags: ["Alternative", "Indie"], codec: "AAC+", bitrate: 128, preset: true },
       { name: "SomaFM Indie Pop Rocks", url: "https://ice1.somafm.com/indiepop-128-mp3", country: "Internet", tags: ["Indie", "Pop"], codec: "MP3", bitrate: 128, preset: true },
     ],
