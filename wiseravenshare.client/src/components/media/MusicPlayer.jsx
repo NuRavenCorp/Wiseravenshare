@@ -107,6 +107,31 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
 
   const current = currentIdx >= 0 ? tracks[currentIdx] : null;
 
+  const prepareBrowserCompatibleTrack = async () => {
+    if (!current?.id) {
+      setPlaybackError("This file is not in your music library, so it cannot be converted for this browser.");
+      return;
+    }
+    const trackId = String(current.id);
+    if (conversionAttemptRef.current === trackId) return;
+    conversionAttemptRef.current = trackId;
+    setPlaybackError("This browser cannot decode the original audio. Preparing a compatible copy…");
+    setPlaying(false);
+    try {
+      const compatible = await apiClient.podcastAudio.convertForBrowser(trackId);
+      const compatibleUrl = URL.createObjectURL(compatible);
+      setPlayUrl((previous) => {
+        if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+        return compatibleUrl;
+      });
+      setPlaybackError("Compatible audio is ready. Press play to start this track.");
+    } catch (error) {
+      const detail = error?.data?.detail;
+      const message = typeof detail === "string" ? detail : error?.data?.message || error?.message;
+      setPlaybackError(message || "Could not convert this track for browser playback.");
+    }
+  };
+
   // Fetch signed URL when track changes
   useEffect(() => {
     let cancelled = false;
@@ -146,8 +171,10 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
       if (error?.name === "NotAllowedError") {
         setNativeControlsFallback(true);
         setPlaybackError("Your browser blocked this play request. Tap the audio controls below to start playback.");
+      } else if (error?.name === "NotSupportedError" || error?.name === "EncodingError") {
+        void prepareBrowserCompatibleTrack();
       } else if (error?.name !== "AbortError") {
-        setPlaybackError("This track could not be played. Check the file format or try uploading it again.");
+        setPlaybackError(error?.message || "This track could not be played. Check the file format or try uploading it again.");
       }
     });
   };
@@ -288,21 +315,8 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
         onError={async (event) => {
           if (!playUrl) return;
           const code = event.currentTarget.error?.code;
-          if (code === 4 && current && conversionAttemptRef.current !== String(current.id)) {
-            conversionAttemptRef.current = String(current.id);
-            setPlaybackError("This browser cannot decode this file. Preparing a compatible audio copy…");
-            try {
-              const compatible = await apiClient.podcastAudio.convertForBrowser(current.id);
-              const compatibleUrl = URL.createObjectURL(compatible);
-              setPlayUrl((previous) => {
-                if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
-                return compatibleUrl;
-              });
-              setPlaybackError("Compatible audio is ready. Press play to start this track.");
-            } catch (error) {
-              setPlaybackError(error?.data?.message || error?.message || "Could not prepare compatible audio for this browser.");
-            }
-            setPlaying(false);
+          if (code === 4 && current) {
+            await prepareBrowserCompatibleTrack();
             return;
           }
           const detail = code === 4 ? "This audio format is not supported and conversion could not be completed." : "The audio stream could not be loaded. Check access or try uploading the track again.";

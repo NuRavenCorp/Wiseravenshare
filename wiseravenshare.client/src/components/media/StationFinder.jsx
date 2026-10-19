@@ -10,10 +10,19 @@ import { getStationsByRegionAndGenre } from "@/Services/fmService";
 const NYC_CALLSIGNS = ["WBLS", "WQHT", "WWPR", "Hot 97", "Power 105.1"];
 
 const getStationStream = (station) => {
-  const url = String(station?.url_resolved || station?.url || station?.urlResolved || "").trim();
+  let url = String(station?.url_resolved || station?.url || station?.urlResolved || "").trim();
+  const identity = `${station?.name || ""} ${station?.callSign || station?.callsign || ""} ${station?.station || ""}`;
+  // Radio Browser often returns iHeart's raw AAC endpoint for Power 105.1.
+  // Use iHeart's HLS rendition so browsers with no raw-AAC decoder can play it.
+  if (/power\s*105(?:\.1)?|\bWWPR(?:-FM)?\b/i.test(identity)) {
+    url = "https://stream.revma.ihrhls.com/zc1481/hls.m3u8";
+  } else {
+    const iheartStream = url.match(/^https?:\/\/(?:stream\.)?revma\.ihrhls\.com\/(zc\d+)\/?(?:\?.*)?$/i);
+    if (iheartStream) url = `https://stream.revma.ihrhls.com/${iheartStream[1]}/hls.m3u8`;
+  }
   if (!url) return "";
   if (url.startsWith("/")) return url;
-  if (/\.m3u8(?:\?|$)/i.test(url)) return url;
+  if (/\.m3u8(?:\?|$)/i.test(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
   return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
 };
 
