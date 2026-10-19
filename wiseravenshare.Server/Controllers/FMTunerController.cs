@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Text.RegularExpressions;
 using Wiseravenshare.Server.DTOs.FM;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Services.FM;
@@ -513,6 +515,115 @@ public sealed class FMTunerController : ControllerBase
                 await Response.WriteAsync($"Proxy error: {ex.Message}", cancellationToken);
             }
         }
+    }
+
+    /// <summary>Same-origin HLS proxy for iHeart playlists and their nested segments/keys.</summary>
+    [HttpGet("hls-proxy")]
+    [AllowAnonymous]
+    public async Task HlsProxy([FromQuery] string url, CancellationToken cancellationToken)
+    {
+        if (!TryAllowedIHeartUri(url, out var uri))
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            await Response.WriteAsync("Only iHeart Revma HLS URLs are supported.", cancellationToken);
+            return;
+        }
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("WiseRavenFMProxy/1.0");
+            client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            if (Request.Headers.TryGetValue("Range", out var rangeValue)
+                && System.Net.Http.Headers.RangeHeaderValue.TryParse(rangeValue.ToString(), out var range))
+                request.Headers.Range = range;
+
+            using var upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var finalUri = upstream.RequestMessage?.RequestUri ?? uri;
+            if (!IsAllowedIHeartUri(finalUri))
+            {
+                Response.StatusCode = StatusCodes.Status502BadGateway;
+                await Response.WriteAsync("The HLS provider redirected to an unsupported host.", cancellationToken);
+                return;
+            }
+            if (!upstream.IsSuccessStatusCode)
+            {
+                Response.StatusCode = (int)upstream.StatusCode;
+                await Response.WriteAsync($"HLS provider returned {(int)upstream.StatusCode}.", cancellationToken);
+                return;
+            }
+
+            Response.Headers["Cache-Control"] = "no-store";
+            var contentType = upstream.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            if (contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase)
+                || finalUri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
+            {
+                var playlist = await upstream.Content.ReadAsStringAsync(cancellationToken);
+                if (!playlist.TrimStart().StartsWith("#EXTM3U", StringComparison.Ordinal))
+                {
+                    Response.StatusCode = StatusCodes.Status502BadGateway;
+                    await Response.WriteAsync("The HLS provider returned an invalid playlist.", cancellationToken);
+                    return;
+                }
+
+                playlist = Regex.Replace(playlist, "URI=\"([^\"]+)\"", match =>
+                    $"URI=\"{ProxyHlsReference(match.Groups[1].Value, finalUri)}\"");
+                playlist = string.Join("\n", playlist.Split('\n').Select(line =>
+                {
+                    var trimmed = line.Trim();
+                    return trimmed.Length == 0 || trimmed.StartsWith('#')
+                        ? line
+                        : ProxyHlsReference(trimmed, finalUri);
+                }));
+                Response.ContentType = "application/vnd.apple.mpegurl";
+                await Response.WriteAsync(playlist, Encoding.UTF8, cancellationToken);
+                return;
+            }
+
+            Response.StatusCode = (int)upstream.StatusCode;
+            Response.ContentType = contentType;
+            if (upstream.Content.Headers.ContentLength is long length)
+                Response.ContentLength = length;
+            if (upstream.Content.Headers.ContentRange is not null)
+                Response.Headers.ContentRange = upstream.Content.Headers.ContentRange.ToString();
+            await using var stream = await upstream.Content.ReadAsStreamAsync(cancellationToken);
+            await stream.CopyToAsync(Response.Body, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal when the browser stops playback or changes station.
+        }
+        catch (Exception ex)
+        {
+            if (!Response.HasStarted)
+            {
+                Response.StatusCode = StatusCodes.Status502BadGateway;
+                await Response.WriteAsync($"HLS proxy error: {ex.Message}", cancellationToken);
+            }
+        }
+    }
+
+    private static bool TryAllowedIHeartUri(string rawUrl, out Uri uri)
+    {
+        return Uri.TryCreate(rawUrl, UriKind.Absolute, out uri!) && IsAllowedIHeartUri(uri);
+    }
+
+    private static bool IsAllowedIHeartUri(Uri uri)
+    {
+        return uri.Scheme == Uri.UriSchemeHttps
+            && (uri.Host.Equals("revma.ihrhls.com", StringComparison.OrdinalIgnoreCase)
+                || uri.Host.EndsWith(".revma.ihrhls.com", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ProxyHlsReference(string reference, Uri playlistUri)
+    {
+        if (reference.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return reference;
+        var resolved = Uri.TryCreate(playlistUri, reference, out var candidate) ? candidate : null;
+        if (resolved is null || !IsAllowedIHeartUri(resolved)) return reference;
+        var localUrl = $"/api/fmtuner/hls-proxy?url={Uri.EscapeDataString(resolved.ToString())}";
+        return localUrl;
     }
 
     private Guid GetUserIdOrDefault()

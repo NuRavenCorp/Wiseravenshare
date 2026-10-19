@@ -114,7 +114,7 @@ const request = async (path, options = {}) => {
 
 const requestBlob = async (path, options = {}) => {
   const token = readStoredToken();
-  const headers = { ...(options.headers || {}) };
+  const headers = { Accept: "audio/mpeg, application/json;q=0.9, */*;q=0.8", ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(buildUrl(path), { credentials: "include", ...options, headers });
   if (!response.ok) {

@@ -91,7 +91,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
     }
 
     [HttpGet("{trackId}/browser-compatible")]
-    [Produces("audio/mpeg")]
+    [Produces("audio/mpeg", "application/json")]
     public async Task<IActionResult> GetBrowserCompatibleTrack(string trackId, CancellationToken cancellationToken)
     {
         if (!TryResolveUserId(out var userId))
@@ -125,13 +125,17 @@ public sealed class RavensightMusicMediaController : ControllerBase
         using var client = _httpClientFactory.CreateClient("AudioService");
         using var multipart = new MultipartFormDataContent();
         using var fileContent = new StreamContent(source);
+        using var conversionRequest = new HttpRequestMessage(HttpMethod.Post, "/browser-compatible");
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         multipart.Add(fileContent, "file", Path.GetFileName(fileName));
+        conversionRequest.Content = multipart;
+        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/mpeg"));
+        conversionRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json", 0.9));
 
         HttpResponseMessage response;
         try
         {
-            response = await client.PostAsync("/browser-compatible", multipart, cancellationToken);
+            response = await client.SendAsync(conversionRequest, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
