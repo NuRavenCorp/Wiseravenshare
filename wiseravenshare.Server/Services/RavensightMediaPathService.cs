@@ -10,6 +10,8 @@ public interface IRavensightMediaPathService
         string? requestedDestinationFolder,
     string? userStorageIdentity,
         CancellationToken cancellationToken = default);
+
+    string? ResolveExistingFilePath(RavensightMediaType mediaType, string fileName, string? requestedDestinationFolder);
 }
 
 public sealed class RavensightMediaPathService : IRavensightMediaPathService

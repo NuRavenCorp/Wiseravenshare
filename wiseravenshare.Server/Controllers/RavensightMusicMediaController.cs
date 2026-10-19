@@ -21,6 +21,9 @@ public sealed class RavensightMusicMediaController : ControllerBase
     private readonly IBlobStorageService _blobStorageService;
     private readonly ILogger<RavensightMusicMediaController> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IWebHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
+    private readonly IRavensightMediaPathService _mediaPathService;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
@@ -28,7 +31,10 @@ public sealed class RavensightMusicMediaController : ControllerBase
         RavensightMediaCatalogStore mediaCatalogStore,
         IBlobStorageService blobStorageService,
         ILogger<RavensightMusicMediaController> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IWebHostEnvironment environment,
+        IConfiguration configuration,
+        IRavensightMediaPathService mediaPathService)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
@@ -36,6 +42,9 @@ public sealed class RavensightMusicMediaController : ControllerBase
         _blobStorageService = blobStorageService;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _environment = environment;
+        _configuration = configuration;
+        _mediaPathService = mediaPathService;
     }
 
     [HttpGet]
@@ -99,6 +108,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         string? objectKey = null;
         string fileName = "audio-file";
+        RavensightMediaAssetRecord? catalogAsset = null;
         var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
         var track = tracks.FirstOrDefault(candidate => string.Equals(candidate.Id, trackId, StringComparison.OrdinalIgnoreCase));
         if (track is not null)
@@ -108,23 +118,64 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
         else
         {
-            var asset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
-            if (asset is null || !string.Equals(asset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
+            catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
+            if (catalogAsset is null || !string.Equals(catalogAsset.MediaType, "music", StringComparison.OrdinalIgnoreCase))
                 return NotFound(new { message = "Track not found in your library." });
-            objectKey = asset.RelativePath;
-            fileName = asset.FileName;
+            objectKey = catalogAsset.RelativePath;
+            fileName = catalogAsset.FileName;
         }
 
         if (string.IsNullOrWhiteSpace(objectKey))
             return NotFound(new { message = "The original audio file has no stored media key." });
 
-        await using var source = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+        // Some music uploads are cataloged in both bucket_objects and the unified
+        // media catalog. Resolve the catalog row by ID or filename so local and
+        // backup copies remain usable when the primary Spaces object has expired.
+        if (catalogAsset is null)
+        {
+            catalogAsset = await _mediaCatalogStore.GetUserAssetByIdAsync(userId, trackId, cancellationToken);
+            if (catalogAsset is null)
+            {
+                var userAssets = await _mediaCatalogStore.GetUserAssetsAsync(userId, "music", 10000, cancellationToken);
+                catalogAsset = userAssets.FirstOrDefault(asset =>
+                    string.Equals(asset.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        Stream? source = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+        if (source is null && catalogAsset is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(catalogAsset.RelativePath)
+                && !string.Equals(catalogAsset.RelativePath, objectKey, StringComparison.OrdinalIgnoreCase))
+                source = await _blobStorageService.OpenReadAsync(catalogAsset.RelativePath, cancellationToken);
+
+            if (source is null && !string.IsNullOrWhiteSpace(catalogAsset.AbsolutePath)
+                && System.IO.File.Exists(catalogAsset.AbsolutePath))
+                source = new FileStream(catalogAsset.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+
+            if (source is null)
+            {
+                var destination = Path.GetDirectoryName(objectKey.Replace('/', Path.DirectorySeparatorChar));
+                var localPath = _mediaPathService.ResolveExistingFilePath(
+                    RavensightMediaType.Music,
+                    fileName,
+                    destination);
+                if (!string.IsNullOrWhiteSpace(localPath) && System.IO.File.Exists(localPath))
+                    source = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            }
+
+            if (source is null)
+                source = await OpenMediaBackupAsync(userId, catalogAsset.Id, fileName, cancellationToken);
+        }
+
         if (source is null)
-            return NotFound(new { message = "The original audio file is no longer available in storage." });
+            return NotFound(new { message = "The original audio file is no longer available in primary storage or its configured backup. Re-upload the file to restore playback." });
+
+        await using var ownedSource = source;
 
         using var client = _httpClientFactory.CreateClient("AudioService");
         using var multipart = new MultipartFormDataContent();
-        using var fileContent = new StreamContent(source);
+        using var fileContent = new StreamContent(ownedSource);
         using var conversionRequest = new HttpRequestMessage(HttpMethod.Post, "/browser-compatible");
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         multipart.Add(fileContent, "file", Path.GetFileName(fileName));
@@ -155,6 +206,31 @@ public sealed class RavensightMusicMediaController : ControllerBase
             var converted = await response.Content.ReadAsByteArrayAsync(cancellationToken);
             return File(converted, "audio/mpeg", $"{Path.GetFileNameWithoutExtension(fileName)}.mp3");
         }
+    }
+
+    private async Task<Stream?> OpenMediaBackupAsync(Guid userId, string assetId, string fileName, CancellationToken cancellationToken)
+    {
+        var safeName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeName) || string.IsNullOrWhiteSpace(assetId))
+            return null;
+
+        // The media backup endpoint stores object copies under this deterministic key.
+        var backupKey = $"backups/media/{userId:N}/{assetId}/{safeName}";
+        var backupStream = await _blobStorageService.OpenReadAsync(backupKey, cancellationToken);
+        if (backupStream is not null)
+            return backupStream;
+
+        // Also check the local backup root used by the same endpoint.
+        var configuredRoot = _configuration["MediaBackup:LocalRoot"];
+        var backupRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(_environment.ContentRootPath, "App_Data", "MediaBackups")
+            : Path.IsPathRooted(configuredRoot) ? configuredRoot : Path.Combine(_environment.ContentRootPath, configuredRoot));
+        var candidate = Path.GetFullPath(Path.Combine(backupRoot, userId.ToString("N"), assetId, safeName));
+        var rootPrefix = backupRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!candidate.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(candidate))
+            return null;
+
+        return new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
     }
 
     [HttpGet("player-state")]
