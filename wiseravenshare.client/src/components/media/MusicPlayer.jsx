@@ -54,6 +54,11 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   const mountedRef = useRef(false);
   const { toast } = useToast();
   const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  const getTrackId = (track) => {
+    const raw = track?.id ?? track?.trackId ?? track?.TrackId ?? track?.assetId ?? track?.AssetId ?? null;
+    const normalized = String(raw || "").trim();
+    return normalized || null;
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -101,14 +106,18 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
 
   useEffect(() => {
     if (!initialTrack || tracks.length === 0) return;
+    const initialTrackId = getTrackId(initialTrack);
     if (Array.isArray(initialQueue) && initialQueue.length > 1) {
       const queue = initialQueue.map(normalizeTrack);
       setTracks(queue);
-      setCurrentIdx(Math.max(0, queue.findIndex((track) => String(track.id) === String(initialTrack.id))));
+      setCurrentIdx(Math.max(0, queue.findIndex((track) => {
+        const queueTrackId = getTrackId(track);
+        return Boolean(initialTrackId && queueTrackId && queueTrackId === initialTrackId);
+      })));
       return;
     }
     const index = tracks.findIndex((track) =>
-      (initialTrack.id && String(track.id) === String(initialTrack.id))
+      (initialTrackId && getTrackId(track) === initialTrackId)
       || (initialTrack.url && track.file_uri === initialTrack.url)
       || (initialTrack.file_uri && track.file_uri === initialTrack.file_uri));
     if (index >= 0) {
@@ -123,26 +132,42 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   const current = currentIdx >= 0 ? tracks[currentIdx] : null;
 
   const prepareBrowserCompatibleTrack = async () => {
-    if (!current?.id) {
+    const trackId = getTrackId(current);
+    if (!trackId) {
       setPlaybackError("This file is not in your music library, so it cannot be converted for this browser.");
       return;
     }
-    const trackId = String(current.id);
     if (conversionAttemptRef.current === trackId) return;
     conversionAttemptRef.current = trackId;
     setPlaybackError("This browser cannot decode the original audio. Preparing a compatible copy…");
     setPlaying(false);
     try {
       const compatible = await apiClient.podcastAudio.convertForBrowser(trackId);
-      if (!mountedRef.current || String(current?.id) !== trackId) return;
+      if (!mountedRef.current || getTrackId(current) !== trackId) return;
       const compatibleUrl = URL.createObjectURL(compatible);
       setPlayUrl((previous) => {
         if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
         return compatibleUrl;
       });
-      setPlaybackError("Compatible audio is ready. Press play to start this track.");
+      const audio = playerRef.current;
+      if (!audio) return;
+
+      audio.load();
+      try {
+        await audio.play();
+        setPlaybackError("");
+      } catch (error) {
+        if (error?.name === "NotAllowedError") {
+          setNativeControlsFallback(true);
+          setPlaybackError("Compatible audio is ready. Press play to start this track.");
+        } else if (error?.name === "NotSupportedError" || error?.name === "EncodingError") {
+          setPlaybackError("The converted audio is not playable in this browser. Re-upload the track or try another format.");
+        } else if (error?.name !== "AbortError") {
+          setPlaybackError(error?.message || "Could not start playback for the converted audio.");
+        }
+      }
     } catch (error) {
-      if (!mountedRef.current || String(current?.id) !== trackId) return;
+      if (!mountedRef.current || getTrackId(current) !== trackId) return;
       const detail = error?.data?.detail;
       const message = typeof detail === "string" ? detail : error?.data?.message || error?.message;
       setPlaybackError(message || "Could not convert this track for browser playback.");
@@ -163,16 +188,42 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     conversionAttemptRef.current = null;
     setProgress(0);
     setDuration(0);
-    getPlayableUrl(current.file_uri).then((url) => {
-      if (cancelled) return;
-      if (!url) throw new Error("The media URL is unavailable.");
-      setPlayUrl(url);
-      setUrlLoading(false);
-    }).catch((error) => {
-      if (cancelled) return;
-      setUrlLoading(false);
-      setPlaybackError(error?.message || "Could not prepare this track for playback.");
-    });
+    const loadTrack = async () => {
+      try {
+        const streamTrackId = getTrackId(current);
+        if (streamTrackId) {
+          const blob = await apiClient.ravensightMedia.streamMusic(streamTrackId);
+          if (cancelled) return;
+          const objectUrl = URL.createObjectURL(blob);
+          setPlayUrl((previous) => {
+            if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+            return objectUrl;
+          });
+          setUrlLoading(false);
+          return;
+        }
+
+        const url = await getPlayableUrl(current.file_uri);
+        if (cancelled) return;
+        if (!url) throw new Error("The media URL is unavailable.");
+        setPlayUrl(url);
+        setUrlLoading(false);
+      } catch (primaryError) {
+        if (cancelled) return;
+
+        try {
+          const fallbackUrl = await getPlayableUrl(current?.file_uri);
+          if (!fallbackUrl) throw primaryError;
+          setPlayUrl(fallbackUrl);
+          setUrlLoading(false);
+        } catch {
+          setUrlLoading(false);
+          setPlaybackError(primaryError?.message || "Could not prepare this track for playback.");
+        }
+      }
+    };
+
+    void loadTrack();
     return () => { cancelled = true; };
   }, [current]);
 

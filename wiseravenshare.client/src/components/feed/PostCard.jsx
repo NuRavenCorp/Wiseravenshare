@@ -122,6 +122,14 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
 
   const hashtagList = post.hashtags?.length ? post.hashtags : [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
   const partialList = [...new Set((post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
+  const engagementUsers = Array.isArray(post.engagement_users) ? post.engagement_users : [];
+  const engagementSummary = engagementUsers.slice(0, 4).map((entry) => {
+    const engagementUser = entry?.user || {};
+    const name = engagementUser.display_name || engagementUser.displayName || engagementUser.username || "Someone";
+    const type = String(entry?.type || "engaged").toLowerCase();
+    const verb = type === "comment" ? "commented" : type === "repost" ? "reposted" : "liked";
+    return `${name} ${verb}`;
+  });
 
   return (
     <article className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden">
@@ -200,6 +208,11 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
           </div>
         )}
         {partialList.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{partialList.map((tag) => <button key={tag} onClick={() => onHashtagClick?.(`%${tag}`)} className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20">%{tag}</button>)}</div>}
+        {engagementSummary.length > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {engagementSummary.join(" · ")}
+          </p>
+        )}
       </div>
 
       {post.media_uris?.length > 0 && (

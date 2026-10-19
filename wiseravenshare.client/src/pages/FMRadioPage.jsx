@@ -176,6 +176,7 @@ const normalizeLibraryTrack = (track) => {
   const fileName = String(track.name || track.fileName || track.title || 'Untitled').trim();
   const artist = String(track.artist || '').trim();
   const title = String(track.title || '').trim() || parseMeta(fileName).title;
+  const trackId = String(track.id || track.trackId || track.TrackId || track.assetId || track.AssetId || '').trim();
   const relativePath = String(track.relativePath || track.RelativePath || track.objectKey || track.ObjectKey || '').trim();
   const directUrl = normalizePlaybackUrl(track.mediaUrl || track.url || track.fileUrl || track.publicUrl || track.MediaUrl || track.Url || '');
   const blobStreamUrl = toBlobStreamUrl(relativePath);
@@ -184,7 +185,7 @@ const normalizeLibraryTrack = (track) => {
   const mediaUrl = directUrl || blobStreamUrl || fileNameStreamUrl;
 
   return {
-    id: String(track.id || `${fileName}-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    id: trackId || `${fileName}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name: fileName,
     title,
     artist: artist || parseMeta(fileName).artist,
@@ -209,9 +210,17 @@ const resolveTrackSourceCandidates = (track) => {
   const blobStream = encodedRelativePath ? `/api/videostreaming/blob/${encodedRelativePath}` : '';
   const fileName = String(track.fileName || track.name || '').trim();
   const fileNameStream = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
-  const proxy = /^https?:\/\//i.test(normalizedDirect)
-    ? `/api/fmtuner/stream-proxy?url=${encodeURIComponent(normalizedDirect)}`
-    : '';
+  let proxy = '';
+  if (/^https?:\/\//i.test(normalizedDirect)) {
+    try {
+      const parsed = new URL(normalizedDirect);
+      if (parsed.protocol === 'http:') {
+        proxy = `/api/fmtuner/stream-proxy?url=${encodeURIComponent(normalizedDirect)}`;
+      }
+    } catch {
+      proxy = '';
+    }
+  }
   const fileObjectUrl = track.file ? URL.createObjectURL(track.file) : '';
 
   return [...new Set([
@@ -353,6 +362,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   const creatorRecorderStreamRef = useRef(null);
   const creatorRecorderChunksRef = useRef([]);
   const creatorRecorderTimerRef = useRef(null);
+  const activeTrackLoadRequestRef = useRef(0);
+  const generatedTrackObjectUrlsRef = useRef([]);
 
   // Web Audio nodes wired into Howler's ctx
   const eqFiltersRef  = useRef([]);
@@ -377,6 +388,14 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     persistentTrack = currentTrack || null;
     persistentTrackIndex = Number.isFinite(trackIndex) ? trackIndex : 0;
   }, [currentTrack, trackIndex]);
+  useEffect(() => () => {
+    generatedTrackObjectUrlsRef.current.forEach((url) => {
+      if (typeof url === 'string' && url.startsWith('blob:')) {
+        URL.revokeObjectURL(url);
+      }
+    });
+    generatedTrackObjectUrlsRef.current = [];
+  }, []);
 
   // Pull durable tracks that the music library has already cached so FM cassette/radio creator
   // can reuse the original uploaded media list instead of appearing empty.
@@ -958,6 +977,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   const loadTrack = useCallback((track, idx, autoPlay = false) => {
     if (!track) return;
     setLoadError('');
+    const requestId = activeTrackLoadRequestRef.current + 1;
+    activeTrackLoadRequestRef.current = requestId;
 
     // Stop + destroy previous Howl
     if (howlRef.current) {
@@ -974,89 +995,108 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     setDuration(0);
     setIsPlaying(false);
 
-    let sourceUrl = String(track.mediaUrl || track.url || track.objectUrl || '').trim();
-    if (!sourceUrl && track.file) {
-      sourceUrl = URL.createObjectURL(track.file);
-      track.objectUrl = sourceUrl;
-    }
+    const resolveAndLoad = async () => {
+      const trackName = track.name || track.fileName || track.title || 'track';
+      const ext = String(trackName).split('.').pop().toLowerCase();
+      const trackId = String(track.id || track.trackId || track.TrackId || track.assetId || track.AssetId || '').trim();
+      let sourceUrl = String(track.mediaUrl || track.url || track.objectUrl || '').trim();
 
-    if (!sourceUrl) {
-      setLoadError(`Cannot play "${track.name || track.title || 'track'}" because no media URL was found.`);
-      return;
-    }
-
-    const trackName = track.name || track.fileName || track.title || 'track';
-    const ext = String(trackName).split('.').pop().toLowerCase();
-    const mime = mimeForFile(trackName);
-
-    const howl = new Howl({
-      src:    [sourceUrl],
-      format: [ext],
-      html5:  true,   // html5:true ensures all formats use the audio element (codec support via browser)
-      volume: isMuted ? 0 : volume,
-      onload: () => {
-        setDuration(howl.duration());
-        buildEqChain();
-      },
-      onplay: () => {
-        setIsPlaying(true);
-        buildEqChain();
-        startViz();
-        startTicker();
-      },
-      onpause: () => {
-        setIsPlaying(false);
-        stopViz();
-        stopTicker();
-      },
-      onstop: () => {
-        setIsPlaying(false);
-        stopViz();
-        stopTicker();
-        setCurrentTime(0);
-      },
-      onend: () => {
-        stopTicker();
-        stopViz();
-        const lib = libraryRef.current;
-        const i   = idxRef.current;
-        const rep = repeatRef.current;
-        const shuf = shuffleRef.current;
-        if (rep === 'one') { howlRef.current?.play(); return; }
-        if (lib.length <= 1) { setIsPlaying(false); return; }
-        let next;
-        if (shuf) { do { next = Math.floor(Math.random() * lib.length); } while (next === i && lib.length > 1); }
-        else if (rep === 'all' || i < lib.length - 1) { next = (i + 1) % lib.length; }
-        else { setIsPlaying(false); return; }
-        loadTrack(lib[next], next, true);
-      },
-      onloaderror: (_, err) => {
-        setLoadError(`Cannot decode "${trackName}" - ${err || 'unsupported format in this browser'}`);
-        setIsPlaying(false);
-
-        // Auto-advance past the unplayable file so it doesn't block the queue.
-        // Destroy the failed Howl instance first.
-        if (howlRef.current) {
-          howlRef.current.unload();
-          howlRef.current = null;
+      if (trackId) {
+        try {
+          const streamed = await apiClient.ravensightMedia.streamMusic(trackId);
+          if (activeTrackLoadRequestRef.current !== requestId) return;
+          const streamedUrl = URL.createObjectURL(streamed);
+          generatedTrackObjectUrlsRef.current.push(streamedUrl);
+          sourceUrl = streamedUrl;
+          track.objectUrl = streamedUrl;
+        } catch {
+          // Fall back to existing URL strategies below.
         }
-        const lib = libraryRef.current;
-        const i   = idxRef.current;
-        const nextIdx = i < lib.length - 1 ? i + 1 : -1;
-        if (nextIdx >= 0 && lib[nextIdx]) {
-          loadTrack(lib[nextIdx], nextIdx, false);
-        } else {
-          // No next track — clear the player so new uploads can load immediately.
-          setCurrentTrack(null);
+      }
+
+      if (!sourceUrl && track.file) {
+        sourceUrl = URL.createObjectURL(track.file);
+        generatedTrackObjectUrlsRef.current.push(sourceUrl);
+        track.objectUrl = sourceUrl;
+      }
+
+      if (!sourceUrl) {
+        if (activeTrackLoadRequestRef.current === requestId) {
+          setLoadError(`Cannot play "${trackName}" because no media URL was found.`);
         }
-      },
-    });
+        return;
+      }
 
-    howlRef.current  = howl;
-    setCurrentTrack(track);
-    setTrackIndex(idx);
+      if (activeTrackLoadRequestRef.current !== requestId) return;
 
-    if (autoPlay) howl.play();
+      const howl = new Howl({
+        src:    [sourceUrl],
+        format: [ext],
+        html5:  true,   // html5:true ensures all formats use the audio element (codec support via browser)
+        volume: isMuted ? 0 : volume,
+        onload: () => {
+          setDuration(howl.duration());
+          buildEqChain();
+        },
+        onplay: () => {
+          setIsPlaying(true);
+          buildEqChain();
+          startViz();
+          startTicker();
+        },
+        onpause: () => {
+          setIsPlaying(false);
+          stopViz();
+          stopTicker();
+        },
+        onstop: () => {
+          setIsPlaying(false);
+          stopViz();
+          stopTicker();
+          setCurrentTime(0);
+        },
+        onend: () => {
+          stopTicker();
+          stopViz();
+          const lib = libraryRef.current;
+          const i   = idxRef.current;
+          const rep = repeatRef.current;
+          const shuf = shuffleRef.current;
+          if (rep === 'one') { howlRef.current?.play(); return; }
+          if (lib.length <= 1) { setIsPlaying(false); return; }
+          let next;
+          if (shuf) { do { next = Math.floor(Math.random() * lib.length); } while (next === i && lib.length > 1); }
+          else if (rep === 'all' || i < lib.length - 1) { next = (i + 1) % lib.length; }
+          else { setIsPlaying(false); return; }
+          loadTrack(lib[next], next, true);
+        },
+        onloaderror: (_, err) => {
+          setLoadError(`Cannot decode "${trackName}" - ${err || 'unsupported format in this browser'}`);
+          setIsPlaying(false);
+
+          if (howlRef.current) {
+            howlRef.current.unload();
+            howlRef.current = null;
+          }
+          const lib = libraryRef.current;
+          const i   = idxRef.current;
+          const nextIdx = i < lib.length - 1 ? i + 1 : -1;
+          if (nextIdx >= 0 && lib[nextIdx]) {
+            loadTrack(lib[nextIdx], nextIdx, false);
+          } else {
+            setCurrentTrack(null);
+          }
+        },
+      });
+
+      howlRef.current  = howl;
+      setCurrentTrack(track);
+      setTrackIndex(idx);
+
+      if (autoPlay) howl.play();
+    };
+
+    void resolveAndLoad();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildEqChain, startViz, stopViz, startTicker, stopTicker, volume, isMuted]);
 

@@ -35,8 +35,15 @@ const resolvePlaybackUrl = (rawUrl) => {
   if (shouldUseHlsProxy(rawUrl)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(rawUrl)}`;
   // Same-origin relative URLs don't need a proxy
   if (rawUrl.startsWith('/')) return rawUrl;
-  // Proxy all other external streams to avoid CORS + mixed-content blocks
-  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(rawUrl)}`;
+  try {
+    const parsed = new URL(rawUrl);
+    // HTTPS streams should play directly to avoid App Platform proxy timeouts.
+    if (parsed.protocol === 'https:') return rawUrl;
+    if (parsed.protocol === 'http:') return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(rawUrl)}`;
+  } catch {
+    // Fall through and return raw URL for non-standard but browser-playable inputs.
+  }
+  return rawUrl;
 };
 
 function groupByCategory(channels) {

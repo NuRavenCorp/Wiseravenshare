@@ -53,6 +53,7 @@ public interface IPostRepository : IRepository<Post>
     Task<IReadOnlyList<Comment>> GetCommentsAsync(Guid postId, int page, int pageSize);
     Task<Comment> AddCommentAsync(Guid postId, Guid userId, string content, Guid? parentCommentId = null);
     Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null);
+    Task<IReadOnlyList<PostEngagementActor>> GetRecentEngagementActorsAsync(Guid postId, int maxPerType = 3);
     Task IncrementViewAsync(Guid postId);
     Task IncrementShareAsync(Guid postId);
 }
@@ -67,6 +68,11 @@ public sealed record PostInteractionState(
     bool IsLiked,
     bool IsReposted,
     bool IsBookmarked);
+
+public sealed record PostEngagementActor(
+    Guid UserId,
+    string EngagementType,
+    DateTime CreatedAt);
 
 // Wiseravenshare.Core/Interfaces/Repositories/ITruthRepository.cs
 public interface ITruthRepository : IRepository<TruthClaim>

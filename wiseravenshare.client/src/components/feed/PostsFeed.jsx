@@ -17,6 +17,12 @@ const normalizePost = (post) => ({
   media_uris: post.mediaUrls || post.media_uris || (post.mediaUrl ? [post.mediaUrl] : []),
   is_liked: post.isLiked ?? post.is_liked,
   is_reposted: post.isReposted ?? post.is_reposted,
+  engagement_users: (post.engagementUsers || post.engagement_users || []).map((entry) => ({
+    ...entry,
+    type: entry.type || entry.engagementType || "engaged",
+    engaged_at: entry.engagedAt || entry.engaged_at || null,
+    user: entry.user || null,
+  })),
   hashtags: post.hashtags || [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((tag) => tag.slice(1)))],
 });
 
@@ -101,12 +107,21 @@ export default function PostsFeed() {
     } catch (error) { console.error("Could not unblock user", error); }
   };
   const openTag = (value) => { setTag(value.startsWith("%") ? value : value.replace(/^#/, "")); setMode("trending"); };
+  const handlePosted = async (createdPost) => {
+    if (createdPost) {
+      const normalizedCreatedPost = normalizePost(createdPost);
+      setPosts((current) => [normalizedCreatedPost, ...current.filter((post) => post.id !== normalizedCreatedPost.id)]);
+      setView("feed");
+      setMode("following");
+    }
+    await fetchPosts();
+  };
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-5">
-      {showComposer && <PostComposer compact onPosted={fetchPosts} />}
+      {showComposer && <PostComposer compact onPosted={handlePosted} />}
       {currentUser && blockedUsers.length > 0 && <details className="rounded-lg border border-border bg-card/50 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground"><ShieldBan className="h-4 w-4" /> Blocked accounts ({blockedUsers.length})</summary><div className="mt-3 space-y-2">{blockedUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 rounded-md bg-background/60 px-3 py-2"><span className="truncate text-sm">{user.name || user.handle || user.id}</span><button onClick={() => unblockUser(user.id)} className="flex items-center gap-1 text-xs text-primary hover:underline"><ShieldCheck className="h-3.5 w-3.5" /> Unblock</button></div>)}</div></details>}
       {trendingTopics.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"><span className="mr-1 text-xs font-medium text-muted-foreground">Trending topics</span>{trendingTopics.map(([topic, count]) => <button key={topic} onClick={() => openTag(topic.startsWith("#") ? topic.slice(1) : topic)} className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary hover:bg-primary/10">{topic}<span className="ml-1 opacity-60">{count}</span></button>)}</div>}
       <div className="flex flex-wrap items-center justify-between gap-3">

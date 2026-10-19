@@ -14,9 +14,10 @@ export function MediaExperienceProvider({ children }) {
     const type = kind === "audio" || kind === "music" ? "music"
       : kind === "image" || kind === "photo" ? "photo"
       : kind === "video" ? "video" : "";
+    const mediaId = media?.id ?? media?.trackId ?? media?.TrackId ?? media?.assetId ?? media?.AssetId ?? null;
     const url = media?.url || media?.file_uri || media?.mediaUrl || media?.videoUrl || media?.imageUrl || "";
-    if (!type || (!url && !(type === "music" && media?.id))) return;
-    setRequest({ ...media, type, url, title: media.title || media.fileName || "Untitled media" });
+    if (!type || (!url && !(type === "music" && mediaId))) return;
+    setRequest({ ...media, id: mediaId ?? media?.id, type, url, title: media.title || media.fileName || "Untitled media" });
   }, []);
   const closeMedia = useCallback(() => setRequest(null), []);
 

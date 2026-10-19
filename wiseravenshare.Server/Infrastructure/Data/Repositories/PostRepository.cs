@@ -281,6 +281,39 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
                 isBookmarked);
         }
 
+        public async Task<IReadOnlyList<PostEngagementActor>> GetRecentEngagementActorsAsync(Guid postId, int maxPerType = 3)
+        {
+            var safeMaxPerType = Math.Clamp(maxPerType, 1, 10);
+
+            var likes = await _context.PostLikes
+                .Where(l => l.PostId == postId)
+                .OrderByDescending(l => l.CreatedAt)
+                .Take(safeMaxPerType)
+                .Select(l => new PostEngagementActor(l.UserId, "like", l.CreatedAt))
+                .ToListAsync();
+
+            var comments = await _context.Set<Comment>()
+                .Where(c => c.PostId == postId && !c.IsDeleted)
+                .OrderByDescending(c => c.CreatedAt)
+                .Take(safeMaxPerType)
+                .Select(c => new PostEngagementActor(c.UserId, "comment", c.CreatedAt))
+                .ToListAsync();
+
+            var reposts = await _context.PostReposts
+                .Where(r => r.PostId == postId)
+                .OrderByDescending(r => r.CreatedAt)
+                .Take(safeMaxPerType)
+                .Select(r => new PostEngagementActor(r.UserId, "repost", r.CreatedAt))
+                .ToListAsync();
+
+            return likes
+                .Concat(comments)
+                .Concat(reposts)
+                .OrderByDescending(actor => actor.CreatedAt)
+                .DistinctBy(actor => new { actor.UserId, actor.EngagementType })
+                .ToList();
+        }
+
         public async Task IncrementViewAsync(Guid postId)
         {
             await _context.Database.ExecuteSqlAsync(
