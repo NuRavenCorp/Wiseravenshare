@@ -153,9 +153,10 @@ public class MediaController : ControllerBase
 
         string uniqueFileName;
         string persistedMediaUrl;
+        string persistedRelativePath;
         try
         {
-            (uniqueFileName, persistedMediaUrl) = await SaveMediaFileAsync(file, extension, managedDestinationFolder, cancellationToken);
+            (uniqueFileName, persistedMediaUrl, persistedRelativePath) = await SaveMediaFileAsync(file, extension, managedDestinationFolder, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -280,7 +281,7 @@ public class MediaController : ControllerBase
                     UserId = catalogUserGuid,
                     MediaType = isPhoto ? RavensightMediaType.Photo : isAudio ? RavensightMediaType.Music : RavensightMediaType.Video,
                     FileName = uniqueFileName,
-                    RelativePath = $"{mediaFolder}/{uniqueFileName}",
+                    RelativePath = persistedRelativePath,
                     PublicUrl = persistedMediaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? persistedMediaUrl : null,
                     AbsolutePath = string.Empty,
                     DestinationFolder = mediaFolder,
@@ -371,9 +372,9 @@ public class MediaController : ControllerBase
     /// configured the file is streamed directly to the bucket and the persistent public URL is
     /// returned. This survives container restarts and redeployments.
     /// Local disk is used only as a development fallback.
-    /// Returns (uniqueFileName, persistentMediaUrl).
+    /// Returns (uniqueFileName, persistentMediaUrl, storageRelativePath).
     /// </summary>
-    private async Task<(string FileName, string MediaUrl)> SaveMediaFileAsync(
+    private async Task<(string FileName, string MediaUrl, string RelativePath)> SaveMediaFileAsync(
         IFormFile file,
         string extension,
         string? requestedDestinationFolder,
@@ -405,7 +406,7 @@ public class MediaController : ControllerBase
                     ? result.PublicUrl
                     : blobStreamUrl;
 
-                return (uniqueFileName, mediaUrl);
+                return (uniqueFileName, mediaUrl, result.ObjectKey);
             }
             catch (Exception ex)
             {
@@ -435,7 +436,8 @@ public class MediaController : ControllerBase
                 await using var diskStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
                 await file.CopyToAsync(diskStream, cancellationToken);
                 var localUrl = StreamingUrlHelper.StreamByFileName(uniqueFileName);
-                return (uniqueFileName, localUrl);
+                var localRelativePath = $"{normalizedDestination}/{uniqueFileName}".Replace('\\', '/').Trim('/');
+                return (uniqueFileName, localUrl, localRelativePath);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {

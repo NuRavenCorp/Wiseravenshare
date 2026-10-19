@@ -125,9 +125,6 @@ public sealed class RavensightMusicMediaController : ControllerBase
             fileName = catalogAsset.FileName;
         }
 
-        if (string.IsNullOrWhiteSpace(objectKey))
-            return NotFound(new { message = "The original audio file has no stored media key." });
-
         // Some music uploads are cataloged in both bucket_objects and the unified
         // media catalog. Resolve the catalog row by ID or filename so local and
         // backup copies remain usable when the primary Spaces object has expired.
@@ -142,31 +139,62 @@ public sealed class RavensightMusicMediaController : ControllerBase
             }
         }
 
-        Stream? source = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+        var objectKeyCandidates = BuildObjectKeyCandidates(
+            objectKey,
+            track?.MediaUrl,
+            catalogAsset?.RelativePath,
+            catalogAsset?.PublicUrl,
+            userId,
+            fileName);
+
+        if (objectKeyCandidates.Count == 0)
+            return NotFound(new { message = "The original audio file has no stored media key." });
+
+        Stream? source = null;
+        foreach (var candidateKey in objectKeyCandidates)
+        {
+            source = await _blobStorageService.OpenReadAsync(candidateKey, cancellationToken);
+            if (source is not null)
+                break;
+        }
+
         if (source is null && catalogAsset is not null)
         {
-            if (!string.IsNullOrWhiteSpace(catalogAsset.RelativePath)
-                && !string.Equals(catalogAsset.RelativePath, objectKey, StringComparison.OrdinalIgnoreCase))
-                source = await _blobStorageService.OpenReadAsync(catalogAsset.RelativePath, cancellationToken);
-
-            if (source is null && !string.IsNullOrWhiteSpace(catalogAsset.AbsolutePath)
+            if (!string.IsNullOrWhiteSpace(catalogAsset.AbsolutePath)
                 && System.IO.File.Exists(catalogAsset.AbsolutePath))
                 source = new FileStream(catalogAsset.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        }
 
-            if (source is null)
+        if (source is null)
+        {
+            var userMusicFolder = $"users/{ResolveUserStorageIdentity(userId)}/media/music";
+            var objectFolders = objectKeyCandidates
+                .Select(candidate => Path.GetDirectoryName(candidate.Replace('/', Path.DirectorySeparatorChar)))
+                .Where(folder => !string.IsNullOrWhiteSpace(folder));
+            var localFolders = new[]
             {
-                var destination = Path.GetDirectoryName(objectKey.Replace('/', Path.DirectorySeparatorChar));
+                catalogAsset?.DestinationFolder,
+                userMusicFolder
+            }
+            .Concat(objectFolders)
+            .Where(folder => !string.IsNullOrWhiteSpace(folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var localFolder in localFolders)
+            {
                 var localPath = _mediaPathService.ResolveExistingFilePath(
                     RavensightMediaType.Music,
                     fileName,
-                    destination);
-                if (!string.IsNullOrWhiteSpace(localPath) && System.IO.File.Exists(localPath))
-                    source = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                    localFolder);
+                if (string.IsNullOrWhiteSpace(localPath) || !System.IO.File.Exists(localPath))
+                    continue;
+                source = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                break;
             }
-
-            if (source is null)
-                source = await OpenMediaBackupAsync(userId, catalogAsset.Id, fileName, cancellationToken);
         }
+
+        if (source is null)
+            source = await OpenMediaBackupAsync(userId, catalogAsset?.Id ?? track?.Id ?? trackId, fileName, cancellationToken);
 
         if (source is null)
             return NotFound(new { message = "The original audio file is no longer available in primary storage or its configured backup. Re-upload the file to restore playback." });
@@ -211,11 +239,12 @@ public sealed class RavensightMusicMediaController : ControllerBase
     private async Task<Stream?> OpenMediaBackupAsync(Guid userId, string assetId, string fileName, CancellationToken cancellationToken)
     {
         var safeName = Path.GetFileName(fileName);
-        if (string.IsNullOrWhiteSpace(safeName) || string.IsNullOrWhiteSpace(assetId))
+        var safeAssetId = Path.GetFileName(assetId);
+        if (string.IsNullOrWhiteSpace(safeName) || string.IsNullOrWhiteSpace(safeAssetId))
             return null;
 
         // The media backup endpoint stores object copies under this deterministic key.
-        var backupKey = $"backups/media/{userId:N}/{assetId}/{safeName}";
+        var backupKey = $"backups/media/{userId:N}/{safeAssetId}/{safeName}";
         var backupStream = await _blobStorageService.OpenReadAsync(backupKey, cancellationToken);
         if (backupStream is not null)
             return backupStream;
@@ -225,12 +254,70 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var backupRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
             ? Path.Combine(_environment.ContentRootPath, "App_Data", "MediaBackups")
             : Path.IsPathRooted(configuredRoot) ? configuredRoot : Path.Combine(_environment.ContentRootPath, configuredRoot));
-        var candidate = Path.GetFullPath(Path.Combine(backupRoot, userId.ToString("N"), assetId, safeName));
+        var candidate = Path.GetFullPath(Path.Combine(backupRoot, userId.ToString("N"), safeAssetId, safeName));
         var rootPrefix = backupRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!candidate.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(candidate))
             return null;
 
         return new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+    }
+
+    private async Task CreateMusicBackupAsync(
+        Guid userId,
+        string assetId,
+        string objectKey,
+        string fileName,
+        string destinationFolder,
+        string contentType,
+        CancellationToken cancellationToken)
+    {
+        var safeName = Path.GetFileName(fileName);
+        var safeAssetId = Path.GetFileName(assetId);
+        if (string.IsNullOrWhiteSpace(safeName) || string.IsNullOrWhiteSpace(safeAssetId))
+            return;
+
+        var backupKey = $"backups/media/{userId:N}/{safeAssetId}/{safeName}";
+        if (_blobStorageService.IsConfigured)
+        {
+            await using var original = await _blobStorageService.OpenReadAsync(objectKey, cancellationToken);
+            if (original is not null)
+            {
+                await _blobStorageService.UploadAsync(backupKey, original, contentType, cancellationToken);
+                return;
+            }
+
+            var localSourcePath = _mediaPathService.ResolveExistingFilePath(
+                RavensightMediaType.Music,
+                safeName,
+                destinationFolder);
+            if (!string.IsNullOrWhiteSpace(localSourcePath) && System.IO.File.Exists(localSourcePath))
+            {
+                await using var localSource = new FileStream(localSourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                await _blobStorageService.UploadAsync(backupKey, localSource, contentType, cancellationToken);
+                return;
+            }
+        }
+
+        var configuredRoot = _configuration["MediaBackup:LocalRoot"];
+        var backupRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(_environment.ContentRootPath, "App_Data", "MediaBackups")
+            : Path.IsPathRooted(configuredRoot) ? configuredRoot : Path.Combine(_environment.ContentRootPath, configuredRoot));
+        var backupPath = Path.GetFullPath(Path.Combine(backupRoot, userId.ToString("N"), safeAssetId, safeName));
+        var rootPrefix = backupRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!backupPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Invalid local music backup path.");
+
+        var sourcePath = _mediaPathService.ResolveExistingFilePath(
+            RavensightMediaType.Music,
+            safeName,
+            destinationFolder);
+        if (string.IsNullOrWhiteSpace(sourcePath) || !System.IO.File.Exists(sourcePath))
+            return;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+        await using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        await using var output = new FileStream(backupPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+        await input.CopyToAsync(output, cancellationToken);
     }
 
     [HttpGet("player-state")]
@@ -568,9 +655,10 @@ public sealed class RavensightMusicMediaController : ControllerBase
 
         // Mirror to the unified media catalog so GetUserMusic can always find it.
         var savedAtUtc = DateTime.TryParse(track.UploadedAt, out var uploadedAt) ? uploadedAt.ToUniversalTime() : DateTime.UtcNow;
+        RavensightMediaAssetRecord? savedCatalogAsset = null;
         try
         {
-            await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+            savedCatalogAsset = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
             {
                 UserId = userId,
                 MediaType = RavensightMediaType.Music,
@@ -602,6 +690,22 @@ public sealed class RavensightMusicMediaController : ControllerBase
             HttpContext.RequestServices
                 .GetService<ILogger<RavensightMusicMediaController>>()
                 ?.LogWarning(ex, "Music catalog entry failed for user {UserId}; track saved in bucket store.", userId);
+        }
+
+        try
+        {
+            await CreateMusicBackupAsync(
+                userId,
+                savedCatalogAsset?.Id ?? track.Id,
+                track.ObjectKey,
+                track.FileName,
+                userMusicFolder,
+                dto.File.ContentType,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Music backup could not be created for track {TrackId}; primary upload remains saved.", track.Id);
         }
 
         return Ok(new
@@ -637,6 +741,69 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var displayName = User.FindFirstValue(ClaimTypes.Name);
         var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
         return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
+    }
+
+    private List<string> BuildObjectKeyCandidates(
+        string? objectKey,
+        string? trackMediaUrl,
+        string? catalogRelativePath,
+        string? catalogPublicUrl,
+        Guid userId,
+        string fileName)
+    {
+        var keys = new List<string>();
+        var projectFolder = (_configuration["Storage:ProjectFolder"] ?? "wiseravenshare").Trim().Trim('/');
+        var userStorageIdentity = ResolveUserStorageIdentity(userId);
+        var fallbackUserMusicPath = $"users/{userStorageIdentity}/media/music/{Path.GetFileName(fileName)}";
+
+        AddObjectKeyCandidate(keys, objectKey, projectFolder);
+        AddObjectKeyCandidate(keys, catalogRelativePath, projectFolder);
+        AddObjectKeyCandidate(keys, ExtractObjectKeyFromMediaUrl(trackMediaUrl), projectFolder);
+        AddObjectKeyCandidate(keys, ExtractObjectKeyFromMediaUrl(catalogPublicUrl), projectFolder);
+        AddObjectKeyCandidate(keys, fallbackUserMusicPath, projectFolder);
+
+        return keys;
+    }
+
+    private static string? ExtractObjectKeyFromMediaUrl(string? mediaUrl)
+    {
+        if (string.IsNullOrWhiteSpace(mediaUrl))
+            return null;
+
+        var value = mediaUrl.Trim();
+        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var uri))
+            return null;
+
+        var path = uri.IsAbsoluteUri ? uri.AbsolutePath : value;
+        var normalizedPath = path.Replace('\\', '/');
+        const string mediaBlobPrefix = "/api/media/blob/";
+        const string videoBlobPrefix = "/api/videostreaming/blob/";
+        if (normalizedPath.StartsWith(mediaBlobPrefix, StringComparison.OrdinalIgnoreCase))
+            return Uri.UnescapeDataString(normalizedPath[mediaBlobPrefix.Length..]).Trim('/');
+        if (normalizedPath.StartsWith(videoBlobPrefix, StringComparison.OrdinalIgnoreCase))
+            return Uri.UnescapeDataString(normalizedPath[videoBlobPrefix.Length..]).Trim('/');
+
+        return null;
+    }
+
+    private static void AddObjectKeyCandidate(ICollection<string> keys, string? candidate, string projectFolder)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+            return;
+
+        var normalized = candidate.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        if (!keys.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            keys.Add(normalized);
+
+        if (!normalized.StartsWith(projectFolder + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            var projectScoped = $"{projectFolder}/{normalized}".Trim('/');
+            if (!keys.Contains(projectScoped, StringComparer.OrdinalIgnoreCase))
+                keys.Add(projectScoped);
+        }
     }
 
     private static string ReadMusicMeta(string? metadataJson, string key)

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useState } from "react";
+import ReactPlayer from "react-player";
 import { X } from "lucide-react";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import ZoomableImage from "@/components/media/ZoomableImage";
@@ -35,10 +36,21 @@ export function useMediaExperience() {
 
 function MediaExperienceModal({ request, onClose }) {
   const [url, setUrl] = useState("");
+  const [mediaError, setMediaError] = useState("");
+  const [videoError, setVideoError] = useState("");
   React.useEffect(() => {
     if (request.type === "music") return undefined;
     let active = true;
-    getPlayableUrl(request.url).then((resolved) => { if (active) setUrl(resolved || request.url); });
+    getPlayableUrl(request.url)
+      .then((resolved) => {
+        if (active) {
+          setUrl(resolved || request.url);
+          setMediaError("");
+        }
+      })
+      .catch((error) => {
+        if (active) setMediaError(error?.message || "This media could not be prepared for playback.");
+      });
     return () => { active = false; };
   }, [request.type, request.url]);
 
@@ -50,9 +62,25 @@ function MediaExperienceModal({ request, onClose }) {
           <button type="button" onClick={onClose} aria-label="Close media player" className="rounded p-1 text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
         </header>
         {request.type === "music" ? <MusicPlayer initialTrack={request} initialQueue={request.queue} />
+          : mediaError ? <p role="alert" className="py-16 text-center text-sm text-destructive">{mediaError}</p>
           : !url ? <div className="py-16 text-center text-sm text-muted-foreground">Loading media…</div>
           : request.type === "photo" ? <ZoomableImage src={url} alt={request.title} className="mx-auto max-h-[78vh] w-full rounded-lg" fittingType="fit" />
-          : <video src={url} controls autoPlay playsInline className="mx-auto max-h-[78vh] w-full rounded-lg border border-border bg-black" />}
+          : (
+            <div>
+              <ReactPlayer
+                src={url}
+                controls
+                playsInline
+                preload="metadata"
+                width="100%"
+                height="min(78vh, 56.25vw)"
+                style={{ maxHeight: "78vh", aspectRatio: "16 / 9", background: "#000", borderRadius: "0.5rem", overflow: "hidden" }}
+                onError={(error) => setVideoError(error?.message || "This video could not be played in this browser.")}
+                onPlaying={() => setVideoError("")}
+              />
+              {videoError && <p role="alert" className="mt-3 text-sm text-destructive">{videoError}</p>}
+            </div>
+          )}
       </section>
     </div>
   );
