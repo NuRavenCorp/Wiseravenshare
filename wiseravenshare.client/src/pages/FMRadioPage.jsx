@@ -266,6 +266,12 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   const [duration,     setDuration]     = useState(0);
   const [loadError,    setLoadError]    = useState('');
 
+  // Music Library extras
+  const [editTrack,       setEditTrack]       = useState(null);
+  const [playlists,       setPlaylists]       = useState(() => { try { return JSON.parse(localStorage.getItem('wr_playlists') || '[]'); } catch { return []; } });
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [playlistError,   setPlaylistError]   = useState('');
+
   // UI toggles
   const [showEq,       setShowEq]       = useState(false);
   const [showQueue,    setShowQueue]    = useState(false);
@@ -394,8 +400,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     apiClient.ravensightMedia.listMusic()
       .then((items) => {
         if (cancelled || !Array.isArray(items)) return;
-        const normalized = items.map(normalizeLibraryTrack)
-          .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
+      const normalized = items.map(normalizeLibraryTrack)
+          .filter((track) => track && track.id);
         setLibrary(normalized);
         lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
       })
@@ -1152,7 +1158,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       const items = await apiClient.ravensightMedia.listMusic();
       const normalized = (Array.isArray(items) ? items : []).map(normalizeLibraryTrack)
-        .filter((track) => track && (track.mediaUrl || track.file || track.objectUrl));
+        .filter((track) => track && track.id);
       setLibrary(normalized);
       lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
 
@@ -1256,6 +1262,63 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       return n;
     });
   }, [currentTrack]);
+
+  const refreshLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    setLibraryUploadError('');
+    try {
+      const items = await apiClient.ravensightMedia.listMusic();
+      const normalized = (Array.isArray(items) ? items : []).map(normalizeLibraryTrack).filter(Boolean);
+      setLibrary(normalized);
+      lsSet(MUSIC_LIBRARY_CACHE_KEY, normalized);
+    } catch (err) {
+      setLibraryUploadError(err?.message || 'Could not load your saved tracks.');
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, []);
+
+  const updateTrackMeta = useCallback(async (updated) => {
+    setLibrary((prev) => prev.map((t) => t.id === updated.id ? { ...t, ...updated } : t));
+    try {
+      await apiClient.ravensightMedia.updateMusicInfo(updated.id, {
+        title: updated.title,
+        artist: updated.artist,
+        album: updated.album,
+        genre: updated.genre,
+      });
+    } catch { /* best-effort — local update already applied */ }
+  }, []);
+
+  const createPlaylist = useCallback(() => {
+    const name = newPlaylistName.trim();
+    if (!name) { setPlaylistError('Enter a playlist name.'); return; }
+    if (library.length === 0) { setPlaylistError('Add tracks before creating a playlist.'); return; }
+    const pl = { id: `pl-${Date.now()}`, name, trackIds: library.map((t) => t.id), createdAt: new Date().toISOString() };
+    setPlaylists((prev) => {
+      const next = [...prev, pl];
+      try { localStorage.setItem('wr_playlists', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setNewPlaylistName('');
+    setPlaylistError('');
+  }, [newPlaylistName, library]);
+
+  const deletePlaylist = useCallback((plId) => {
+    setPlaylists((prev) => {
+      const next = prev.filter((p) => p.id !== plId);
+      try { localStorage.setItem('wr_playlists', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const playPlaylist = useCallback((pl) => {
+    const tracks = pl.trackIds
+      .map((id) => library.find((t) => t.id === id))
+      .filter(Boolean);
+    if (!tracks.length) return;
+    openMedia({ ...tracks[0], type: 'music', url: tracks[0].mediaUrl || '', queue: tracks });
+  }, [library, openMedia]);
 
   useEffect(() => {
     if (!persistentHowl) {
@@ -2183,31 +2246,77 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       {tab === 'cassette' && (
         <div className="mod-library">
+          {/* ── Track Info Edit Modal ── */}
+          {editTrack && (
+            <div
+              style={{ position:'fixed', inset:0, zIndex:300, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}
+              onClick={() => setEditTrack(null)}
+            >
+              <div
+                style={{ background:'var(--card-bg,#1a1a2e)', border:'1px solid var(--border-color,#333)', borderRadius:14, padding:24, width:'100%', maxWidth:400, boxShadow:'0 8px 40px rgba(0,0,0,0.6)' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ margin:'0 0 16px', fontSize:16, fontWeight:700 }}>✏ Edit Track Info</h3>
+                {[
+                  { key:'title',  label:'Title'  },
+                  { key:'artist', label:'Artist' },
+                  { key:'album',  label:'Album'  },
+                  { key:'genre',  label:'Genre'  },
+                ].map(({ key, label }) => (
+                  <div key={key} style={{ marginBottom:10 }}>
+                    <label style={{ display:'block', fontSize:12, marginBottom:4, opacity:.7 }}>{label}</label>
+                    <input
+                      value={editTrack[key] || ''}
+                      onChange={(e) => setEditTrack((t) => ({ ...t, [key]: e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid var(--border-color,#444)', background:'var(--input-bg,#111)', color:'var(--text-color,#fff)', fontSize:14, boxSizing:'border-box' }}
+                    />
+                  </div>
+                ))}
+                <div style={{ display:'flex', gap:8, marginTop:18 }}>
+                  <button
+                    className="mod-upload-btn"
+                    style={{ flex:1, padding:'8px 0' }}
+                    onClick={() => { updateTrackMeta(editTrack); setEditTrack(null); }}
+                  >
+                    Save
+                  </button>
+                  <button className="mod-pill" onClick={() => setEditTrack(null)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Track List ── */}
           <div className="mod-queue">
             <div className="mod-queue-head">
               <span>Saved Tracks ({library.length})</span>
-              <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear all</button>
+              <div style={{ display:'flex', gap:6 }}>
+                <button className="mod-pill" onClick={refreshLibrary} title="Refresh library" disabled={libraryLoading}>⟳</button>
+                <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear all</button>
+              </div>
             </div>
             {library.length === 0 ? (
-              <div className="mod-queue-empty">{libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}</div>
+              <div className="mod-queue-empty">
+                {libraryLoading ? 'Loading your saved tracks…' : 'No saved tracks yet — upload music below'}
+              </div>
             ) : (
               <div className="mod-queue-list">
-                {library.map((t, i) => (
+                {library.map((t) => (
                   <div
                     key={t.id}
                     className="mod-queue-item"
-                    onDoubleClick={() => openMedia({ ...t, type: 'music', url: t.mediaUrl || t.url || '', queue: library })}
+                    onDoubleClick={() => openMedia({ ...t, type:'music', url: t.mediaUrl || t.url || '', queue: library })}
                   >
                     <button
                       className="mod-q-play"
                       title="Play"
-                      onClick={() => openMedia({ ...t, type: 'music', url: t.mediaUrl || t.url || '', queue: library })}
-                    >
-                      ▶
-                    </button>
-                    <span className="mod-q-name">
+                      onClick={() => openMedia({ ...t, type:'music', url: t.mediaUrl || t.url || '', queue: library })}
+                    >▶</button>
+                    <span className="mod-q-name" title={[t.artist, t.album].filter(Boolean).join(' · ') || undefined}>
                       {isFav(t) && '⭐ '}{t.title || t.name}
+                      {t.artist && <span style={{ opacity:.55, fontSize:'0.8em', marginLeft:6 }}>{t.artist}</span>}
                     </span>
+                    <button className="mod-q-btn" title="Edit info" onClick={() => setEditTrack({ ...t })}>✏</button>
                     <button className={`mod-q-btn${isFav(t) ? ' fav' : ''}`} onClick={() => toggleFav(t)}>★</button>
                     <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'up')}>↑</button>
                     <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'down')}>↓</button>
@@ -2218,10 +2327,43 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             )}
           </div>
 
-          <input type="file" ref={uploadRef} multiple style={{ display: 'none' }}
+          {/* ── Playlists ── */}
+          <div style={{ marginTop:16, borderTop:'1px solid var(--border-color,#333)', paddingTop:14 }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+              <span style={{ fontSize:13, fontWeight:600, opacity:.8 }}>🎵 Playlists</span>
+            </div>
+            <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+              <input
+                value={newPlaylistName}
+                onChange={(e) => { setNewPlaylistName(e.target.value); setPlaylistError(''); }}
+                placeholder="New playlist name…"
+                style={{ flex:1, padding:'6px 10px', borderRadius:8, border:'1px solid var(--border-color,#444)', background:'var(--input-bg,#111)', color:'var(--text-color,#fff)', fontSize:13 }}
+                onKeyDown={(e) => e.key === 'Enter' && createPlaylist()}
+              />
+              <button className="mod-pill" onClick={createPlaylist} disabled={!newPlaylistName.trim()}>＋ Create</button>
+            </div>
+            {playlistError && <div style={{ fontSize:12, color:'#f87171', marginBottom:6 }}>{playlistError}</div>}
+            {playlists.length === 0 ? (
+              <div style={{ fontSize:12, opacity:.5, padding:'6px 0' }}>No playlists yet — create one from your tracks above.</div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                {playlists.map((pl) => (
+                  <div key={pl.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:8, border:'1px solid var(--border-color,#333)', background:'var(--card-bg,#1a1a2e)' }}>
+                    <button className="mod-q-play" title="Play playlist" onClick={() => playPlaylist(pl)}>▶</button>
+                    <span style={{ flex:1, fontSize:13, fontWeight:500 }}>{pl.name}</span>
+                    <span style={{ fontSize:11, opacity:.5 }}>{pl.trackIds.length} track{pl.trackIds.length !== 1 ? 's' : ''}</span>
+                    <button className="mod-q-btn rm" title="Delete playlist" onClick={() => deletePlaylist(pl.id)}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Upload ── */}
+          <input type="file" ref={uploadRef} multiple style={{ display:'none' }}
             accept=".mp3,.m4a,.wav,.flac,.ogg,.aac,audio/mpeg,audio/mp4,audio/wav,audio/flac,audio/ogg,audio/aac"
             onChange={handleUpload} />
-          <button className="mod-upload-btn" disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
+          <button className="mod-upload-btn" style={{ marginTop:14 }} disabled={libraryUploadBusy} onClick={() => uploadRef.current?.click()}>
             {libraryUploadBusy ? 'Uploading tracks…' : '＋ Upload to your music library — MP3 · M4A · WAV · FLAC · OGG · AAC'}
           </button>
           {libraryUploadError && <div role="alert" className="mod-upload-error">{libraryUploadError}</div>}

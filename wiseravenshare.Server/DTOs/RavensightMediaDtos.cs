@@ -72,6 +72,14 @@ public sealed class UpdateRavensightMediaStateRequest
     public bool? Protected { get; set; }
 }
 
+public sealed class UpdateMusicTrackInfoRequest
+{
+    public string? Title { get; set; }
+    public string? Artist { get; set; }
+    public string? Album { get; set; }
+    public string? Genre { get; set; }
+}
+
 public sealed class MusicPlayerStateUpsertRequest
 {
     public string? ActivePlaylistId { get; set; }

@@ -562,6 +562,28 @@ public sealed class RavensightMusicMediaController : ControllerBase
         });
     }
 
+    [HttpPatch("{trackId}/info")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateTrackInfo(
+        [FromRoute] string trackId,
+        [FromBody] UpdateMusicTrackInfoRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Unable to determine current user." });
+
+        if (string.IsNullOrWhiteSpace(trackId))
+            return BadRequest(new { message = "trackId is required." });
+
+        var updated = await _musicLibraryStore.UpdateTrackInfoAsync(
+            userId, trackId.Trim(), request, cancellationToken);
+
+        if (!updated)
+            return NotFound(new { message = "Track not found." });
+
+        return Ok(new { success = true });
+    }
+
     [HttpPatch("{trackId}/state")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateTrackState(
