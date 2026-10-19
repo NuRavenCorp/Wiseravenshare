@@ -24,6 +24,8 @@ import PodcastMonetization from "@/components/podcasts/PodcastMonetization";
 import PodcastTeamPanel from "@/components/podcasts/PodcastTeamPanel";
 import ProductionTimeline from "@/components/podcasts/ProductionTimeline";
 import PodcastMediaTab from "@/components/podcasts/PodcastMediaTab";
+import PodcastScriptCards from "@/components/podcasts/PodcastScriptCards";
+import PodcastDeviceSync from "@/components/podcasts/PodcastDeviceSync";
 import RecordingSession from "@/components/ravensight/RecordingSession";
 import { resolvePermissions } from "@/lib/podcastPermissions";
 
@@ -236,6 +238,16 @@ export default function PodcastsPanel() {
                   <Radio className="w-4 h-4" /> Record
                   </button>
                   <button
+                  onClick={() => setTab("sync")}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
+                    tab === "sync"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                  >
+                  <Mic className="w-4 h-4" /> Live Sync
+                  </button>
+                  <button
                   onClick={() => setTab("media")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "media"
@@ -282,6 +294,35 @@ export default function PodcastsPanel() {
               )}
               {tab === "record" && (
                 <RecordingSession podcast={selected} onUpdate={load} />
+              )}
+              {tab === "sync" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <Radio className="w-4 h-4 text-primary" /> Device Sync
+                    </h3>
+                    <PodcastDeviceSync
+                      sessionId={selected.id}
+                      deviceId={`device-${(user?.id ?? "guest").slice(0, 8)}`}
+                      deviceType="browser"
+                      isHost={isOwner}
+                    />
+                  </div>
+                  <div className="space-y-2 flex flex-col" style={{ minHeight: 480 }}>
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <Mic className="w-4 h-4 text-primary" /> Script Cards
+                    </h3>
+                    <div className="flex-1 rounded-xl border border-border overflow-hidden">
+                      <PodcastScriptCards
+                        sessionId={selected.id}
+                        deviceId={`device-${(user?.id ?? "guest").slice(0, 8)}`}
+                        deviceType="browser"
+                        isHost={isOwner}
+                        className="h-full"
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
               {tab === "media" && (
                 <PodcastMediaTab podcast={selected} onUpdate={load} />
