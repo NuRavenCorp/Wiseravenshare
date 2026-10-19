@@ -40,29 +40,37 @@ public sealed class MediaBlobController : ControllerBase
 
     [HttpGet("blob/{**objectKey}")]
     [HttpGet("~/api/videostreaming/blob/{**objectKey}")]
+    [AllowAnonymous]
     public async Task<IActionResult> StreamBlob([FromRoute] string objectKey, [FromQuery] string? sig, CancellationToken cancellationToken)
     {
-        var userId = User.GetUserId();
-        if (userId == Guid.Empty)
-        {
-            return Unauthorized(new { message = "Invalid user session." });
-        }
-
         var normalizedKey = NormalizeObjectKey(objectKey);
         if (string.IsNullOrWhiteSpace(normalizedKey))
         {
             return BadRequest(new { message = "Missing object key." });
         }
 
-        if (!string.IsNullOrWhiteSpace(sig) && !_signatureService.VerifyKeySignature(normalizedKey, sig))
+        var userId = User.GetUserId();
+
+        var hasSignature = !string.IsNullOrWhiteSpace(sig);
+        var isTrustedSignedRequest = _signatureService.IsSignatureEnforced && hasSignature && _signatureService.VerifyKeySignature(normalizedKey, sig);
+
+        if (_signatureService.IsSignatureEnforced && hasSignature && !isTrustedSignedRequest)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Invalid signature." });
         }
 
-        var ownsObject = await UserOwnsObjectKeyAsync(userId, normalizedKey, cancellationToken);
-        if (!ownsObject)
+        if (!isTrustedSignedRequest)
         {
-            return NotFound(new { message = "Media not found." });
+            if (userId == Guid.Empty)
+            {
+                return Unauthorized(new { message = "Invalid user session." });
+            }
+
+            var ownsObject = await UserOwnsObjectKeyAsync(userId, normalizedKey, cancellationToken);
+            if (!ownsObject)
+            {
+                return NotFound(new { message = "Media not found." });
+            }
         }
 
         var blobStream = await _blobStorageService.OpenReadAsync(normalizedKey, cancellationToken);
@@ -74,13 +82,16 @@ public sealed class MediaBlobController : ControllerBase
             return File(blobStream, contentType, enableRangeProcessing: true);
         }
 
-        var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, limit: 500, cancellationToken: cancellationToken);
-        var localAsset = assets.FirstOrDefault(asset =>
-            string.Equals(NormalizeObjectKey(asset.RelativePath), normalizedKey, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(asset.FileName, Path.GetFileName(normalizedKey), StringComparison.OrdinalIgnoreCase));
-        if (localAsset is not null && !string.IsNullOrWhiteSpace(localAsset.AbsolutePath) && System.IO.File.Exists(localAsset.AbsolutePath))
+        if (userId != Guid.Empty)
         {
-            return PhysicalFile(localAsset.AbsolutePath, ResolveContentType(normalizedKey), enableRangeProcessing: true);
+            var assets = await _mediaCatalogStore.GetUserAssetsAsync(userId, limit: 500, cancellationToken: cancellationToken);
+            var localAsset = assets.FirstOrDefault(asset =>
+                string.Equals(NormalizeObjectKey(asset.RelativePath), normalizedKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(asset.FileName, Path.GetFileName(normalizedKey), StringComparison.OrdinalIgnoreCase));
+            if (localAsset is not null && !string.IsNullOrWhiteSpace(localAsset.AbsolutePath) && System.IO.File.Exists(localAsset.AbsolutePath))
+            {
+                return PhysicalFile(localAsset.AbsolutePath, ResolveContentType(normalizedKey), enableRangeProcessing: true);
+            }
         }
 
         return NotFound(new { message = "Media file is no longer available in storage." });
@@ -215,4 +226,3 @@ public sealed class MediaBlobController : ControllerBase
         };
     }
 }
-

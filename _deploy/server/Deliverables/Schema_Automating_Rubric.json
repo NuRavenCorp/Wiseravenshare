@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wiseravenstream.com/schemas/pre-publish-rubric.json",
+  "title": "WiseRavenStream Pre-Publish Compliance Rubric",
+  "description": "10-point pre-publish compliance schema for automated screening with human gatekeeper review.",
+  "type": "object",
+  "required": [
+    "content_id",
+    "creator_id",
+    "timestamp_utc",
+    "engine_version",
+    "points",
+    "overall_status"
+  ],
+  "properties": {
+    "content_id": {
+      "type": "string",
+      "description": "Unique identifier for the content being screened."
+    },
+    "creator_id": {
+      "type": "string",
+      "description": "Unique identifier for the creator account."
+    },
+    "stream_id": {
+      "type": "string",
+      "description": "Optional stream session ID for live content."
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of screening."
+    },
+    "engine_version": {
+      "type": "string",
+      "description": "Version of the auto-screen engine used."
+    },
+    "points": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": [ "point_id", "point_name", "result", "confidence" ],
+        "properties": {
+          "point_id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "point_name": {
+            "type": "string",
+            "enum": [
+              "Identity & Authorization",
+              "Malware & File Integrity",
+              "Intellectual Property / DMCA",
+              "Content Safety (Zero-Tolerance)",
+              "Hate Speech & Harassment",
+              "Age-Rating & Labeling",
+              "Truth Scoring & Verification",
+              "Sponsorship & Disclosure",
+              "Technical Quality",
+              "Metadata & Distribution"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [ "PASS", "FLAG", "FAIL" ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Clip timestamps, hashes, matched signatures, or log references."
+          },
+          "notes": {
+            "type": "string"
+          },
+          "human_review": {
+            "type": "object",
+            "properties": {
+              "required": { "type": "boolean" },
+              "admin_id": { "type": "string" },
+              "reviewed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "decision": {
+                "type": "string",
+                "enum": [ "CLEARED", "ESCALATED", "REQUIRES_EDIT", "REJECTED" ]
+              },
+              "rationale": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "AUTO_SCREENING",
+        "AUTO_BLOCKED",
+        "HUMAN_REVIEW",
+        "APPROVED",
+        "PUBLISHED",
+        "APPEALED",
+        "PERMANENTLY_BLOCKED"
+      ]
+    },
+    "enforcement": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "enforcement_id": { "type": "string" },
+        "action": {
+          "type": "string",
+          "enum": [ "NONE", "WARNING", "SUSPENSION_24_72H", "SUSPENSION_7_30D", "PERMANENT_BAN" ]
+        }
+      }
+    },
+    "appeal": {
+      "type": "object",
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reviewed_by": { "type": "string" },
+        "outcome": {
+          "type": "string",
+          "enum": [ "UPHELD", "REDUCED", "REVERSED", "PENDING", "NOT_ELIGIBLE" ]
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "required": [ "logged_at", "retention_until" ],
+      "properties": {
+        "logged_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retention_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hash": { "type": "string" }
+      }
+    }
+  }
+}
