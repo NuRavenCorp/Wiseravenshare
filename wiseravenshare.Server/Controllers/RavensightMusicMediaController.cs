@@ -755,12 +755,18 @@ public sealed class RavensightMusicMediaController : ControllerBase
         var projectFolder = (_configuration["Storage:ProjectFolder"] ?? "wiseravenshare").Trim().Trim('/');
         var userStorageIdentity = ResolveUserStorageIdentity(userId);
         var fallbackUserMusicPath = $"users/{userStorageIdentity}/media/music/{Path.GetFileName(fileName)}";
+        var fallbackUserAudioPath = $"users/{userStorageIdentity}/media/audio/{Path.GetFileName(fileName)}";
 
         AddObjectKeyCandidate(keys, objectKey, projectFolder);
         AddObjectKeyCandidate(keys, catalogRelativePath, projectFolder);
+        AddObjectKeyCandidate(keys, _blobStorageService.ResolveObjectKey(objectKey ?? string.Empty), projectFolder);
+        AddObjectKeyCandidate(keys, _blobStorageService.ResolveObjectKey(catalogRelativePath ?? string.Empty), projectFolder);
         AddObjectKeyCandidate(keys, ExtractObjectKeyFromMediaUrl(trackMediaUrl), projectFolder);
         AddObjectKeyCandidate(keys, ExtractObjectKeyFromMediaUrl(catalogPublicUrl), projectFolder);
+        AddObjectKeyCandidate(keys, _blobStorageService.ResolveObjectKey(trackMediaUrl ?? string.Empty), projectFolder);
+        AddObjectKeyCandidate(keys, _blobStorageService.ResolveObjectKey(catalogPublicUrl ?? string.Empty), projectFolder);
         AddObjectKeyCandidate(keys, fallbackUserMusicPath, projectFolder);
+        AddObjectKeyCandidate(keys, fallbackUserAudioPath, projectFolder);
 
         return keys;
     }
