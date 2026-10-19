@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import Navbar from "@/components/landing/Navbar";
-import { Video, Music, Radio, Mic, SatelliteDish, Film } from "lucide-react";
 import VideoPlayer from "@/components/media/VideoPlayer";
 import VideoLibrary from "@/components/media/VideoLibrary";
 import MusicPlayer from "@/components/media/MusicPlayer";
@@ -12,18 +11,17 @@ import LiveStreamPanel from "@/components/media/LiveStreamPanel";
 import RightsManager from "@/components/media/RightsManager";
 import DRMManager from "@/components/media/DRMManager";
 import CloudMediaPanel from "@/components/media/CloudMediaPanel";
-import { Scale, ShieldCheck, Cloud } from "lucide-react";
 
 const tabs = [
-  { id: "video", label: "Video", icon: Video },
-  { id: "video-library", label: "Video Library", icon: Film },
-  { id: "music", label: "Music", icon: Music },
-  { id: "radio", label: "FM Radio", icon: Radio },
-  { id: "karaoke", label: "Karaoke", icon: Mic },
-  { id: "live", label: "Live", icon: SatelliteDish },
-  { id: "rights", label: "Rights", icon: Scale },
-  { id: "drm", label: "DRM", icon: ShieldCheck },
-  { id: "cloud", label: "Cloud", icon: Cloud },
+  { id: "video", label: "Video" },
+  { id: "video-library", label: "Video Library" },
+  { id: "music", label: "Music" },
+  { id: "radio", label: "FM Radio" },
+  { id: "karaoke", label: "Karaoke" },
+  { id: "live", label: "Live" },
+  { id: "rights", label: "Rights" },
+  { id: "drm", label: "DRM" },
+  { id: "cloud", label: "Cloud" },
 ];
 
 export default function Media() {
@@ -39,16 +37,16 @@ export default function Media() {
         </div>
         <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
           {tabs.map((t) => {
-            const Icon = t.icon;
             return (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
+                aria-current={tab === t.id ? "page" : undefined}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px ${
                   tab === t.id ? "border-primary text-primary bg-primary/5" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="w-4 h-4" /> {t.label}
+                {t.label}
               </button>
             );
           })}

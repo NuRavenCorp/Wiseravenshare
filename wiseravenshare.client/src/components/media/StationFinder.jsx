@@ -8,14 +8,27 @@ import { PRESET_CATEGORIES } from "@/lib/radioPresets";
 import { getStationsByRegionAndGenre } from "@/Services/fmService";
 
 const NYC_CALLSIGNS = ["WBLS", "WQHT", "WWPR", "Hot 97", "Power 105.1"];
+const POWER105_HLS_URL = "https://stream.revma.ihrhls.com/zc1481/hls.m3u8";
+
+const proxyStreamUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("/")) return url;
+  if (/\.m3u8(?:\?|$)/i.test(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
+  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+};
 
 const getStationStream = (station) => {
   let url = String(station?.url_resolved || station?.url || station?.urlResolved || "").trim();
   const identity = `${station?.name || ""} ${station?.callSign || station?.callsign || ""} ${station?.station || ""}`;
+  if (/radio\s*paradise/i.test(identity)) {
+    // Native audio can play this HTTPS MP3 cross-origin; avoid the generic proxy,
+    // which can be rejected by Radio Paradise's stream edge.
+    return "https://stream-tx1.radioparadise.com/mp3-128";
+  }
   // Radio Browser often returns iHeart's raw AAC endpoint for Power 105.1.
   // Use iHeart's HLS rendition so browsers with no raw-AAC decoder can play it.
   if (/power\s*105(?:\.1)?|\bWWPR(?:-FM)?\b/i.test(identity)) {
-    url = "https://stream.revma.ihrhls.com/zc1481/hls.m3u8";
+    url = POWER105_HLS_URL;
   } else if (/radio\s*paradise/i.test(identity)) {
     // The raw AAC 320 endpoint is inconsistently decoded by browser players;
     // Radio Paradise's official MP3 direct stream has wider player support.
@@ -27,21 +40,31 @@ const getStationStream = (station) => {
     const iheartStream = url.match(/^https?:\/\/(?:stream\.)?revma\.ihrhls\.com\/(zc\d+)\/?(?:\?.*)?$/i);
     if (iheartStream) url = `https://stream.revma.ihrhls.com/${iheartStream[1]}/hls.m3u8`;
   }
-  if (!url) return "";
-  if (url.startsWith("/")) return url;
-  if (/\.m3u8(?:\?|$)/i.test(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
-  return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
+  return proxyStreamUrl(url);
 };
 
-const normalizeStation = (station) => ({
-  ...station,
-  id: station.stationuuid || station.id || station.url_resolved || station.url,
-  url: getStationStream(station),
-  tags: Array.isArray(station.tags)
-    ? station.tags
-    : String(station.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
-  bitrate: Number(station.bitrate) || 0,
-});
+const normalizeStation = (station) => {
+  const identity = `${station?.name || ""} ${station?.callSign || station?.callsign || ""} ${station?.station || ""}`;
+  const isPower105 = /power\s*105(?:\.1)?|\bWWPR(?:-FM)?\b/i.test(identity);
+  const isRadioParadise = /radio\s*paradise/i.test(identity);
+  const radioBrowserStream = station?.url_resolved || station?.url || "";
+  return {
+    ...station,
+    id: station.stationuuid || station.id || station.url_resolved || station.url,
+    url: getStationStream(station),
+    alternateUrl: isRadioParadise
+      ? "https://stream-dc1.radioparadise.com/mp3-128"
+      : isPower105
+        // Use Radio Browser's currently resolved source for the fallback; iHeart
+        // edge hostnames rotate, so hardcoding one quickly becomes stale.
+        ? proxyStreamUrl(radioBrowserStream)
+        : station?.alternateUrl || "",
+    tags: Array.isArray(station.tags)
+      ? station.tags
+      : String(station.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    bitrate: Number(station.bitrate) || 0,
+  };
+};
 
 const lookupZip = async (zip) => {
   const response = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`);
@@ -228,6 +251,17 @@ export default function StationFinder() {
   );
 
   const playbackUrl = playing?.url || "";
+  const handlePlaybackError = () => {
+    if (playing?.alternateUrl && !playing.alternateAttempted) {
+      setPlaying((current) => current ? { ...current, url: current.alternateUrl, alternateUrl: "", alternateAttempted: true } : current);
+      setError(`The main stream for ${playing?.name || "this station"} failed. Trying its alternate server…`);
+      return;
+    }
+    // Keep the audio element mounted with visible controls so the listener can
+    // explicitly press Play after a browser rejects programmatic autoplay.
+    setPlaying((current) => current ? { ...current, autoplayFailed: true } : current);
+    setError(`Could not start ${playing?.name || "this station"} automatically. Use the player controls to try again, or listen on iHeart.`);
+  };
 
   return (
     <div className="space-y-4">
@@ -279,7 +313,25 @@ export default function StationFinder() {
         </div>
       )}
 
-      {playing && <ReactPlayer key={playing.id} src={playbackUrl} playing width="0" height="0" config={{ file: { forceAudio: true } }} onError={() => { setPlaying(null); setError(`Could not play ${playing.name}. The stream may be offline or restricted.`); }} />}
+      {playing && (
+        <div className="space-y-2">
+          <ReactPlayer
+            key={`${playing.id}:${playbackUrl}`}
+            src={playbackUrl}
+            playing={!playing.autoplayFailed}
+            controls
+            width="100%"
+            height="48px"
+            config={{ file: { forceAudio: true } }}
+            onError={handlePlaybackError}
+          />
+          {/power\s*105|\bWWPR\b/i.test(`${playing.name || ""} ${playing.callSign || playing.callsign || ""}`) && (
+            <a className="text-xs underline text-muted-foreground" href="https://www.iheart.com/live/power-1051-1481/" target="_blank" rel="noreferrer">
+              Open Power 105.1 on iHeart
+            </a>
+          )}
+        </div>
+      )}
 
       {playing && <TuningDial frequency={playingFreq} playing label={playing.name} sourceType="internet" />}
 
