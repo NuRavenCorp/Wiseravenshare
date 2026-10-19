@@ -14,6 +14,17 @@ const CATEGORY_LABELS = {
 };
 
 const CATEGORY_ORDER = ['talk-news', 'chill', 'jazz-soul', 'electronic', 'eclectic'];
+const HLS_PROXY_HOSTS = ["revma.ihrhls.com", "bbcmedia.co.uk", "bbci.co.uk", "bbc.co.uk"];
+
+const shouldUseHlsProxy = (url) => {
+  if (!/\.m3u8(?:\?|$)/i.test(url || "")) return false;
+  try {
+    const parsed = new URL(url);
+    return HLS_PROXY_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+};
 
 // Proxy stream through the backend to fix CORS + HTTP→HTTPS mixed-content issues.
 // HLS manifests (.m3u8) are already HTTPS and served correctly; only proxy
@@ -21,7 +32,7 @@ const CATEGORY_ORDER = ['talk-news', 'chill', 'jazz-soul', 'electronic', 'eclect
 const resolvePlaybackUrl = (rawUrl) => {
   if (!rawUrl) return '';
   // Same-origin HLS proxy rewrites segment URLs and avoids external CORS failures.
-  if (/\.m3u8(?:\?|$)/i.test(rawUrl)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(rawUrl)}`;
+  if (shouldUseHlsProxy(rawUrl)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(rawUrl)}`;
   // Same-origin relative URLs don't need a proxy
   if (rawUrl.startsWith('/')) return rawUrl;
   // Proxy all other external streams to avoid CORS + mixed-content blocks

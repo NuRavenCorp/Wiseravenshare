@@ -9,11 +9,22 @@ import { getStationsByRegionAndGenre } from "@/Services/fmService";
 
 const NYC_CALLSIGNS = ["WBLS", "WQHT", "WWPR", "Hot 97", "Power 105.1"];
 const POWER105_HLS_URL = "https://stream.revma.ihrhls.com/zc1481/hls.m3u8";
+const HLS_PROXY_HOSTS = ["revma.ihrhls.com", "bbcmedia.co.uk", "bbci.co.uk", "bbc.co.uk"];
+
+const shouldUseHlsProxy = (url) => {
+  if (!/\.m3u8(?:\?|$)/i.test(url || "")) return false;
+  try {
+    const parsed = new URL(url);
+    return HLS_PROXY_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+};
 
 const proxyStreamUrl = (url) => {
   if (!url) return "";
   if (url.startsWith("/")) return url;
-  if (/\.m3u8(?:\?|$)/i.test(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
+  if (shouldUseHlsProxy(url)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(url)}`;
   return `/api/fmtuner/stream-proxy?url=${encodeURIComponent(url)}`;
 };
 
