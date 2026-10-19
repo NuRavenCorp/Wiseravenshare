@@ -180,7 +180,8 @@ const normalizeLibraryTrack = (track) => {
   const directUrl = normalizePlaybackUrl(track.mediaUrl || track.url || track.fileUrl || track.publicUrl || track.MediaUrl || track.Url || '');
   const blobStreamUrl = toBlobStreamUrl(relativePath);
   const fileNameStreamUrl = fileName ? `/api/videostreaming/stream?fileName=${encodeURIComponent(fileName)}` : '';
-  const mediaUrl = blobStreamUrl || fileNameStreamUrl || directUrl;
+  // Prefer backend-provided URL first to avoid unnecessary proxy hops.
+  const mediaUrl = directUrl || blobStreamUrl || fileNameStreamUrl;
 
   return {
     id: String(track.id || `${fileName}-${Date.now()}-${Math.random().toString(16).slice(2)}`),
@@ -215,10 +216,10 @@ const resolveTrackSourceCandidates = (track) => {
 
   return [...new Set([
     normalizedDirect,
+    fileObjectUrl,
     blobStream,
     fileNameStream,
     proxy,
-    fileObjectUrl,
     ...FALLBACK_AUDIO_CANDIDATES
   ].filter(Boolean))];
 };

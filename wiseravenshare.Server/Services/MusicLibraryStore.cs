@@ -60,11 +60,13 @@ public sealed class BucketMusicLibraryStore : IMusicLibraryStore
     private readonly string _provider = "digitalocean_spaces";
     private readonly IBlobStorageService _blobStorageService;
     private readonly IRavensightMusicService _musicService;
+    private readonly IMediaBlobSignatureService _signatureService;
 
     public BucketMusicLibraryStore(
         IConfiguration configuration,
         IBlobStorageService blobStorageService,
-        IRavensightMusicService musicService)
+        IRavensightMusicService musicService,
+        IMediaBlobSignatureService signatureService)
     {
         _connectionString = ResolveConnectionString(configuration);
         _bucketName = configuration["Storage:Blob:BucketName"]?.Trim() ?? "bucket-wrs-01010";
@@ -76,6 +78,7 @@ public sealed class BucketMusicLibraryStore : IMusicLibraryStore
             ?? string.Empty;
         _blobStorageService = blobStorageService;
         _musicService = musicService;
+        _signatureService = signatureService;
     }
 
     public async Task<IReadOnlyList<UserMusicTrackDto>> GetUserMusicAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -590,7 +593,7 @@ INSERT INTO app_data.bucket_objects (
         return path.Trim('/');
     }
 
-    private static string BuildBlobFallbackUrl(string objectKey)
+    private string BuildBlobFallbackUrl(string objectKey)
     {
         var normalized = objectKey.Replace('\\', '/').Trim('/');
         if (string.IsNullOrWhiteSpace(normalized))
@@ -602,7 +605,14 @@ INSERT INTO app_data.bucket_objects (
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(Uri.EscapeDataString);
 
-        return $"/api/media/blob/{string.Join("/", segments)}";
+        var path = $"/api/media/blob/{string.Join("/", segments)}";
+        var signature = _signatureService.SignKey(normalized);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return path;
+        }
+
+        return $"{path}?sig={Uri.EscapeDataString(signature)}";
     }
 
     private static JsonElement? ParseMetadata(string? metadataJson)

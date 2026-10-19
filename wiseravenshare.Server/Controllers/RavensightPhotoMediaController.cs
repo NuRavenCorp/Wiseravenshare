@@ -17,17 +17,20 @@ public sealed class RavensightPhotoMediaController : ControllerBase
     private readonly IRavensightPhotoService _photoService;
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly IBlobStorageService _blobStorageService;
+    private readonly IMediaBlobSignatureService _signatureService;
     private readonly ILogger<RavensightPhotoMediaController> _logger;
 
     public RavensightPhotoMediaController(
         IRavensightPhotoService photoService,
         RavensightMediaCatalogStore mediaCatalogStore,
         IBlobStorageService blobStorageService,
+        IMediaBlobSignatureService signatureService,
         ILogger<RavensightPhotoMediaController> logger)
     {
         _photoService = photoService;
         _mediaCatalogStore = mediaCatalogStore;
         _blobStorageService = blobStorageService;
+        _signatureService = signatureService;
         _logger = logger;
     }
 
@@ -51,18 +54,24 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             objectKey = a.RelativePath,
             caption = ReadMetadataString(a.MetadataJson, "caption", string.Empty),
             description = ReadMetadataString(a.MetadataJson, "caption", string.Empty),
-            imageUrl = StreamingUrlHelper.ResolveMediaUrl(
-                a.PublicUrl,
-                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
-                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
-            thumbnailUrl = StreamingUrlHelper.ResolveMediaUrl(
-                a.PublicUrl,
-                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
-                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
-            mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
-                a.PublicUrl,
-                StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
-                    ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+            imageUrl = AppendBlobSignatureIfNeeded(
+                StreamingUrlHelper.ResolveMediaUrl(
+                    a.PublicUrl,
+                    StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                        ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+                a.RelativePath),
+            thumbnailUrl = AppendBlobSignatureIfNeeded(
+                StreamingUrlHelper.ResolveMediaUrl(
+                    a.PublicUrl,
+                    StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                        ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+                a.RelativePath),
+            mediaUrl = AppendBlobSignatureIfNeeded(
+                StreamingUrlHelper.ResolveMediaUrl(
+                    a.PublicUrl,
+                    StreamingUrlHelper.StreamByBlobPath(a.RelativePath)
+                        ?? StreamingUrlHelper.StreamByFileName(a.FileName)),
+                a.RelativePath),
             archived = ReadMetadataBool(a.MetadataJson, "archived"),
             @protected = ReadMetadataBool(a.MetadataJson, "protected"),
             uploadedAt = a.SavedAtUtc.ToString("O"),
@@ -246,6 +255,7 @@ public sealed class RavensightPhotoMediaController : ControllerBase
             !string.IsNullOrWhiteSpace(blobStreamUrl)
                 ? blobStreamUrl
                 : StreamingUrlHelper.StreamByFileName(saved.FileName));
+        mediaUrl = AppendBlobSignatureIfNeeded(mediaUrl, saved.RelativePath);
 
         var response = new RavensightSavedMediaDto
         {
@@ -276,6 +286,30 @@ public sealed class RavensightPhotoMediaController : ControllerBase
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }
         });
+    }
+
+    private string AppendBlobSignatureIfNeeded(string streamPath, string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(streamPath)
+            || !streamPath.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            return streamPath;
+        }
+
+        var objectKey = (relativePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return streamPath;
+        }
+
+        var signature = _signatureService.SignKey(objectKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return streamPath;
+        }
+
+        var separator = streamPath.Contains('?') ? "&" : "?";
+        return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
     }
 
     private bool TryResolveUserId(out Guid userId)

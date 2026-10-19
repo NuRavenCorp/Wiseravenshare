@@ -24,6 +24,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
     private readonly IWebHostEnvironment _environment;
     private readonly IConfiguration _configuration;
     private readonly IRavensightMediaPathService _mediaPathService;
+    private readonly IMediaBlobSignatureService _signatureService;
 
     public RavensightMusicMediaController(
         IMusicLibraryStore musicLibraryStore,
@@ -34,7 +35,8 @@ public sealed class RavensightMusicMediaController : ControllerBase
         IHttpClientFactory httpClientFactory,
         IWebHostEnvironment environment,
         IConfiguration configuration,
-        IRavensightMediaPathService mediaPathService)
+        IRavensightMediaPathService mediaPathService,
+        IMediaBlobSignatureService signatureService)
     {
         _musicLibraryStore = musicLibraryStore;
         _musicPlaybackStateStore = musicPlaybackStateStore;
@@ -45,6 +47,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
         _environment = environment;
         _configuration = configuration;
         _mediaPathService = mediaPathService;
+        _signatureService = signatureService;
     }
 
     [HttpGet]
@@ -73,6 +76,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
                     var streamPath = string.IsNullOrWhiteSpace(blobPath)
                         ? StreamingUrlHelper.StreamByFileName(a.FileName)
                         : blobPath;
+                    var signedStreamPath = AppendBlobSignatureIfNeeded(streamPath, a.RelativePath);
                     return new UserMusicTrackDto
                     {
                         Id = a.Id,
@@ -82,7 +86,7 @@ public sealed class RavensightMusicMediaController : ControllerBase
                         Artist = ReadMusicMeta(a.MetadataJson, "artist"),
                         Album = ReadMusicMeta(a.MetadataJson, "album"),
                         Genre = ReadMusicMeta(a.MetadataJson, "genre"),
-                        MediaUrl = StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, streamPath),
+                        MediaUrl = StreamingUrlHelper.ResolveMediaUrl(a.PublicUrl, signedStreamPath),
                         RelativePath = a.RelativePath,
                         ObjectKey = a.RelativePath,
                         FileName = a.FileName,
@@ -97,6 +101,30 @@ public sealed class RavensightMusicMediaController : ControllerBase
         }
 
         return Ok(bucketTracks.Concat(catalogTracks).ToList());
+    }
+
+    private string AppendBlobSignatureIfNeeded(string streamPath, string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(streamPath)
+            || !streamPath.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            return streamPath;
+        }
+
+        var objectKey = (relativePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return streamPath;
+        }
+
+        var signature = _signatureService.SignKey(objectKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return streamPath;
+        }
+
+        var separator = streamPath.Contains('?') ? "&" : "?";
+        return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
     }
 
     [HttpGet("{trackId}/browser-compatible")]

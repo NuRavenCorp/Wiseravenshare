@@ -24,8 +24,9 @@ public sealed class RavensightVideoMediaController : ControllerBase
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IBlobStorageService _blobStorageService;
+    private readonly IMediaBlobSignatureService _signatureService;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore, IHttpClientFactory httpClientFactory, IBlobStorageService blobStorageService)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore, IHttpClientFactory httpClientFactory, IBlobStorageService blobStorageService, IMediaBlobSignatureService signatureService)
     {
         _videoService = videoService;
         _videoLibraryStore = videoLibraryStore;
@@ -34,6 +35,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
         _mediaCatalogStore = mediaCatalogStore;
         _httpClientFactory = httpClientFactory;
         _blobStorageService = blobStorageService;
+        _signatureService = signatureService;
     }
 
     [HttpGet]
@@ -46,6 +48,10 @@ public sealed class RavensightVideoMediaController : ControllerBase
         try
         {
             var videos = (await _videoLibraryStore.GetUserVideosAsync(userId.ToString(), cancellationToken)).ToList();
+            foreach (var video in videos)
+            {
+                video.VideoUrl = AppendBlobSignatureIfNeeded(video.VideoUrl, null);
+            }
             try
             {
                 // Durable catalog entries survive when the secondary video-library write degrades.
@@ -60,6 +66,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
                     var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
                         asset.PublicUrl,
                         StreamingUrlHelper.StreamByBlobPath(asset.RelativePath) ?? StreamingUrlHelper.StreamByFileName(asset.FileName));
+                    mediaUrl = AppendBlobSignatureIfNeeded(mediaUrl, asset.RelativePath);
                     var normalizedUrl = NormalizeMediaUrl(mediaUrl);
                     if (string.IsNullOrWhiteSpace(normalizedUrl) || !knownUrls.Add(normalizedUrl)) continue;
 
@@ -110,6 +117,10 @@ public sealed class RavensightVideoMediaController : ControllerBase
                 CreatedAt = asset.SavedAtUtc,
                 UpdatedAt = asset.SavedAtUtc
             }).ToList();
+            foreach (var video in videos)
+            {
+                video.VideoUrl = AppendBlobSignatureIfNeeded(video.VideoUrl, null);
+            }
 
             return Ok(videos);
         }
@@ -261,6 +272,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
         var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(
             saved.File.PublicUrl,
             StreamingUrlHelper.StreamByBlobPath(saved.File.RelativePath));
+        mediaUrl = AppendBlobSignatureIfNeeded(mediaUrl, saved.File.RelativePath);
         var persistenceStatus = "ready";
         var response = new RavensightSavedMediaDto
         {
@@ -512,6 +524,60 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
     private static string NormalizeMediaUrl(string? mediaUrl) =>
         string.IsNullOrWhiteSpace(mediaUrl) ? string.Empty : mediaUrl.Trim().TrimEnd('/');
+
+    private string AppendBlobSignatureIfNeeded(string streamPath, string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(streamPath)
+            || !streamPath.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            return streamPath;
+        }
+
+        var objectKey = (relativePath ?? ExtractObjectKeyFromMediaUrl(streamPath) ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return streamPath;
+        }
+
+        var signature = _signatureService.SignKey(objectKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return streamPath;
+        }
+
+        var separator = streamPath.Contains('?') ? "&" : "?";
+        return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
+    }
+
+    private static string? ExtractObjectKeyFromMediaUrl(string? mediaUrl)
+    {
+        if (string.IsNullOrWhiteSpace(mediaUrl))
+        {
+            return null;
+        }
+
+        var value = mediaUrl.Trim();
+        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var uri))
+        {
+            return null;
+        }
+
+        var path = uri.IsAbsoluteUri ? uri.AbsolutePath : value;
+        var normalizedPath = path.Replace('\\', '/');
+        const string mediaBlobPrefix = "/api/media/blob/";
+        const string videoBlobPrefix = "/api/videostreaming/blob/";
+        if (normalizedPath.StartsWith(mediaBlobPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return Uri.UnescapeDataString(normalizedPath[mediaBlobPrefix.Length..]).Trim('/');
+        }
+
+        if (normalizedPath.StartsWith(videoBlobPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return Uri.UnescapeDataString(normalizedPath[videoBlobPrefix.Length..]).Trim('/');
+        }
+
+        return null;
+    }
     private static string TryReadMetadataString(string? metadataJson, string key, string fallback)
     {
         if (string.IsNullOrWhiteSpace(metadataJson))
