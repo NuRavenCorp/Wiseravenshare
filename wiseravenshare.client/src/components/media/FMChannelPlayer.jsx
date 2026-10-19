@@ -1,5 +1,5 @@
 import ReactPlayer from 'react-player';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { apiClient } from '@/api/client';
 import { ALL_PRESET_STATIONS, PRESET_CATEGORIES } from '@/lib/radioPresets';
 import { Play, Pause, Radio, Volume2, VolumeX, Loader2, AlertCircle, WifiOff } from 'lucide-react';
@@ -82,7 +82,6 @@ export default function FMChannelPlayer() {
   const [playerError, setPlayerError] = useState(null);
   const [buffering, setBuffering] = useState(false);
   const [nativeControlsFallback, setNativeControlsFallback] = useState(false);
-  const playerRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,24 +122,11 @@ export default function FMChannelPlayer() {
   const handleTogglePlay = () => {
     if (!activeChannel) return;
     setPlayerError(null);
-    const media = playerRef.current;
     if (isPlaying) {
-      media?.pause?.();
       setIsPlaying(false);
       return;
     }
     setBuffering(true);
-    const result = media?.play?.();
-    if (result && typeof result.then === 'function') {
-      result.catch((error) => {
-        setIsPlaying(false);
-        setBuffering(false);
-        setNativeControlsFallback(true);
-        setPlayerError(error?.name === 'NotAllowedError'
-          ? 'Your browser blocked automatic playback. Use the player controls below to start the station.'
-          : classifyError(error));
-      });
-    }
     setIsPlaying(true);
   };
 
@@ -175,8 +161,7 @@ export default function FMChannelPlayer() {
       {/* Hidden ReactPlayer — only mounted when a channel is selected */}
       {activeChannel && (
         <ReactPlayer
-          ref={playerRef}
-          src={playbackUrl}
+          url={playbackUrl}
           playing={isPlaying}
           volume={muted ? 0 : volume}
           controls={nativeControlsFallback}

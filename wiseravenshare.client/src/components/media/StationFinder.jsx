@@ -317,7 +317,7 @@ export default function StationFinder() {
         <div className="space-y-2">
           <ReactPlayer
             key={`${playing.id}:${playbackUrl}`}
-            src={playbackUrl}
+            url={playbackUrl}
             playing={!playing.autoplayFailed}
             controls
             width="100%"
