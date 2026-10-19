@@ -323,6 +323,10 @@ export default function StationFinder() {
             width="100%"
             height="48px"
             config={{ file: { forceAudio: true } }}
+            onPlay={() => {
+              setError("");
+              setPlaying((current) => current ? { ...current, autoplayFailed: false } : current);
+            }}
             onError={handlePlaybackError}
           />
           {/power\s*105|\bWWPR\b/i.test(`${playing.name || ""} ${playing.callSign || playing.callsign || ""}`) && (

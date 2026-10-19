@@ -20,8 +20,8 @@ const CATEGORY_ORDER = ['talk-news', 'chill', 'jazz-soul', 'electronic', 'eclect
 // direct Icecast/SHOUTcast streams that are plain http:// or cross-origin.
 const resolvePlaybackUrl = (rawUrl) => {
   if (!rawUrl) return '';
-  // HLS manifests go directly to ReactPlayer's built-in HLS support
-  if (rawUrl.endsWith('.m3u8') || rawUrl.includes('.m3u8?')) return rawUrl;
+  // Same-origin HLS proxy rewrites segment URLs and avoids external CORS failures.
+  if (/\.m3u8(?:\?|$)/i.test(rawUrl)) return `/api/fmtuner/hls-proxy?url=${encodeURIComponent(rawUrl)}`;
   // Same-origin relative URLs don't need a proxy
   if (rawUrl.startsWith('/')) return rawUrl;
   // Proxy all other external streams to avoid CORS + mixed-content blocks
@@ -81,6 +81,7 @@ export default function FMChannelPlayer() {
   const [muted, setMuted] = useState(false);
   const [playerError, setPlayerError] = useState(null);
   const [buffering, setBuffering] = useState(false);
+  const [nativeControlsFallback, setNativeControlsFallback] = useState(false);
   const playerRef = useRef(null);
 
   useEffect(() => {
@@ -108,10 +109,12 @@ export default function FMChannelPlayer() {
     setPlayerError(null);
     setBuffering(false);
     if (activeChannel?.id === ch.id) {
-      // Toggle play/pause on same channel
-      setIsPlaying((p) => !p);
+      // Call the media element directly inside the click gesture. This matters
+      // on iOS and other browsers that reject play() from an async state effect.
+      void handleTogglePlay();
     } else {
       // Cue new channel but don't autoplay — let user press Play
+      setNativeControlsFallback(false);
       setActiveChannel(ch);
       setIsPlaying(false);
     }
@@ -120,7 +123,25 @@ export default function FMChannelPlayer() {
   const handleTogglePlay = () => {
     if (!activeChannel) return;
     setPlayerError(null);
-    setIsPlaying((p) => !p);
+    const media = playerRef.current;
+    if (isPlaying) {
+      media?.pause?.();
+      setIsPlaying(false);
+      return;
+    }
+    setBuffering(true);
+    const result = media?.play?.();
+    if (result && typeof result.then === 'function') {
+      result.catch((error) => {
+        setIsPlaying(false);
+        setBuffering(false);
+        setNativeControlsFallback(true);
+        setPlayerError(error?.name === 'NotAllowedError'
+          ? 'Your browser blocked automatic playback. Use the player controls below to start the station.'
+          : classifyError(error));
+      });
+    }
+    setIsPlaying(true);
   };
 
   const handleError = (err) => {
@@ -158,8 +179,9 @@ export default function FMChannelPlayer() {
           src={playbackUrl}
           playing={isPlaying}
           volume={muted ? 0 : volume}
-          width="0"
-          height="0"
+          controls={nativeControlsFallback}
+          width={nativeControlsFallback ? "100%" : "0"}
+          height={nativeControlsFallback ? "48px" : "0"}
           onPlay={() => { setIsPlaying(true); setBuffering(false); }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}

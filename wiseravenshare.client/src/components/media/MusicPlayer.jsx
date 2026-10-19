@@ -33,6 +33,7 @@ const EMPTY_QUEUE = Object.freeze([]);
 export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_QUEUE }) {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState("");
   const [currentIdx, setCurrentIdx] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const [playUrl, setPlayUrl] = useState(null);
@@ -50,8 +51,14 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const playerRef = useRef(null);
   const conversionAttemptRef = useRef(null);
+  const mountedRef = useRef(false);
   const { toast } = useToast();
   const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     const audio = playerRef.current;
@@ -61,6 +68,10 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
       try { audio.volume = volume; } catch { /* iOS manages playback volume through system controls. */ }
     }
   }, [volume, muted, isIOS]);
+
+  useEffect(() => () => {
+    if (playUrl?.startsWith("blob:")) URL.revokeObjectURL(playUrl);
+  }, [playUrl]);
 
   const normalizeTrack = (track) => ({
     ...track,
@@ -74,7 +85,11 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
       const res = await apiClient.ravensightMedia.listMusic();
       const loadedTracks = (res || []).map(normalizeTrack);
       setTracks(loadedTracks);
+      setLibraryError("");
       if (!initialTrack && loadedTracks.length > 0) setCurrentIdx(0);
+    } catch (error) {
+      setLibraryError(error?.message || "Your music library could not be loaded.");
+      toast({ title: "Could not load music", description: error?.message || "Refresh the library and try again.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -119,6 +134,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     setPlaying(false);
     try {
       const compatible = await apiClient.podcastAudio.convertForBrowser(trackId);
+      if (!mountedRef.current || String(current?.id) !== trackId) return;
       const compatibleUrl = URL.createObjectURL(compatible);
       setPlayUrl((previous) => {
         if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
@@ -126,6 +142,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
       });
       setPlaybackError("Compatible audio is ready. Press play to start this track.");
     } catch (error) {
+      if (!mountedRef.current || String(current?.id) !== trackId) return;
       const detail = error?.data?.detail;
       const message = typeof detail === "string" ? detail : error?.data?.message || error?.message;
       setPlaybackError(message || "Could not convert this track for browser playback.");
@@ -211,7 +228,14 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     if (repeat === "one") {
       if (playerRef.current) {
         playerRef.current.currentTime = 0;
-        playerRef.current.play().catch(() => setPlaybackError("This track could not be played."));
+        playerRef.current.play().catch((error) => {
+          if (error?.name === "NotAllowedError") {
+            setNativeControlsFallback(true);
+            setPlaybackError("Your browser paused before the next play. Tap the audio controls to resume.");
+          } else {
+            setPlaybackError("This track could not be played.");
+          }
+        });
       }
     } else if (repeat === "all" || currentIdx < tracks.length - 1 || shuffle) {
       handleNext();
@@ -448,6 +472,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
 
       {/* Track List */}
       <div className="space-y-2">
+        {libraryError && <p role="alert" className="text-sm text-destructive">{libraryError}</p>}
         {tracks.length === 0 ? (
           <div className="rounded-lg border border-border bg-card p-8 text-center">
             <Music className="w-8 h-8 text-muted-foreground mx-auto mb-2" />

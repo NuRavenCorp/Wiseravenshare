@@ -51,6 +51,8 @@ export default function VideoPlayer() {
   const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
+  const [nativeControlsFallback, setNativeControlsFallback] = useState(false);
   const [confirmingId, setConfirmingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -66,9 +68,12 @@ export default function VideoPlayer() {
   });
 
   const fetchVideos = async () => {
+    setLoading(true);
     try {
       const res = await apiClient.ravensightMedia.listVideos();
       setVideos((res || []).map(normalizeVideo));
+    } catch (error) {
+      toast({ title: "Could not load videos", description: error?.message || "Try refreshing the library.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -84,27 +89,66 @@ export default function VideoPlayer() {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  useEffect(() => {
+    if (!playerRef.current) return;
+    playerRef.current.volume = muted ? 0 : volume;
+  }, [volume, muted]);
+
+  useEffect(() => {
+    if (!playerRef.current) return;
+    try { playerRef.current.playbackRate = speed; } catch { /* Ignore unsupported rates. */ }
+  }, [speed]);
+
   // Fetch signed URL when current changes
   useEffect(() => {
+    let cancelled = false;
     if (!current) {
       setPlayUrl(null);
-      return;
+      return () => { cancelled = true; };
     }
+    setPlayUrl(null);
     setUrlLoading(true);
     setPlaying(false);
+    setPlaybackError("");
+    setNativeControlsFallback(false);
     setProgress(0);
     setDuration(0);
     setVideoSize({ w: 0, h: 0 });
     getPlayableUrl(current.file_uri).then((url) => {
+      if (cancelled) return;
+      if (!url) throw new Error("The video URL is unavailable.");
       setPlayUrl(url);
       setUrlLoading(false);
+    }).catch((error) => {
+      if (cancelled) return;
+      setPlaybackError(error?.message || "Could not prepare this video for playback.");
+      setUrlLoading(false);
     });
+    return () => { cancelled = true; };
   }, [current]);
 
   const handleSeek = (e) => {
     const time = Number(e.target.value);
-    playerRef.current?.seekTo(time, 'seconds');
+    if (playerRef.current) playerRef.current.currentTime = time;
     setProgress(time);
+  };
+
+  const togglePlayback = async () => {
+    const video = playerRef.current;
+    if (!video) return;
+    if (!video.paused) {
+      video.pause();
+      return;
+    }
+    setPlaybackError("");
+    try {
+      await video.play();
+    } catch (error) {
+      setNativeControlsFallback(true);
+      setPlaybackError(error?.name === "NotAllowedError"
+        ? "Your browser blocked playback. Press play in the video controls to start."
+        : error?.message || "This video could not be played. Check the file or try uploading it again.");
+    }
   };
 
   const toggleFullscreen = () => {
@@ -118,7 +162,7 @@ export default function VideoPlayer() {
   };
 
   const captureStill = async () => {
-    const video = playerRef.current?.getInternalPlayer();
+    const video = playerRef.current;
     if (!video || !video.videoWidth) return;
     setCapturing(true);
     try {
@@ -130,14 +174,16 @@ export default function VideoPlayer() {
       const blob = await new Promise((resolve) =>
         canvas.toBlob(resolve, "image/png")
       );
+      if (!blob) throw new Error("Could not capture a frame from this video.");
       const file = new File([blob], `${current.title}-still-${Date.now()}.png`, {
         type: "image/png",
       });
       await apiClient.ravensightMedia.uploadPhoto(file, {
         caption: `video-still:${current.title}`,
       });
+      toast({ title: "Still captured", description: "The frame was saved to your photo library." });
     } catch (e) {
-      console.error(e);
+      toast({ title: "Still capture failed", description: e?.message || "Could not save a frame from this video.", variant: "destructive" });
     } finally {
       setCapturing(false);
     }
@@ -225,33 +271,44 @@ export default function VideoPlayer() {
           >
             <ReactPlayer
               ref={playerRef}
-              url={playUrl}
+              src={playUrl}
               playing={playing}
               volume={muted ? 0 : volume}
               playbackRate={speed}
+              controls={nativeControlsFallback || isFullscreen}
+              playsInline
+              preload="metadata"
               width="100%"
               height="100%"
-              style={{ position: 'absolute', top: 0, left: 0 }}
-              onPlay={() => setPlaying(true)}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+              config={{ file: { attributes: { controlsList: "nodownload" } } }}
+              onPlay={() => { setPlaying(true); setPlaybackError(""); }}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
-              onProgress={({ playedSeconds }) => setProgress(playedSeconds)}
-              onDuration={(d) => setDuration(d)}
-              onReady={() => setPlaying(true)}
-              onError={() => {}}
-              config={{
-                file: {
-                  attributes: { controlsList: 'nodownload' },
-                  hlsOptions: {},
-                },
+              onTimeUpdate={(event) => setProgress(event.currentTarget?.currentTime || 0)}
+              onDurationChange={(seconds) => setDuration(Number.isFinite(seconds) ? seconds : 0)}
+              onLoadedMetadata={(event) => {
+                const media = event.currentTarget;
+                setVideoSize({ w: media.videoWidth || 0, h: media.videoHeight || 0 });
+                if (Number.isFinite(media.duration)) setDuration(media.duration);
+              }}
+              onError={(event) => {
+                const code = event?.currentTarget?.error?.code;
+                setPlaying(false);
+                setNativeControlsFallback(true);
+                setPlaybackError(code === 4
+                  ? "This video format is not supported by this browser. Try MP4 or WebM, or convert the file before uploading."
+                  : "The video stream could not be loaded. Check the file or try again.");
               }}
             />
-            {!isFullscreen && (
+            {formatLabel && !isFullscreen && (
               <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-background/80 text-foreground backdrop-blur-sm">
-                Landscape
+                {formatLabel}
               </span>
             )}
           </div>
+
+          {playbackError && <p role="alert" className="text-sm text-destructive">{playbackError}</p>}
 
           {/* Custom Controls */}
           {!isFullscreen && (
@@ -275,7 +332,7 @@ export default function VideoPlayer() {
 
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-1">
-                  <Button size="icon" onClick={() => setPlaying(!playing)}>
+                  <Button size="icon" onClick={togglePlayback} aria-label={playing ? "Pause video" : "Play video"}>
                     {playing ? (
                       <Pause className="w-4 h-4" />
                     ) : (
@@ -360,6 +417,13 @@ export default function VideoPlayer() {
         <div className="rounded-lg border border-border bg-card p-8 text-center">
           <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">Loading video stream...</p>
+        </div>
+      ) : current && playbackError ? (
+        <div className="rounded-lg border border-destructive/30 bg-card p-8 text-center space-y-3">
+          <p role="alert" className="text-sm text-destructive">{playbackError}</p>
+          <Button variant="outline" size="sm" onClick={() => setCurrent((selected) => selected ? { ...selected } : selected)}>
+            Try again
+          </Button>
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-card p-8 text-center">
