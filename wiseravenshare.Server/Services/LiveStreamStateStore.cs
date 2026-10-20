@@ -478,6 +478,29 @@ CREATE TABLE IF NOT EXISTS app_data.live_streams (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS host_user_id UUID;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS description TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS is_audio_only BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS current_chunk_uri TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS chunk_sequence INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS final_recording_key TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS final_recording_uri TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS final_video_id TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS recorded_duration_ms BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS total_segments INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS kept_permanently BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS kept_at TIMESTAMPTZ NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS kept_by TEXT NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS expiry_reminder_sent_at TIMESTAMPTZ NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+ALTER TABLE app_data.live_streams ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS ix_live_streams_active
     ON app_data.live_streams (started_at DESC)
     WHERE ended_at IS NULL;
@@ -578,8 +601,8 @@ FROM app_data.live_streams ls
 
     private static LiveStreamState MapStream(NpgsqlDataReader reader)
     {
-        var streamId = reader.GetGuid(reader.GetOrdinal("stream_id"));
-        var ownerId = reader.GetGuid(reader.GetOrdinal("host_user_id"));
+        var streamId = ReadGuidOrDefault(reader, "stream_id", Guid.Empty);
+        var ownerId = ReadNullableGuid(reader, "host_user_id") ?? streamId;
         var endedAt = ReadNullableDateTime(reader, "ended_at");
         var deletedAt = ReadNullableDateTime(reader, "deleted_at");
         var status = deletedAt.HasValue
@@ -605,15 +628,15 @@ FROM app_data.live_streams ls
             id = streamId.ToString(),
             created_by_id = ownerId.ToString(),
             streamer_id = ownerId.ToString(),
-            title = reader.GetString(reader.GetOrdinal("title")),
+            title = ReadStringOrDefault(reader, "title", "Untitled live"),
             description = ReadNullableString(reader, "description"),
             status = status,
             current_chunk_uri = currentChunkUri,
-            chunk_sequence = reader.GetInt32(reader.GetOrdinal("computed_chunk_sequence")),
-            is_audio_only = reader.GetBoolean(reader.GetOrdinal("is_audio_only")),
-            started_at = reader.GetDateTime(reader.GetOrdinal("started_at")).ToUniversalTime(),
+            chunk_sequence = ReadInt32OrDefault(reader, "computed_chunk_sequence", 0),
+            is_audio_only = ReadBoolOrDefault(reader, "is_audio_only", false),
+            started_at = ReadDateTimeOrDefault(reader, "started_at", DateTime.UtcNow),
             ended_at = endedAt,
-            kept_permanently = reader.GetBoolean(reader.GetOrdinal("kept_permanently")),
+            kept_permanently = ReadBoolOrDefault(reader, "kept_permanently", false),
             kept_at = ReadNullableDateTime(reader, "kept_at"),
             kept_by = ReadNullableString(reader, "kept_by"),
             expires_at = ReadNullableDateTime(reader, "expires_at"),
@@ -622,10 +645,10 @@ FROM app_data.live_streams ls
             final_recording_uri = finalUri,
             final_recording_key = finalKey,
             final_video_id = ReadNullableString(reader, "final_video_id"),
-            recorded_duration_ms = reader.GetInt64(reader.GetOrdinal("recorded_duration_ms")),
-            total_segments = reader.GetInt32(reader.GetOrdinal("total_segments")),
-            created_date = reader.GetDateTime(reader.GetOrdinal("started_at")).ToUniversalTime(),
-            updated_date = reader.GetDateTime(reader.GetOrdinal("updated_at")).ToUniversalTime()
+            recorded_duration_ms = ReadInt64OrDefault(reader, "recorded_duration_ms", 0L),
+            total_segments = ReadInt32OrDefault(reader, "total_segments", 0),
+            created_date = ReadDateTimeOrDefault(reader, "started_at", DateTime.UtcNow),
+            updated_date = ReadDateTimeOrDefault(reader, "updated_at", DateTime.UtcNow)
         };
     }
 
@@ -646,14 +669,99 @@ FROM app_data.live_streams ls
 
     private static string? ReadNullableString(NpgsqlDataReader reader, string columnName)
     {
-        var ordinal = reader.GetOrdinal(columnName);
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
     private static DateTime? ReadNullableDateTime(NpgsqlDataReader reader, string columnName)
     {
-        var ordinal = reader.GetOrdinal(columnName);
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal).ToUniversalTime();
+    }
+
+    private static Guid? ReadNullableGuid(NpgsqlDataReader reader, string columnName)
+    {
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0 || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return reader.GetGuid(ordinal);
+    }
+
+    private static Guid ReadGuidOrDefault(NpgsqlDataReader reader, string columnName, Guid fallback)
+    {
+        var value = ReadNullableGuid(reader, columnName);
+        return value ?? fallback;
+    }
+
+    private static string ReadStringOrDefault(NpgsqlDataReader reader, string columnName, string fallback)
+    {
+        var value = ReadNullableString(reader, columnName);
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private static bool ReadBoolOrDefault(NpgsqlDataReader reader, string columnName, bool fallback)
+    {
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0 || reader.IsDBNull(ordinal))
+        {
+            return fallback;
+        }
+
+        return reader.GetBoolean(ordinal);
+    }
+
+    private static int ReadInt32OrDefault(NpgsqlDataReader reader, string columnName, int fallback)
+    {
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0 || reader.IsDBNull(ordinal))
+        {
+            return fallback;
+        }
+
+        return reader.GetInt32(ordinal);
+    }
+
+    private static long ReadInt64OrDefault(NpgsqlDataReader reader, string columnName, long fallback)
+    {
+        var ordinal = FindColumnOrdinal(reader, columnName);
+        if (ordinal < 0 || reader.IsDBNull(ordinal))
+        {
+            return fallback;
+        }
+
+        return reader.GetInt64(ordinal);
+    }
+
+    private static DateTime ReadDateTimeOrDefault(NpgsqlDataReader reader, string columnName, DateTime fallback)
+    {
+        var value = ReadNullableDateTime(reader, columnName);
+        return value ?? fallback;
+    }
+
+    private static int FindColumnOrdinal(NpgsqlDataReader reader, string columnName)
+    {
+        for (var index = 0; index < reader.FieldCount; index++)
+        {
+            if (string.Equals(reader.GetName(index), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static bool TryParseGuid(string? input, out Guid value)
