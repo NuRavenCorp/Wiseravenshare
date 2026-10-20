@@ -88,6 +88,50 @@ public sealed class PythonMatrixController : ControllerBase
         }
     }
 
+    [HttpGet("media/render")]
+    public async Task<IActionResult> RenderMedia([FromQuery] string source, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return BadRequest(new { message = "Missing media source." });
+        }
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"media/render?source={Uri.EscapeDataString(source.Trim())}");
+
+            var authHeader = Request.Headers.Authorization.ToString();
+            if (!string.IsNullOrWhiteSpace(authHeader))
+            {
+                request.Headers.TryAddWithoutValidation("X-Forward-Auth", authHeader);
+            }
+
+            var cookieHeader = Request.Headers.Cookie.ToString();
+            if (!string.IsNullOrWhiteSpace(cookieHeader))
+            {
+                request.Headers.TryAddWithoutValidation("X-Forward-Cookie", cookieHeader);
+            }
+
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return await ProxyJsonResponse(response, cancellationToken);
+            }
+
+            var payload = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return File(payload, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Python media renderer backup failed.");
+            return StatusCode(503, new { message = "Python media renderer backup is unavailable." });
+        }
+    }
+
     private async Task<IActionResult> ProxyPostAsync(string relativeUrl, JsonElement payload, CancellationToken cancellationToken)
     {
         try

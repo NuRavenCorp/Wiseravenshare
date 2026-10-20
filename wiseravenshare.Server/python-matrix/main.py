@@ -5,12 +5,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 import psycopg
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, field_validator
 from live_ranker import rank_live_feed
 
@@ -28,6 +29,17 @@ MAX_LIVE_FEED_LIMIT = 100
 MAX_TRAINING_SAMPLE_LIMIT = 5000
 NURAVEN_CORP_LLM_SCORER_URL = os.environ.get("NURAVEN_CORP_LLM_SCORER_URL", "").strip()
 RANKER_MODEL_TIMEOUT_SECONDS = float(os.environ.get("RANKER_MODEL_TIMEOUT_SECONDS", "1.5"))
+MEDIA_RENDERER_TIMEOUT_SECONDS = float(os.environ.get("MEDIA_RENDERER_TIMEOUT_SECONDS", "12"))
+MEDIA_RENDERER_MAX_BYTES = int(os.environ.get("MEDIA_RENDERER_MAX_BYTES", str(200 * 1024 * 1024)))
+MEDIA_RENDERER_ORIGIN = os.environ.get("MEDIA_RENDERER_ORIGIN", "http://127.0.0.1:5242").strip().rstrip("/")
+MEDIA_RENDERER_ALLOWED_HOSTS = {
+    value.strip().lower()
+    for value in os.environ.get(
+        "MEDIA_RENDERER_ALLOWED_HOSTS",
+        "127.0.0.1,localhost,134.199.224.48,cdn.wiseravenshare.com,nyc3.digitaloceanspaces.com",
+    ).split(",")
+    if value.strip()
+}
 
 
 def get_connection() -> psycopg.Connection:
@@ -179,6 +191,43 @@ def _derive_rank_label(watch_seconds: float, liked: bool, commented: bool, share
     return round(min(1.0, label), 4)
 
 
+def _is_allowed_media_host(hostname: str) -> bool:
+    normalized = (hostname or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in MEDIA_RENDERER_ALLOWED_HOSTS:
+        return True
+    return any(
+        candidate.startswith(".") and normalized.endswith(candidate)
+        for candidate in MEDIA_RENDERER_ALLOWED_HOSTS
+    )
+
+
+def _resolve_media_source_url(source: str) -> str:
+    value = (source or "").strip()
+    if not value:
+        raise ValueError("Missing media source URL.")
+
+    parsed = urllib_parse.urlparse(value)
+    if parsed.scheme and parsed.netloc:
+        if parsed.scheme.lower() not in {"http", "https"}:
+            raise ValueError("Unsupported media source protocol.")
+        if not _is_allowed_media_host(parsed.hostname or ""):
+            raise ValueError("Media source host is not allowed.")
+        return value
+
+    if value.startswith("//"):
+        raise ValueError("Protocol-relative URLs are not allowed.")
+    if "\\" in value:
+        raise ValueError("Invalid media source path.")
+    if not value.startswith("/"):
+        value = "/" + value
+    if not value.startswith("/api/media/") and not value.startswith("/api/videostreaming/"):
+        raise ValueError("Media source path is not allowed.")
+
+    return f"{MEDIA_RENDERER_ORIGIN}{value}"
+
+
 def validate_matrix(value: list[list[float]], name: str) -> list[list[float]]:
     if not value or not all(isinstance(row, list) and row for row in value):
         raise ValueError(f"{name} must be a non-empty 2D array.")
@@ -292,6 +341,54 @@ def database_health():
         "status": "ok",
         "database": "postgres",
     }
+
+
+@app.get("/media/render")
+def render_media_backup(request: Request, source: str = Query(..., min_length=1)):
+    try:
+        source_url = _resolve_media_source_url(source)
+    except ValueError as error:
+        return JSONResponse(status_code=400, content={"message": str(error)})
+
+    upstream_headers = {
+        "Accept": "*/*",
+        "User-Agent": "wiseravenshare-python-renderer/1.0",
+    }
+    if source_url.startswith(MEDIA_RENDERER_ORIGIN):
+        forwarded_auth = (request.headers.get("x-forward-auth") or "").strip()
+        if forwarded_auth:
+            upstream_headers["Authorization"] = forwarded_auth
+        forwarded_cookie = (request.headers.get("x-forward-cookie") or "").strip()
+        if forwarded_cookie:
+            upstream_headers["Cookie"] = forwarded_cookie
+
+    req = urllib_request.Request(source_url, method="GET", headers=upstream_headers)
+
+    try:
+        with urllib_request.urlopen(req, timeout=MEDIA_RENDERER_TIMEOUT_SECONDS) as upstream:
+            content_type = upstream.headers.get("Content-Type", "application/octet-stream")
+            data = upstream.read(MEDIA_RENDERER_MAX_BYTES + 1)
+            if len(data) > MEDIA_RENDERER_MAX_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"message": "Media source exceeds renderer size limit."},
+                )
+            return Response(content=data, media_type=content_type)
+    except urllib_error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="ignore") if hasattr(error, "read") else str(error)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "message": "Backup media renderer upstream request failed.",
+                "status": getattr(error, "code", None),
+                "detail": detail[:1000],
+            },
+        )
+    except urllib_error.URLError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Backup media renderer cannot reach source.", "detail": str(error)},
+        )
 
 
 @app.get("/matrix/history")
