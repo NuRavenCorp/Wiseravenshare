@@ -45,9 +45,6 @@ export default function LiveStreamBroadcaster({ onEnd }) {
         : { audio: true, video: true };
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = mediaStream;
-      if (previewRef.current && !audioOnly) {
-        previewRef.current.srcObject = mediaStream;
-      }
 
       const res = await apiClient.entities.LiveStream.create({
         title: title.trim(),
@@ -97,6 +94,10 @@ export default function LiveStreamBroadcaster({ onEnd }) {
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (previewRef.current) {
+      previewRef.current.srcObject = null;
     }
     if (streamIdRef.current) {
       try {
@@ -113,6 +114,27 @@ export default function LiveStreamBroadcaster({ onEnd }) {
     setTitle("");
     onEnd?.();
   };
+
+  useEffect(() => {
+    if (!streaming || audioOnly || !previewRef.current || !streamRef.current) {
+      return;
+    }
+
+    const video = previewRef.current;
+    video.srcObject = streamRef.current;
+    const playPreview = () => {
+      video.play().catch(() => {});
+    };
+    video.onloadedmetadata = playPreview;
+    playPreview();
+
+    return () => {
+      video.onloadedmetadata = null;
+      if (video.srcObject) {
+        video.srcObject = null;
+      }
+    };
+  }, [streaming, audioOnly]);
 
   useEffect(() => {
     return () => {
