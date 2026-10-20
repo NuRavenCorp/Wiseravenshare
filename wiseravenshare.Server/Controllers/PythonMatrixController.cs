@@ -16,13 +16,16 @@ public sealed class PythonMatrixController : ControllerBase
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PythonMatrixController> _logger;
+    private readonly IConfiguration _configuration;
 
     public PythonMatrixController(
         IHttpClientFactory httpClientFactory,
-        ILogger<PythonMatrixController> logger)
+        ILogger<PythonMatrixController> logger,
+        IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpGet("health")]
@@ -102,7 +105,10 @@ public sealed class PythonMatrixController : ControllerBase
             using var request = new HttpRequestMessage(
                 HttpMethod.Get,
                 $"media/render?source={Uri.EscapeDataString(source.Trim())}");
-            request.Headers.TryAddWithoutValidation("X-Forward-Origin", $"{Request.Scheme}://{Request.Host.Value}");
+            var internalOrigin = (_configuration["PythonMatrixService:InternalAppOrigin"]
+                                  ?? _configuration["PythonMatrixService__InternalAppOrigin"]
+                                  ?? "http://127.0.0.1:5242").Trim().TrimEnd('/');
+            request.Headers.TryAddWithoutValidation("X-Forward-Origin", internalOrigin);
 
             var authHeader = Request.Headers.Authorization.ToString();
             if (!string.IsNullOrWhiteSpace(authHeader))

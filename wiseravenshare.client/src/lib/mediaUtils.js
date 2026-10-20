@@ -1,4 +1,4 @@
-import { resolveApiUrl } from "@/api/client";
+﻿import { resolveApiUrl } from "@/api/client";
 
 const protectedBlobUrlCache = new Map();
 const PROTECTED_MEDIA_PATH_PREFIXES = [
@@ -52,6 +52,13 @@ const tryExtractSpacesObjectKey = (absoluteUrl) => {
   return parts.slice(1).join("/");
 };
 
+class MediaNotFoundError extends Error {
+  constructor(url) {
+    super("Media not found: " + url);
+    this.name = "MediaNotFoundError";
+  }
+}
+
 const fetchProtectedBlobUrl = async (absoluteUrl) => {
   if (protectedBlobUrlCache.has(absoluteUrl)) {
     return protectedBlobUrlCache.get(absoluteUrl);
@@ -65,6 +72,7 @@ const fetchProtectedBlobUrl = async (absoluteUrl) => {
     headers,
   });
   if (!response.ok) {
+    if (response.status === 404) throw new MediaNotFoundError(absoluteUrl);
     throw new Error(`Media request failed (${response.status}).`);
   }
 
@@ -96,6 +104,7 @@ const fetchPythonRenderedBlobUrl = async (sourceUri) => {
     headers,
   });
   if (!response.ok) {
+    if (response.status === 404) throw new MediaNotFoundError(sourceValue);
     throw new Error(`Python renderer request failed (${response.status}).`);
   }
 
@@ -124,8 +133,9 @@ export async function getPlayableUrl(fileUri) {
         && isProtectedMediaPath(absolute.pathname)) {
         try {
           return await fetchProtectedBlobUrl(absolute.toString());
-        } catch {
-          return await fetchPythonRenderedBlobUrl(absolute.toString());
+        } catch (err) {
+          if (err instanceof MediaNotFoundError) return absolute.toString();
+          try { return await fetchPythonRenderedBlobUrl(absolute.toString()); } catch { return absolute.toString(); }
         }
       }
 
@@ -133,10 +143,12 @@ export async function getPlayableUrl(fileUri) {
       if (spacesObjectKey) {
         const blobProxyPath = buildBlobProxyPath(spacesObjectKey);
         if (blobProxyPath) {
+          const proxyAbsoluteUrl = resolveApiUrl(blobProxyPath);
           try {
-            return await fetchProtectedBlobUrl(resolveApiUrl(blobProxyPath));
-          } catch {
-            return await fetchPythonRenderedBlobUrl(absolute.toString());
+            return await fetchProtectedBlobUrl(proxyAbsoluteUrl);
+          } catch (err) {
+            if (err instanceof MediaNotFoundError) return proxyAbsoluteUrl;
+            try { return await fetchPythonRenderedBlobUrl(proxyAbsoluteUrl); } catch { return proxyAbsoluteUrl; }
           }
         }
       }
@@ -148,13 +160,15 @@ export async function getPlayableUrl(fileUri) {
   }
 
   if (candidateUrl.startsWith("/") && isProtectedMediaPath(candidateUrl)) {
+    const absoluteProtected = resolveApiUrl(candidateUrl);
     try {
-      return await fetchProtectedBlobUrl(resolveApiUrl(candidateUrl));
-    } catch {
+      return await fetchProtectedBlobUrl(absoluteProtected);
+    } catch (err) {
+      if (err instanceof MediaNotFoundError) return absoluteProtected;
       try {
-        return await fetchPythonRenderedBlobUrl(resolveApiUrl(candidateUrl));
+        return await fetchPythonRenderedBlobUrl(absoluteProtected);
       } catch {
-        return resolveApiUrl(candidateUrl);
+        return absoluteProtected;
       }
     }
   }

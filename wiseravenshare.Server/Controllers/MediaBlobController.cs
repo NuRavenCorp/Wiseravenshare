@@ -73,12 +73,24 @@ public sealed class MediaBlobController : ControllerBase
             }
         }
 
-        var blobStream = await _blobStorageService.OpenReadAsync(normalizedKey, cancellationToken);
+        var blobCandidates = BuildBlobKeyCandidates(normalizedKey);
+        Stream? blobStream = null;
+        string? resolvedBlobKey = null;
+        foreach (var candidate in blobCandidates)
+        {
+            blobStream = await _blobStorageService.OpenReadAsync(candidate, cancellationToken);
+            if (blobStream is not null)
+            {
+                resolvedBlobKey = candidate;
+                break;
+            }
+        }
+
         if (blobStream is not null)
         {
-            var contentType = ResolveContentType(normalizedKey);
+            var contentType = ResolveContentType(resolvedBlobKey ?? normalizedKey);
             Response.Headers.CacheControl = "private, max-age=31536000, immutable";
-            Response.Headers["X-Media-Key-Signature"] = _signatureService.SignKey(normalizedKey);
+            Response.Headers["X-Media-Key-Signature"] = _signatureService.SignKey(resolvedBlobKey ?? normalizedKey);
             return File(blobStream, contentType, enableRangeProcessing: true);
         }
 
@@ -189,6 +201,43 @@ public sealed class MediaBlobController : ControllerBase
     private static string NormalizeObjectKey(string? objectKey)
     {
         return (objectKey ?? string.Empty).Replace('\\', '/').Trim('/');
+    }
+
+    private static IReadOnlyList<string> BuildBlobKeyCandidates(string normalizedKey)
+    {
+        var candidates = new List<string>();
+        void Add(string? value)
+        {
+            var current = NormalizeObjectKey(value);
+            if (string.IsNullOrWhiteSpace(current))
+            {
+                return;
+            }
+
+            if (!candidates.Contains(current, StringComparer.OrdinalIgnoreCase))
+            {
+                candidates.Add(current);
+            }
+        }
+
+        Add(normalizedKey);
+        var firstSlash = normalizedKey.IndexOf('/');
+        if (firstSlash > 0 && firstSlash < normalizedKey.Length - 1)
+        {
+            Add(normalizedKey[(firstSlash + 1)..]);
+        }
+
+        if (!normalizedKey.StartsWith("wiseravenshare/", StringComparison.OrdinalIgnoreCase))
+        {
+            Add($"wiseravenshare/{normalizedKey}");
+        }
+
+        if (!normalizedKey.StartsWith("server/", StringComparison.OrdinalIgnoreCase))
+        {
+            Add($"server/{normalizedKey}");
+        }
+
+        return candidates;
     }
 
     private string ResolveContentType(string objectKey)

@@ -74,6 +74,58 @@ namespace Wiseravenshare.Server.Controllers
         }
 
         /// <summary>
+        /// Create a threaded series of posts in order.
+        /// Each post after the first replies to the previously created post.
+        /// </summary>
+        [HttpPost("threads")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> CreateThread([FromBody] CreatePostThreadDto dto)
+        {
+            if (dto?.Posts == null || dto.Posts.Count == 0)
+            {
+                return BadRequest(new { message = "At least one post is required to create a thread." });
+            }
+
+            var userId = User.Identity?.IsAuthenticated == true
+                ? await ResolveEffectiveUserIdAsync()
+                : Guid.NewGuid();
+
+            var created = new List<PostDto>(dto.Posts.Count);
+            Guid? nextReplyToId = dto.ReplyToId;
+
+            foreach (var item in dto.Posts)
+            {
+                var createDto = new CreatePostDto
+                {
+                    Content = item.Content,
+                    MediaUrls = item.MediaUrls,
+                    MediaUrl = item.MediaUrl,
+                    YoutubeUrl = item.YoutubeUrl,
+                    TikTokUrl = item.TikTokUrl,
+                    FacebookUrl = item.FacebookUrl,
+                    Provenance = item.Provenance,
+                    Type = item.Type,
+                    ReplyToId = nextReplyToId,
+                    LocationName = item.LocationName,
+                    IsTruthDispatch = item.IsTruthDispatch,
+                    TruthDeclarationAccepted = item.TruthDeclarationAccepted,
+                    Latitude = item.Latitude,
+                    Longitude = item.Longitude,
+                    IsSensitive = item.IsSensitive
+                };
+
+                var post = await _postService.CreatePostAsync(userId, createDto);
+                created.Add(post);
+                nextReplyToId = post.Id;
+            }
+
+            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+            return StatusCode(StatusCodes.Status201Created, created);
+        }
+
+        /// <summary>
         /// Update a post
         /// </summary>
         [HttpPut("{id}")]

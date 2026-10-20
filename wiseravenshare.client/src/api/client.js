@@ -314,6 +314,12 @@ export const apiClient = {
     feed(page = 1, pageSize = 20) {
       return requestJson(`/api/posts/feed?page=${page}&pageSize=${pageSize}`, { method: "GET" });
     },
+    createThread(payload) {
+      return requestJson("/api/posts/threads", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
     trending(count = 20) {
       return requestJson(`/api/posts/trending?count=${count}`, { method: "GET" });
     },

@@ -169,4 +169,49 @@ namespace Wiseravenshare.Server.DTOs.Post
         [JsonPropertyName("truthDeclarationAccepted")]
         public bool? TruthDeclarationAccepted { get; set; }
     }
+
+    public class CreatePostThreadDto
+    {
+        [MinLength(1)]
+        public List<CreatePostThreadItemDto> Posts { get; set; } = new();
+
+        [JsonPropertyName("replyToId")]
+        public Guid? ReplyToId { get; set; }
+    }
+
+    public class CreatePostThreadItemDto
+    {
+        [MaxLength(1000)]
+        public string Content { get; set; } = string.Empty;
+
+        public string? MediaUrls { get; set; }
+
+        [JsonPropertyName("mediaUrl")]
+        public string? MediaUrl { get; set; }
+
+        [JsonPropertyName("youtubeUrl")]
+        public string? YoutubeUrl { get; set; }
+
+        [JsonPropertyName("tiktokUrl")]
+        public string? TikTokUrl { get; set; }
+
+        [JsonPropertyName("facebookUrl")]
+        public string? FacebookUrl { get; set; }
+
+        [JsonPropertyName("provenance")]
+        public PostProvenanceDto? Provenance { get; set; }
+
+        public string Type { get; set; } = "Text";
+        public string? LocationName { get; set; }
+
+        [JsonPropertyName("truthDispatch")]
+        public bool IsTruthDispatch { get; set; }
+
+        [JsonPropertyName("truthDeclarationAccepted")]
+        public bool TruthDeclarationAccepted { get; set; }
+
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public bool IsSensitive { get; set; }
+    }
 }
