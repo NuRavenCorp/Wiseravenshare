@@ -79,6 +79,27 @@ public sealed class FunctionCompatController : ControllerBase
         return Ok(await BuildLocalAnalyticsAsync(request.Days, includeTopContent: true));
     }
 
+    [HttpPost("create-karaoke-checkout")]
+    [HttpPost("CreateKaraokeCheckout")]
+    public IActionResult CreateKaraokeCheckout([FromBody] JsonElement body)
+    {
+        var stripeKey = _configuration["Stripe:SecretKey"];
+        if (string.IsNullOrWhiteSpace(stripeKey))
+        {
+            return Ok(new
+            {
+                error = "Karaoke checkout is not available yet.",
+                message = "Payment processing is not configured on this server."
+            });
+        }
+
+        return Ok(new
+        {
+            error = "Karaoke checkout is not implemented.",
+            message = "Contact support to enable karaoke access."
+        });
+    }
+
     [HttpPost("get-pg-analytics")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> GetPgAnalytics([FromBody] AnalyticsRequest request)
