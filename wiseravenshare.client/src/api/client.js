@@ -518,12 +518,51 @@ export const apiClient = {
     },
   },
   live: {
+    start(streamId, payload = {}) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/start`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    presignSegment(streamId, payload = {}) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/segments/presign`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    confirmSegment(streamId, segmentIndex) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/segments/${encodeURIComponent(String(segmentIndex))}/confirm`, {
+        method: "POST",
+      });
+    },
+    end(streamId) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/end`, {
+        method: "POST",
+      });
+    },
     feed(viewerId, limit = 50) {
       const query = new URLSearchParams({
         viewer_id: String(viewerId || ""),
         limit: String(limit),
       });
       return requestJson(`/api/live/feed?${query.toString()}`, {
+        method: "GET",
+      });
+    },
+    keep(streamId) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/keep`, {
+        method: "POST",
+      });
+    },
+    message(streamId, text) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/message`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+    },
+    expiry(streamId, userId) {
+      const query = new URLSearchParams({ user_id: String(userId || "") });
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/expiry?${query.toString()}`, {
         method: "GET",
       });
     },

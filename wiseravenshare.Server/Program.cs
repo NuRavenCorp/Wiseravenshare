@@ -1972,6 +1972,8 @@ builder.Services.AddScoped<ICreatorRadioStationService, CreatorRadioStationServi
 if (enableHostedServices)
 {
     builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.RadioStationActivationAgentService>();
+    builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LiveStreamAssemblyHostedService>();
+    builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.LiveStreamExpiryHostedService>();
 }
 builder.Services.AddScoped<IIcecastStreamService, IcecastStreamService>();
 builder.Services.AddHttpClient<IGeminiTagService, GeminiTagService>();

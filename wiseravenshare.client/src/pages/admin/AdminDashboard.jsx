@@ -19,8 +19,10 @@ import AdminGoogleAnalytics from "@/components/admin/AdminGoogleAnalytics";
 import AdminFeatureReleases from "@/components/admin/AdminFeatureReleases";
 import AdminJournalism from "@/components/admin/AdminJournalism";
 import AdminEntityCatalog from "@/components/admin/AdminEntityCatalog";
+import AdminCommandCenter from "@/components/admin/AdminCommandCenter";
 
 const tabs = [
+  { id: "command-center", label: "Command Center", icon: ShieldAlert },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "metrics", label: "Site Metrics", icon: BarChart3 },
   { id: "crawler", label: "Crawler", icon: Radar },
@@ -42,7 +44,7 @@ const tabs = [
 ];
 
 export default function AdminDashboard() {
-  const [active, setActive] = useState("overview");
+  const [active, setActive] = useState("command-center");
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -84,6 +86,7 @@ export default function AdminDashboard() {
           <h1 className="font-heading text-3xl md:text-4xl text-foreground mb-8 capitalize">
             {tabs.find((t) => t.id === active)?.label}
           </h1>
+          {active === "command-center" && <AdminCommandCenter onOpenTab={setActive} />}
           {active === "overview" && <AdminOverview />}
           {active === "metrics" && <AdminMetrics />}
           {active === "crawler" && <AdminCrawler />}
