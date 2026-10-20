@@ -230,24 +230,52 @@ public sealed class RavensightVideoMediaController : ControllerBase
     public async Task<IActionResult> SaveVideo([FromForm] SaveRavensightVideoDto dto, CancellationToken cancellationToken)
     {
         var file = dto.File;
-        if (file is null || file.Length == 0)
+        if ((file is null || file.Length == 0) && Request.HasFormContentType)
         {
             file = Request.Form.Files.FirstOrDefault(f =>
                 string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
 
-        if (file is null || file.Length == 0)
-        {
-            return BadRequest(new { message = "No video file uploaded. Ensure the multipart field is named 'File'." });
-        }
-
-        dto.File = file;
-
         if (!TryResolveUserId(out var userId))
         {
             return Unauthorized(new { message = "Unable to determine current user." });
         }
+
+        if (file is null || file.Length == 0)
+        {
+            var externalVideoUrl = ResolveExternalVideoUrl();
+            if (!string.IsNullOrWhiteSpace(externalVideoUrl))
+            {
+                var hasSubscriptionForExternal = await HasActiveSubscriptionAsync(userId);
+                var fallbackMode = VideoRetentionPolicy.ResolveStorageMode(dto.StorageMode, dto.IsPermanent, hasSubscriptionForExternal);
+                var fallbackVideo = BuildFallbackVideo(userId, dto, externalVideoUrl, fallbackMode, hasSubscriptionForExternal);
+                return Ok(new
+                {
+                    file = new RavensightSavedMediaDto
+                    {
+                        FileName = Path.GetFileName(new Uri(externalVideoUrl, UriKind.RelativeOrAbsolute).IsAbsoluteUri
+                            ? new Uri(externalVideoUrl).AbsolutePath
+                            : externalVideoUrl),
+                        RelativePath = externalVideoUrl,
+                        DestinationFolder = dto.DestinationFolder,
+                        ContentType = "video/mp4",
+                        SizeBytes = 0,
+                        SavedAtUtc = DateTime.UtcNow,
+                        MediaUrl = externalVideoUrl
+                    },
+                    fileName = Path.GetFileName(externalVideoUrl),
+                    filePath = externalVideoUrl,
+                    mediaUrl = externalVideoUrl,
+                    video = fallbackVideo,
+                    persistenceStatus = "external"
+                });
+            }
+
+            return BadRequest(new { message = "No video file uploaded. Ensure the multipart field is named 'File'." });
+        }
+
+        dto.File = file;
 
         var privacy = PrivacyStatus.Unlisted;
         if (!string.IsNullOrWhiteSpace(dto.Privacy)
@@ -404,6 +432,57 @@ public sealed class RavensightVideoMediaController : ControllerBase
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }
         });
+    }
+
+    private string ResolveExternalVideoUrl()
+    {
+        static string ReadField(IFormCollection form, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (form.TryGetValue(name, out var value))
+                {
+                    var resolved = value.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(resolved))
+                    {
+                        return resolved;
+                    }
+                }
+            }
+
+            return string.Empty;
+        }
+
+        if (Request.HasFormContentType)
+        {
+            var form = Request.Form;
+            var formUrl = ReadField(
+                form,
+                "videoUrl",
+                "video_url",
+                "mediaUrl",
+                "media_url",
+                "source",
+                "source_url",
+                "filePath",
+                "file_path");
+            if (!string.IsNullOrWhiteSpace(formUrl))
+            {
+                return formUrl;
+            }
+        }
+
+        var query = Request.Query;
+        foreach (var key in new[] { "videoUrl", "video_url", "mediaUrl", "media_url", "source", "source_url", "filePath", "file_path" })
+        {
+            var value = query[key].ToString().Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 
     [HttpPatch("{videoId}/state")]

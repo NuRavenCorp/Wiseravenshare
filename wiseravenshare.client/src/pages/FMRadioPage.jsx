@@ -271,6 +271,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryUploadBusy, setLibraryUploadBusy] = useState(false);
   const [libraryUploadError, setLibraryUploadError] = useState('');
+  const [selectedTrackIds, setSelectedTrackIds] = useState([]);
   const [currentTrack, setCurrentTrack] = useState(null);
   const [trackIndex,   setTrackIndex]   = useState(0);
   const [isPlaying,    setIsPlaying]    = useState(false);
@@ -1246,13 +1247,62 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
       }
       return next;
     });
+    setSelectedTrackIds((prev) => prev.filter((trackId) => trackId !== id));
   }, [currentTrack, loadTrack, stop]);
 
   const clearQueue = useCallback(() => {
     setLibrary([]);
     setCurrentTrack(null);
+    setSelectedTrackIds([]);
     stop();
   }, [stop]);
+
+  const toggleTrackSelection = useCallback((trackId) => {
+    setSelectedTrackIds((prev) =>
+      prev.includes(trackId)
+        ? prev.filter((id) => id !== trackId)
+        : [...prev, trackId]
+    );
+  }, []);
+
+  const selectAllTracks = useCallback(() => {
+    setSelectedTrackIds(library.map((track) => track.id));
+  }, [library]);
+
+  const clearTrackSelection = useCallback(() => {
+    setSelectedTrackIds([]);
+  }, []);
+
+  const removeSelectedTracks = useCallback(() => {
+    if (!selectedTrackIds.length) return;
+    const selected = new Set(selectedTrackIds);
+    setLibrary((prev) => {
+      const next = prev.filter((track) => !selected.has(track.id));
+      if (currentTrack?.id && selected.has(currentTrack.id)) {
+        if (next.length) loadTrack(next[0], 0, false);
+        else { stop(); setCurrentTrack(null); }
+      }
+      return next;
+    });
+    setSelectedTrackIds([]);
+  }, [selectedTrackIds, currentTrack, loadTrack, stop]);
+
+  const playSelectedTracks = useCallback(() => {
+    if (!selectedTrackIds.length) return;
+    const selected = library.filter((track) => selectedTrackIds.includes(track.id));
+    if (!selected.length) return;
+    openMedia({
+      ...selected[0],
+      type: 'music',
+      url: selected[0].mediaUrl || selected[0].url || '',
+      queue: selected
+    });
+  }, [selectedTrackIds, library, openMedia]);
+
+  useEffect(() => {
+    const validIds = new Set(library.map((track) => track.id));
+    setSelectedTrackIds((prev) => prev.filter((id) => validIds.has(id)));
+  }, [library]);
 
   useEffect(() => {
     try {
@@ -1354,7 +1404,14 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     const name = newPlaylistName.trim();
     if (!name) { setPlaylistError('Enter a playlist name.'); return; }
     if (library.length === 0) { setPlaylistError('Add tracks before creating a playlist.'); return; }
-    const pl = { id: `pl-${Date.now()}`, name, trackIds: library.map((t) => t.id), createdAt: new Date().toISOString() };
+    const selected = selectedTrackIds.length
+      ? library.filter((track) => selectedTrackIds.includes(track.id))
+      : library;
+    if (!selected.length) {
+      setPlaylistError('Select at least one track before creating a playlist.');
+      return;
+    }
+    const pl = { id: `pl-${Date.now()}`, name, trackIds: selected.map((t) => t.id), createdAt: new Date().toISOString() };
     setPlaylists((prev) => {
       const next = [...prev, pl];
       try { localStorage.setItem('wr_playlists', JSON.stringify(next)); } catch {}
@@ -1362,7 +1419,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
     });
     setNewPlaylistName('');
     setPlaylistError('');
-  }, [newPlaylistName, library]);
+  }, [newPlaylistName, library, selectedTrackIds]);
 
   const deletePlaylist = useCallback((plId) => {
     setPlaylists((prev) => {
@@ -2408,6 +2465,10 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
             <div className="mod-queue-head">
               <span>Saved Tracks ({library.length})</span>
               <div style={{ display:'flex', gap:6 }}>
+                <button className="mod-pill" onClick={selectAllTracks} disabled={!library.length}>Select all</button>
+                <button className="mod-pill" onClick={clearTrackSelection} disabled={!selectedTrackIds.length}>Clear sel</button>
+                <button className="mod-pill" onClick={playSelectedTracks} disabled={!selectedTrackIds.length}>Play sel</button>
+                <button className="mod-pill" onClick={removeSelectedTracks} disabled={!selectedTrackIds.length}>Remove sel</button>
                 <button className="mod-pill" onClick={refreshLibrary} title="Refresh library" disabled={libraryLoading}>⟳</button>
                 <button className="mod-pill" onClick={clearQueue} disabled={!library.length}>Clear all</button>
               </div>
@@ -2418,12 +2479,23 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
               </div>
             ) : (
               <div className="mod-queue-list">
-                {library.map((t) => (
+                {library.map((t) => {
+                  const selected = selectedTrackIds.includes(t.id);
+                  return (
                   <div
                     key={t.id}
                     className="mod-queue-item"
+                    style={selected ? { borderColor: 'var(--primary-color,#67b7ff)', background: 'color-mix(in srgb, var(--primary-color,#67b7ff) 14%, transparent)' } : undefined}
                     onDoubleClick={() => openMedia({ ...t, type:'music', url: t.mediaUrl || t.url || '', queue: library })}
                   >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleTrackSelection(t.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Select track"
+                      style={{ marginRight: 6 }}
+                    />
                     <button
                       className="mod-q-play"
                       title="Play"
@@ -2439,7 +2511,8 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
                     <button className="mod-q-btn" onClick={() => moveTrack(t.id, 'down')}>↓</button>
                     <button className="mod-q-btn rm" onClick={() => removeTrack(t.id)}>✕</button>
                   </div>
-                ))}
+                );
+                })}
               </div>
             )}
           </div>

@@ -198,7 +198,7 @@ export default function Library() {
   }, []);
 
   const handleUpload = async (type, file) => {
-    if (!file) return;
+    if (!file) return false;
     const expectedPrefix = TYPE_PREFIXES[type];
     const extension = getFileExtension(file.name);
     const extensionAllowed = EXTENSION_MAP[type]?.has(extension) || false;
@@ -213,7 +213,7 @@ export default function Library() {
         variant: "destructive",
       });
       if (fileRefs.current[type]) fileRefs.current[type].value = "";
-      return;
+      return false;
     }
     setUploading(type);
     try {
@@ -233,15 +233,39 @@ export default function Library() {
       }
       fetchItems();
       fetchCounts();
+      return true;
     } catch (e) {
       toast({
         title: "Upload failed",
         description: e?.message || "Could not upload this file.",
         variant: "destructive",
       });
+      return false;
     } finally {
       setUploading(null);
       if (fileRefs.current[type]) fileRefs.current[type].value = "";
+    }
+  };
+
+  const handleUploadBatch = async (type, fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+
+    let uploadedCount = 0;
+    let rejectedCount = 0;
+
+    for (const file of files) {
+      const ok = await handleUpload(type, file);
+      if (ok) uploadedCount += 1;
+      else rejectedCount += 1;
+    }
+
+    if (rejectedCount > 0) {
+      toast({
+        title: "Some uploads were skipped",
+        description: `${uploadedCount} uploaded, ${rejectedCount} failed.`,
+        variant: uploadedCount ? "default" : "destructive",
+      });
     }
   };
 
@@ -392,8 +416,9 @@ export default function Library() {
                 ref={(el) => (fileRefs.current[type] = el)}
                 type="file"
                 accept={ACCEPT_MAP[type]}
+                multiple
                 className="hidden"
-                onChange={(e) => handleUpload(type, e.target.files?.[0])}
+                onChange={(e) => handleUploadBatch(type, e.target.files)}
               />
               <Button
                 variant="outline"

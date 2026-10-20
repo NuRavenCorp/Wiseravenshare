@@ -19,9 +19,10 @@ export default function JournalismReportForm({ onPublished }) {
   const [media, setMedia] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [fields, setFields] = useState({ who: "", what: "", where: "", when: "", why: "", how: "" });
+  const [showGuidedNotes, setShowGuidedNotes] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState(null);
-  const [editedBody, setEditedBody] = useState("");
+  const [draftHeadline, setDraftHeadline] = useState("");
+  const [draftBody, setDraftBody] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState(null);
   const [scoring, setScoring] = useState(false);
@@ -86,7 +87,7 @@ export default function JournalismReportForm({ onPublished }) {
 
   const handleGenerate = async () => {
     if (!fields.what.trim()) {
-      setError("Please describe what happened before generating.");
+      setError("Add at least a short 'What happened' note before AI assist.");
       return;
     }
     setGenerating(true);
@@ -100,13 +101,8 @@ export default function JournalismReportForm({ onPublished }) {
       }
 
       const parsed = parseGeneratedReport(res?.data?.reply);
-      const generatedReport = {
-        headline: parsed.headline,
-        body: parsed.body,
-        model: res?.data?.model,
-      };
-      setGenerated(generatedReport);
-      setEditedBody(generatedReport.body);
+      setDraftHeadline((current) => current.trim() || parsed.headline);
+      setDraftBody((current) => (current.trim() ? current : parsed.body));
     } catch (err) {
       setError(err?.data?.error || err?.message || "Failed to generate report.");
     } finally {
@@ -115,11 +111,16 @@ export default function JournalismReportForm({ onPublished }) {
   };
 
   const handlePublish = async () => {
-    if (!generated) return;
+    const cleanHeadline = draftHeadline.trim();
+    const cleanBody = draftBody.trim();
+    if (!cleanHeadline || !cleanBody) {
+      setError("Add both a headline and report body before publishing.");
+      return;
+    }
     setPublishing(true);
     setError(null);
     try {
-      const content = `${generated.headline}\n\n${editedBody}`;
+      const content = `${cleanHeadline}\n\n${cleanBody}`;
       const post = await apiClient.entities.Post.create({
         content,
         post_type: "journalism",
@@ -131,7 +132,7 @@ export default function JournalismReportForm({ onPublished }) {
       try {
         await apiClient.entities.JournalismReport.create({
           post_id: post.id,
-          headline: generated.headline,
+          headline: cleanHeadline,
           description: fields.what || undefined,
           region: fields.where || undefined,
           verification_status: "under_review",
@@ -162,8 +163,9 @@ export default function JournalismReportForm({ onPublished }) {
   const handleDone = () => {
     setMedia([]);
     setFields({ who: "", what: "", where: "", when: "", why: "", how: "" });
-    setGenerated(null);
-    setEditedBody("");
+    setShowGuidedNotes(false);
+    setDraftHeadline("");
+    setDraftBody("");
     setIntegrityResult(null);
     if (onPublished) onPublished();
   };
@@ -173,7 +175,7 @@ export default function JournalismReportForm({ onPublished }) {
       {/* Upload section */}
       <div>
         <Label className="text-sm font-medium text-foreground mb-3 block">
-          Photo / Video Evidence
+          Step 1: Add evidence (optional)
         </Label>
         <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg p-6 cursor-pointer hover:border-primary/40 transition-colors">
           <Upload className="w-6 h-6 text-muted-foreground" />
@@ -222,102 +224,109 @@ export default function JournalismReportForm({ onPublished }) {
         )}
       </div>
 
-      {/* 5W1H form */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <FileText className="w-4 h-4 text-primary" />
-          Field Notes — The Five W's & H
+      <div className="space-y-3">
+        <Label className="text-sm font-medium text-foreground mb-1 block">
+          Step 2: Write your report
+        </Label>
+        <div>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">
+            Headline
+          </Label>
+          <Input
+            value={draftHeadline}
+            onChange={(e) => setDraftHeadline(e.target.value)}
+            placeholder="Write a clear headline"
+          />
         </div>
-        {FIELDS.map((f) => (
-          <div key={f.key}>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">
-              {f.label}
-            </Label>
-            {f.textarea ? (
-              <Textarea
-                value={fields[f.key]}
-                onChange={(e) => setFields((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                placeholder={f.placeholder}
-                rows={3}
-                className="resize-none"
-              />
-            ) : (
-              <Input
-                value={fields[f.key]}
-                onChange={(e) => setFields((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                placeholder={f.placeholder}
-              />
-            )}
-          </div>
-        ))}
+        <div>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">
+            Body
+          </Label>
+          <Textarea
+            value={draftBody}
+            onChange={(e) => setDraftBody(e.target.value)}
+            rows={10}
+            className="resize-y text-sm leading-relaxed"
+            placeholder="Write the story, key facts, and context."
+          />
+        </div>
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
-
-      {/* Generate button */}
-      {!generated && (
-        <Button
-          onClick={handleGenerate}
-          disabled={generating || uploading || !fields.what.trim()}
-          className="w-full"
+      <div className="rounded-lg border border-border bg-background/40 p-4 space-y-4">
+        <button
+          type="button"
+          onClick={() => setShowGuidedNotes((s) => !s)}
+          className="w-full flex items-center justify-between text-left"
         >
-          {generating ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" /> Writing your report...
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" /> Generate AI Report
-            </>
-          )}
-        </Button>
-      )}
+          <span className="text-sm font-medium text-foreground flex items-center gap-2">
+            <FileText className="w-4 h-4 text-primary" />
+            Optional: Guided notes + AI assist
+          </span>
+          <span className="text-xs text-muted-foreground">{showGuidedNotes ? "Hide" : "Show"}</span>
+        </button>
 
-      {/* Generated article preview */}
-      {generated && (
-        <div className="space-y-4">
-          <div className="border border-border rounded-lg p-4 bg-background/50">
-            <div className="flex items-center gap-2 mb-3">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium text-foreground">AI-Generated Report</span>
-            </div>
-            <h3 className="font-heading text-xl text-foreground mb-3">{generated.headline}</h3>
-            <Textarea
-              value={editedBody}
-              onChange={(e) => setEditedBody(e.target.value)}
-              rows={10}
-              className="resize-y text-sm leading-relaxed"
-              placeholder="Edit the article body..."
-            />
-            <p className="text-xs text-muted-foreground mt-2">
-              Edit the text above before publishing. Your raw notes and media will be attached.
-            </p>
-          </div>
-          <div className="flex gap-3">
+        {showGuidedNotes && (
+          <div className="space-y-4">
+            {FIELDS.map((f) => (
+              <div key={f.key}>
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">
+                  {f.label}
+                </Label>
+                {f.textarea ? (
+                  <Textarea
+                    value={fields[f.key]}
+                    onChange={(e) => setFields((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                    rows={3}
+                    className="resize-none"
+                  />
+                ) : (
+                  <Input
+                    value={fields[f.key]}
+                    onChange={(e) => setFields((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                  />
+                )}
+              </div>
+            ))}
             <Button
+              onClick={handleGenerate}
+              disabled={generating || uploading || !fields.what.trim()}
+              className="w-full"
               variant="outline"
-              onClick={() => {
-                setGenerated(null);
-                setEditedBody("");
-              }}
-              disabled={publishing}
             >
-              Start Over
-            </Button>
-            <Button onClick={handlePublish} disabled={publishing} className="flex-1">
-              {publishing ? (
+              {generating ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Publishing...
+                  <Loader2 className="w-4 h-4 animate-spin" /> Building draft...
                 </>
               ) : (
                 <>
-                  <Send className="w-4 h-4" /> Publish Report
+                  <Sparkles className="w-4 h-4" /> Fill draft with AI
                 </>
               )}
             </Button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <div className="space-y-2">
+        <Label className="text-sm font-medium text-foreground block">
+          Step 3: Publish
+        </Label>
+        <Button onClick={handlePublish} disabled={publishing || uploading} className="w-full">
+          {publishing ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Publishing...
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4" /> Publish Report
+            </>
+          )}
+        </Button>
+      </div>
 
       {scoring && (
         <div className="rounded-xl border border-accent/30 bg-accent/5 p-6 flex items-center gap-3">
