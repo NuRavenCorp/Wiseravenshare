@@ -21,7 +21,7 @@ const tabs = [
   { id: "music", label: "Music" },
   { id: "radio", label: "FM Radio" },
   { id: "karaoke", label: "Karaoke" },
-  { id: "live", label: "Live" },
+  { id: "live", label: "WiseRavenShare Live" },
   { id: "rights", label: "Rights" },
   { id: "drm", label: "DRM" },
   { id: "cloud", label: "Cloud" },
