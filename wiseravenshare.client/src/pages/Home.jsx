@@ -2,13 +2,16 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
-import { LogIn, LogOut, GraduationCap, ChevronUp, Feather } from "lucide-react";
+import { Image } from "@/components/ui/image";
+import { useBrandLogo } from "@/lib/branding";
+import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
 import HomeTiles from "@/components/landing/HomeTiles";
 
 const INTRO_KEY = "wrs_intro_seen";
 
 export default function Home() {
   const { isAuthenticated, logout } = useAuth();
+  const logoUrl = useBrandLogo();
   const [introSeen, setIntroSeen] = useState(true);
   const [learnMode, setLearnMode] = useState(false);
 
@@ -33,7 +36,7 @@ export default function Home() {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="flex items-center justify-between px-6 h-20 border-b border-border/40">
         <div className="flex items-center gap-2.5">
-          <Feather className="w-9 h-9 text-primary" />
+          <Image src={logoUrl} alt="WiseRavenShare" className="w-9 h-9 rounded-full" fittingType="fill" />
           <span className="font-display text-sm tracking-[0.2em] text-foreground">
             WISE<span className="text-accent">RAVEN</span>SHARE
           </span>

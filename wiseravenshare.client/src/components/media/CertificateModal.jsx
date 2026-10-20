@@ -1,8 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { X, Award, Download, Scroll, ShieldCheck, Stamp } from "lucide-react";
-
-const BRAND_LOGO = "https://media.apiClient.com/images/public/6acad64c240f9153977f3360/5f68aaa8d_FullLogo_Transparent_NoBuffer.png";
+import { useBrandLogo } from "@/lib/branding";
 
 const CERT_TYPES = {
   ownership: {
@@ -28,6 +27,7 @@ const CERT_TYPES = {
 };
 
 export default function CertificateModal({ right, onClose }) {
+  const logoUrl = useBrandLogo();
   const [certType, setCertType] = useState("ownership");
   const certRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
@@ -103,7 +103,7 @@ export default function CertificateModal({ right, onClose }) {
           <div className="absolute bottom-4 right-4 w-12 h-12 border-r-2 border-b-2 border-accent/40 rounded-br-lg" />
 
           <div className="relative text-center px-6">
-            <img src={BRAND_LOGO} alt="WiseRavenShare" className="w-16 h-16 mx-auto mb-3 rounded-full" />
+            <img src={logoUrl} alt="WiseRavenShare" className="w-16 h-16 mx-auto mb-3 rounded-full" />
             <p className="text-xs tracking-[0.3em] text-accent uppercase mb-1" style={{ fontFamily: "'Cinzel', serif" }}>
               WiseRavenShare
             </p>

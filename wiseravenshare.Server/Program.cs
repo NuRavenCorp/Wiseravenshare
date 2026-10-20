@@ -2086,6 +2086,7 @@ builder.Services.AddSingleton<VideoFeedCollaborationService>();
 builder.Services.AddSingleton<PodcastVideoBridgeStateService>();
 builder.Services.AddSingleton<VideoLibraryStore>();
 builder.Services.AddSingleton<RavensightMediaCatalogStore>();
+builder.Services.AddSingleton<PlatformBrandingStore>();
 builder.Services.AddSingleton<PersistenceDiagnosticsCache>();
 
 // ── Python microservice orchestrator ──────────────────────────────────────────
@@ -2490,11 +2491,23 @@ using (var scope = app.Services.CreateScope())
     var userStore = scope.ServiceProvider.GetRequiredService<UserStore>();
     var videoLibraryStore = scope.ServiceProvider.GetRequiredService<VideoLibraryStore>();
     var mediaCatalogStore = scope.ServiceProvider.GetRequiredService<RavensightMediaCatalogStore>();
+    var platformBrandingStore = scope.ServiceProvider.GetRequiredService<PlatformBrandingStore>();
     var persistenceDiagnosticsCache = scope.ServiceProvider.GetRequiredService<PersistenceDiagnosticsCache>();
 
     // Bootstrap media catalog schema (photos, music, videos unified table).
     try { await mediaCatalogStore.EnsureSchemaAsync(); }
     catch (Exception ex) { app.Logger.LogWarning(ex, "Media catalog schema bootstrap failed at startup; will retry on first use."); }
+
+    // Bootstrap platform branding settings for reusable logo URL.
+    try
+    {
+        await platformBrandingStore.EnsureSchemaAsync();
+        await platformBrandingStore.SetDefaultValueAsync("brand_logo_url", "/assets/branding/th-512.jpg");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Platform branding bootstrap failed during startup.");
+    }
 
     var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
     var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
