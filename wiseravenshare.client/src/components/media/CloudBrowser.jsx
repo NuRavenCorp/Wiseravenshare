@@ -26,7 +26,14 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
         folderId: id,
       });
       setFiles(res.data?.files || []);
-      setInclusionMethods(Array.isArray(res.data?.inclusionMethods) ? res.data.inclusionMethods : []);
+      setInclusionMethods(
+        Array.isArray(res.data?.inclusionMethods)
+          ? res.data.inclusionMethods
+          : Array.isArray(res.data?.methods)
+            ? res.data.methods.map((method, index) =>
+                typeof method === "string" ? { id: `method-${index}`, label: method } : method)
+            : []
+      );
     } catch (e) {
       toast({ title: "Could not browse files", description: e?.message, variant: "destructive" });
       onClose();
@@ -77,7 +84,7 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
     setImportingLink(true);
     try {
       const res = await apiClient.functions.invoke("CloudMediaTransfer", {
-        action: "import",
+        action: "include",
         provider,
         sharedUrl: url,
         mediaType: importMode,

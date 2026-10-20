@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,9 @@ using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.Interfaces;
 using Wiseravenshare.Server.Services.SocialPublishing;
 using Wiseravenshare.Server.Services.Truth;
+using CreateRavensightMediaAssetRequest = Wiseravenshare.Server.Models.CreateRavensightMediaAssetRequest;
+using CreateVideoLibraryEntryRequest = Wiseravenshare.Server.Models.CreateVideoLibraryEntryRequest;
+using RavensightMediaType = Wiseravenshare.Server.Models.RavensightMediaType;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -1638,68 +1642,388 @@ public sealed class FunctionCompatController : ControllerBase
 
         var normalizedUrl = NormalizeDropboxSharedUrl(sharedUrl);
         var title = ReadString(payload, "title");
-        var mediaType = InferMediaLibraryType(normalizedUrl, ReadString(payload, "mediaType"));
-        string inferredTitle = "Dropbox media";
+        var mediaType = InferMediaLibraryType(normalizedUrl, ReadString(payload, "mediaType")).ToString().ToLowerInvariant();
+        var inferredTitle = "Dropbox media";
         if (Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var parsedIncludedUri))
         {
             inferredTitle = Path.GetFileNameWithoutExtension(parsedIncludedUri.AbsolutePath) ?? inferredTitle;
         }
-        var resolvedTitle = string.IsNullOrWhiteSpace(title) ? inferredTitle : title.Trim();
 
-        var metadata = BuildJsonDocument(new
+        return Ok(await ImportExternalMediaAsync(
+            userId,
+            normalizedSourceUrl: normalizedUrl,
+            fileNameHint: Path.GetFileName(parsedIncludedUri?.AbsolutePath ?? string.Empty),
+            titleHint: string.IsNullOrWhiteSpace(title) ? inferredTitle : title.Trim(),
+            mediaTypeHint: mediaType,
+            provider: "dropbox",
+            includedVia: "shared_link",
+            cancellationToken));
+    }
+
+    private async Task<object> ImportExternalMediaAsync(
+        Guid userId,
+        string normalizedSourceUrl,
+        string? fileNameHint,
+        string? titleHint,
+        string mediaTypeHint,
+        string provider,
+        string includedVia,
+        CancellationToken cancellationToken)
+    {
+        var downloaded = await DownloadRemoteMediaAsync(normalizedSourceUrl, fileNameHint, cancellationToken);
+        var mediaType = ResolveRavensightMediaType(mediaTypeHint, downloaded.FileName, downloaded.ContentType);
+        if (mediaType is null)
         {
-            source = "dropbox",
-            included_via = "shared_link",
-            original_shared_url = sharedUrl,
-            normalized_url = normalizedUrl,
-            included_at_utc = DateTime.UtcNow
-        });
+            throw new InvalidOperationException("Could not infer media type from the Dropbox object. Set mediaType to music, video, or photo.");
+        }
 
-        var existing = await _db.SavedMediaItems
-            .FirstOrDefaultAsync(x => x.UserId == userId && x.MediaUrl == normalizedUrl && x.MediaType == mediaType, cancellationToken);
-
-        if (existing is null)
+        var userStorageIdentity = ResolveUserStorageIdentityForImport(userId);
+        var title = string.IsNullOrWhiteSpace(titleHint)
+            ? Path.GetFileNameWithoutExtension(downloaded.FileName)
+            : titleHint.Trim();
+        if (string.IsNullOrWhiteSpace(title))
         {
-            existing = new SavedMedia
+            title = "Dropbox import";
+        }
+
+        await using var stream = new MemoryStream(downloaded.Bytes, writable: false);
+        var formFile = new FormFile(stream, 0, downloaded.Bytes.Length, "file", downloaded.FileName)
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = downloaded.ContentType
+        };
+
+        if (mediaType == RavensightMediaType.Music)
+        {
+            var destinationFolder = $"users/{userStorageIdentity}/media/music";
+            var dto = new SaveRavensightMusicDto
+            {
+                File = formFile,
+                Title = title,
+                DestinationFolder = destinationFolder
+            };
+            var track = await _musicLibraryStore.SaveMusicAsync(userId, formFile, dto, userStorageIdentity, cancellationToken);
+            var savedAtUtc = DateTime.TryParse(track.UploadedAt, out var uploadedAt) ? uploadedAt.ToUniversalTime() : DateTime.UtcNow;
+            await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
             {
                 UserId = userId,
-                Title = resolvedTitle,
-                Description = "Included from Dropbox shared link",
-                MediaType = mediaType,
-                MediaUrl = normalizedUrl,
-                ThumbnailUrl = mediaType == MediaLibraryType.Photo ? normalizedUrl : null,
-                MediaMetadata = metadata,
-                Tags = new[] { "dropbox", "linked" },
-                IsVisibleInFeed = false
+                MediaType = RavensightMediaType.Music,
+                FileName = track.FileName,
+                RelativePath = string.IsNullOrWhiteSpace(track.ObjectKey) ? $"{destinationFolder}/{track.FileName}" : track.ObjectKey,
+                PublicUrl = track.MediaUrl.StartsWith("/", StringComparison.Ordinal) ? null : track.MediaUrl,
+                AbsolutePath = string.Empty,
+                DestinationFolder = destinationFolder,
+                ContentType = formFile.ContentType,
+                SizeBytes = track.SizeBytes,
+                SavedAtUtc = savedAtUtc,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    title = track.Title,
+                    artist = track.Artist,
+                    album = track.Album,
+                    genre = track.Genre,
+                    source = provider,
+                    included_via = includedVia
+                })
+            }, cancellationToken);
+
+            return new
+            {
+                provider,
+                success = true,
+                mediaType = "music",
+                title = "Music imported",
+                message = "Dropbox music was added to your Wise-tracks library.",
+                track
             };
-            _db.SavedMediaItems.Add(existing);
-        }
-        else
-        {
-            existing.Title = resolvedTitle;
-            existing.MediaMetadata = metadata;
-            existing.UpdatedAt = DateTime.UtcNow;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
-
-        return Ok(new
+        if (mediaType == RavensightMediaType.Video)
         {
-            provider = "dropbox",
-            success = true,
-            included = new
+            var destinationFolder = $"users/{userStorageIdentity}/media/videos";
+            var saved = await _videoService.SaveVideoAsync(
+                userId,
+                formFile,
+                title,
+                $"Imported from {provider}",
+                destinationFolder,
+                userStorageIdentity,
+                PrivacyStatus.Unlisted,
+                cancellationToken);
+
+            var blobPath = StreamingUrlHelper.StreamByBlobPath(saved.File.RelativePath);
+            if (string.IsNullOrWhiteSpace(blobPath))
             {
-                id = existing.Id,
-                title = existing.Title,
-                mediaType = existing.MediaType.ToString(),
-                mediaUrl = existing.MediaUrl
-            },
-            methods = new[]
-            {
-                "include shared url",
-                "import from browser"
+                blobPath = StreamingUrlHelper.StreamByFileName(saved.File.FileName);
             }
-        });
+
+            var mediaUrl = StreamingUrlHelper.ResolveMediaUrl(saved.File.PublicUrl, blobPath ?? string.Empty);
+            mediaUrl = AppendBlobSignatureIfNeeded(mediaUrl, saved.File.RelativePath);
+
+            var asset = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+            {
+                UserId = userId,
+                MediaType = RavensightMediaType.Video,
+                FileName = saved.File.FileName,
+                RelativePath = saved.File.RelativePath,
+                PublicUrl = saved.File.PublicUrl,
+                AbsolutePath = saved.File.AbsolutePath,
+                DestinationFolder = saved.File.DestinationFolder,
+                ContentType = saved.File.ContentType,
+                SizeBytes = saved.File.SizeBytes,
+                SavedAtUtc = saved.File.SavedAtUtc,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    title,
+                    description = $"Imported from {provider}",
+                    source = provider,
+                    included_via = includedVia
+                })
+            }, cancellationToken);
+
+            try
+            {
+                await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId.ToString("D"),
+                    Title = title,
+                    Description = $"Imported from {provider}",
+                    VideoUrl = mediaUrl,
+                    PrivacyStatus = "unlisted",
+                    Status = "published",
+                    StorageMode = "permanent",
+                    IsPermanent = true
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Video library row creation failed after Dropbox import for user {UserId}.", userId);
+            }
+
+            return new
+            {
+                provider,
+                success = true,
+                mediaType = "video",
+                title = "Video imported",
+                message = "Dropbox video was added to your video library.",
+                video = new { id = asset.Id, fileName = saved.File.FileName, mediaUrl }
+            };
+        }
+
+        var photoFolder = $"users/{userStorageIdentity}/media/photos";
+        var photo = await _photoService.SavePhotoAsync(formFile, photoFolder, userStorageIdentity, cancellationToken);
+        var photoBlobPath = StreamingUrlHelper.StreamByBlobPath(photo.RelativePath);
+        if (string.IsNullOrWhiteSpace(photoBlobPath))
+        {
+            photoBlobPath = StreamingUrlHelper.StreamByFileName(photo.FileName);
+        }
+
+        var photoUrl = StreamingUrlHelper.ResolveMediaUrl(photo.PublicUrl, photoBlobPath ?? string.Empty);
+        photoUrl = AppendBlobSignatureIfNeeded(photoUrl, photo.RelativePath);
+        var photoAsset = await _mediaCatalogStore.CreateAssetAsync(new CreateRavensightMediaAssetRequest
+        {
+            UserId = userId,
+            MediaType = RavensightMediaType.Photo,
+            FileName = photo.FileName,
+            RelativePath = photo.RelativePath,
+            PublicUrl = photo.PublicUrl,
+            AbsolutePath = photo.AbsolutePath,
+            DestinationFolder = photo.DestinationFolder,
+            ContentType = photo.ContentType,
+            SizeBytes = photo.SizeBytes,
+            SavedAtUtc = photo.SavedAtUtc,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                caption = title,
+                source = provider,
+                included_via = includedVia
+            })
+        }, cancellationToken);
+
+        return new
+        {
+            provider,
+            success = true,
+            mediaType = "photo",
+            title = "Photo imported",
+            message = "Dropbox photo was added to your photo library.",
+            photo = new { id = photoAsset.Id, fileName = photo.FileName, mediaUrl = photoUrl }
+        };
+    }
+
+    private async Task<DownloadedCloudObject> DownloadRemoteMediaAsync(string mediaUrl, string? fileNameHint, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            throw new InvalidOperationException("Dropbox media URL must be an absolute HTTP(S) URL.");
+        }
+
+        using var client = new HttpClient();
+        using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"Download failed with status {(int)response.StatusCode}.");
+        }
+
+        const long maxBytes = 250L * 1024L * 1024L;
+        if (response.Content.Headers.ContentLength is > maxBytes)
+        {
+            throw new InvalidOperationException("Dropbox media exceeds the 250MB import limit.");
+        }
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var memory = new MemoryStream();
+        var buffer = new byte[81920];
+        long total = 0;
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (total > maxBytes)
+            {
+                throw new InvalidOperationException("Dropbox media exceeds the 250MB import limit.");
+            }
+
+            memory.Write(buffer, 0, read);
+        }
+
+        if (memory.Length == 0)
+        {
+            throw new InvalidOperationException("Dropbox media download was empty.");
+        }
+
+        var fileName = string.IsNullOrWhiteSpace(fileNameHint)
+            ? Path.GetFileName(uri.AbsolutePath)
+            : fileNameHint.Trim();
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = $"dropbox-import-{Guid.NewGuid():N}";
+        }
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? GuessContentTypeFromExtension(fileName);
+        return new DownloadedCloudObject
+        {
+            Bytes = memory.ToArray(),
+            FileName = fileName,
+            ContentType = contentType
+        };
+    }
+
+    private static string GuessContentTypeFromExtension(string fileName)
+    {
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".flac" => "audio/flac",
+            ".aac" => "audio/aac",
+            ".m4a" => "audio/mp4",
+            ".ogg" => "audio/ogg",
+            ".mp4" => "video/mp4",
+            ".mov" => "video/quicktime",
+            ".webm" => "video/webm",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private static RavensightMediaType? ResolveRavensightMediaType(string? mediaTypeHint, string fileName, string contentType)
+    {
+        var hint = (mediaTypeHint ?? string.Empty).Trim().ToLowerInvariant();
+        if (hint is "music" or "audio")
+        {
+            return RavensightMediaType.Music;
+        }
+
+        if (hint == "video")
+        {
+            return RavensightMediaType.Video;
+        }
+
+        if (hint is "photo" or "image")
+        {
+            return RavensightMediaType.Photo;
+        }
+
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        if (new[] { ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".aiff", ".aif", ".wma", ".oga", ".caf" }.Contains(extension))
+        {
+            return RavensightMediaType.Music;
+        }
+
+        if (new[] { ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".mpeg", ".mpg", ".3gp", ".3g2", ".ts", ".m2ts" }.Contains(extension))
+        {
+            return RavensightMediaType.Video;
+        }
+
+        if (new[] { ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp" }.Contains(extension))
+        {
+            return RavensightMediaType.Photo;
+        }
+
+        if (contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+        {
+            return RavensightMediaType.Music;
+        }
+
+        if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+        {
+            return RavensightMediaType.Video;
+        }
+
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return RavensightMediaType.Photo;
+        }
+
+        return null;
+    }
+
+    private string ResolveUserStorageIdentityForImport(Guid userId)
+    {
+        var displayName = User.FindFirstValue(ClaimTypes.Name);
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        return StoragePathResolver.ResolveUserStorageIdentity(displayName, email, userId.ToString("N"));
+    }
+
+    private string AppendBlobSignatureIfNeeded(string streamPath, string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(streamPath)
+            || !streamPath.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            return streamPath;
+        }
+
+        var objectKey = (relativePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return streamPath;
+        }
+
+        var signature = _signatureService.SignKey(objectKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return streamPath;
+        }
+
+        var separator = streamPath.Contains('?') ? "&" : "?";
+        return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
+    }
+
+    private sealed class DownloadedCloudObject
+    {
+        public byte[] Bytes { get; init; } = Array.Empty<byte>();
+        public string FileName { get; init; } = string.Empty;
+        public string ContentType { get; init; } = "application/octet-stream";
     }
 
     private Guid ResolveUserId()

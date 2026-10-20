@@ -2227,20 +2227,66 @@ public class AuthController : ControllerBase
         var rawTenantEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__TenantId");
         var rawRedirectUriEnv = ReadRawEnvironmentOAuthSetting($"Authentication__OAuthProviders__{sectionName}__RedirectUri");
 
+        var fallbackClientId = provider switch
+        {
+            // Instagram uses the same Meta app credentials as Facebook in most deployments.
+            "instagram" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Facebook:ClientId"],
+                _configuration["FACEBOOK_OAUTH_CLIENT_ID"],
+                _configuration["FACEBOOK_CLIENT_ID"]),
+            // YouTube OAuth uses Google OAuth credentials.
+            "youtube" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Google:ClientId"],
+                _configuration["GOOGLE_OAUTH_CLIENT_ID"],
+                _configuration["GOOGLE_CLIENT_ID"]),
+            _ => string.Empty
+        };
+        var fallbackClientSecret = provider switch
+        {
+            "instagram" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Facebook:ClientSecret"],
+                _configuration["FACEBOOK_OAUTH_CLIENT_SECRET"],
+                _configuration["FACEBOOK_CLIENT_SECRET"]),
+            "youtube" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Google:ClientSecret"],
+                _configuration["GOOGLE_OAUTH_CLIENT_SECRET"],
+                _configuration["GOOGLE_CLIENT_SECRET"]),
+            _ => string.Empty
+        };
+        var fallbackRedirectUri = provider switch
+        {
+            "instagram" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Facebook:RedirectUri"],
+                _configuration["FACEBOOK_OAUTH_REDIRECT_URI"],
+                _configuration["FACEBOOK_REDIRECT_URI"]),
+            "youtube" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Google:RedirectUri"],
+                _configuration["GOOGLE_OAUTH_REDIRECT_URI"],
+                _configuration["GOOGLE_REDIRECT_URI"]),
+            _ => string.Empty
+        };
+
         var clientId = ResolveOAuthSettingValue(
             section["ClientId"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientId"],
             rawClientIdEnv,
             ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientId"),
             _configuration[$"{providerPrefix}_OAUTH_CLIENT_ID"],
-            _configuration[$"{providerPrefix}_OAUTH_CLIENTID"]);
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTID"],
+            _configuration[$"{providerPrefix}_CLIENT_ID"],
+            _configuration[$"{providerPrefix}_CLIENTID"],
+            provider == "tiktok" ? _configuration["TIKTOK_CLIENT_KEY"] : null,
+            fallbackClientId);
         var clientSecret = ResolveOAuthSettingValue(
             section["ClientSecret"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:ClientSecret"],
             rawClientSecretEnv,
             ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "ClientSecret"),
             _configuration[$"{providerPrefix}_OAUTH_CLIENT_SECRET"],
-            _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"]);
+            _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"],
+            _configuration[$"{providerPrefix}_CLIENT_SECRET"],
+            _configuration[$"{providerPrefix}_CLIENTSECRET"],
+            fallbackClientSecret);
         var tenantId = ResolveOAuthSettingValue(
             section["TenantId"],
             _configuration[$"Authentication:OAuthProviders:{sectionName}:TenantId"],
@@ -2255,7 +2301,10 @@ public class AuthController : ControllerBase
             ResolveOAuthSettingBySuffix(providerPrefix, sectionName, "RedirectUri"),
             _configuration[$"{providerPrefix}_OAUTH_REDIRECT_URI"],
             _configuration[$"{providerPrefix}_OAUTH_CALLBACK"],
-            _configuration[$"{providerPrefix}_OAUTH_CALLBACK_URL"]);
+            _configuration[$"{providerPrefix}_OAUTH_CALLBACK_URL"],
+            _configuration[$"{providerPrefix}_REDIRECT_URI"],
+            _configuration[$"{providerPrefix}_CALLBACK_URL"],
+            fallbackRedirectUri);
 
         return new OAuthProviderConfig
         {
