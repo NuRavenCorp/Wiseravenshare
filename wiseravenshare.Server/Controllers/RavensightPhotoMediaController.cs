@@ -181,19 +181,41 @@ public sealed class RavensightPhotoMediaController : ControllerBase
 
     [HttpPost("save")]
     [RequestSizeLimit(100_000_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 100_000_000)]
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SavePhoto([FromForm] SaveRavensightPhotoDto dto, CancellationToken cancellationToken)
     {
+        if (!Request.HasFormContentType)
+        {
+            return BadRequest(new { message = "Expected multipart/form-data upload payload." });
+        }
+
         var file = dto.File;
         if (file is null || file.Length == 0)
         {
-            file = Request.Form.Files.FirstOrDefault(f =>
-                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                file = Request.Form.Files.FirstOrDefault(f =>
+                    string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
+            }
+            catch (InvalidDataException ex)
+            {
+                _logger.LogWarning(ex, "Invalid multipart payload while saving photo.");
+                return BadRequest(new { message = "Invalid upload payload. Retry with a valid multipart/form-data request." });
+            }
         }
         if (file is null || file.Length == 0)
         {
-            file = Request.Form.Files.FirstOrDefault();
+            try
+            {
+                file = Request.Form.Files.FirstOrDefault();
+            }
+            catch (InvalidDataException ex)
+            {
+                _logger.LogWarning(ex, "Invalid multipart payload while reading fallback photo file.");
+                return BadRequest(new { message = "Invalid upload payload. Retry with a valid multipart/form-data request." });
+            }
         }
 
         if (file is null || file.Length == 0)
@@ -214,7 +236,24 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         var resolved = string.IsNullOrWhiteSpace(dto.DestinationFolder)
             ? libraryDestination
             : StoragePathResolver.EnsureUserScopedDestination(dto.DestinationFolder, userStorageIdentity);
-        var saved = await _photoService.SavePhotoAsync(dto.File, resolved, userStorageIdentity, cancellationToken);
+        RavensightSavedMediaFile saved;
+        try
+        {
+            saved = await _photoService.SavePhotoAsync(dto.File, resolved, userStorageIdentity, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Photo upload rejected for user {UserId}.", userId);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Photo binary save failed for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Photo upload is temporarily unavailable. Please try again."
+            });
+        }
         RavensightMediaUserPreference? preference = null;
         RavensightMediaAssetRecord? mediaRecord = null;
         var persistenceStatus = "ready";
