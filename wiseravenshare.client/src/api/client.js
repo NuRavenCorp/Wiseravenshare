@@ -292,8 +292,52 @@ const entityClient = (entityName) => ({
       body: JSON.stringify({ filter, update }),
     });
   },
-  subscribe() {
-    return () => {};
+  subscribe(handler) {
+    if (entityName !== "LiveStream" || typeof handler !== "function") {
+      return () => {};
+    }
+
+    let disposed = false;
+    const seen = new Map();
+
+    const pump = async () => {
+      if (disposed) return;
+      try {
+        const snapshot = await requestJson(`/api/entities/${encodeURIComponent(entityName)}/filter`, {
+          method: "POST",
+          body: JSON.stringify({ query: {}, options: { limit: 100, sort: "-updated_date" } }),
+        });
+
+        const items = Array.isArray(snapshot)
+          ? snapshot
+          : (Array.isArray(snapshot?.items) ? snapshot.items : []);
+
+        for (const item of items) {
+          const id = String(item?.id || "");
+          if (!id) continue;
+          const signature = [
+            item?.status || "",
+            item?.chunk_sequence || 0,
+            item?.current_chunk_uri || "",
+            item?.updated_date || "",
+          ].join("|");
+          const previous = seen.get(id);
+          seen.set(id, signature);
+          if (previous !== undefined && previous !== signature) {
+            handler({ type: "update", data: item });
+          }
+        }
+      } catch {
+        // Keep polling silently; callers already handle missing updates.
+      }
+    };
+
+    const interval = window.setInterval(pump, 3000);
+    void pump();
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
   },
 });
 

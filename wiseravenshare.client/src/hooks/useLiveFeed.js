@@ -19,7 +19,16 @@ export function useLiveFeed(viewerId) {
       setFeed(data?.streams || []);
       setError(null);
     } catch (requestError) {
-      setError(requestError?.message || "Unable to load live feed.");
+      try {
+        const fallback = await apiClient.entities.LiveStream.filter(
+          { status: "live" },
+          { sort: "-updated_date", limit: 50 },
+        );
+        setFeed(fallback?.items || []);
+        setError(null);
+      } catch (fallbackError) {
+        setError(fallbackError?.message || requestError?.message || "Unable to load live feed.");
+      }
     } finally {
       setLoading(false);
     }
