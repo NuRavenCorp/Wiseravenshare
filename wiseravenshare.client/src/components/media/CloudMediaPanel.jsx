@@ -33,8 +33,8 @@ export default function CloudMediaPanel() {
 
   const checkConnection = async (provider) => {
     try {
-      await apiClient.functions.invoke("CloudMediaTransfer", { action: "list", provider, folderId: null });
-      return true;
+      const status = await apiClient.connectors.status(PROVIDERS[provider].connectorId);
+      return !!status?.connected;
     } catch {
       return false;
     }

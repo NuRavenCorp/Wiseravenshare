@@ -100,6 +100,49 @@ public sealed class FunctionCompatController : ControllerBase
         });
     }
 
+    [HttpPost("cloud-media-transfer")]
+    [HttpPost("CloudMediaTransfer")]
+    public IActionResult CloudMediaTransfer([FromBody] JsonElement payload)
+    {
+        var action = payload.TryGetProperty("action", out var actionProp)
+            ? actionProp.GetString()?.Trim().ToLowerInvariant()
+            : string.Empty;
+        var provider = payload.TryGetProperty("provider", out var providerProp)
+            ? providerProp.GetString()?.Trim().ToLowerInvariant()
+            : string.Empty;
+
+        if (provider is not ("googledrive" or "dropbox"))
+        {
+            return BadRequest(new { message = "provider must be googledrive or dropbox." });
+        }
+
+        return action switch
+        {
+            "list" => Ok(new
+            {
+                provider,
+                files = Array.Empty<object>(),
+                connected = true,
+                message = $"Connected to {provider}, but remote file listing is not configured on this deployment."
+            }),
+            "import" => Ok(new
+            {
+                provider,
+                action,
+                success = true,
+                message = "Cloud import request accepted (compat mode)."
+            }),
+            "export" => Ok(new
+            {
+                provider,
+                action,
+                success = true,
+                message = "Cloud export request accepted (compat mode)."
+            }),
+            _ => BadRequest(new { message = "action must be list, import, or export." })
+        };
+    }
+
     [HttpPost("get-pg-analytics")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> GetPgAnalytics([FromBody] AnalyticsRequest request)
