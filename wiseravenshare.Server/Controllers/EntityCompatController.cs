@@ -164,6 +164,14 @@ public sealed class EntityCompatController : ControllerBase
             chunk_sequence = ReadInt(payload, "chunk_sequence", 0),
             is_audio_only = ReadBool(payload, "is_audio_only", false),
             started_at = TryReadDateTime(payload, "started_at") ?? now,
+            kept_permanently = ReadBool(payload, "kept_permanently", false),
+            kept_at = TryReadDateTime(payload, "kept_at"),
+            kept_by = ReadString(payload, "kept_by"),
+            expires_at = TryReadDateTime(payload, "expires_at"),
+            expiry_reminder_sent_at = TryReadDateTime(payload, "expiry_reminder_sent_at"),
+            deleted_at = TryReadDateTime(payload, "deleted_at"),
+            final_recording_uri = ReadString(payload, "final_recording_uri"),
+            final_video_id = ReadString(payload, "final_video_id"),
             created_date = now,
             updated_date = now,
         };
@@ -209,7 +217,18 @@ public sealed class EntityCompatController : ControllerBase
             if (!string.IsNullOrWhiteSpace(description)) stream.description = description;
 
             var status = ReadString(payload, "status");
-            if (!string.IsNullOrWhiteSpace(status)) stream.status = status;
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                stream.status = status;
+                if (string.Equals(status, "ended", StringComparison.OrdinalIgnoreCase))
+                {
+                    stream.ended_at ??= DateTime.UtcNow;
+                    if (!stream.kept_permanently && !stream.expires_at.HasValue)
+                    {
+                        stream.expires_at = stream.ended_at.Value.AddHours(72);
+                    }
+                }
+            }
 
             var chunkUri = ReadString(payload, "current_chunk_uri");
             if (!string.IsNullOrWhiteSpace(chunkUri)) stream.current_chunk_uri = chunkUri;
@@ -225,10 +244,49 @@ public sealed class EntityCompatController : ControllerBase
             }
 
             var endedAt = TryReadDateTime(payload, "ended_at");
-            if (endedAt.HasValue) stream.ended_at = endedAt.Value;
+            if (endedAt.HasValue)
+            {
+                stream.ended_at = endedAt.Value;
+                if (!stream.kept_permanently && !stream.expires_at.HasValue)
+                {
+                    stream.expires_at = endedAt.Value.AddHours(72);
+                }
+            }
 
             var startedAt = TryReadDateTime(payload, "started_at");
             if (startedAt.HasValue) stream.started_at = startedAt.Value;
+
+            if (TryReadBool(payload, "kept_permanently", out var keptPermanently))
+            {
+                stream.kept_permanently = keptPermanently;
+                if (keptPermanently)
+                {
+                    stream.kept_at ??= DateTime.UtcNow;
+                    stream.kept_by ??= "ui";
+                    stream.expires_at = null;
+                }
+            }
+
+            var keptAt = TryReadDateTime(payload, "kept_at");
+            if (keptAt.HasValue) stream.kept_at = keptAt.Value;
+
+            var keptBy = ReadString(payload, "kept_by");
+            if (!string.IsNullOrWhiteSpace(keptBy)) stream.kept_by = keptBy;
+
+            var expiresAt = TryReadDateTime(payload, "expires_at");
+            if (expiresAt.HasValue) stream.expires_at = expiresAt.Value;
+
+            var reminderSentAt = TryReadDateTime(payload, "expiry_reminder_sent_at");
+            if (reminderSentAt.HasValue) stream.expiry_reminder_sent_at = reminderSentAt.Value;
+
+            var deletedAt = TryReadDateTime(payload, "deleted_at");
+            if (deletedAt.HasValue) stream.deleted_at = deletedAt.Value;
+
+            var finalRecordingUri = ReadString(payload, "final_recording_uri");
+            if (!string.IsNullOrWhiteSpace(finalRecordingUri)) stream.final_recording_uri = finalRecordingUri;
+
+            var finalVideoId = ReadString(payload, "final_video_id");
+            if (!string.IsNullOrWhiteSpace(finalVideoId)) stream.final_video_id = finalVideoId;
         });
 
         if (updated is null)
@@ -313,6 +371,7 @@ public sealed class EntityCompatController : ControllerBase
         var sort = ReadString(body, "options.sort");
 
         IEnumerable<LiveStreamState> query = _liveStreamStateStore.GetAll();
+        query = query.Where(stream => stream.deleted_at is null);
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(stream => string.Equals(stream.status, status, StringComparison.OrdinalIgnoreCase));
@@ -339,7 +398,7 @@ public sealed class EntityCompatController : ControllerBase
     private int CountLiveStreams(JsonElement body)
     {
         var status = ReadString(body, "query.status");
-        var query = _liveStreamStateStore.GetAll().AsEnumerable();
+        var query = _liveStreamStateStore.GetAll().Where(stream => stream.deleted_at is null);
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(stream => string.Equals(stream.status, status, StringComparison.OrdinalIgnoreCase));

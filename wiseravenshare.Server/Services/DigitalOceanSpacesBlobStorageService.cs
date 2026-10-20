@@ -18,6 +18,10 @@ public interface IBlobStorageService
     Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsAsync(string objectKey, CancellationToken cancellationToken = default);
+
+    Task<string?> GetPresignedUploadUrlAsync(string objectKey, string contentType, TimeSpan expiresIn);
 }
 
 public sealed record StoredBlobResult(string ObjectKey, string PublicUrl);
@@ -213,6 +217,62 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         {
             _logger.LogWarning(ex, "Unable to delete object {ObjectKey} from DigitalOcean Spaces bucket {BucketName}", objectKey, _bucketName);
             return false;
+        }
+    }
+
+    public async Task<bool> ExistsAsync(string objectKey, CancellationToken cancellationToken = default)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        try
+        {
+            var client = CreateClient();
+            await client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+            {
+                BucketName = _bucketName,
+                Key = NormalizeObjectKey(objectKey)
+            }, cancellationToken);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to confirm object {ObjectKey} in DigitalOcean Spaces bucket {BucketName}", objectKey, _bucketName);
+            return false;
+        }
+    }
+
+    public Task<string?> GetPresignedUploadUrlAsync(string objectKey, string contentType, TimeSpan expiresIn)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        try
+        {
+            var client = CreateClient();
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName = _bucketName,
+                Key = NormalizeObjectKey(objectKey),
+                Verb = HttpVerb.PUT,
+                Expires = DateTime.UtcNow.Add(expiresIn <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : expiresIn),
+                ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType
+            };
+            var url = client.GetPreSignedURL(request);
+            return Task.FromResult<string?>(url);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to create presigned upload URL for object {ObjectKey}.", objectKey);
+            return Task.FromResult<string?>(null);
         }
     }
 
