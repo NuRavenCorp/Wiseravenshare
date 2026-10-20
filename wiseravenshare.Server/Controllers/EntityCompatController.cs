@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -23,11 +24,16 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class EntityCompatController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly ILogger<EntityCompatController> _logger;
 
-    public EntityCompatController(AppDbContext db, ILogger<EntityCompatController> logger)
+    public EntityCompatController(
+        AppDbContext db,
+        LiveStreamStateStore liveStreamStateStore,
+        ILogger<EntityCompatController> logger)
     {
         _db = db;
+        _liveStreamStateStore = liveStreamStateStore;
         _logger = logger;
     }
 
@@ -50,6 +56,7 @@ public sealed class EntityCompatController : ControllerBase
             {
                 "post" => Ok(await FilterPostsAsync(userId, body, limit, cancellationToken)),
                 "conversation" => Ok(await FilterConversationsAsync(userId, limit, cancellationToken)),
+                "livestream" => Ok(FilterLiveStreams(body, limit)),
                 _ => Ok(EmptyResult())
             };
         }
@@ -109,6 +116,7 @@ public sealed class EntityCompatController : ControllerBase
                 "conversation" => await _db.Conversations
                     .AsNoTracking()
                     .CountAsync(c => c.Participants.Any(p => p.UserId == userId), cancellationToken),
+                "livestream" => CountLiveStreams(body),
                 _ => 0
             };
             return Ok(new { count });
@@ -118,6 +126,117 @@ public sealed class EntityCompatController : ControllerBase
             _logger.LogWarning(ex, "EntityCompat count failed for entity '{Entity}'.", entityName);
             return Ok(new { count = 0 });
         }
+    }
+
+    [HttpPost("{entityName}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Create(
+        string entityName,
+        [FromBody] JsonElement payload)
+    {
+        if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(new { message = $"Entity '{entityName}' does not support create in compat mode." });
+        }
+
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var title = ReadString(payload, "title");
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return BadRequest(new { message = "title is required." });
+        }
+
+        var now = DateTime.UtcNow;
+        var stream = new LiveStreamState
+        {
+            id = ReadString(payload, "id") is { Length: > 0 } id ? id : Guid.NewGuid().ToString("N"),
+            created_by_id = userId.ToString(),
+            title = title,
+            description = ReadString(payload, "description"),
+            streamer_id = ReadString(payload, "streamer_id") is { Length: > 0 } sid ? sid : userId.ToString(),
+            status = ReadString(payload, "status") is { Length: > 0 } status ? status : "live",
+            current_chunk_uri = ReadString(payload, "current_chunk_uri"),
+            chunk_sequence = ReadInt(payload, "chunk_sequence", 0),
+            is_audio_only = ReadBool(payload, "is_audio_only", false),
+            started_at = TryReadDateTime(payload, "started_at") ?? now,
+            created_date = now,
+            updated_date = now,
+        };
+
+        _liveStreamStateStore.Create(stream);
+        return Ok(stream);
+    }
+
+    [HttpPatch("{entityName}/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Update(
+        string entityName,
+        string id,
+        [FromBody] JsonElement payload)
+    {
+        if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(new { message = $"Entity '{entityName}' does not support update in compat mode." });
+        }
+
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        if (!_liveStreamStateStore.TryGet(id, out var existing))
+        {
+            return NotFound(new { message = "Live stream not found." });
+        }
+
+        if (!string.Equals(existing.created_by_id, userId.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "You do not own this stream." });
+        }
+
+        var updated = _liveStreamStateStore.Update(id, stream =>
+        {
+            var title = ReadString(payload, "title");
+            if (!string.IsNullOrWhiteSpace(title)) stream.title = title;
+
+            var description = ReadString(payload, "description");
+            if (!string.IsNullOrWhiteSpace(description)) stream.description = description;
+
+            var status = ReadString(payload, "status");
+            if (!string.IsNullOrWhiteSpace(status)) stream.status = status;
+
+            var chunkUri = ReadString(payload, "current_chunk_uri");
+            if (!string.IsNullOrWhiteSpace(chunkUri)) stream.current_chunk_uri = chunkUri;
+
+            if (TryReadInt(payload, "chunk_sequence", out var chunkSequence))
+            {
+                stream.chunk_sequence = Math.Max(0, chunkSequence);
+            }
+
+            if (TryReadBool(payload, "is_audio_only", out var isAudioOnly))
+            {
+                stream.is_audio_only = isAudioOnly;
+            }
+
+            var endedAt = TryReadDateTime(payload, "ended_at");
+            if (endedAt.HasValue) stream.ended_at = endedAt.Value;
+
+            var startedAt = TryReadDateTime(payload, "started_at");
+            if (startedAt.HasValue) stream.started_at = startedAt.Value;
+        });
+
+        if (updated is null)
+        {
+            return NotFound(new { message = "Live stream not found." });
+        }
+
+        return Ok(updated);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -187,6 +306,47 @@ public sealed class EntityCompatController : ControllerBase
     private static EntityFilterResponse EmptyResult() =>
         new() { Items = [], Total = 0 };
 
+    private EntityFilterResponse FilterLiveStreams(JsonElement body, int limit)
+    {
+        var status = ReadString(body, "query.status");
+        var streamerId = ReadString(body, "query.streamer_id");
+        var sort = ReadString(body, "options.sort");
+
+        IEnumerable<LiveStreamState> query = _liveStreamStateStore.GetAll();
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(stream => string.Equals(stream.status, status, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(streamerId))
+        {
+            query = query.Where(stream => string.Equals(stream.streamer_id, streamerId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        query = sort switch
+        {
+            "created_date" => query.OrderBy(stream => stream.created_date),
+            "-created_date" => query.OrderByDescending(stream => stream.created_date),
+            "updated_date" => query.OrderBy(stream => stream.updated_date),
+            "-updated_date" => query.OrderByDescending(stream => stream.updated_date),
+            _ => query.OrderByDescending(stream => stream.updated_date)
+        };
+
+        var items = query.Take(limit).Cast<object>().ToList();
+        return new EntityFilterResponse { Items = items, Total = items.Count };
+    }
+
+    private int CountLiveStreams(JsonElement body)
+    {
+        var status = ReadString(body, "query.status");
+        var query = _liveStreamStateStore.GetAll().AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(stream => string.Equals(stream.status, status, StringComparison.OrdinalIgnoreCase));
+        }
+        return query.Count();
+    }
+
     private static int ReadInt(JsonElement body, string dotPath, int defaultValue)
     {
         try
@@ -204,6 +364,115 @@ public sealed class EntityCompatController : ControllerBase
         {
             return defaultValue;
         }
+    }
+
+    private static string? ReadString(JsonElement body, string dotPath)
+    {
+        try
+        {
+            var parts = dotPath.Split('.');
+            var current = body;
+            foreach (var part in parts)
+            {
+                if (!current.TryGetProperty(part, out current))
+                {
+                    return null;
+                }
+            }
+
+            if (current.ValueKind == JsonValueKind.String)
+            {
+                return current.GetString();
+            }
+
+            return current.ValueKind == JsonValueKind.Null || current.ValueKind == JsonValueKind.Undefined
+                ? null
+                : current.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ReadBool(JsonElement body, string dotPath, bool defaultValue)
+    {
+        return TryReadBool(body, dotPath, out var result) ? result : defaultValue;
+    }
+
+    private static bool TryReadBool(JsonElement body, string dotPath, out bool value)
+    {
+        value = false;
+        try
+        {
+            var parts = dotPath.Split('.');
+            var current = body;
+            foreach (var part in parts)
+            {
+                if (!current.TryGetProperty(part, out current))
+                {
+                    return false;
+                }
+            }
+
+            if (current.ValueKind == JsonValueKind.True || current.ValueKind == JsonValueKind.False)
+            {
+                value = current.GetBoolean();
+                return true;
+            }
+
+            if (current.ValueKind == JsonValueKind.String && bool.TryParse(current.GetString(), out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadInt(JsonElement body, string dotPath, out int value)
+    {
+        value = 0;
+        try
+        {
+            var parts = dotPath.Split('.');
+            var current = body;
+            foreach (var part in parts)
+            {
+                if (!current.TryGetProperty(part, out current))
+                {
+                    return false;
+                }
+            }
+
+            if (current.ValueKind == JsonValueKind.Number && current.TryGetInt32(out value))
+            {
+                return true;
+            }
+
+            if (current.ValueKind == JsonValueKind.String && int.TryParse(current.GetString(), out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static DateTime? TryReadDateTime(JsonElement body, string dotPath)
+    {
+        var raw = ReadString(body, dotPath);
+        return DateTime.TryParse(raw, out var parsed) ? parsed : null;
     }
 }
 

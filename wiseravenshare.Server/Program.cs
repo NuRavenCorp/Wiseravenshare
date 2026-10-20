@@ -1950,6 +1950,7 @@ builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaService, W
 builder.Services.AddScoped<Wiseravenshare.Server.Services.Media.IMediaPlaybackQueueService, Wiseravenshare.Server.Services.Media.MediaPlaybackQueueService>();
 // Refresh tokens survive deploys/restarts (persisted in app_data.refresh_tokens).
 builder.Services.AddSingleton<RefreshTokenStore>();
+builder.Services.AddSingleton<LiveStreamStateStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();

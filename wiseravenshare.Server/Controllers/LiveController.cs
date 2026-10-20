@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -9,13 +10,16 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class LiveController : ControllerBase
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly ILogger<LiveController> _logger;
 
     public LiveController(
         IHttpClientFactory httpClientFactory,
+        LiveStreamStateStore liveStreamStateStore,
         ILogger<LiveController> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _liveStreamStateStore = liveStreamStateStore;
         _logger = logger;
     }
 
@@ -55,7 +59,7 @@ public sealed class LiveController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Live feed proxy request failed.");
-            return StatusCode(503, new { message = "Live feed service is unavailable." });
+            return Ok(new { streams = BuildLocalFeed(boundedLimit) });
         }
     }
 
@@ -91,5 +95,28 @@ public sealed class LiveController : ControllerBase
             _logger.LogWarning(ex, "Live feed training data proxy request failed.");
             return StatusCode(503, new { message = "Live feed training data is unavailable." });
         }
+    }
+
+    private IReadOnlyList<object> BuildLocalFeed(int limit)
+    {
+        return _liveStreamStateStore.GetAll()
+            .Where(stream => string.Equals(stream.status, "live", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(stream => stream.chunk_sequence)
+            .ThenByDescending(stream => stream.updated_date)
+            .Take(Math.Clamp(limit, 1, 100))
+            .Select(stream => (object)new
+            {
+                stream_id = stream.id,
+                title = stream.title,
+                category = stream.is_audio_only ? "audio" : "video",
+                viewer_count = 0,
+                streamer_id = stream.streamer_id,
+                current_chunk_uri = stream.current_chunk_uri,
+                chunk_sequence = stream.chunk_sequence,
+                is_audio_only = stream.is_audio_only,
+                started_at = stream.started_at,
+                updated_date = stream.updated_date
+            })
+            .ToList();
     }
 }
