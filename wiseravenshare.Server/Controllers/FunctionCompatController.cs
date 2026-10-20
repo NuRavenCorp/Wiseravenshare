@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Wiseravenshare.Server.DTOs.Collaboration;
 using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Entities;
@@ -29,7 +30,7 @@ public sealed class FunctionCompatController : ControllerBase
     private readonly ITruthEngineService _truthEngine;
     private readonly IWiseCoinService _wiseCoinService;
     private readonly AppDbContext _db;
-    private readonly IProjectService _projectService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly TeamAccessService _teamAccessService;
     private readonly GrowthService _growthService;
     private readonly IEmailService _emailService;
@@ -45,7 +46,7 @@ public sealed class FunctionCompatController : ControllerBase
         ITruthEngineService truthEngine,
         IWiseCoinService wiseCoinService,
         AppDbContext db,
-        IProjectService projectService,
+        IServiceProvider serviceProvider,
         TeamAccessService teamAccessService,
         GrowthService growthService,
         IEmailService emailService,
@@ -60,7 +61,7 @@ public sealed class FunctionCompatController : ControllerBase
         _truthEngine = truthEngine;
         _wiseCoinService = wiseCoinService;
         _db = db;
-        _projectService = projectService;
+        _serviceProvider = serviceProvider;
         _teamAccessService = teamAccessService;
         _growthService = growthService;
         _emailService = emailService;
@@ -265,6 +266,12 @@ public sealed class FunctionCompatController : ControllerBase
     [Authorize]
     public async Task<IActionResult> InviteCollaborator([FromBody] InviteCollaboratorRequest request)
     {
+        var projectService = _serviceProvider.GetService<IProjectService>();
+        if (projectService is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Collaboration services are not available." });
+        }
+
         if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.Identifier))
         {
             return BadRequest(new { error = "projectId and identifier are required." });
@@ -276,7 +283,7 @@ public sealed class FunctionCompatController : ControllerBase
             return BadRequest(new { error = "Provide an email address or a known collaborator identifier." });
         }
 
-        var invite = await _projectService.InviteCollaboratorAsync(request.ProjectId, new InviteCollaboratorDto
+        var invite = await projectService.InviteCollaboratorAsync(request.ProjectId, new InviteCollaboratorDto
         {
             Email = inviteeEmail,
             Role = string.IsNullOrWhiteSpace(request.Role) ? "Contributor" : request.Role,

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 
@@ -131,30 +132,44 @@ public sealed class LiveController : ControllerBase
         var now = DateTime.UtcNow;
         var title = string.IsNullOrWhiteSpace(body?.title) ? "Untitled live" : body.title.Trim();
         var audioOnly = body?.is_audio_only ?? false;
-        var existing = _liveStreamStateStore.Update(streamId, stream =>
+        LiveStreamState? existing;
+        try
         {
-            stream.title = title;
-            stream.status = "live";
-            stream.is_audio_only = audioOnly;
-            stream.started_at ??= now;
-            stream.ended_at = null;
-            stream.deleted_at = null;
-        });
-
-        if (existing is null)
-        {
-            existing = _liveStreamStateStore.Create(new LiveStreamState
+            existing = _liveStreamStateStore.Update(streamId, stream =>
             {
-                id = streamId,
-                created_by_id = userId,
-                streamer_id = userId,
-                title = title,
-                status = "live",
-                is_audio_only = audioOnly,
-                started_at = now,
-                created_date = now,
-                updated_date = now
+                stream.title = title;
+                stream.status = "live";
+                stream.is_audio_only = audioOnly;
+                stream.started_at ??= now;
+                stream.ended_at = null;
+                stream.deleted_at = null;
             });
+
+            if (existing is null)
+            {
+                existing = _liveStreamStateStore.Create(new LiveStreamState
+                {
+                    id = streamId,
+                    created_by_id = userId,
+                    streamer_id = userId,
+                    title = title,
+                    status = "live",
+                    is_audio_only = audioOnly,
+                    started_at = now,
+                    created_date = now,
+                    updated_date = now
+                });
+            }
+        }
+        catch (PostgresException ex) when (string.Equals(ex.SqlState, "23503", StringComparison.Ordinal))
+        {
+            _logger.LogWarning(ex, "Live stream start blocked by missing user reference for {UserId}", userId);
+            return Conflict(new { message = "Live stream start is blocked by user profile sync. Please re-login and retry." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Live stream start failed for stream {StreamId}", streamId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Live service is temporarily unavailable." });
         }
 
         return Ok(new
