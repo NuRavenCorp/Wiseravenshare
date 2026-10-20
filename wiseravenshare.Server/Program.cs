@@ -2051,6 +2051,15 @@ builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
 builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();
+
+// Collaboration services (required by FunctionCompatController and CollaborationControllers)
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Repositories.IProjectRepository, Wiseravenshare.Server.Infrastructure.Data.Repositories.ProjectRepository>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Repositories.IProjectMemberRepository, Wiseravenshare.Server.Infrastructure.Data.Repositories.ProjectMemberRepository>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Repositories.IProjectContentRepository, Wiseravenshare.Server.Infrastructure.Data.Repositories.ProjectContentRepository>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Repositories.ICollaborationInviteRepository, Wiseravenshare.Server.Infrastructure.Data.Repositories.CollaborationInviteRepository>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Repositories.IPlatformPublishRepository, Wiseravenshare.Server.Infrastructure.Data.Repositories.PlatformPublishRepository>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Services.ICollaborationNotificationService, Wiseravenshare.Server.Services.Collaboration.CollaborationNotificationService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Services.IProjectService, Wiseravenshare.Server.Services.Collaboration.ProjectService>();
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
 // AI assistant — select provider via AiProvider config (gradient|deepseek|digitalocean|dochatbot|do-chatbot|llamacpp).
 // DigitalOcean chatbot path is the production default.
