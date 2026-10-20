@@ -36,7 +36,7 @@ MEDIA_RENDERER_ALLOWED_HOSTS = {
     value.strip().lower()
     for value in os.environ.get(
         "MEDIA_RENDERER_ALLOWED_HOSTS",
-        "127.0.0.1,localhost,134.199.224.48,cdn.wiseravenshare.com,nyc3.digitaloceanspaces.com",
+        "127.0.0.1,localhost,134.199.224.48,cdn.wiseravenshare.com,nyc3.digitaloceanspaces.com,.digitaloceanspaces.com",
     ).split(",")
     if value.strip()
 }
@@ -195,15 +195,17 @@ def _is_allowed_media_host(hostname: str) -> bool:
     normalized = (hostname or "").strip().lower()
     if not normalized:
         return False
-    if normalized in MEDIA_RENDERER_ALLOWED_HOSTS:
-        return True
-    return any(
-        candidate.startswith(".") and normalized.endswith(candidate)
-        for candidate in MEDIA_RENDERER_ALLOWED_HOSTS
-    )
+    for candidate in MEDIA_RENDERER_ALLOWED_HOSTS:
+        if normalized == candidate:
+            return True
+        if candidate.startswith(".") and normalized.endswith(candidate):
+            return True
+        if not candidate.startswith(".") and normalized.endswith("." + candidate):
+            return True
+    return False
 
 
-def _resolve_media_source_url(source: str) -> str:
+def _resolve_media_source_url(source: str, fallback_origin: str) -> str:
     value = (source or "").strip()
     if not value:
         raise ValueError("Missing media source URL.")
@@ -225,7 +227,14 @@ def _resolve_media_source_url(source: str) -> str:
     if not value.startswith("/api/media/") and not value.startswith("/api/videostreaming/"):
         raise ValueError("Media source path is not allowed.")
 
-    return f"{MEDIA_RENDERER_ORIGIN}{value}"
+    origin = (fallback_origin or "").strip().rstrip("/") or MEDIA_RENDERER_ORIGIN
+    parsed_origin = urllib_parse.urlparse(origin)
+    if parsed_origin.scheme.lower() not in {"http", "https"} or not parsed_origin.netloc:
+        raise ValueError("Invalid media renderer origin.")
+    if not _is_allowed_media_host(parsed_origin.hostname or ""):
+        raise ValueError("Media renderer origin host is not allowed.")
+
+    return f"{origin}{value}"
 
 
 def validate_matrix(value: list[list[float]], name: str) -> list[list[float]]:
@@ -345,8 +354,9 @@ def database_health():
 
 @app.get("/media/render")
 def render_media_backup(request: Request, source: str = Query(..., min_length=1)):
+    forwarded_origin = (request.headers.get("x-forward-origin") or "").strip()
     try:
-        source_url = _resolve_media_source_url(source)
+        source_url = _resolve_media_source_url(source, forwarded_origin)
     except ValueError as error:
         return JSONResponse(status_code=400, content={"message": str(error)})
 
