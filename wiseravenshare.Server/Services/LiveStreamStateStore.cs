@@ -513,20 +513,9 @@ CREATE TABLE IF NOT EXISTS app_data.live_keep_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-DO $$
-BEGIN
-    IF to_regclass('app_data."Users"') IS NOT NULL THEN
-        BEGIN
-            ALTER TABLE app_data.live_streams
-                ADD CONSTRAINT fk_live_streams_users
-                FOREIGN KEY (host_user_id) REFERENCES app_data."Users"("Id") ON DELETE CASCADE;
-        EXCEPTION
-            WHEN duplicate_object THEN
-                NULL;
-        END;
-    END IF;
-END;
-$$;
+-- Live streams must continue working even when user table schema drifts.
+ALTER TABLE app_data.live_streams
+    DROP CONSTRAINT IF EXISTS fk_live_streams_users;
 """;
             using var command = new NpgsqlCommand(sql, connection);
             command.ExecuteNonQuery();

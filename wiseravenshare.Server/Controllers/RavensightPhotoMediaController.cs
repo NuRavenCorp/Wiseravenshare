@@ -191,6 +191,10 @@ public sealed class RavensightPhotoMediaController : ControllerBase
                 string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
         }
+        if (file is null || file.Length == 0)
+        {
+            file = Request.Form.Files.FirstOrDefault();
+        }
 
         if (file is null || file.Length == 0)
         {
