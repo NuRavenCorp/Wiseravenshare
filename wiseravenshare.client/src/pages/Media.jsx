@@ -31,6 +31,7 @@ export default function Media() {
   const [tab, setTab] = useState("video");
   const [tracks, setTracks] = useState([]);
   const [tracksLoading, setTracksLoading] = useState(false);
+  const [selectedTrackIds, setSelectedTrackIds] = useState(new Set());
   const { openMedia } = useMediaExperience();
 
   useEffect(() => {
@@ -42,6 +43,17 @@ export default function Media() {
       .finally(() => setTracksLoading(false));
   }, [tab]);
 
+  useEffect(() => {
+    setSelectedTrackIds((prev) => {
+      const validIds = new Set((tracks || []).map((track) => track.id));
+      const next = new Set();
+      prev.forEach((id) => {
+        if (validIds.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [tracks]);
+
   const playTrack = (track, allTracks) => {
     openMedia({
       ...track,
@@ -49,6 +61,29 @@ export default function Media() {
       url: track.mediaUrl || track.file_uri || track.url || "",
       queue: allTracks,
     });
+  };
+
+  const toggleTrackSelection = (trackId) => {
+    setSelectedTrackIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  };
+
+  const selectAllTracks = () => {
+    setSelectedTrackIds(new Set(tracks.map((track) => track.id)));
+  };
+
+  const clearTrackSelection = () => {
+    setSelectedTrackIds(new Set());
+  };
+
+  const playSelectedTracks = () => {
+    const selected = tracks.filter((track) => selectedTrackIds.has(track.id));
+    if (!selected.length) return;
+    playTrack(selected[0], selected);
   };
 
   return (
@@ -85,12 +120,21 @@ export default function Media() {
                 <p className="mt-1 text-sm text-muted-foreground">Upload tracks to your library, then double-click or press ▶ to play.</p>
               </header>
               <MediaUpload type="music" onUploaded={() => {
+                setSelectedTrackIds(new Set());
                 setTracksLoading(true);
                 apiClient.ravensightMedia.listMusic()
                   .then((res) => setTracks(res || []))
                   .catch(() => {})
                   .finally(() => setTracksLoading(false));
               }} />
+              {tracks.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={selectAllTracks} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50">Select all</button>
+                  <button type="button" onClick={clearTrackSelection} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Clear</button>
+                  <button type="button" onClick={playSelectedTracks} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play selected</button>
+                  <span className="text-xs text-muted-foreground">{selectedTrackIds.size} selected</span>
+                </div>
+              )}
               <div className="mt-4 space-y-1">
                 {tracksLoading && (
                   <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
@@ -107,6 +151,13 @@ export default function Media() {
                     onDoubleClick={() => playTrack(t, tracks)}
                     className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-secondary/50 cursor-pointer select-none"
                   >
+                    <input
+                      type="checkbox"
+                      checked={selectedTrackIds.has(t.id)}
+                      onChange={() => toggleTrackSelection(t.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      className="accent-primary"
+                    />
                     <button
                       onClick={() => playTrack(t, tracks)}
                       className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0 hover:bg-primary/20"

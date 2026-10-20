@@ -9,24 +9,56 @@ export default function MediaUpload({ type, onUploaded, label }) {
   const [error, setError] = useState(null);
   const inputRef = useRef(null);
 
-  const handleFile = async (file) => {
-    if (!file) return;
+  const handleFiles = async (files) => {
+    const allFiles = Array.from(files || []).filter(Boolean);
+    if (!allFiles.length) return;
+
     setUploading(true);
     setError(null);
     setSuccess(null);
+    let uploadedCount = 0;
+    let firstUploadedName = "";
+    const failed = [];
+
     try {
-      if (type === "video") {
-        await apiClient.ravensightMedia.uploadVideo(file, {
-          title: file.name.replace(/\.[^/.]+$/, ""),
-        });
-      } else {
-        await apiClient.ravensightMedia.uploadMusic(file, {
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          destinationFolder: "my-library",
-        });
+      for (const file of allFiles) {
+        try {
+          if (type === "video") {
+            await apiClient.ravensightMedia.uploadVideo(file, {
+              title: file.name.replace(/\.[^/.]+$/, ""),
+            });
+          } else {
+            await apiClient.ravensightMedia.uploadMusic(file, {
+              title: file.name.replace(/\.[^/.]+$/, ""),
+              destinationFolder: "my-library",
+            });
+          }
+          if (!firstUploadedName) firstUploadedName = file.name;
+          uploadedCount += 1;
+        } catch (uploadError) {
+          failed.push({
+            fileName: file.name,
+            message: uploadError?.data?.message || uploadError?.message || "Upload failed",
+          });
+        }
       }
-      setSuccess(`"${file.name}" uploaded successfully`);
-      onUploaded?.();
+
+      if (uploadedCount) {
+        setSuccess(
+          uploadedCount === 1
+            ? `"${firstUploadedName || "Track"}" uploaded successfully`
+            : `${uploadedCount} file(s) uploaded successfully`
+        );
+        onUploaded?.();
+      }
+
+      if (failed.length) {
+        setError(
+          failed.length === 1
+            ? `${failed[0].fileName}: ${failed[0].message}`
+            : `${failed.length} file(s) failed to upload.`
+        );
+      }
     } catch (e) {
       const msg = e?.data?.message || e?.message || "Upload failed";
       setError(msg);
@@ -46,8 +78,9 @@ export default function MediaUpload({ type, onUploaded, label }) {
         ref={inputRef}
         type="file"
         accept={accept}
+        multiple
         className="hidden"
-        onChange={(e) => handleFile(e.target.files?.[0])}
+        onChange={(e) => handleFiles(e.target.files)}
       />
       <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading}>
         {uploading ? (
