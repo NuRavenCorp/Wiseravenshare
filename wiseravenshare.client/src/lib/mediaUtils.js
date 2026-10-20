@@ -28,6 +28,30 @@ const normalizeCandidateUrl = (raw) => {
 const isProtectedMediaPath = (pathName) => PROTECTED_MEDIA_PATH_PREFIXES.some((prefix) =>
   pathName.startsWith(prefix));
 
+const buildBlobProxyPath = (objectKey) => {
+  const normalized = String(objectKey || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized) return "";
+  const encodedPath = normalized
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return encodedPath ? `/api/media/blob/${encodedPath}` : "";
+};
+
+const tryExtractSpacesObjectKey = (absoluteUrl) => {
+  if (!absoluteUrl || !absoluteUrl.hostname) return "";
+  if (!absoluteUrl.hostname.toLowerCase().includes("digitaloceanspaces.com")) return "";
+
+  const parts = absoluteUrl.pathname
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean);
+
+  if (parts.length < 2) return "";
+  return parts.slice(1).join("/");
+};
+
 const fetchProtectedBlobUrl = async (absoluteUrl) => {
   if (protectedBlobUrlCache.has(absoluteUrl)) {
     return protectedBlobUrlCache.get(absoluteUrl);
@@ -69,6 +93,15 @@ export async function getPlayableUrl(fileUri) {
         && isProtectedMediaPath(absolute.pathname)) {
         return await fetchProtectedBlobUrl(absolute.toString());
       }
+
+      const spacesObjectKey = tryExtractSpacesObjectKey(absolute);
+      if (spacesObjectKey) {
+        const blobProxyPath = buildBlobProxyPath(spacesObjectKey);
+        if (blobProxyPath) {
+          return await fetchProtectedBlobUrl(resolveApiUrl(blobProxyPath));
+        }
+      }
+
       return candidateUrl;
     } catch {
       return candidateUrl;
