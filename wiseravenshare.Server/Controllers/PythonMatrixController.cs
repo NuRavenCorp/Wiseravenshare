@@ -102,6 +102,7 @@ public sealed class PythonMatrixController : ControllerBase
             using var request = new HttpRequestMessage(
                 HttpMethod.Get,
                 $"media/render?source={Uri.EscapeDataString(source.Trim())}");
+            request.Headers.TryAddWithoutValidation("X-Forward-Origin", $"{Request.Scheme}://{Request.Host.Value}");
 
             var authHeader = Request.Headers.Authorization.ToString();
             if (!string.IsNullOrWhiteSpace(authHeader))
