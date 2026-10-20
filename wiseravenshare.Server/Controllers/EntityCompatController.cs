@@ -21,19 +21,22 @@ namespace Wiseravenshare.Server.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/entities")]
-public sealed class EntityCompatController : ControllerBase
+public sealed partial class EntityCompatController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly LiveStreamStateStore _liveStreamStateStore;
+    private readonly IMediaBlobSignatureService _signatureService;
     private readonly ILogger<EntityCompatController> _logger;
 
     public EntityCompatController(
         AppDbContext db,
         LiveStreamStateStore liveStreamStateStore,
+        IMediaBlobSignatureService signatureService,
         ILogger<EntityCompatController> logger)
     {
         _db = db;
         _liveStreamStateStore = liveStreamStateStore;
+        _signatureService = signatureService;
         _logger = logger;
     }
 
@@ -391,7 +394,11 @@ public sealed class EntityCompatController : ControllerBase
             _ => query.OrderByDescending(stream => stream.updated_date)
         };
 
-        var items = query.Take(limit).Cast<object>().ToList();
+        var items = query
+            .Take(limit)
+            .Select(SignLiveStreamMediaPaths)
+            .Cast<object>()
+            .ToList();
         return new EntityFilterResponse { Items = items, Total = items.Count };
     }
 
@@ -539,4 +546,45 @@ public sealed class EntityFilterResponse
 {
     public List<object> Items { get; set; } = [];
     public int Total { get; set; }
+}
+
+public partial class EntityCompatController
+{
+    private LiveStreamState SignLiveStreamMediaPaths(LiveStreamState stream)
+    {
+        stream.current_chunk_uri = AppendBlobSignatureIfNeeded(stream.current_chunk_uri);
+        stream.final_recording_uri = AppendBlobSignatureIfNeeded(stream.final_recording_uri);
+        return stream;
+    }
+
+    private string? AppendBlobSignatureIfNeeded(string? mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return mediaPath;
+        }
+
+        var value = mediaPath.Trim();
+        if (!value.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("sig=", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        const string prefix = "/api/media/blob/";
+        var objectKey = Uri.UnescapeDataString(value.Split('?', 2)[0][prefix.Length..]).Trim('/');
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return value;
+        }
+
+        var signature = _signatureService.SignKey(objectKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return value;
+        }
+
+        var separator = value.Contains('?') ? "&" : "?";
+        return $"{value}{separator}sig={Uri.EscapeDataString(signature)}";
+    }
 }
