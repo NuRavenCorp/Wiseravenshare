@@ -2,11 +2,9 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Image } from "@/components/ui/image";
-import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
+import { LogIn, LogOut, GraduationCap, ChevronUp, Feather } from "lucide-react";
 import HomeTiles from "@/components/landing/HomeTiles";
 
-const BRAND_LOGO = "https://media.apiClient.com/images/public/6acad64c240f9153977f3360/5f68aaa8d_FullLogo_Transparent_NoBuffer.png";
 const INTRO_KEY = "wrs_intro_seen";
 
 export default function Home() {
@@ -35,7 +33,7 @@ export default function Home() {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="flex items-center justify-between px-6 h-20 border-b border-border/40">
         <div className="flex items-center gap-2.5">
-          <Image src={BRAND_LOGO} alt="WiseRavenShare" className="w-9 h-9 rounded-full" fittingType="fill" />
+          <Feather className="w-9 h-9 text-primary" />
           <span className="font-display text-sm tracking-[0.2em] text-foreground">
             WISE<span className="text-accent">RAVEN</span>SHARE
           </span>

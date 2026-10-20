@@ -1,6 +1,6 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -21,17 +21,20 @@ public sealed class LiveController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly IBlobStorageService _blobStorageService;
+    private readonly IMediaBlobSignatureService _signatureService;
     private readonly ILogger<LiveController> _logger;
 
     public LiveController(
         IHttpClientFactory httpClientFactory,
         LiveStreamStateStore liveStreamStateStore,
         IBlobStorageService blobStorageService,
+        IMediaBlobSignatureService signatureService,
         ILogger<LiveController> logger)
     {
         _httpClientFactory = httpClientFactory;
         _liveStreamStateStore = liveStreamStateStore;
         _blobStorageService = blobStorageService;
+        _signatureService = signatureService;
         _logger = logger;
     }
 
@@ -255,7 +258,9 @@ public sealed class LiveController : ControllerBase
         }
 
         _liveStreamStateStore.MarkSegmentUploaded(streamId, index);
-        var streamPath = StreamingUrlHelper.StreamByBlobPath(segment.storage_key);
+        var streamPath = AppendBlobSignatureIfNeeded(
+            StreamingUrlHelper.StreamByBlobPath(segment.storage_key),
+            segment.storage_key);
         _liveStreamStateStore.Update(streamId, s =>
         {
             s.current_chunk_uri = streamPath;
@@ -454,7 +459,7 @@ public sealed class LiveController : ControllerBase
                 category = stream.is_audio_only ? "audio" : "video",
                 viewer_count = 0,
                 streamer_id = stream.streamer_id,
-                current_chunk_uri = stream.current_chunk_uri,
+                current_chunk_uri = EnsureSignedBlobPath(stream.current_chunk_uri),
                 chunk_sequence = stream.chunk_sequence,
                 is_audio_only = stream.is_audio_only,
                 started_at = stream.started_at,
@@ -465,11 +470,65 @@ public sealed class LiveController : ControllerBase
 
     private bool TryResolveUserId(out string userId)
     {
-        userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue("sub")
-            ?? User.FindFirstValue("id")
-            ?? string.Empty;
-        return !string.IsNullOrWhiteSpace(userId);
+        var parsedUserId = User.GetUserId();
+        if (parsedUserId == Guid.Empty)
+        {
+            userId = string.Empty;
+            return false;
+        }
+
+        userId = parsedUserId.ToString();
+        return true;
+    }
+
+    private string AppendBlobSignatureIfNeeded(string streamPath, string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(streamPath)
+            || !streamPath.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            return streamPath;
+        }
+
+        var normalizedKey = (objectKey ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return streamPath;
+        }
+
+        var signature = _signatureService.SignKey(normalizedKey);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return streamPath;
+        }
+
+        var separator = streamPath.Contains('?') ? "&" : "?";
+        return $"{streamPath}{separator}sig={Uri.EscapeDataString(signature)}";
+    }
+
+    private string EnsureSignedBlobPath(string? streamPath)
+    {
+        var value = streamPath ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value)
+            || !value.StartsWith("/api/media/blob/", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("sig=", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        var objectKey = ExtractObjectKeyFromMediaPath(value);
+        return AppendBlobSignatureIfNeeded(value, objectKey);
+    }
+
+    private static string ExtractObjectKeyFromMediaPath(string streamPath)
+    {
+        var cleanPath = streamPath.Split('?', 2)[0];
+        const string mediaBlobPrefix = "/api/media/blob/";
+        if (!cleanPath.StartsWith(mediaBlobPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return Uri.UnescapeDataString(cleanPath[mediaBlobPrefix.Length..]).Trim('/');
     }
 
     private static bool IsOwner(LiveStreamState stream, string userId)

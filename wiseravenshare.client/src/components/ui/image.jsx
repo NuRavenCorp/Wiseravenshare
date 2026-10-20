@@ -9,6 +9,20 @@ import {
 
 const FALLBACK_IMAGE_URL =
   "https://static.wixstatic.com/media/12d367_4f26ccd17f8f4e3a8958306ea08c2332~mv2.png"
+const DEAD_IMAGE_HOSTS = new Set(["media.apiclient.com"])
+
+const normalizeLegacyImageSource = (source) => {
+  if (!source) return source
+  try {
+    const parsed = new URL(source)
+    if (DEAD_IMAGE_HOSTS.has(parsed.hostname.toLowerCase())) {
+      return FALLBACK_IMAGE_URL
+    }
+    return source
+  } catch {
+    return source
+  }
+}
 
 /**
  * Image with built-in Wix Media Platform support: canonical public images on
@@ -21,7 +35,7 @@ const FALLBACK_IMAGE_URL =
 const Image = React.forwardRef(
   (
     {
-      src: source,
+      src: rawSource,
       fittingType = "fill",
       originWidth,
       originHeight,
@@ -33,6 +47,7 @@ const Image = React.forwardRef(
     },
     ref
   ) => {
+    const source = normalizeLegacyImageSource(rawSource)
     const [previewSource, setPreviewSource] = React.useState(null)
     const preview = previewSource?.source === source ? previewSource : null
     const src = preview ? preview.value : source
