@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
+import { useAuth } from "@/lib/AuthContext";
 import LiveStreamBroadcaster from "@/components/media/LiveStreamBroadcaster";
 import LiveStreamViewer from "@/components/media/LiveStreamViewer";
 import LiveFeed from "@/components/media/LiveFeed";
@@ -7,28 +8,99 @@ import { Radio, Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function LiveStreamPanel() {
+  const { user } = useAuth();
   const [mode, setMode] = useState("list");
   const [streams, setStreams] = useState([]);
+  const [endedStreams, setEndedStreams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedStream, setSelectedStream] = useState(null);
+  const [expiryById, setExpiryById] = useState({});
+  const [keepTextById, setKeepTextById] = useState({});
+  const [keepBusyById, setKeepBusyById] = useState({});
 
   const fetchStreams = async () => {
     try {
-      const res = await apiClient.entities.LiveStream.filter(
-        { status: "live" },
-        { sort: "-created_date", limit: 50 }
-      );
-      setStreams(res.items || []);
+      const [liveRes, endedRes] = await Promise.all([
+        apiClient.entities.LiveStream.filter(
+          { status: "live" },
+          { sort: "-created_date", limit: 50 }
+        ),
+        user?.id
+          ? apiClient.entities.LiveStream.filter(
+              { status: "ended", streamer_id: user.id },
+              { sort: "-updated_date", limit: 20 }
+            )
+          : Promise.resolve({ items: [] }),
+      ]);
+      setStreams(liveRes.items || []);
+      setEndedStreams(endedRes.items || []);
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshExpiry = async (streamId) => {
+    if (!streamId || !user?.id) return;
+    try {
+      const expiry = await apiClient.live.expiry(streamId, user.id);
+      setExpiryById((prev) => ({ ...prev, [streamId]: expiry }));
+    } catch {
+      // best-effort
+    }
+  };
+
+  const refreshEndedExpiry = async (items) => {
+    if (!user?.id || !Array.isArray(items) || !items.length) return;
+    await Promise.all(items.map((item) => refreshExpiry(item.id)));
   };
 
   useEffect(() => {
     fetchStreams();
     const unsub = apiClient.entities.LiveStream.subscribe(() => fetchStreams());
     return unsub;
-  }, []);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!endedStreams.length) return;
+    void refreshEndedExpiry(endedStreams);
+  }, [endedStreams, user?.id]);
+
+  const formatRemaining = (secondsRemaining) => {
+    if (typeof secondsRemaining !== "number") return "No expiry set";
+    if (secondsRemaining <= 0) return "Expired";
+    const days = Math.floor(secondsRemaining / 86400);
+    const hours = Math.floor((secondsRemaining % 86400) / 3600);
+    const minutes = Math.floor((secondsRemaining % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
+  const keepStream = async (streamId) => {
+    if (!streamId) return;
+    setKeepBusyById((prev) => ({ ...prev, [streamId]: true }));
+    try {
+      await apiClient.live.keep(streamId);
+      await refreshExpiry(streamId);
+      await fetchStreams();
+    } finally {
+      setKeepBusyById((prev) => ({ ...prev, [streamId]: false }));
+    }
+  };
+
+  const sendKeepMessage = async (streamId) => {
+    const text = (keepTextById[streamId] || "").trim();
+    if (!text) return;
+    setKeepBusyById((prev) => ({ ...prev, [streamId]: true }));
+    try {
+      await apiClient.live.message(streamId, text);
+      setKeepTextById((prev) => ({ ...prev, [streamId]: "" }));
+      await refreshExpiry(streamId);
+      await fetchStreams();
+    } finally {
+      setKeepBusyById((prev) => ({ ...prev, [streamId]: false }));
+    }
+  };
 
   if (mode === "broadcast") {
     return (
@@ -101,8 +173,7 @@ export default function LiveStreamPanel() {
                   {s.title}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {s.is_audio_only ? "Audio" : "Video"}{" "}
-                  {s.chunk_sequence > 1 ? `- Recording update ${s.chunk_sequence}` : ""}
+                  {s.is_audio_only ? "Audio" : "Video"}
                 </p>
               </div>
               <span className="px-2 py-0.5 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1 shrink-0">
@@ -111,6 +182,59 @@ export default function LiveStreamPanel() {
               </span>
             </button>
           ))}
+        </div>
+      )}
+      {user?.id && endedStreams.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">
+              Saved Live Recordings
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Auto-delete after 3 days unless kept
+            </span>
+          </div>
+          <div className="space-y-3">
+            {endedStreams.map((stream) => {
+              const expiry = expiryById[stream.id];
+              const kept = !!expiry?.kept_permanently;
+              const urgent = !!expiry?.in_reminder_window;
+              const busy = !!keepBusyById[stream.id];
+              return (
+                <div key={stream.id} className="rounded-lg border border-border bg-background/40 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-foreground font-medium">{stream.title}</p>
+                      <p className={`text-xs ${kept ? "text-green-500" : urgent ? "text-amber-500" : "text-muted-foreground"}`}>
+                        {kept
+                          ? "Kept permanently"
+                          : `Auto-deletes in ${formatRemaining(expiry?.seconds_remaining)}`}
+                      </p>
+                    </div>
+                    <Button size="sm" variant={kept ? "outline" : "default"} onClick={() => keepStream(stream.id)} disabled={busy || kept}>
+                      {kept ? "Kept" : busy ? "Saving..." : "Keep"}
+                    </Button>
+                  </div>
+                  {!kept && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={keepTextById[stream.id] || ""}
+                        onChange={(e) =>
+                          setKeepTextById((prev) => ({ ...prev, [stream.id]: e.target.value }))
+                        }
+                        placeholder='Type "keep" to save permanently'
+                        className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+                      />
+                      <Button size="sm" variant="outline" onClick={() => sendKeepMessage(stream.id)} disabled={busy || !(keepTextById[stream.id] || "").trim()}>
+                        Send
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

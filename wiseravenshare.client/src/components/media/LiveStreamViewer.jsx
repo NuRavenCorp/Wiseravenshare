@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 export default function LiveStreamViewer({ stream, onBack }) {
   const [loading, setLoading] = useState(true);
   const [ended, setEnded] = useState(false);
-  const [currentSeq, setCurrentSeq] = useState(stream.chunk_sequence || 0);
   const videoRef = useRef(null);
   const lastSeqRef = useRef(stream.chunk_sequence || 0);
   const currentSourceRef = useRef("");
@@ -48,7 +47,6 @@ export default function LiveStreamViewer({ stream, onBack }) {
     const setup = async () => {
       if (stream.current_chunk_uri && stream.chunk_sequence > 0) {
         lastSeqRef.current = stream.chunk_sequence;
-        setCurrentSeq(stream.chunk_sequence);
         await applyWholeStreamSource(stream);
       }
       if (disposed) return;
@@ -65,7 +63,6 @@ export default function LiveStreamViewer({ stream, onBack }) {
         }
         if (s.chunk_sequence > lastSeqRef.current && s.current_chunk_uri) {
           lastSeqRef.current = s.chunk_sequence;
-          setCurrentSeq(s.chunk_sequence);
           void applyWholeStreamSource(s);
         }
       });
@@ -127,7 +124,7 @@ export default function LiveStreamViewer({ stream, onBack }) {
           <p className="text-xs text-muted-foreground mt-1">Stream has ended</p>
         ) : (
           <p className="text-xs text-muted-foreground mt-1">
-            Live recording update {currentSeq} - {stream.is_audio_only ? "Audio" : "Video"}
+            Live {stream.is_audio_only ? "Audio" : "Video"} stream
           </p>
         )}
       </div>
