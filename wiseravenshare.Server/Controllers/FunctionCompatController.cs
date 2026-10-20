@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +40,12 @@ public sealed class FunctionCompatController : ControllerBase
     private readonly ISiteCrawlerService _siteCrawlerService;
     private readonly ISubscriptionService _subscriptionService;
     private readonly ISocialPublishQueue _socialPublishQueue;
+    private readonly IMusicLibraryStore _musicLibraryStore;
+    private readonly IRavensightVideoService _videoService;
+    private readonly IRavensightPhotoService _photoService;
+    private readonly RavensightMediaCatalogStore _mediaCatalogStore;
+    private readonly VideoLibraryStore _videoLibraryStore;
+    private readonly IMediaBlobSignatureService _signatureService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<FunctionCompatController> _logger;
 
@@ -54,6 +62,12 @@ public sealed class FunctionCompatController : ControllerBase
         ISiteCrawlerService siteCrawlerService,
         ISubscriptionService subscriptionService,
         ISocialPublishQueue socialPublishQueue,
+        IMusicLibraryStore musicLibraryStore,
+        IRavensightVideoService videoService,
+        IRavensightPhotoService photoService,
+        RavensightMediaCatalogStore mediaCatalogStore,
+        VideoLibraryStore videoLibraryStore,
+        IMediaBlobSignatureService signatureService,
         IConfiguration configuration,
         ILogger<FunctionCompatController> logger)
     {
@@ -69,6 +83,12 @@ public sealed class FunctionCompatController : ControllerBase
         _siteCrawlerService = siteCrawlerService;
         _subscriptionService = subscriptionService;
         _socialPublishQueue = socialPublishQueue;
+        _musicLibraryStore = musicLibraryStore;
+        _videoService = videoService;
+        _photoService = photoService;
+        _mediaCatalogStore = mediaCatalogStore;
+        _videoLibraryStore = videoLibraryStore;
+        _signatureService = signatureService;
         _configuration = configuration;
         _logger = logger;
     }
@@ -103,7 +123,7 @@ public sealed class FunctionCompatController : ControllerBase
 
     [HttpPost("cloud-media-transfer")]
     [HttpPost("CloudMediaTransfer")]
-    public IActionResult CloudMediaTransfer([FromBody] JsonElement payload)
+    public async Task<IActionResult> CloudMediaTransfer([FromBody] JsonElement payload, CancellationToken cancellationToken = default)
     {
         var action = payload.TryGetProperty("action", out var actionProp)
             ? actionProp.GetString()?.Trim().ToLowerInvariant()
@@ -117,30 +137,81 @@ public sealed class FunctionCompatController : ControllerBase
             return BadRequest(new { message = "provider must be googledrive or dropbox." });
         }
 
+        if (provider == "googledrive")
+        {
+            return action switch
+            {
+                "list" => Ok(new
+                {
+                    provider,
+                    files = Array.Empty<object>(),
+                    connected = true,
+                    message = "Google Drive browsing is not configured on this deployment."
+                }),
+                "import" => Ok(new
+                {
+                    provider,
+                    action,
+                    success = true,
+                    message = "Google Drive import request accepted (compat mode)."
+                }),
+                "export" => Ok(new
+                {
+                    provider,
+                    action,
+                    success = true,
+                    message = "Google Drive export request accepted (compat mode)."
+                }),
+                _ => BadRequest(new { message = "action must be list, import, export, or include." })
+            };
+        }
+
+        var dropboxAccessToken = ResolveDropboxAccessToken();
+        if (string.IsNullOrWhiteSpace(dropboxAccessToken))
+        {
+            if (action is "include" or "import")
+            {
+                var hasLink = !string.IsNullOrWhiteSpace(ReadString(payload, "sharedUrl"))
+                    || !string.IsNullOrWhiteSpace(ReadString(payload, "url"))
+                    || !string.IsNullOrWhiteSpace(ReadString(payload, "directUrl"));
+                if (hasLink)
+                {
+                    return await IncludeDropboxSharedLinkAsync(payload, cancellationToken);
+                }
+            }
+
+            return Ok(new
+            {
+                provider,
+                connected = false,
+                success = false,
+                inclusionMethods = new[]
+                {
+                    "Paste Dropbox shared URL (sharedUrl/url) to include media without server token.",
+                    "Configure Dropbox:AccessToken for full folder browsing/import."
+                },
+                message = "Dropbox API token is missing. Shared-link inclusion is still available."
+            });
+        }
+
         return action switch
         {
-            "list" => Ok(new
-            {
-                provider,
-                files = Array.Empty<object>(),
-                connected = true,
-                message = $"Connected to {provider}, but remote file listing is not configured on this deployment."
-            }),
-            "import" => Ok(new
-            {
-                provider,
-                action,
-                success = true,
-                message = "Cloud import request accepted (compat mode)."
-            }),
+            "list" => await ListDropboxFilesAsync(payload, dropboxAccessToken, cancellationToken),
+            "import" => await ImportDropboxFileAsync(payload, dropboxAccessToken, cancellationToken),
+            "include" => await IncludeDropboxSharedLinkAsync(payload, cancellationToken),
             "export" => Ok(new
             {
                 provider,
                 action,
                 success = true,
-                message = "Cloud export request accepted (compat mode)."
+                methods = new[]
+                {
+                    "Export by direct upload to Dropbox API (not yet enabled on this deployment).",
+                    "Use 'include' with Dropbox shared links for immediate in-app rendering."
+                },
+                message = "Dropbox export fallback returned inclusion methods."
             }),
-            _ => BadRequest(new { message = "action must be list, import, or export." })
+            _ => BadRequest(new { message = "action must be list, import, export, or include." })
         };
     }
 
@@ -1374,6 +1445,261 @@ public sealed class FunctionCompatController : ControllerBase
         if (request.PublishToWiseRavenStream) platforms.Add("wiseravenstream");
         if (request.PublishToBluesky) platforms.Add("bluesky");
         return platforms;
+    }
+
+    private string? ResolveDropboxAccessToken()
+    {
+        return _configuration["Dropbox:AccessToken"]
+            ?? _configuration["DROPBOX_ACCESS_TOKEN"]
+            ?? _configuration["DropboxAccessToken"];
+    }
+
+    private HttpClient CreateDropboxClient(string accessToken)
+    {
+        var client = new HttpClient
+        {
+            BaseAddress = new Uri("https://api.dropboxapi.com/2/")
+        };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return client;
+    }
+
+    private static string? ReadString(JsonElement payload, string propertyName)
+    {
+        return payload.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static MediaLibraryType InferMediaLibraryType(string? fileNameOrUrl, string? providedType = null)
+    {
+        var normalized = (providedType ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized is "photo" or "image") return MediaLibraryType.Photo;
+        if (normalized is "video") return MediaLibraryType.Video;
+        if (normalized is "music" or "audio") return MediaLibraryType.Music;
+
+        var extension = Path.GetExtension(fileNameOrUrl ?? string.Empty).Trim().ToLowerInvariant();
+        return extension switch
+        {
+            ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp" or ".svg" => MediaLibraryType.Photo,
+            ".mp4" or ".mov" or ".mkv" or ".webm" or ".avi" or ".m4v" => MediaLibraryType.Video,
+            ".mp3" or ".wav" or ".flac" or ".aac" or ".ogg" or ".m4a" => MediaLibraryType.Music,
+            _ => MediaLibraryType.Photo
+        };
+    }
+
+    private static string NormalizeDropboxSharedUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        var builder = new UriBuilder(uri);
+        var host = builder.Host.ToLowerInvariant();
+        if (host == "www.dropbox.com")
+        {
+            builder.Host = "dl.dropboxusercontent.com";
+        }
+
+        var query = System.Web.HttpUtility.ParseQueryString(builder.Query);
+        query.Remove("dl");
+        query.Remove("raw");
+        query["raw"] = "1";
+        builder.Query = query.ToString();
+        return builder.Uri.ToString();
+    }
+
+    private async Task<IActionResult> ListDropboxFilesAsync(JsonElement payload, string accessToken, CancellationToken cancellationToken)
+    {
+        var folderId = ReadString(payload, "folderId") ?? ReadString(payload, "path") ?? string.Empty;
+        var listPath = folderId.Trim();
+        if (!string.IsNullOrWhiteSpace(listPath) && !listPath.StartsWith("/") && !listPath.StartsWith("id:", StringComparison.OrdinalIgnoreCase))
+        {
+            listPath = "/" + listPath.TrimStart('/');
+        }
+
+        using var client = CreateDropboxClient(accessToken);
+        var body = new
+        {
+            path = listPath,
+            recursive = false,
+            include_media_info = true,
+            include_deleted = false,
+            include_has_explicit_shared_members = false
+        };
+
+        using var response = await client.PostAsJsonAsync("files/list_folder", body, cancellationToken);
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return StatusCode((int)response.StatusCode, new { message = "Dropbox list failed.", detail = raw });
+        }
+
+        using var json = JsonDocument.Parse(raw);
+        var entries = json.RootElement.TryGetProperty("entries", out var entriesNode) && entriesNode.ValueKind == JsonValueKind.Array
+            ? entriesNode.EnumerateArray()
+            : Enumerable.Empty<JsonElement>();
+
+        var files = entries.Select(entry =>
+        {
+            var tag = entry.TryGetProperty(".tag", out var tagNode) ? tagNode.GetString() : string.Empty;
+            var name = entry.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? "Untitled" : "Untitled";
+            var pathLower = entry.TryGetProperty("path_lower", out var pl) ? pl.GetString() ?? string.Empty : string.Empty;
+            var fallbackId = entry.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty;
+            var id = !string.IsNullOrWhiteSpace(pathLower) ? pathLower : fallbackId;
+            var isFolder = string.Equals(tag, "folder", StringComparison.OrdinalIgnoreCase);
+            var mediaType = isFolder ? string.Empty : InferMediaLibraryType(name).ToString().ToLowerInvariant();
+
+            return new
+            {
+                id,
+                name,
+                isFolder,
+                path = id,
+                size = entry.TryGetProperty("size", out var sizeNode) && sizeNode.ValueKind == JsonValueKind.Number ? sizeNode.GetInt64() : 0L,
+                mediaType
+            };
+        }).ToList();
+
+        return Ok(new
+        {
+            provider = "dropbox",
+            connected = true,
+            files,
+            methods = new[]
+            {
+                "Browse folders and import files into WiseRavenShare.",
+                "Paste a Dropbox shared URL and include it directly."
+            }
+        });
+    }
+
+    private async Task<IActionResult> ImportDropboxFileAsync(JsonElement payload, string accessToken, CancellationToken cancellationToken)
+    {
+        var userId = ResolveUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var filePath = ReadString(payload, "filePath")
+            ?? ReadString(payload, "path")
+            ?? ReadString(payload, "fileId");
+        var fileName = ReadString(payload, "fileName") ?? "Dropbox file";
+        var title = ReadString(payload, "title") ?? Path.GetFileNameWithoutExtension(fileName) ?? "Dropbox import";
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return BadRequest(new { message = "filePath/fileId is required for Dropbox import." });
+        }
+
+        using var client = CreateDropboxClient(accessToken);
+        using var tempLinkResponse = await client.PostAsJsonAsync("files/get_temporary_link", new { path = filePath }, cancellationToken);
+        var raw = await tempLinkResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (!tempLinkResponse.IsSuccessStatusCode)
+        {
+            return StatusCode((int)tempLinkResponse.StatusCode, new { message = "Dropbox temporary link request failed.", detail = raw });
+        }
+
+        using var tempLinkJson = JsonDocument.Parse(raw);
+        var mediaUrl = tempLinkJson.RootElement.TryGetProperty("link", out var linkNode) ? linkNode.GetString() : null;
+        if (string.IsNullOrWhiteSpace(mediaUrl))
+        {
+            return StatusCode(502, new { message = "Dropbox returned no temporary link." });
+        }
+
+        var mediaType = InferMediaLibraryType(fileName, ReadString(payload, "mediaType")).ToString().ToLowerInvariant();
+        return Ok(await ImportExternalMediaAsync(
+            userId,
+            normalizedSourceUrl: mediaUrl,
+            fileNameHint: fileName,
+            titleHint: title,
+            mediaTypeHint: mediaType,
+            provider: "dropbox",
+            includedVia: "import",
+            cancellationToken));
+    }
+
+    private async Task<IActionResult> IncludeDropboxSharedLinkAsync(JsonElement payload, CancellationToken cancellationToken)
+    {
+        var userId = ResolveUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var sharedUrl = ReadString(payload, "sharedUrl") ?? ReadString(payload, "url");
+        if (string.IsNullOrWhiteSpace(sharedUrl))
+        {
+            return BadRequest(new { message = "sharedUrl is required for Dropbox include." });
+        }
+
+        var normalizedUrl = NormalizeDropboxSharedUrl(sharedUrl);
+        var title = ReadString(payload, "title");
+        var mediaType = InferMediaLibraryType(normalizedUrl, ReadString(payload, "mediaType"));
+        string inferredTitle = "Dropbox media";
+        if (Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var parsedIncludedUri))
+        {
+            inferredTitle = Path.GetFileNameWithoutExtension(parsedIncludedUri.AbsolutePath) ?? inferredTitle;
+        }
+        var resolvedTitle = string.IsNullOrWhiteSpace(title) ? inferredTitle : title.Trim();
+
+        var metadata = BuildJsonDocument(new
+        {
+            source = "dropbox",
+            included_via = "shared_link",
+            original_shared_url = sharedUrl,
+            normalized_url = normalizedUrl,
+            included_at_utc = DateTime.UtcNow
+        });
+
+        var existing = await _db.SavedMediaItems
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.MediaUrl == normalizedUrl && x.MediaType == mediaType, cancellationToken);
+
+        if (existing is null)
+        {
+            existing = new SavedMedia
+            {
+                UserId = userId,
+                Title = resolvedTitle,
+                Description = "Included from Dropbox shared link",
+                MediaType = mediaType,
+                MediaUrl = normalizedUrl,
+                ThumbnailUrl = mediaType == MediaLibraryType.Photo ? normalizedUrl : null,
+                MediaMetadata = metadata,
+                Tags = new[] { "dropbox", "linked" },
+                IsVisibleInFeed = false
+            };
+            _db.SavedMediaItems.Add(existing);
+        }
+        else
+        {
+            existing.Title = resolvedTitle;
+            existing.MediaMetadata = metadata;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            provider = "dropbox",
+            success = true,
+            included = new
+            {
+                id = existing.Id,
+                title = existing.Title,
+                mediaType = existing.MediaType.ToString(),
+                mediaUrl = existing.MediaUrl
+            },
+            methods = new[]
+            {
+                "include shared url",
+                "import from browser"
+            }
+        });
     }
 
     private Guid ResolveUserId()

@@ -752,9 +752,29 @@ export const apiClient = {
       });
       return data?.url || data?.connectUrl || "/settings";
     },
+    async status(connectorId) {
+      return requestJson(`/api/connectors/${encodeURIComponent(connectorId)}/status`, {
+        method: "GET",
+      });
+    },
     async disconnectAppUser(connectorId) {
       return requestJson(`/api/connectors/${encodeURIComponent(connectorId)}/disconnect`, {
         method: "POST",
+      });
+    },
+  },
+  savedMedia: {
+    async getLibrary(page = 1, pageSize = 100) {
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      return requestJson(`/api/SavedMedia/library?${query.toString()}`, { method: "GET" });
+    },
+    async save(payload) {
+      return requestJson("/api/SavedMedia/save", {
+        method: "POST",
+        body: JSON.stringify(payload),
       });
     },
   },

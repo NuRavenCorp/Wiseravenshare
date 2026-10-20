@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
-import { Loader2, Folder, File as FileIcon, ChevronLeft, Download } from "lucide-react";
+import { Loader2, Folder, File as FileIcon, ChevronLeft, Download, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -11,6 +11,10 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
   const [loading, setLoading] = useState(true);
   const [importingId, setImportingId] = useState(null);
   const [history, setHistory] = useState([]);
+  const [inclusionMethods, setInclusionMethods] = useState([]);
+  const [sharedUrl, setSharedUrl] = useState("");
+  const [importMode, setImportMode] = useState("auto");
+  const [importingLink, setImportingLink] = useState(false);
   const { toast } = useToast();
 
   const load = async (id) => {
@@ -21,7 +25,8 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
         provider,
         folderId: id,
       });
-      setFiles(res.data.files || []);
+      setFiles(res.data?.files || []);
+      setInclusionMethods(Array.isArray(res.data?.inclusionMethods) ? res.data.inclusionMethods : []);
     } catch (e) {
       toast({ title: "Could not browse files", description: e?.message, variant: "destructive" });
       onClose();
@@ -62,6 +67,34 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
     }
   };
 
+  const handleImportSharedLink = async () => {
+    const url = sharedUrl.trim();
+    if (!url) {
+      toast({ title: "Dropbox link required", description: "Paste a Dropbox or direct media link first.", variant: "destructive" });
+      return;
+    }
+
+    setImportingLink(true);
+    try {
+      const res = await apiClient.functions.invoke("CloudMediaTransfer", {
+        action: "import",
+        provider,
+        sharedUrl: url,
+        mediaType: importMode,
+      });
+      const title = res?.data?.title || "Imported to library";
+      const description = res?.data?.message || "The media file is now available in your WiseRavenShare library.";
+      toast({ title, description });
+      setSharedUrl("");
+      await onImported?.();
+      await load(null);
+    } catch (e) {
+      toast({ title: "Import failed", description: e?.message, variant: "destructive" });
+    } finally {
+      setImportingLink(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
       <div
@@ -80,6 +113,44 @@ export default function CloudBrowser({ provider, onClose, onImported }) {
           <button onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">
             Close ✕
           </button>
+        </div>
+        <div className="border-b border-border p-3 space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Add Dropbox media by link and choose how to include it in WiseRavenShare.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="url"
+              value={sharedUrl}
+              onChange={(e) => setSharedUrl(e.target.value)}
+              placeholder="Paste Dropbox shared link or direct media URL"
+              className="h-9 flex-1 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            />
+            <select
+              value={importMode}
+              onChange={(e) => setImportMode(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+              aria-label="Media type"
+            >
+              <option value="auto">Auto detect</option>
+              <option value="music">Music</option>
+              <option value="video">Video</option>
+              <option value="photo">Photo</option>
+            </select>
+            <Button size="sm" onClick={handleImportSharedLink} disabled={importingLink}>
+              {importingLink ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Link2 className="w-3.5 h-3.5" />
+              )}
+              Include
+            </Button>
+          </div>
+          {inclusionMethods.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {inclusionMethods.map((method) => method.label || method.id).join(" • ")}
+            </p>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-3">
           {loading ? (

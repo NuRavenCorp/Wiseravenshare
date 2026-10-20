@@ -7,11 +7,13 @@ import {
   Loader2,
   RefreshCw,
   FolderOpen,
+  Link2,
   Music,
   Video,
   Image as ImageIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import CloudBrowser from "@/components/media/CloudBrowser";
 
@@ -29,6 +31,8 @@ export default function CloudMediaPanel() {
   const [loadingAssets, setLoadingAssets] = useState(true);
   const [assetError, setAssetError] = useState("");
   const [busy, setBusy] = useState({});
+  const [dropboxSharedUrl, setDropboxSharedUrl] = useState("");
+  const [dropboxIncludeTitle, setDropboxIncludeTitle] = useState("");
   const { toast } = useToast();
 
   const checkConnection = async (provider) => {
@@ -54,12 +58,16 @@ export default function CloudMediaPanel() {
         apiClient.ravensightMedia.listMusic(),
         apiClient.ravensightMedia.listVideos(),
         apiClient.ravensightMedia.listPhotos(100),
+        apiClient.savedMedia.getLibrary(1, 200),
       ]);
       const unpack = (value) => Array.isArray(value) ? value : value?.items || value?.data || [];
-      const [musicResult, videoResult, photoResult] = results;
+      const [musicResult, videoResult, photoResult, savedMediaResult] = results;
       const music = musicResult.status === "fulfilled" ? unpack(musicResult.value) : [];
       const videos = videoResult.status === "fulfilled" ? unpack(videoResult.value) : [];
       const photos = photoResult.status === "fulfilled" ? unpack(photoResult.value) : [];
+      const savedMediaItems = savedMediaResult.status === "fulfilled"
+        ? (Array.isArray(savedMediaResult.value?.items) ? savedMediaResult.value.items : [])
+        : [];
       const normalize = (asset, type, index) => ({
         ...asset,
         id: String(asset.id || asset.trackId || asset.videoId || asset.photoId || `${type}-${asset.fileName || asset.title || index}`),
@@ -68,11 +76,33 @@ export default function CloudMediaPanel() {
         file_uri: asset.file_uri || asset.fileUrl || asset.mediaUrl || asset.videoUrl || asset.imageUrl || "",
         created_date: asset.created_date || asset.uploadedAt || asset.createdAt || asset.savedAtUtc || "",
       });
-      setAssets([
+      const normalizedSaved = savedMediaItems.map((asset, index) => {
+        const mediaType = String(asset.mediaType || "").toLowerCase();
+        const normalizedType = mediaType.includes("video")
+          ? "video"
+          : mediaType.includes("music") || mediaType.includes("audio")
+            ? "music"
+            : "photo";
+        return normalize({
+          ...asset,
+          file_uri: asset.mediaUrl || asset.file_uri || "",
+          created_date: asset.createdAt || asset.created_date || "",
+          title: asset.title || asset.fileName || "Untitled",
+        }, normalizedType, index);
+      });
+
+      const merged = [
         ...music.map((asset, index) => normalize(asset, "music", index)),
         ...videos.map((asset, index) => normalize(asset, "video", index)),
         ...photos.map((asset, index) => normalize(asset, "photo", index)),
-      ].sort((a, b) => new Date(b.created_date || 0) - new Date(a.created_date || 0)));
+        ...normalizedSaved,
+      ];
+
+      const deduped = Array.from(new Map(
+        merged.map((item) => [String(item.file_uri || item.id), item])
+      ).values());
+
+      setAssets(deduped.sort((a, b) => new Date(b.created_date || 0) - new Date(a.created_date || 0)));
       const failedTypes = results.flatMap((result, index) => result.status === "rejected" ? [ ["music", "video", "photo"][index] ] : []);
       setAssetError(failedTypes.length
         ? `Some media could not be loaded (${failedTypes.join(", ")}). Refresh to try again.`
@@ -138,6 +168,36 @@ export default function CloudMediaPanel() {
     }
   };
 
+  const includeDropboxSharedLink = async () => {
+    const sharedUrl = dropboxSharedUrl.trim();
+    if (!sharedUrl) {
+      toast({ title: "Dropbox link required", description: "Paste a Dropbox shared link first.", variant: "destructive" });
+      return;
+    }
+
+    setBusy((b) => ({ ...b, "include-dropbox-link": true }));
+    try {
+      const response = await apiClient.functions.invoke("CloudMediaTransfer", {
+        action: "include",
+        provider: "dropbox",
+        sharedUrl,
+        title: dropboxIncludeTitle.trim() || undefined,
+      });
+      const included = response?.data?.included;
+      toast({
+        title: "Dropbox media included",
+        description: included?.title || "Media was added to your WiseRavenShare library.",
+      });
+      setDropboxSharedUrl("");
+      setDropboxIncludeTitle("");
+      await fetchAssets();
+    } catch (e) {
+      toast({ title: "Include failed", description: e?.message || "Could not include the Dropbox media.", variant: "destructive" });
+    } finally {
+      setBusy((b) => ({ ...b, "include-dropbox-link": false }));
+    }
+  };
+
   const downloadAsset = async (asset) => {
     const key = `dl-${asset.id}`;
     setBusy((b) => ({ ...b, [key]: true }));
@@ -176,7 +236,7 @@ export default function CloudMediaPanel() {
       <div>
         <h2 className="font-heading text-xl text-foreground mb-1">Cloud &amp; Device Transfer</h2>
         <p className="text-sm text-muted-foreground">
-          Import from your cloud accounts, export library media back to them, or download to your device (SD card).
+          Import from cloud accounts, include Dropbox media by share link/direct URL, export library media, or download to device.
         </p>
       </div>
 
@@ -188,6 +248,33 @@ export default function CloudMediaPanel() {
               <p className="text-xs text-muted-foreground">
                 {connected[key] ? "Connected" : checking ? "Checking…" : "Not connected"}
               </p>
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-primary" />
+                <p className="text-sm font-medium text-foreground">Dropbox inclusion methods</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                1) Connect Dropbox and browse/import files. 2) Paste a Dropbox shared link to include music, video, or photo directly.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-[1fr_220px_auto]">
+                <Input
+                  value={dropboxSharedUrl}
+                  onChange={(e) => setDropboxSharedUrl(e.target.value)}
+                  placeholder="https://www.dropbox.com/s/.../file.mp4?dl=0"
+                  aria-label="Dropbox shared URL"
+                />
+                <Input
+                  value={dropboxIncludeTitle}
+                  onChange={(e) => setDropboxIncludeTitle(e.target.value)}
+                  placeholder="Optional title override"
+                  aria-label="Optional media title"
+                />
+                <Button onClick={includeDropboxSharedLink} disabled={busy["include-dropbox-link"]}>
+                  {busy["include-dropbox-link"] ? <Loader2 className="w-4 h-4 animate-spin" /> : "Include"}
+                </Button>
+              </div>
             </div>
             {connected[key] ? (
               <div className="flex gap-2">
