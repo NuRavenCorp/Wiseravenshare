@@ -24,6 +24,8 @@ export default function LiveStreamBroadcaster({ onEnd }) {
   const streamIdRef = useRef(null);
   const chunkSeqRef = useRef(0);
   const previewRef = useRef(null);
+  const recordedChunksRef = useRef([]);
+  const uploadSerialRef = useRef(Promise.resolve());
 
   const pickMimeType = () => {
     if (audioOnly) {
@@ -59,24 +61,35 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       const recorder = new MediaRecorder(mediaStream, { mimeType });
       recorderRef.current = recorder;
       chunkSeqRef.current = 0;
+      recordedChunksRef.current = [];
+      uploadSerialRef.current = Promise.resolve();
 
       recorder.ondataavailable = async (e) => {
         if (e.data.size === 0) return;
-        try {
-          const ext = mimeType.includes("webm") ? "webm" : "mp4";
-          const file = new File([e.data], `chunk-${chunkSeqRef.current}.${ext}`, {
-            type: mimeType,
+        recordedChunksRef.current.push(e.data);
+        uploadSerialRef.current = uploadSerialRef.current
+          .then(async () => {
+            const streamId = streamIdRef.current;
+            if (!streamId) return;
+            const ext = mimeType.includes("webm") ? "webm" : "mp4";
+            const nextSequence = chunkSeqRef.current + 1;
+            const fullSoFar = new Blob(recordedChunksRef.current, { type: mimeType });
+            const file = new File(
+              [fullSoFar],
+              `live-stream-${streamId}-${nextSequence}.${ext}`,
+              { type: mimeType },
+            );
+            const { fileUrl: file_uri } = await uploadToSpaces(file, "live");
+            chunkSeqRef.current = nextSequence;
+            setChunkCount(nextSequence);
+            await apiClient.entities.LiveStream.update(streamId, {
+              current_chunk_uri: file_uri,
+              chunk_sequence: nextSequence,
+            });
+          })
+          .catch((err) => {
+            console.error(err);
           });
-          const { fileUrl: file_uri } = await uploadToSpaces(file, "live");
-          chunkSeqRef.current++;
-          setChunkCount(chunkSeqRef.current);
-          await apiClient.entities.LiveStream.update(streamIdRef.current, {
-            current_chunk_uri: file_uri,
-            chunk_sequence: chunkSeqRef.current,
-          });
-        } catch (err) {
-          console.error(err);
-        }
       };
 
       recorder.start(3000);
@@ -90,7 +103,18 @@ export default function LiveStreamBroadcaster({ onEnd }) {
 
   const stopStream = async () => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
+      const recorder = recorderRef.current;
+      const stopped = new Promise((resolve) => {
+        recorder.addEventListener("stop", resolve, { once: true });
+      });
+      try {
+        recorder.requestData();
+      } catch {
+        // Some browsers can throw if requestData is called too close to stop.
+      }
+      recorder.stop();
+      await stopped;
+      await uploadSerialRef.current;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());

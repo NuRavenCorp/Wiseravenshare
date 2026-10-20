@@ -9,38 +9,53 @@ export default function LiveStreamViewer({ stream, onBack }) {
   const [ended, setEnded] = useState(false);
   const [currentSeq, setCurrentSeq] = useState(stream.chunk_sequence || 0);
   const videoRef = useRef(null);
-  const chunkQueueRef = useRef([]);
   const lastSeqRef = useRef(stream.chunk_sequence || 0);
-  const playingRef = useRef(false);
+  const currentSourceRef = useRef("");
 
-  const playNextChunk = () => {
-    if (chunkQueueRef.current.length === 0) {
-      playingRef.current = false;
+  const applyWholeStreamSource = async (next) => {
+    if (!next?.current_chunk_uri) return;
+    const playableUrl = await getPlayableUrl(next.current_chunk_uri);
+    if (!playableUrl || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const previousTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const shouldResumePlayback = !video.paused || video.currentTime > 0;
+
+    if (currentSourceRef.current === playableUrl) {
       return;
     }
-    const chunk = chunkQueueRef.current.shift();
-    setCurrentSeq(chunk.seq);
-    playingRef.current = true;
-    if (videoRef.current) {
-      videoRef.current.src = chunk.url;
-      videoRef.current.play().catch(() => {});
-    }
+    currentSourceRef.current = playableUrl;
+    video.src = playableUrl;
+    video.onloadedmetadata = () => {
+      if (previousTime > 0 && Number.isFinite(video.duration) && video.duration > previousTime) {
+        try {
+          video.currentTime = previousTime;
+        } catch {
+          // Ignore seek failures for browsers that block metadata-time seeks.
+        }
+      }
+      if (shouldResumePlayback || !ended) {
+        video.play().catch(() => {});
+      }
+    };
   };
 
   useEffect(() => {
     if (!stream) return;
+    let disposed = false;
     let unsub;
 
     const setup = async () => {
-      // Play the current chunk immediately if available
       if (stream.current_chunk_uri && stream.chunk_sequence > 0) {
-        const url = await getPlayableUrl(stream.current_chunk_uri);
-        chunkQueueRef.current.push({ seq: stream.chunk_sequence, url });
-        playNextChunk();
+        lastSeqRef.current = stream.chunk_sequence;
+        setCurrentSeq(stream.chunk_sequence);
+        await applyWholeStreamSource(stream);
       }
+      if (disposed) return;
       setLoading(false);
 
       unsub = apiClient.entities.LiveStream.subscribe((event) => {
+        if (disposed) return;
         if (event.type !== "update") return;
         const s = event.data;
         if (s.id !== stream.id) return;
@@ -50,19 +65,21 @@ export default function LiveStreamViewer({ stream, onBack }) {
         }
         if (s.chunk_sequence > lastSeqRef.current && s.current_chunk_uri) {
           lastSeqRef.current = s.chunk_sequence;
-          getPlayableUrl(s.current_chunk_uri).then((url) => {
-            chunkQueueRef.current.push({ seq: s.chunk_sequence, url });
-            if (!playingRef.current) playNextChunk();
-          });
+          setCurrentSeq(s.chunk_sequence);
+          void applyWholeStreamSource(s);
         }
       });
     };
     setup();
 
     return () => {
+      disposed = true;
       if (unsub) unsub();
+      if (videoRef.current) {
+        videoRef.current.onloadedmetadata = null;
+      }
     };
-  }, [stream]);
+  }, [stream, ended]);
 
   if (loading) {
     return (
@@ -84,7 +101,12 @@ export default function LiveStreamViewer({ stream, onBack }) {
           autoPlay
           playsInline
           className={`w-full aspect-video ${stream.is_audio_only ? "opacity-0" : ""}`}
-          onEnded={playNextChunk}
+          onEnded={() => {
+            // Keep viewer active between rolling live file updates.
+            if (!ended && videoRef.current) {
+              videoRef.current.play().catch(() => {});
+            }
+          }}
         />
         {stream.is_audio_only && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -105,7 +127,7 @@ export default function LiveStreamViewer({ stream, onBack }) {
           <p className="text-xs text-muted-foreground mt-1">Stream has ended</p>
         ) : (
           <p className="text-xs text-muted-foreground mt-1">
-            Segment {currentSeq} - {stream.is_audio_only ? "Audio" : "Video"}
+            Live recording update {currentSeq} - {stream.is_audio_only ? "Audio" : "Video"}
           </p>
         )}
       </div>
