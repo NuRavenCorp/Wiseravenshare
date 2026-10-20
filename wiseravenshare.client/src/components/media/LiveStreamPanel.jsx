@@ -101,8 +101,8 @@ export default function LiveStreamPanel() {
                   {s.title}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {s.is_audio_only ? "Audio" : "Video"} - Segment{" "}
-                  {s.chunk_sequence || 0}
+                  {s.is_audio_only ? "Audio" : "Video"}{" "}
+                  {s.chunk_sequence > 1 ? `- Recording update ${s.chunk_sequence}` : ""}
                 </p>
               </div>
               <span className="px-2 py-0.5 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1 shrink-0">
