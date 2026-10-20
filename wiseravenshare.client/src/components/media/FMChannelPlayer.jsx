@@ -156,6 +156,7 @@ export default function FMChannelPlayer() {
   };
 
   const playbackUrl = activeChannel ? resolvePlaybackUrl(activeChannel.streamUrl) : '';
+  const isHlsPlayback = /\.m3u8(?:\?|$)/i.test(playbackUrl) || playbackUrl.includes('/api/fmtuner/hls-proxy?');
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -179,12 +180,18 @@ export default function FMChannelPlayer() {
       {/* Hidden ReactPlayer — only mounted when a channel is selected */}
       {activeChannel && (
         <ReactPlayer
-          url={playbackUrl}
+          src={playbackUrl}
           playing={isPlaying}
           volume={muted ? 0 : volume}
           controls={nativeControlsFallback}
           width={nativeControlsFallback ? "100%" : "0"}
           height={nativeControlsFallback ? "48px" : "0"}
+          config={{
+            file: {
+              forceAudio: true,
+              forceHLS: isHlsPlayback,
+            },
+          }}
           onPlay={() => { setIsPlaying(true); setBuffering(false); }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
