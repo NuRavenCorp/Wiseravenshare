@@ -4,11 +4,10 @@ import { Menu, X, MessageCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Image } from "@/components/ui/image";
 import { useAuth } from "@/lib/AuthContext";
+import { useBrandLogo } from "@/lib/branding";
 import NotificationBell from "@/components/NotificationBell";
 import RavenChirpToast from "@/components/RavenChirpToast";
 import VibePill from "@/components/vibe/VibePill";
-
-const BRAND_LOGO = "https://media.apiClient.com/images/public/6acad64c240f9153977f3360/5f68aaa8d_FullLogo_Transparent_NoBuffer.png";
 
 const links = [
   { label: "Mission", href: "/#mission" },
@@ -21,6 +20,7 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const { isAuthenticated, logout } = useAuth();
+  const logoUrl = useBrandLogo();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -38,7 +38,7 @@ export default function Navbar() {
     >
       <nav className="mx-auto max-w-7xl px-6 h-20 flex items-center justify-between">
         <a href="#top" className="flex items-center gap-2.5 group">
-          <Image src={BRAND_LOGO} alt="WiseRavenShare" className="w-10 h-10 rounded-full group-hover:scale-110 transition-transform duration-500" fittingType="fill" />
+          <Image src={logoUrl} alt="WiseRavenShare" className="w-10 h-10 rounded-full group-hover:scale-110 transition-transform duration-500" fittingType="fill" />
           <span className="font-display text-lg tracking-[0.2em] text-foreground">
             WISE<span className="text-accent">RAVEN</span>SHARE
           </span>
