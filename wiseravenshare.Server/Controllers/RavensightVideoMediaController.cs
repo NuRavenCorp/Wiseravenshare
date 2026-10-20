@@ -229,12 +229,30 @@ public sealed class RavensightVideoMediaController : ControllerBase
     [ProducesResponseType(typeof(RavensightSavedMediaDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SaveVideo([FromForm] SaveRavensightVideoDto dto, CancellationToken cancellationToken)
     {
-        var file = dto.File;
-        if ((file is null || file.Length == 0) && Request.HasFormContentType)
+        if (!Request.HasFormContentType)
         {
-            file = Request.Form.Files.FirstOrDefault(f =>
-                string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
+            return BadRequest(new { message = "Expected multipart/form-data upload payload." });
+        }
+
+        if (Request.ContentLength.HasValue && Request.ContentLength.Value > 500_000_000)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = "Video file exceeds the 500 MB upload limit." });
+        }
+
+        var file = dto.File;
+        if (file is null || file.Length == 0)
+        {
+            try
+            {
+                file = Request.Form.Files.FirstOrDefault(f =>
+                    string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(f.Name, "File", StringComparison.OrdinalIgnoreCase));
+            }
+            catch (InvalidDataException ex)
+            {
+                _logger.LogWarning(ex, "Invalid multipart payload while saving video.");
+                return BadRequest(new { message = "Invalid upload payload. Retry with a valid multipart/form-data request." });
+            }
         }
 
         if (!TryResolveUserId(out var userId))
@@ -284,15 +302,32 @@ public sealed class RavensightVideoMediaController : ControllerBase
             privacy = parsedPrivacy;
         }
 
-        var saved = await _videoService.SaveVideoAsync(
-            userId,
-            file,
-            dto.Title,
-            dto.Description,
-            dto.DestinationFolder,
-            ResolveUserStorageIdentity(userId),
-            privacy,
-            cancellationToken);
+        RavensightSavedVideo saved;
+        try
+        {
+            saved = await _videoService.SaveVideoAsync(
+                userId,
+                file,
+                dto.Title,
+                dto.Description,
+                dto.DestinationFolder,
+                ResolveUserStorageIdentity(userId),
+                privacy,
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Video upload rejected for user {UserId}.", userId);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Video binary save failed for user {UserId}.", userId);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Video upload is temporarily unavailable. Please try again."
+            });
+        }
 
         var hasActiveSubscription = await HasActiveSubscriptionAsync(userId);
         var resolvedStorageMode = VideoRetentionPolicy.ResolveStorageMode(dto.StorageMode, dto.IsPermanent, hasActiveSubscription);
