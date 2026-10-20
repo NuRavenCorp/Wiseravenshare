@@ -22,6 +22,7 @@ import React, {
 } from 'react';
 import { Howl, Howler } from 'howler';
 import StationFinder from '../components/media/StationFinder';
+import LiveStreamPanel from '../components/media/LiveStreamPanel';
 import { fmService } from '../Services/fmService';
 import { getCountries, getPopularTags, getStationsByRegionAndGenre } from '../Services/fmService';
 import { apiService } from '../Services/api';
@@ -238,7 +239,7 @@ const resolveTrackSourceCandidates = (track) => {
 const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   // Tabs
   const [tab, setTab] = useState(() => {
-    const validTabs = new Set(['radio', 'cassette', 'creator', 'caption']);
+    const validTabs = new Set(['radio', 'live', 'cassette', 'creator', 'caption']);
     return validTabs.has(initialTab) ? initialTab : 'radio';
   });
 
@@ -480,7 +481,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
   }, [creatorRegionIso]);
 
   useEffect(() => {
-    const validTabs = new Set(['radio', 'cassette', 'creator', 'caption']);
+    const validTabs = new Set(['radio', 'live', 'cassette', 'creator', 'caption']);
     if (!validTabs.has(initialTab)) return;
     setTab(initialTab);
   }, [initialTab]);
@@ -2064,7 +2065,11 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
           </div>
         </div>
         <div className="wr-station-ticker">
-          {tab === 'cassette' && currentTrack ? `${meta?.title} — ${meta?.artist}` : stationName}
+          {tab === 'cassette' && currentTrack
+            ? `${meta?.title} — ${meta?.artist}`
+            : tab === 'live'
+              ? 'WISERAVENSHARE LIVE · VIDEO + PHOTOS + MUSIC'
+              : stationName}
         </div>
       </div>
 
@@ -2083,12 +2088,18 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       <div className="wr-source-tabs">
         <button className={`wr-source-btn${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>📻 FM RADIO</button>
+        <button className={`wr-source-btn${tab === 'live' ? ' active' : ''}`} onClick={() => setTab('live')}>🔴 WISERAVENSHARE LIVE</button>
         <button className={`wr-source-btn${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>🎙 CREATOR</button>
         <button className={`wr-source-btn${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>📼 MUSIC LIBRARY</button>
         <button className={`wr-source-btn${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>🎬 CAPTION</button>
       </div>
 
       {tab === 'radio' && <div className="wr-fm-section"><StationFinder /></div>}
+      {tab === 'live' && (
+        <div className="wr-fm-section">
+          <LiveStreamPanel />
+        </div>
+      )}
 
       {tab === 'cassette' && (
         <div className="wr-cassette-deck">
@@ -2336,6 +2347,7 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         <div className="mod-logo">🎧 WiseRaven</div>
         <div className="mod-tabs">
           <button className={`mod-tab${tab === 'radio' ? ' active' : ''}`} onClick={() => setTab('radio')}>FM Radio</button>
+          <button className={`mod-tab${tab === 'live' ? ' active' : ''}`} onClick={() => setTab('live')}>WiseRavenShare Live</button>
           <button className={`mod-tab${tab === 'creator' ? ' active' : ''}`} onClick={() => setTab('creator')}>Radio Creator</button>
           <button className={`mod-tab${tab === 'cassette' ? ' active' : ''}`} onClick={() => setTab('cassette')}>Music Library</button>
           <button className={`mod-tab${tab === 'caption' ? ' active' : ''}`} onClick={() => setTab('caption')}>Caption</button>
@@ -2344,6 +2356,9 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
 
       {tab === 'radio' && (
         <div className="mod-fm"><StationFinder /></div>
+      )}
+      {tab === 'live' && (
+        <div className="mod-fm"><LiveStreamPanel /></div>
       )}
 
       {tab === 'cassette' && (
