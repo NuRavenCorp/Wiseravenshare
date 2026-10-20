@@ -301,6 +301,7 @@ export default function StationFinder() {
     ? playing.playbackCandidates
     : [playing?.url].filter(Boolean);
   const playbackUrl = playbackCandidates[Math.max(0, Number(playing?.playbackCandidateIndex) || 0)] || "";
+  const isHlsPlayback = /\.m3u8(?:\?|$)/i.test(playbackUrl) || playbackUrl.includes("/api/fmtuner/hls-proxy?");
   const handlePlaybackError = () => {
     const currentCandidateIndex = Math.max(0, Number(playing?.playbackCandidateIndex) || 0);
     if (currentCandidateIndex + 1 < playbackCandidates.length) {
@@ -383,12 +384,17 @@ export default function StationFinder() {
         <div className="space-y-2">
           <ReactPlayer
             key={`${playing.id}:${playbackUrl}`}
-            url={playbackUrl}
+            src={playbackUrl}
             playing={!playing.autoplayFailed}
             controls
             width="100%"
             height="48px"
-            config={{ file: { forceAudio: true } }}
+            config={{
+              file: {
+                forceAudio: true,
+                forceHLS: isHlsPlayback,
+              },
+            }}
             onPlay={() => {
               setError("");
               setPlaying((current) => current ? { ...current, autoplayFailed: false } : current);
