@@ -18,14 +18,12 @@ export default function LiveStreamBroadcaster({ onEnd }) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState(null);
   const [audioOnly, setAudioOnly] = useState(false);
-  const [chunkCount, setChunkCount] = useState(0);
+  const [saving, setSaving] = useState(false);
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
   const streamIdRef = useRef(null);
-  const chunkSeqRef = useRef(0);
   const previewRef = useRef(null);
   const recordedChunksRef = useRef([]);
-  const uploadSerialRef = useRef(Promise.resolve());
 
   const pickMimeType = () => {
     if (audioOnly) {
@@ -60,39 +58,14 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(mediaStream, { mimeType });
       recorderRef.current = recorder;
-      chunkSeqRef.current = 0;
       recordedChunksRef.current = [];
-      uploadSerialRef.current = Promise.resolve();
 
       recorder.ondataavailable = async (e) => {
         if (e.data.size === 0) return;
         recordedChunksRef.current.push(e.data);
-        uploadSerialRef.current = uploadSerialRef.current
-          .then(async () => {
-            const streamId = streamIdRef.current;
-            if (!streamId) return;
-            const ext = mimeType.includes("webm") ? "webm" : "mp4";
-            const nextSequence = chunkSeqRef.current + 1;
-            const fullSoFar = new Blob(recordedChunksRef.current, { type: mimeType });
-            const file = new File(
-              [fullSoFar],
-              `live-stream-${streamId}-${nextSequence}.${ext}`,
-              { type: mimeType },
-            );
-            const { fileUrl: file_uri } = await uploadToSpaces(file, "live");
-            chunkSeqRef.current = nextSequence;
-            setChunkCount(nextSequence);
-            await apiClient.entities.LiveStream.update(streamId, {
-              current_chunk_uri: file_uri,
-              chunk_sequence: nextSequence,
-            });
-          })
-          .catch((err) => {
-            console.error(err);
-          });
       };
 
-      recorder.start(3000);
+      recorder.start();
       setStreaming(true);
     } catch (err) {
       setError(
@@ -102,6 +75,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
   };
 
   const stopStream = async () => {
+    setSaving(true);
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       const recorder = recorderRef.current;
       const stopped = new Promise((resolve) => {
@@ -114,8 +88,23 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       }
       recorder.stop();
       await stopped;
-      await uploadSerialRef.current;
     }
+
+    const streamId = streamIdRef.current;
+    const mimeType = recorderRef.current?.mimeType || (audioOnly ? "audio/webm" : "video/webm");
+    let finalUri = "";
+    if (streamId && recordedChunksRef.current.length > 0) {
+      try {
+        const ext = mimeType.includes("webm") ? "webm" : "mp4";
+        const fullRecording = new Blob(recordedChunksRef.current, { type: mimeType });
+        const file = new File([fullRecording], `live-stream-${streamId}.${ext}`, { type: mimeType });
+        const { fileUrl } = await uploadToSpaces(file, "live");
+        finalUri = fileUrl || "";
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -126,6 +115,8 @@ export default function LiveStreamBroadcaster({ onEnd }) {
     if (streamIdRef.current) {
       try {
         await apiClient.entities.LiveStream.update(streamIdRef.current, {
+          current_chunk_uri: finalUri || undefined,
+          chunk_sequence: finalUri ? 1 : 0,
           status: "ended",
           ended_at: new Date().toISOString(),
         });
@@ -134,8 +125,9 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       }
     }
     setStreaming(false);
-    setChunkCount(0);
+    setSaving(false);
     setTitle("");
+    recordedChunksRef.current = [];
     onEnd?.();
   };
 
@@ -245,9 +237,9 @@ export default function LiveStreamBroadcaster({ onEnd }) {
           </div>
           <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
             <span className="text-xs text-muted-foreground">
-              {chunkCount} segments streamed
+              {saving ? "Saving full live recording..." : "Live recording in progress"}
             </span>
-            <Button variant="destructive" size="sm" onClick={stopStream}>
+            <Button variant="destructive" size="sm" onClick={stopStream} disabled={saving}>
               <StopCircle className="w-4 h-4" /> End Stream
             </Button>
           </div>
