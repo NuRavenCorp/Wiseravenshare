@@ -78,6 +78,37 @@ const fetchProtectedBlobUrl = async (absoluteUrl) => {
   return objectUrl;
 };
 
+const fetchPythonRenderedBlobUrl = async (sourceUri) => {
+  const sourceValue = String(sourceUri || "").trim();
+  if (!sourceValue) {
+    throw new Error("Missing source for python renderer.");
+  }
+  if (sourceValue.includes("/api/python-matrix/media/render")) {
+    throw new Error("Nested python renderer fallback is not allowed.");
+  }
+
+  const token = readAuthToken();
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const rendererUrl = resolveApiUrl(`/api/python-matrix/media/render?source=${encodeURIComponent(sourceValue)}`);
+  const response = await fetch(rendererUrl, {
+    method: "GET",
+    credentials: "include",
+    headers,
+  });
+  if (!response.ok) {
+    throw new Error(`Python renderer request failed (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  if (!blob || blob.size <= 0) {
+    throw new Error("Python renderer returned an empty payload.");
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  protectedBlobUrlCache.set(sourceValue, objectUrl);
+  return objectUrl;
+};
+
 export async function getPlayableUrl(fileUri) {
   if (!fileUri) return null;
   if (fileUri.startsWith("blob:") || fileUri.startsWith("data:")) return fileUri;
@@ -91,14 +122,22 @@ export async function getPlayableUrl(fileUri) {
       if (typeof window !== "undefined"
         && absolute.origin === window.location.origin
         && isProtectedMediaPath(absolute.pathname)) {
-        return await fetchProtectedBlobUrl(absolute.toString());
+        try {
+          return await fetchProtectedBlobUrl(absolute.toString());
+        } catch {
+          return await fetchPythonRenderedBlobUrl(absolute.toString());
+        }
       }
 
       const spacesObjectKey = tryExtractSpacesObjectKey(absolute);
       if (spacesObjectKey) {
         const blobProxyPath = buildBlobProxyPath(spacesObjectKey);
         if (blobProxyPath) {
-          return await fetchProtectedBlobUrl(resolveApiUrl(blobProxyPath));
+          try {
+            return await fetchProtectedBlobUrl(resolveApiUrl(blobProxyPath));
+          } catch {
+            return await fetchPythonRenderedBlobUrl(absolute.toString());
+          }
         }
       }
 
@@ -112,7 +151,11 @@ export async function getPlayableUrl(fileUri) {
     try {
       return await fetchProtectedBlobUrl(resolveApiUrl(candidateUrl));
     } catch {
-      return resolveApiUrl(candidateUrl);
+      try {
+        return await fetchPythonRenderedBlobUrl(resolveApiUrl(candidateUrl));
+      } catch {
+        return resolveApiUrl(candidateUrl);
+      }
     }
   }
 
