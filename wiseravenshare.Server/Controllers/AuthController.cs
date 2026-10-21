@@ -364,11 +364,14 @@ public class AuthController : ControllerBase
             var responseUser = UserStore.ToResponse(user);
             responseUser.Id = domainUserId.ToString("N");
             var accessScope = ResolveAccessScope(user.Email);
+            var teamRole = ResolveTeamRole(user.Email);
             return Ok(new
             {
                 valid = true,
                 user = responseUser,
-                adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase)
+                adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase),
+                accessScope,
+                teamRole
             });
         }
         catch

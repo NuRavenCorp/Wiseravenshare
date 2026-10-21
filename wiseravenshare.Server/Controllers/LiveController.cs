@@ -21,6 +21,7 @@ public sealed class LiveController : ControllerBase
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly LiveStreamStateStore _liveStreamStateStore;
+    private readonly VideoLibraryStore _videoLibraryStore;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IMediaBlobSignatureService _signatureService;
     private readonly ILogger<LiveController> _logger;
@@ -28,12 +29,14 @@ public sealed class LiveController : ControllerBase
     public LiveController(
         IHttpClientFactory httpClientFactory,
         LiveStreamStateStore liveStreamStateStore,
+        VideoLibraryStore videoLibraryStore,
         IBlobStorageService blobStorageService,
         IMediaBlobSignatureService signatureService,
         ILogger<LiveController> logger)
     {
         _httpClientFactory = httpClientFactory;
         _liveStreamStateStore = liveStreamStateStore;
+        _videoLibraryStore = videoLibraryStore;
         _blobStorageService = blobStorageService;
         _signatureService = signatureService;
         _logger = logger;
@@ -330,6 +333,104 @@ public sealed class LiveController : ControllerBase
             ended_at = ended?.ended_at,
             expires_at = ended?.expires_at,
             kept_permanently = ended?.kept_permanently ?? false
+        });
+    }
+
+    [HttpDelete("{streamId}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteStream(
+        [FromRoute] string streamId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+        {
+            return BadRequest(new { message = "streamId is required." });
+        }
+
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        if (!_liveStreamStateStore.TryGet(streamId, out var stream))
+        {
+            return NotFound(new { message = "Stream not found." });
+        }
+
+        if (!IsOwner(stream, userId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Not your stream." });
+        }
+
+        if (string.Equals(stream.status, "live", StringComparison.OrdinalIgnoreCase) && !stream.ended_at.HasValue)
+        {
+            return Conflict(new { message = "End the live stream before deleting its files." });
+        }
+
+        _liveStreamStateStore.Update(streamId, s =>
+        {
+            s.deleted_at = DateTime.UtcNow;
+            s.status = "deleted";
+        });
+
+        var deletedBlobKeys = new List<string>();
+        var missingBlobKeys = new List<string>();
+        var failedBlobKeys = new List<string>();
+
+        var keys = _liveStreamStateStore.GetSegments(streamId)
+            .Select(x => x.storage_key)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(stream.final_recording_key))
+        {
+            keys.Add(stream.final_recording_key);
+        }
+
+        foreach (var key in keys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var deleted = await _blobStorageService.DeleteAsync(key, cancellationToken);
+                if (deleted)
+                {
+                    deletedBlobKeys.Add(key);
+                }
+                else
+                {
+                    missingBlobKeys.Add(key);
+                }
+            }
+            catch (Exception ex)
+            {
+                failedBlobKeys.Add(key);
+                _logger.LogWarning(ex, "Failed deleting blob key {BlobKey} for live stream {StreamId}.", key, streamId);
+            }
+        }
+
+        var deletedRecording = false;
+        var finalVideoId = (stream.final_video_id ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(finalVideoId))
+        {
+            try
+            {
+                deletedRecording = await _videoLibraryStore.DeleteVideoAsync(finalVideoId, userId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed deleting final video record {VideoId} for stream {StreamId}.", finalVideoId, streamId);
+            }
+        }
+
+        _liveStreamStateStore.Remove(streamId);
+
+        return Ok(new
+        {
+            success = true,
+            stream_id = streamId,
+            deleted_recording = deletedRecording,
+            deleted_blob_keys = deletedBlobKeys,
+            missing_blob_keys = missingBlobKeys,
+            failed_blob_keys = failedBlobKeys
         });
     }
 

@@ -423,7 +423,24 @@ export const apiClient = {
         method: "POST",
         body: JSON.stringify({ token }),
       });
-      return data?.user || null;
+      const user = data?.user || null;
+      if (!user) {
+        return null;
+      }
+
+      const accessScope = typeof data?.accessScope === "string" ? data.accessScope : "";
+      const teamRole = typeof data?.teamRole === "string" ? data.teamRole : "";
+      const adminPassActive = data?.adminPassActive === true;
+      const role = typeof user?.role === "string" ? user.role.toLowerCase() : "";
+      const isAdmin = adminPassActive || accessScope.toLowerCase() === "admin" || role === "admin";
+
+      return {
+        ...user,
+        accessScope,
+        teamRole,
+        adminPassActive,
+        isAdmin,
+      };
     },
     async isAuthenticated() {
       try {
@@ -538,6 +555,11 @@ export const apiClient = {
     end(streamId) {
       return requestJson(`/api/live/${encodeURIComponent(streamId)}/end`, {
         method: "POST",
+      });
+    },
+    delete(streamId) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}`, {
+        method: "DELETE",
       });
     },
     feed(viewerId, limit = 50) {

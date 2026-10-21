@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/AuthContext";
 import LiveStreamBroadcaster from "@/components/media/LiveStreamBroadcaster";
 import LiveStreamViewer from "@/components/media/LiveStreamViewer";
 import LiveFeed from "@/components/media/LiveFeed";
-import { Radio, Plus, Loader2 } from "lucide-react";
+import { Radio, Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function LiveStreamPanel() {
@@ -17,6 +17,7 @@ export default function LiveStreamPanel() {
   const [expiryById, setExpiryById] = useState({});
   const [keepTextById, setKeepTextById] = useState({});
   const [keepBusyById, setKeepBusyById] = useState({});
+  const [deleteBusyById, setDeleteBusyById] = useState({});
 
   const fetchStreams = async () => {
     try {
@@ -99,6 +100,30 @@ export default function LiveStreamPanel() {
       await fetchStreams();
     } finally {
       setKeepBusyById((prev) => ({ ...prev, [streamId]: false }));
+    }
+  };
+
+  const deleteStream = async (streamId, streamTitle) => {
+    if (!streamId) return;
+    const confirmed = window.confirm(`Delete "${streamTitle || "this live recording"}" and its stream files?`);
+    if (!confirmed) return;
+
+    setDeleteBusyById((prev) => ({ ...prev, [streamId]: true }));
+    try {
+      await apiClient.live.delete(streamId);
+      setExpiryById((prev) => {
+        const next = { ...prev };
+        delete next[streamId];
+        return next;
+      });
+      setKeepTextById((prev) => {
+        const next = { ...prev };
+        delete next[streamId];
+        return next;
+      });
+      await fetchStreams();
+    } finally {
+      setDeleteBusyById((prev) => ({ ...prev, [streamId]: false }));
     }
   };
 
@@ -200,6 +225,7 @@ export default function LiveStreamPanel() {
               const kept = !!expiry?.kept_permanently;
               const urgent = !!expiry?.in_reminder_window;
               const busy = !!keepBusyById[stream.id];
+              const deleting = !!deleteBusyById[stream.id];
               return (
                 <div key={stream.id} className="rounded-lg border border-border bg-background/40 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-3">
@@ -211,9 +237,20 @@ export default function LiveStreamPanel() {
                           : `Auto-deletes in ${formatRemaining(expiry?.seconds_remaining)}`}
                       </p>
                     </div>
-                    <Button size="sm" variant={kept ? "outline" : "default"} onClick={() => keepStream(stream.id)} disabled={busy || kept}>
-                      {kept ? "Kept" : busy ? "Saving..." : "Keep"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant={kept ? "outline" : "default"} onClick={() => keepStream(stream.id)} disabled={busy || deleting || kept}>
+                        {kept ? "Kept" : busy ? "Saving..." : "Keep"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => deleteStream(stream.id, stream.title)}
+                        disabled={busy || deleting}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        {deleting ? "Deleting..." : "Delete"}
+                      </Button>
+                    </div>
                   </div>
                   {!kept && (
                     <div className="flex items-center gap-2">
@@ -226,7 +263,7 @@ export default function LiveStreamPanel() {
                         placeholder='Type "keep" to save permanently'
                         className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
                       />
-                      <Button size="sm" variant="outline" onClick={() => sendKeepMessage(stream.id)} disabled={busy || !(keepTextById[stream.id] || "").trim()}>
+                      <Button size="sm" variant="outline" onClick={() => sendKeepMessage(stream.id)} disabled={busy || deleting || !(keepTextById[stream.id] || "").trim()}>
                         Send
                       </Button>
                     </div>

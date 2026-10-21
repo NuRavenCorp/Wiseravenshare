@@ -109,6 +109,7 @@ export default function PodcastsPanel() {
   const permissions = selected ? resolvePermissions(selected, teams, user?.id) : null;
 
   const hasAccess = (podcast) => {
+    if (user?.isAdmin || user?.adminPassActive || user?.accessScope === "admin") return true;
     if (!podcast.is_premium) return true;
     if (podcast.created_by_id === user?.id) return true;
     if (payments.some((p) => p.podcast_id === podcast.id)) return true;
