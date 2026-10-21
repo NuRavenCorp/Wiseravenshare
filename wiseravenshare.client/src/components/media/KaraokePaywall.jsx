@@ -19,6 +19,10 @@ export default function KaraokePaywall({ children, currentUser, onAuthRequired }
 
   useEffect(() => {
     if (!currentUser) { setHasAccess(false); return; }
+    if (currentUser.isAdmin || currentUser.adminPassActive || currentUser.accessScope === "admin") {
+      setHasAccess(true);
+      return;
+    }
     apiClient.entities.KaraokePayment.filter(
       { user_id: currentUser.id, status: { $in: ["active", "pending"] } },
       { limit: 1 }
