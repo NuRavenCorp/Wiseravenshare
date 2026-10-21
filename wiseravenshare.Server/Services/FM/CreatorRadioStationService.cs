@@ -67,21 +67,25 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             throw new NotFoundException("Creator not found.");
         }
 
-        // Gate 1: subscription price is mandatory.
-        if (dto.SubscriptionPrice is null or <= 0)
+        var requestedPrice = dto.SubscriptionPrice.GetValueOrDefault();
+        var hasMonetizedPlan = requestedPrice > 0;
+        decimal wiseCoinDeposited = 0m;
+        if (hasMonetizedPlan)
         {
-            throw new BadRequestException("A subscription price greater than zero is required to create a radio station.");
-        }
-
-        // Gate 2: deduct 100 WiseCoins — confirms creator commitment.
-        var coinResult = await _wiseCoin.SpendWSCAsync(
-            creatorId, RadioStationWiseCoinDeposit, TransactionType.Purchase,
-            "Radio station creation deposit (100 WSC)");
-        if (!coinResult.Success)
-        {
-            throw new BadRequestException(
-                $"Insufficient WiseCoins. You need {RadioStationWiseCoinDeposit} WSC to create a radio station. " +
-                $"Current balance: {coinResult.NewBalance} WSC. {coinResult.ErrorMessage}");
+            try
+            {
+                var coinResult = await _wiseCoin.SpendWSCAsync(
+                    creatorId, RadioStationWiseCoinDeposit, TransactionType.Purchase,
+                    "Radio station creation deposit (100 WSC)");
+                if (coinResult.Success)
+                {
+                    wiseCoinDeposited = RadioStationWiseCoinDeposit;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Optional creator station deposit skipped for user {CreatorId}", creatorId);
+            }
         }
 
         var normalized = await _frequencyIntegrity.NormalizeOrGenerateAvailableAsync(dto.Frequency, dto.Band, creatorId, null, cancellationToken);
@@ -103,23 +107,21 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             StreamUrl = null,
             StreamKey = null,
             CreatorId = creatorId,
-            // Station is gated until Stripe setup is also confirmed by the agent.
-            Status = RadioStationStatus.PendingApproval,
+            // Creator station launches immediately; monetization can be configured later.
+            Status = RadioStationStatus.Active,
             Visibility = visibility,
             AllowChat = dto.AllowChat,
             AllowRequests = dto.AllowRequests,
             AllowShoutouts = dto.AllowShoutouts,
             IsProprietaryFrequency = dto.ClaimProprietaryFrequency,
             FrequencyLockedAt = dto.ClaimProprietaryFrequency ? DateTime.UtcNow : null,
-            // Monetization (price already validated above)
-            IsMonetized = true,
-            SubscriptionPrice = dto.SubscriptionPrice,
+            IsMonetized = hasMonetizedPlan,
+            SubscriptionPrice = hasMonetizedPlan ? requestedPrice : null,
             AllowDonations = dto.AllowDonations,
             DonationLink = TrimOrNull(dto.DonationLink),
-            // Activation gate tracking
-            WiseCoinDeposited = RadioStationWiseCoinDeposit,
-            StripeSetupComplete = false,
-            ActivationGatedAt = DateTime.UtcNow,
+            WiseCoinDeposited = wiseCoinDeposited,
+            StripeSetupComplete = true,
+            ActivationGatedAt = null,
             // Extended metadata
             Settings = BuildSettingsJson(dto),
             CreatedAt = DateTime.UtcNow
@@ -138,7 +140,7 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
             await _frequencyIntegrity.ClaimProprietaryFrequencyAsync(station.Id, creatorId, station.Frequency, station.Band, station.FrequencyKey, cancellationToken);
         }
 
-        _logger.LogInformation("Radio station {StationId} created by {CreatorId} — PendingApproval (awaiting Stripe setup)", station.Id, creatorId);
+        _logger.LogInformation("Radio station {StationId} created by {CreatorId} with immediate activation", station.Id, creatorId);
         return await ToDtoAsync(station, creatorId, cancellationToken);
     }
 
@@ -695,9 +697,10 @@ public sealed class CreatorRadioStationService : ICreatorRadioStationService
     }
 
     private static bool ActivationCriteriaMet(CreatorRadioStation station) =>
-        station.SubscriptionPrice > 0
-        && station.WiseCoinDeposited >= RadioStationWiseCoinDeposit
-        && station.StripeSetupComplete;
+        station.Status == RadioStationStatus.Active
+        || (station.SubscriptionPrice > 0
+            && station.WiseCoinDeposited >= RadioStationWiseCoinDeposit
+            && station.StripeSetupComplete);
 
     private async Task<CreatorRadioStationDto> ToDtoAsync(CreatorRadioStation station, Guid userId, CancellationToken cancellationToken)
     {

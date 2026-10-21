@@ -4,6 +4,17 @@ import { Loader2, Lock, RefreshCw, CheckCircle, Mic, Music2, FileText, Tv2, Shar
 import { apiClient } from "@/api/client";
 
 const KARAOKE_PRICE = 4.99;
+const PAYWALL_BYPASS_TEAM_ROLES = new Set([
+  "owner",
+  "producer",
+  "host",
+  "editor",
+  "script-lead",
+  "creator",
+  "radio-station-creator",
+  "radiostation-creator",
+  "karaoke-creator",
+]);
 
 const DEMO_LINES = [
   { text: "🎵  We built this city on rock and roll 🎵", active: true  },
@@ -19,20 +30,36 @@ export default function KaraokePaywall({ children, currentUser, onAuthRequired }
 
   useEffect(() => {
     if (!currentUser) { setHasAccess(false); return; }
-    if (currentUser.isAdmin || currentUser.adminPassActive || currentUser.accessScope === "admin") {
+
+    const teamRole = String(currentUser.teamRole || currentUser.role || "").toLowerCase();
+    const hasBypassRole = currentUser.isAdmin
+      || currentUser.adminPassActive
+      || String(currentUser.accessScope || "").toLowerCase() === "admin"
+      || PAYWALL_BYPASS_TEAM_ROLES.has(teamRole);
+
+    if (hasBypassRole) {
       setHasAccess(true);
       return;
     }
-    apiClient.entities.KaraokePayment.filter(
-      { user_id: currentUser.id, status: { $in: ["active", "pending"] } },
-      { limit: 1 }
-    )
-      .then((res) => {
-        const items = res.items || [];
-        setHasAccess(items.length > 0 && items[0].status === "active");
+
+    Promise.allSettled([
+      apiClient.billing.getSubscription(),
+      apiClient.entities.KaraokePayment.filter(
+        { user_id: currentUser.id, status: { $in: ["active", "pending"] } },
+        { limit: 1 }
+      ),
+    ])
+      .then(([subscriptionResult, karaokeResult]) => {
+        const hasActiveSubscription = subscriptionResult.status === "fulfilled"
+          && Boolean(subscriptionResult.value?.hasActiveSubscription);
+        const items = karaokeResult.status === "fulfilled"
+          ? (karaokeResult.value?.items || [])
+          : [];
+        const hasKaraokePayment = items.length > 0 && items[0].status === "active";
+        setHasAccess(hasActiveSubscription || hasKaraokePayment);
       })
       .catch(() => setHasAccess(false));
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.teamRole, currentUser?.role, currentUser?.accessScope, currentUser?.isAdmin, currentUser?.adminPassActive]);
 
   // Animate demo lyrics line
   useEffect(() => {

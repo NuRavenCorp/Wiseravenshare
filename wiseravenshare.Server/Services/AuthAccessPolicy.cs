@@ -1,9 +1,23 @@
+using System.Security.Claims;
 using Microsoft.Extensions.Configuration;
 
 namespace Wiseravenshare.Server.Services;
 
 public static class AuthAccessPolicy
 {
+    private static readonly HashSet<string> CreatorBypassRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "owner",
+        "producer",
+        "host",
+        "editor",
+        "script-lead",
+        "creator",
+        "radio-station-creator",
+        "radiostation-creator",
+        "karaoke-creator"
+    };
+
     public static bool IsAdminLoginAllowed(string? email, IEnumerable<string>? configuredEmails)
     {
         if (string.IsNullOrWhiteSpace(email))
@@ -97,5 +111,61 @@ public static class AuthAccessPolicy
         }
 
         return !string.Equals(configured.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsAllAccessAdmin(ClaimsPrincipal? user)
+    {
+        if (user is null)
+        {
+            return false;
+        }
+
+        var accessScope = user.FindFirstValue("access_scope") ?? string.Empty;
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var adminPassClaim = user.FindFirstValue("admin_pass") ?? string.Empty;
+        if (string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var role = user.FindFirstValue(ClaimTypes.Role) ?? user.FindFirstValue("role") ?? string.Empty;
+        return string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool HasCreatorPaywallBypassRole(ClaimsPrincipal? user)
+    {
+        if (user is null)
+        {
+            return false;
+        }
+
+        var claims = user.Claims
+            .Where(claim =>
+                string.Equals(claim.Type, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, "teamRole", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, "team_role", StringComparison.OrdinalIgnoreCase))
+            .Select(claim => claim.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+
+        foreach (var claimValue in claims)
+        {
+            if (CreatorBypassRoles.Contains(claimValue.Trim()))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasPaywallBypassAccess(ClaimsPrincipal? user, IConfiguration? configuration)
+    {
+        return ArePaywallsBypassed(configuration)
+            || IsAllAccessAdmin(user)
+            || HasCreatorPaywallBypassRole(user);
     }
 }
