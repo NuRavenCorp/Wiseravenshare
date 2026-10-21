@@ -18,12 +18,14 @@ public class BillingController : ControllerBase
 {
     private readonly ISubscriptionService _subscriptionService;
     private readonly AppDbContext _db;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<BillingController> _logger;
 
-    public BillingController(ISubscriptionService subscriptionService, AppDbContext db, ILogger<BillingController> logger)
+    public BillingController(ISubscriptionService subscriptionService, AppDbContext db, IConfiguration configuration, ILogger<BillingController> logger)
     {
         _subscriptionService = subscriptionService;
         _db = db;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -90,18 +92,18 @@ public class BillingController : ControllerBase
     [ProducesResponseType(typeof(SubscriptionStatusDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSubscription()
     {
-        if (IsAllAccessAdmin())
+        if (AuthAccessPolicy.HasPaywallBypassAccess(User, _configuration))
         {
             var now = DateTime.UtcNow;
             return Ok(new SubscriptionStatusDto
             {
                 HasActiveSubscription = true,
-                Status = "admin_all_access",
-                PriceId = "admin-pass",
+                Status = "paywall_bypass",
+                PriceId = "bypass-pass",
                 CurrentPeriodEnd = now.AddYears(10),
                 CancelAtPeriodEnd = false,
-                StripeCustomerId = "admin-pass",
-                StripeSubscriptionId = "admin-pass"
+                StripeCustomerId = "bypass-pass",
+                StripeSubscriptionId = "bypass-pass"
             });
         }
 
@@ -129,7 +131,7 @@ public class BillingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetWebhookWorkflowStatus()
     {
-        if (!IsAllAccessAdmin())
+        if (!AuthAccessPolicy.IsAllAccessAdmin(User))
         {
             return Forbid();
         }
@@ -138,21 +140,9 @@ public class BillingController : ControllerBase
         return Ok(result);
     }
 
-    private bool IsAllAccessAdmin()
-    {
-        var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;
-        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
-        return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
-    }
-
     private async Task<IActionResult?> EnsureEmailVerifiedForPurchaseAsync()
     {
-        if (IsAllAccessAdmin())
+        if (AuthAccessPolicy.IsAllAccessAdmin(User))
         {
             return null;
         }

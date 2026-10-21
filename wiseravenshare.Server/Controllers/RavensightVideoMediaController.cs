@@ -25,8 +25,9 @@ public sealed class RavensightVideoMediaController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IMediaBlobSignatureService _signatureService;
+    private readonly IConfiguration _configuration;
 
-    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore, IHttpClientFactory httpClientFactory, IBlobStorageService blobStorageService, IMediaBlobSignatureService signatureService)
+    public RavensightVideoMediaController(IRavensightVideoService videoService, VideoLibraryStore videoLibraryStore, AppDbContext dbContext, ILogger<RavensightVideoMediaController> logger, RavensightMediaCatalogStore mediaCatalogStore, IHttpClientFactory httpClientFactory, IBlobStorageService blobStorageService, IMediaBlobSignatureService signatureService, IConfiguration configuration)
     {
         _videoService = videoService;
         _videoLibraryStore = videoLibraryStore;
@@ -36,6 +37,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
         _httpClientFactory = httpClientFactory;
         _blobStorageService = blobStorageService;
         _signatureService = signatureService;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -554,7 +556,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
 
     private async Task<bool> HasActiveSubscriptionAsync(Guid userId)
     {
-        if (IsAllAccessAdmin())
+        if (AuthAccessPolicy.HasPaywallBypassAccess(User, _configuration))
         {
             return true;
         }
@@ -577,18 +579,6 @@ public sealed class RavensightVideoMediaController : ControllerBase
         }
 
         return subscription.Status is "active" or "trialing" or "past_due";
-    }
-
-    private bool IsAllAccessAdmin()
-    {
-        var accessScope = User.FindFirstValue("access_scope") ?? string.Empty;
-        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var adminPassClaim = User.FindFirstValue("admin_pass") ?? string.Empty;
-        return string.Equals(adminPassClaim, "all-access", StringComparison.OrdinalIgnoreCase);
     }
 
     private static VideoLibraryVideo BuildFallbackVideo(Guid userId, SaveRavensightVideoDto dto, string mediaUrl, string resolvedStorageMode, bool hasActiveSubscription)
