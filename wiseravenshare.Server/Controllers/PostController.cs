@@ -51,18 +51,31 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> CreatePost([FromBody] CreatePostDto dto)
         {
-            if (User.Identity?.IsAuthenticated == true)
+            try
             {
-                var userId = await ResolveEffectiveUserIdAsync();
-                var post = await _postService.CreatePostAsync(userId, dto);
-                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-                return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
-            }
+                if (User.Identity?.IsAuthenticated == true)
+                {
+                    var userId = await ResolveEffectiveUserIdAsync();
+                    var post = await _postService.CreatePostAsync(userId, dto);
+                    await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                    return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
+                }
 
-            var fallbackUserId = Guid.NewGuid();
-            var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
-            await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-            return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+                var fallbackUserId = Guid.NewGuid();
+                var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Post creation failed due to persistence constraints.");
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error creating post.");
+                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Post could not be saved right now. Please try again." });
+            }
         }
 
         /// <summary>

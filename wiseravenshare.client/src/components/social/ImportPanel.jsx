@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Loader2, Check, RefreshCw } from "lucide-react";
 
 export default function ImportPanel() {
-  const [items, setItems] = useState({ facebook: [], instagram: [] });
+  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], bluesky: [] });
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -17,10 +17,16 @@ export default function ImportPanel() {
     setImported(null);
     try {
       const res = await apiClient.functions.invoke("SocialImport", { action: "fetch" });
-      setItems(res.data);
+      const data = res.data || {};
+      setItems({
+        facebook: data.facebook || [],
+        instagram: data.instagram || [],
+        tiktok: data.tiktok || [],
+        bluesky: data.bluesky || [],
+      });
       setSelected(new Set());
     } catch {
-      setItems({ facebook: [], instagram: [] });
+      setItems({ facebook: [], instagram: [], tiktok: [], bluesky: [] });
     } finally {
       setLoading(false);
     }
@@ -35,12 +41,17 @@ export default function ImportPanel() {
   };
 
   const handleImport = async () => {
-    const all = [...items.facebook, ...items.instagram];
+    const all = [...items.facebook, ...items.instagram, ...items.tiktok, ...items.bluesky];
     const chosen = all.filter((_, i) => selected.has(i));
     if (chosen.length === 0) return;
     setImporting(true);
     try {
-      const res = await apiClient.functions.invoke("SocialImport", { action: "import", items: chosen });
+      const importItems = chosen.map(item => ({
+        content: item.text || item.content || "",
+        post_type: item.mediaUrl ? "Image" : "Text",
+        media_uris: item.mediaUrl ? [item.mediaUrl] : null,
+      }));
+      const res = await apiClient.functions.invoke("SocialImport", { action: "import", items: importItems });
       setImported(res.data?.imported || 0);
       setSelected(new Set());
     } finally {
@@ -48,7 +59,12 @@ export default function ImportPanel() {
     }
   };
 
-  const allItems = [...items.facebook, ...items.instagram];
+  const allItems = [
+    ...items.facebook,
+    ...items.instagram,
+    ...items.tiktok,
+    ...items.bluesky,
+  ];
 
   return (
     <Card className="bg-card border-border">
@@ -75,9 +91,11 @@ export default function ImportPanel() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-medium text-accent uppercase">{item.platform}</span>
-                {item.page_name && <span className="text-xs text-muted-foreground">· {item.page_name}</span>}
+                {item.authorHandle && item.authorHandle !== "me" && (
+                  <span className="text-xs text-muted-foreground">· {item.authorHandle}</span>
+                )}
               </div>
-              <p className="text-sm text-foreground line-clamp-2">{item.content}</p>
+              <p className="text-sm text-foreground line-clamp-2">{item.text || item.content || "(no text)"}</p>
             </div>
           </div>
         ))}

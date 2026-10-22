@@ -116,7 +116,7 @@ public class PostService : IPostService
 
         if (user == null)
         {
-            var fallbackUsername = $"localuser-{userId.ToString("N")[..12]}";
+            var fallbackUsername = $"localuser-{userId:N}";
             user = new User
             {
                 Id = userId,
@@ -127,17 +127,10 @@ public class PostService : IPostService
                 IsActive = true,
                 TruthScore = 50.00m
             };
-
-            try
-            {
-                await _userRepository.AddAsync(user);
-                _logger.LogInformation("Auto-provisioned fallback user {UserId} during post creation.", userId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to auto-provision fallback user {UserId} during post creation.", userId);
-            }
         }
+
+        userId = await EnsurePersistedUserForPostAsync(userId, user);
+        user.Id = userId;
 
         // Create post
         var mediaUrls = NormalizeMediaUrls(dto);
@@ -190,7 +183,7 @@ public class PostService : IPostService
         var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
         post.Id = createdPostId;
 
-        await _postRepository.AddAsync(post);
+        await PersistPostStrictAsync(post, user);
         _logger.LogInformation("Post created by user {UserId}", userId);
         DispatchSocialPublish(post);
         DispatchCrossPlatformPublish(post);
@@ -261,6 +254,122 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Post could not be reloaded after creation for user {UserId}; returning the local fallback DTO.", userId);
             return BuildPostDto(post, user);
         }
+    }
+
+    private async Task PersistPostStrictAsync(Post post, User user)
+    {
+        try
+        {
+            await _postRepository.AddAsync(post);
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Initial post persistence failed for user {UserId}. Retrying after user reconciliation.", post.UserId);
+        }
+
+        var reconciledUserId = await EnsurePersistedUserForPostAsync(post.UserId, user);
+        post.UserId = reconciledUserId;
+
+        try
+        {
+            await _postRepository.AddAsync(post);
+        }
+        catch (Exception retryEx)
+        {
+            _logger.LogError(retryEx, "Post persistence failed after retry for user {UserId}.", post.UserId);
+            throw new InvalidOperationException("Post could not be saved. Please try again.");
+        }
+    }
+
+    private async Task<Guid> EnsurePersistedUserForPostAsync(Guid requestedUserId, User candidate)
+    {
+        try
+        {
+            var byId = await _userRepository.GetByIdAsync(requestedUserId);
+            if (byId is not null)
+            {
+                return byId.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "User lookup by id failed during post persistence for {UserId}.", requestedUserId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.Email))
+        {
+            try
+            {
+                var byEmail = await _userRepository.GetByEmailAsync(candidate.Email);
+                if (byEmail is not null)
+                {
+                    return byEmail.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "User lookup by email failed during post persistence for {Email}.", candidate.Email);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.Username))
+        {
+            try
+            {
+                var byUsername = await _userRepository.GetByUsernameAsync(candidate.Username);
+                if (byUsername is not null)
+                {
+                    return byUsername.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "User lookup by username failed during post persistence for {Username}.", candidate.Username);
+            }
+        }
+
+        try
+        {
+            var created = await _userRepository.AddAsync(new User
+            {
+                Id = requestedUserId,
+                Email = candidate.Email,
+                Username = candidate.Username,
+                DisplayName = string.IsNullOrWhiteSpace(candidate.DisplayName) ? candidate.Username : candidate.DisplayName,
+                PasswordHash = string.IsNullOrWhiteSpace(candidate.PasswordHash) ? string.Empty : candidate.PasswordHash,
+                IsActive = true,
+                Role = candidate.Role,
+                TruthScore = candidate.TruthScore
+            });
+
+            _logger.LogInformation("Auto-provisioned missing user {UserId} for post persistence.", created.Id);
+            return created.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Auto-provisioning user failed for post persistence; attempting final reconciliation.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.Email))
+        {
+            var byEmail = await _userRepository.GetByEmailAsync(candidate.Email);
+            if (byEmail is not null)
+            {
+                return byEmail.Id;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.Username))
+        {
+            var byUsername = await _userRepository.GetByUsernameAsync(candidate.Username);
+            if (byUsername is not null)
+            {
+                return byUsername.Id;
+            }
+        }
+
+        throw new InvalidOperationException("User profile could not be resolved for post publishing.");
     }
 
     /// <summary>
