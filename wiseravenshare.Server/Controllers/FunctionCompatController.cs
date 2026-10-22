@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using WiseRavenShare.Server.Application.Services.Assistant;
 using Wiseravenshare.Server.DTOs.Collaboration;
 using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Entities;
@@ -50,6 +51,7 @@ public sealed class FunctionCompatController : ControllerBase
     private readonly RavensightMediaCatalogStore _mediaCatalogStore;
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly IMediaBlobSignatureService _signatureService;
+    private readonly ISpeechToTextService _speechToTextService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<FunctionCompatController> _logger;
 
@@ -72,6 +74,7 @@ public sealed class FunctionCompatController : ControllerBase
         RavensightMediaCatalogStore mediaCatalogStore,
         VideoLibraryStore videoLibraryStore,
         IMediaBlobSignatureService signatureService,
+        ISpeechToTextService speechToTextService,
         IConfiguration configuration,
         ILogger<FunctionCompatController> logger)
     {
@@ -93,6 +96,7 @@ public sealed class FunctionCompatController : ControllerBase
         _mediaCatalogStore = mediaCatalogStore;
         _videoLibraryStore = videoLibraryStore;
         _signatureService = signatureService;
+        _speechToTextService = speechToTextService;
         _configuration = configuration;
         _logger = logger;
     }
@@ -123,6 +127,42 @@ public sealed class FunctionCompatController : ControllerBase
             error = "Karaoke checkout is not implemented.",
             message = "Contact support to enable karaoke access."
         });
+    }
+
+    [HttpPost("transcribe-local-file")]
+    [HttpPost("TranscribeLocalFile")]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> TranscribeLocalFile(CancellationToken cancellationToken)
+    {
+        if (!Request.HasFormContentType)
+        {
+            return BadRequest(new { message = "multipart/form-data is required." });
+        }
+
+        var form = await Request.ReadFormAsync(cancellationToken);
+        var audio = form.Files.GetFile("audio")
+            ?? form.Files.GetFile("file")
+            ?? form.Files.FirstOrDefault();
+
+        if (audio is null || audio.Length == 0)
+        {
+            return BadRequest(new { message = "Audio file required." });
+        }
+
+        using var stream = audio.OpenReadStream();
+        try
+        {
+            var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
+                ? "application/octet-stream"
+                : audio.ContentType;
+            var result = await _speechToTextService.TranscribeAsync(stream, contentType, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Direct local transcription failed for {FileName}.", audio.FileName);
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("cloud-media-transfer")]
