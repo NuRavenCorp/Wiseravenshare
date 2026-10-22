@@ -81,7 +81,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             var userPostSignals = BuildUserPostSignals(ctx, post, postTopics);
             var acquaintanceSignals = BuildAcquaintanceSignals(ctx, post.UserId, mutualConnectionsByAuthor);
             var qualitySignals = BuildQualitySignals(post, postTopics, completionCountByPost, nowUtc, candidates.TrendingTopics);
-            var interestSignals = BuildInterestSignals(ctx, post, postTopics, postVector);
+            var interestSignals = BuildInterestSignals(ctx, post, postTopics, postVector, nowUtc);
 
             var predictions = Predict(userPostSignals, acquaintanceSignals, qualitySignals, interestSignals);
             var isOld = post.CreatedAt < nowUtc.AddDays(-7);
@@ -111,13 +111,15 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             rankedNew = EnsureRecentAuthorVisibility(rankedNew, userId, nowUtc);
         }
 
+        // Implicit fatigue circuit breaker: dynamically raises threshold from 0.45 to 0.70
+        var resurfacingThreshold = ctx.Fatigue.Threshold;
         var rankedOld = scoredOld
-            .Where(item => item.ResurfacingScore >= 0.45d && item.NegativeRisk < 0.85d)
+            .Where(item => item.ResurfacingScore >= resurfacingThreshold && item.NegativeRisk < 0.85d)
             .OrderByDescending(item => item.ResurfacingScore)
             .ThenByDescending(item => item.Post.CreatedAt)
             .ToList();
 
-        var merged = ApplyResurfacing(rankedNew, rankedOld);
+        var merged = ApplyResurfacing(rankedNew, rankedOld, ctx.Fatigue);
         var diversified = ApplyDiversity(merged);
 
         return diversified
@@ -185,6 +187,14 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .Select(e => e.TargetId!.Value)
             .ToHashSet();
 
+        var skippedPostIds = interactionEvents
+            .Where(e =>
+                e.TargetId.HasValue &&
+                e.TargetType == "post" &&
+                (e.Type == InteractionEventType.Skip || (e.DurationSeconds.HasValue && e.DurationSeconds.Value <= 2)))
+            .Select(e => e.TargetId!.Value)
+            .ToHashSet();
+
         var hiddenAuthorIds = interactionEvents
             .Where(e =>
                 e.TargetId.HasValue &&
@@ -198,8 +208,24 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .Where(e => e.CreatedAt < nowUtc.AddDays(-21) && e.CreatedAt >= nowUtc.AddDays(-180))
             .ToList();
 
+        var actualDwellSecondsByPost = interactionEvents
+            .Where(e => e.TargetType == "post" && e.TargetId.HasValue && e.DurationSeconds.HasValue)
+            .GroupBy(e => e.TargetId!.Value)
+            .ToDictionary(g => g.Key, g => (double)g.Average(e => e.DurationSeconds!.Value));
+
+        var actualCompletionByPost = interactionEvents
+            .Where(e => e.TargetType == "post" && e.TargetId.HasValue)
+            .GroupBy(e => e.TargetId!.Value)
+            .ToDictionary(g => g.Key, g => (double)g.Count(e => e.Type == InteractionEventType.Complete) / Math.Max(1, g.Count()));
+
+        var authorDwellCounts = interactionEvents
+            .Where(e => e.TargetType == "post" && e.TargetId.HasValue && e.DurationSeconds.GetValueOrDefault() >= 10)
+            .GroupBy(e => e.TargetId!.Value)
+            .ToDictionary(g => g.Key, g => g.Count());
+
         var currentInterestVector = BuildInterestVector(currentEvents);
         var historicalInterestVector = BuildInterestVector(historicalEvents);
+        var preferenceClusters = BuildPreferenceClusters(currentInterestVector);
         var formatPreference = BuildFormatPreference(interactionEvents);
         var topicDwellSeconds = BuildTopicAverageDuration(currentEvents);
         var topicCompletionRate = BuildTopicCompletionRate(currentEvents);
@@ -222,6 +248,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .GroupBy(row => row.AuthorId)
             .ToDictionary(group => group.Key, group => group.Max(row => row.Timestamp));
 
+        var fatigueState = DetectResurfacingFatigue(interactionEvents, nowUtc);
         var trendingTopics = await ResolveTrendingTopicsAsync(nowUtc, cancellationToken);
 
         return new ViewerContext(
@@ -233,9 +260,11 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             commentedPostIds,
             viewedPostIds,
             dismissedPostIds,
+            skippedPostIds,
             hiddenAuthorIds,
             currentInterestVector,
             historicalInterestVector,
+            preferenceClusters,
             formatPreference,
             topicDwellSeconds,
             topicCompletionRate,
@@ -244,6 +273,10 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             priorInteractions14d,
             interactionFrequency30d,
             lastInteractionUtc,
+            actualDwellSecondsByPost,
+            actualCompletionByPost,
+            authorDwellCounts,
+            fatigueState,
             trendingTopics);
     }
 
@@ -316,10 +349,16 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
                 continue;
             }
 
-            if (InterestDriftTrigger(post, ctx)
+            // Trigger A: Interest drift with counterfactual debiasing
+            // Trigger B: Velocity surge (comment velocity weighted over likes)
+            // Trigger C: Topic trending trigger
+            // Trigger D: Acquaintance growth / behavioral coupling
+            // Trigger E: Implicit session imputation (unrecorded high-dwell engagement)
+            if (InterestDriftTrigger(post, ctx, nowUtc)
                 || ExternalEngagementSurge(post, nowUtc)
                 || TopicTrendingTrigger(post, ctx.TrendingTopics)
-                || AcquaintanceGrowthTrigger(post.UserId, ctx))
+                || AcquaintanceGrowthTrigger(post.UserId, ctx)
+                || SessionImputationTrigger(post, ctx))
             {
                 oldCandidates.Add(post);
             }
@@ -333,14 +372,30 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
     private UserPostSignals BuildUserPostSignals(ViewerContext ctx, Post post, IReadOnlyCollection<string> postTopics)
     {
-        var dwell = postTopics.Count == 0
-            ? 0d
-            : postTopics.Select(topic => ctx.TopicDwellSeconds.GetValueOrDefault(topic, 0d)).DefaultIfEmpty(0d).Average();
-        var dwellNorm = Clamp01(dwell / 120d);
+        var expectedDwell = postTopics.Count == 0
+            ? 15d
+            : postTopics.Select(topic => ctx.TopicDwellSeconds.GetValueOrDefault(topic, 15d)).DefaultIfEmpty(15d).Average();
+        var expectedDwellNorm = Clamp01(expectedDwell / 120d);
 
-        var completion = postTopics.Count == 0
-            ? 0d
-            : postTopics.Select(topic => ctx.TopicCompletionRate.GetValueOrDefault(topic, 0d)).DefaultIfEmpty(0d).Average();
+        var expectedCompletion = postTopics.Count == 0
+            ? 0.25d
+            : postTopics.Select(topic => ctx.TopicCompletionRate.GetValueOrDefault(topic, 0.25d)).DefaultIfEmpty(0.25d).Average();
+
+        var actualDwell = ctx.ActualDwellSecondsByPost.GetValueOrDefault(post.Id, 0d);
+        var actualCompletion = ctx.ActualCompletionByPost.GetValueOrDefault(post.Id, 0d);
+
+        // Implicit residuals = actual behavior - expected behavior
+        var dwellResidual = actualDwell - expectedDwell;
+        var completionResidual = actualCompletion - expectedCompletion;
+
+        // Silent interest: user quietly dwelled and completed well beyond expected, without clicking like
+        var silentInterest = actualDwell > Math.Max(12d, expectedDwell * 1.5d)
+            && actualCompletion > Math.Max(0.5d, expectedCompletion * 1.2d)
+            && !ctx.LikedPostIds.Contains(post.Id);
+
+        // Silent aversion: user quickly skipped or dwelled far below expected, without explicitly hiding
+        var silentAversion = ((actualDwell > 0 && actualDwell < expectedDwell * 0.3d) || ctx.SkippedPostIds.Contains(post.Id))
+            && !ctx.DismissedPostIds.Contains(post.Id);
 
         var viewedWithoutInteraction = ctx.ViewedPostIds.Contains(post.Id)
             && !ctx.LikedPostIds.Contains(post.Id)
@@ -352,11 +407,15 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             ctx.LikedPostIds.Contains(post.Id),
             ctx.CommentedPostIds.Contains(post.Id),
             ctx.RepostedPostIds.Contains(post.Id),
-            dwellNorm,
-            Clamp01(completion),
+            expectedDwellNorm,
+            Clamp01(expectedCompletion),
             viewedWithoutInteraction,
             ctx.DismissedPostIds.Contains(post.Id),
-            ctx.HiddenAuthorIds.Contains(post.UserId));
+            ctx.HiddenAuthorIds.Contains(post.UserId),
+            dwellResidual,
+            completionResidual,
+            silentInterest,
+            silentAversion);
     }
 
     private AcquaintanceSignals BuildAcquaintanceSignals(
@@ -364,6 +423,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         Guid authorId,
         IReadOnlyDictionary<Guid, int> mutualConnectionsByAuthor)
     {
+        var (implicitScore, isSilentFollower) = ComputeImplicitAcquaintance(authorId, ctx, mutualConnectionsByAuthor);
         var interactionFrequency30d = Clamp01(ctx.InteractionFrequency30d.GetValueOrDefault(authorId, 0) / 20d);
         var mutualConnections = Clamp01(mutualConnectionsByAuthor.GetValueOrDefault(authorId, 0) / 25d);
         var seenFromAuthor = Math.Max(1, ctx.InteractionFrequency30d.GetValueOrDefault(authorId, 0) + 2);
@@ -372,20 +432,14 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         var recencyDays = ctx.LastAuthorInteractionUtc.TryGetValue(authorId, out var lastSeen)
             ? Math.Max(0d, (DateTime.UtcNow - lastSeen).TotalDays)
             : 365d;
-        var recencySignal = 1d - Clamp01(recencyDays / 90d);
-
-        var acquaintanceScore =
-            interactionFrequency30d * 0.4d +
-            mutualConnections * 0.2d +
-            contentConsumptionRatio * 0.2d +
-            recencySignal * 0.2d;
 
         return new AcquaintanceSignals(
             interactionFrequency30d,
             mutualConnections,
             contentConsumptionRatio,
             recencyDays,
-            Clamp01(acquaintanceScore));
+            implicitScore,
+            isSilentFollower);
     }
 
     private static QualitySignals BuildQualitySignals(
@@ -419,9 +473,20 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         ViewerContext ctx,
         Post post,
         IReadOnlyCollection<string> postTopics,
-        IReadOnlyDictionary<string, double> postVector)
+        IReadOnlyDictionary<string, double> postVector,
+        DateTime nowUtc)
     {
-        var cosine = CosineSimilarity(ctx.CurrentInterestVector, postVector);
+        // 1. Monolithic cosine similarity
+        var monolithicCosine = CosineSimilarity(ctx.CurrentInterestVector, postVector);
+
+        // 2. Heterogeneous preference score (80th percentile across topic sub-clusters)
+        var heterogeneousCosine = ComputeHeterogeneousScore(ctx.PreferenceClusters, postVector);
+
+        // 3. Counterfactual debiasing for observed interaction vs exposure propensity
+        var observed = monolithicCosine;
+        var contentEstimate = heterogeneousCosine > 0 ? heterogeneousCosine : monolithicCosine;
+        var debiasedCosine = ComputeCounterfactualInterest(post, ctx, observed, contentEstimate, nowUtc);
+
         var topicAffinity = postTopics.Count == 0
             ? 0d
             : postTopics.Select(topic => ctx.TopicAffinity.GetValueOrDefault(topic, 0d)).DefaultIfEmpty(0d).Average();
@@ -429,7 +494,8 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         var formatPref = ctx.FormatPreference.GetValueOrDefault(post.Type, 0.2d);
 
         return new InterestSignals(
-            Clamp01(cosine),
+            Clamp01(debiasedCosine),
+            Clamp01(heterogeneousCosine),
             Clamp01(topicAffinity),
             Clamp01(formatPref));
     }
@@ -440,15 +506,19 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         QualitySignals quality,
         InterestSignals interest)
     {
-        var willLike = Clamp01(interest.InterestCosineSimilarity * 0.6d + acquaintance.InteractionFrequency30d * 0.4d);
-        var willComment = Clamp01(userPost.UserDwellTimeOnSimilar * 0.3d + quality.CommentDepth * 0.5d + interest.TopicAffinity * 0.2d);
-        var willShare = Clamp01(quality.CompletionRateGlobal * 0.4d + (userPost.UserSharedBefore ? 0.3d : 0d) + quality.GlobalEngagementRate * 0.2d);
-        var dwellSeconds = Math.Max(0d, userPost.UserDwellTimeOnSimilar * 90d + quality.CompletionRateGlobal * 30d);
-        var meaningful = Clamp01(interest.TopicAffinity * 0.5d + (userPost.UserViewedButNotInteracted ? 0d : 0.2d) + interest.FormatPreference * 0.2d);
+        // Incorporate silent interest: positive residual boosts predicted like/meaningful
+        var silentBoost = userPost.SilentInterest ? 0.25d : 0d;
+        var silentAversionPenalty = userPost.SilentAversion ? 0.35d : 0d;
+
+        var willLike = Clamp01(interest.InterestCosineSimilarity * 0.55d + acquaintance.InteractionFrequency30d * 0.30d + silentBoost);
+        var willComment = Clamp01(userPost.UserDwellTimeOnSimilar * 0.25d + quality.CommentDepth * 0.45d + interest.TopicAffinity * 0.20d + (userPost.SilentInterest ? 0.15d : 0d));
+        var willShare = Clamp01(quality.CompletionRateGlobal * 0.40d + (userPost.UserSharedBefore ? 0.30d : 0d) + quality.GlobalEngagementRate * 0.20d);
+        var dwellSeconds = Math.Max(0d, userPost.UserDwellTimeOnSimilar * 90d + quality.CompletionRateGlobal * 30d + (userPost.SilentInterest ? 25d : 0d));
+        var meaningful = Clamp01(interest.HeterogeneousCosineSimilarity * 0.45d + interest.TopicAffinity * 0.30d + (acquaintance.IsSilentFollower ? 0.15d : 0d) + interest.FormatPreference * 0.10d + silentBoost);
 
         var hideOrReport = userPost.UserMarkedNotInterested || userPost.UserHiddenAuthor
             ? 1d
-            : Clamp01((userPost.UserViewedButNotInteracted ? 0.1d : 0.02d) + (1d - quality.RecencyDecay) * 0.05d);
+            : Clamp01((userPost.UserViewedButNotInteracted ? 0.08d : 0.02d) + (1d - quality.RecencyDecay) * 0.05d + silentAversionPenalty);
 
         return new PredictionSignals(
             willLike,
@@ -457,23 +527,23 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             dwellSeconds,
             meaningful,
             hideOrReport,
-            interest.InterestCosineSimilarity,
+            interest.HeterogeneousCosineSimilarity,
             acquaintance.AcquaintanceScore);
     }
 
     private static double ComputeFeedScore(PredictionSignals preds, QualitySignals quality, bool isOld)
     {
         var baseScore =
-            preds.WillFindMeaningful * 0.28d +
+            preds.WillFindMeaningful * 0.30d +
             Clamp01(preds.PredictedDwellTimeSeconds / 120d) * 0.22d +
-            preds.WillLike * 0.15d +
+            preds.WillLike * 0.14d +
             preds.WillComment * 0.12d +
             preds.WillShare * 0.08d +
-            quality.CompletionRateGlobal * 0.08d +
+            quality.CompletionRateGlobal * 0.07d +
             preds.AcquaintanceScore * 0.07d;
 
         var agePenalty = isOld ? RecencyPenalty(quality.AgeDays) * 0.12d : 0d;
-        var negative = preds.WillHideOrReport * 0.8d + agePenalty;
+        var negative = preds.WillHideOrReport * 0.85d + agePenalty;
         return Math.Max(0d, baseScore - negative);
     }
 
@@ -497,10 +567,10 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
     {
         var positive =
             preds.WillFindMeaningful * 0.35d +
-            preds.WillLike * 0.20d +
-            preds.WillComment * 0.15d +
+            preds.WillLike * 0.18d +
+            preds.WillComment * 0.16d +
             Math.Min(preds.PredictedDwellTimeSeconds / 60d, 1d) * 0.20d +
-            preds.InterestCosineSimilarity * 0.10d;
+            preds.InterestCosineSimilarity * 0.11d;
 
         var ageDays = Math.Max(0d, (nowUtc - post.CreatedAt).TotalDays);
         var negative =
@@ -511,14 +581,22 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return Math.Max(0d, positive - negative + acquaintanceBonus);
     }
 
-    private static List<Post> ApplyResurfacing(IReadOnlyList<Post> rankedNewPosts, IReadOnlyList<ScoredPost> rankedOldPosts)
+    private static List<Post> ApplyResurfacing(IReadOnlyList<Post> rankedNewPosts, IReadOnlyList<ScoredPost> rankedOldPosts, FatigueState fatigue)
     {
+        // Severe implicit fatigue: automatic circuit breaker kicks in and skips older content
+        if (fatigue.IsFatigued && fatigue.Score > 0.80d)
+        {
+            return rankedNewPosts.ToList();
+        }
+
         if (rankedNewPosts.Count == 0)
         {
             return rankedOldPosts.Select(item => item.Post).Take(20).ToList();
         }
 
-        var result = new List<Post>(rankedNewPosts.Count + Math.Max(1, rankedNewPosts.Count / 5));
+        // Adaptive cadence: 1 per 10 when fatigued, 1 per 5 normally
+        var cadence = fatigue.IsFatigued ? 10 : 5;
+        var result = new List<Post>(rankedNewPosts.Count + Math.Max(1, rankedNewPosts.Count / cadence));
         var oldQueue = rankedOldPosts.ToList();
         var oldIndex = 0;
         Guid? lastOldAuthor = null;
@@ -532,7 +610,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
                 result.Add(post);
             }
 
-            if ((i + 1) % 5 != 0 || oldIndex >= oldQueue.Count)
+            if ((i + 1) % cadence != 0 || oldIndex >= oldQueue.Count)
             {
                 continue;
             }
@@ -626,7 +704,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return result;
     }
 
-    private bool InterestDriftTrigger(Post post, ViewerContext ctx)
+    private bool InterestDriftTrigger(Post post, ViewerContext ctx, DateTime nowUtc)
     {
         var topics = ExtractTopics(post);
         if (topics.Count == 0)
@@ -637,7 +715,10 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         var vector = ToUnitVector(topics);
         var current = CosineSimilarity(ctx.CurrentInterestVector, vector);
         var historical = CosineSimilarity(ctx.HistoricalInterestVector, vector);
-        return current >= 0.18d && (current - historical) >= 0.05d;
+
+        // Counterfactually debias the current interest estimate to avoid MNAR
+        var debiased = ComputeCounterfactualInterest(post, ctx, current, current, nowUtc);
+        return debiased >= 0.16d && (debiased - historical) >= 0.04d;
     }
 
     private static bool ExternalEngagementSurge(Post post, DateTime nowUtc)
@@ -647,9 +728,14 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             return false;
         }
 
-        var interactions = post.LikesCount + post.CommentsCount + post.RepostsCount + post.SharesCount;
-        var rate = interactions / Math.Max(20d, post.ViewsCount);
-        return interactions >= 8 && rate >= 0.08d;
+        // Empirical refinement: comment velocity indicates active discussion, while likes are passive.
+        // Weight comment velocity 2.5x higher than like velocity.
+        var commentVelocity = post.CommentsCount;
+        var likeVelocity = post.LikesCount;
+        var weightedSurge = (commentVelocity * 2.5d) + (likeVelocity * 1.0d) + (post.RepostsCount * 1.5d) + (post.SharesCount * 2.0d);
+        var rate = weightedSurge / Math.Max(20d, post.ViewsCount);
+
+        return (commentVelocity >= 3 || weightedSurge >= 12d) && rate >= 0.08d;
     }
 
     private bool TopicTrendingTrigger(Post post, IReadOnlyCollection<string> trendingTopics)
@@ -668,7 +754,191 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
     {
         var recent = ctx.RecentInteractions14d.GetValueOrDefault(authorId, 0);
         var prior = ctx.PriorInteractions14d.GetValueOrDefault(authorId, 0);
-        return recent >= 3 || (recent - prior) >= 2;
+        var dwellCount = ctx.AuthorDwellCounts.GetValueOrDefault(authorId, 0);
+
+        // Either explicit growth or implicit dwell coupling (> 3 recent dwell sessions)
+        return recent >= 3 || (recent - prior) >= 2 || dwellCount >= 4;
+    }
+
+    private static bool SessionImputationTrigger(Post post, ViewerContext ctx)
+    {
+        // Trigger E: If user dwelled significantly on this post in a recent session (> 25s)
+        // without recording an explicit like/comment, impute it as a high-intent unrecorded candidate.
+        if (ctx.ActualDwellSecondsByPost.TryGetValue(post.Id, out var dwell) && dwell >= 25d)
+        {
+            if (!ctx.LikedPostIds.Contains(post.Id) && !ctx.CommentedPostIds.Contains(post.Id))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static double EstimateExposurePropensity(Post post, ViewerContext ctx, DateTime nowUtc)
+    {
+        var propensity = 0.50d;
+
+        if (ctx.FollowingIds.Contains(post.UserId))
+        {
+            propensity += 0.25d;
+        }
+        else
+        {
+            propensity -= 0.15d;
+        }
+
+        // Off-peak posting time (01:00 to 06:00 UTC) has lower organic discovery
+        var postHour = post.CreatedAt.Hour;
+        if (postHour >= 1 && postHour <= 6)
+        {
+            propensity *= 0.75d;
+        }
+
+        if (post.ViewsCount > 100)
+        {
+            propensity += 0.15d;
+        }
+        else if (post.ViewsCount < 10)
+        {
+            propensity -= 0.15d;
+        }
+
+        return Math.Clamp(propensity, 0.05d, 0.95d);
+    }
+
+    public static double ComputeCounterfactualInterest(Post post, ViewerContext ctx, double observedInteraction, double contentEstimate, DateTime nowUtc)
+    {
+        var propensity = EstimateExposurePropensity(post, ctx, nowUtc);
+        if (propensity < 0.30d)
+        {
+            // Low exposure propensity: absence of interaction is uninformative (MNAR).
+            // Back off heavily to content-based similarity.
+            return 0.40d * observedInteraction + 0.60d * contentEstimate;
+        }
+
+        // Sufficient exposure propensity: observed interaction is trustworthy; apply inverse probability weighting.
+        return Math.Clamp(observedInteraction / Math.Max(propensity, 0.10d), 0d, 1d);
+    }
+
+    public static (double Score, bool IsSilentFollower) ComputeImplicitAcquaintance(
+        Guid authorId,
+        ViewerContext ctx,
+        IReadOnlyDictionary<Guid, int> mutualConnectionsByAuthor)
+    {
+        var dwellCount = ctx.AuthorDwellCounts.GetValueOrDefault(authorId, 0);
+        var hasExplicitFollow = ctx.FollowingIds.Contains(authorId);
+        var hasExplicitInteraction = ctx.InteractionFrequency30d.GetValueOrDefault(authorId, 0) > 0;
+
+        // Silent follow: viewer frequently dwells on author's posts (> 3 dwell sessions) with 0 explicit follow/like
+        var isSilentFollower = dwellCount >= 3 && !hasExplicitFollow && !hasExplicitInteraction;
+        var silentFollowWeight = isSilentFollower ? 1.0d : 0.0d;
+
+        var interactionFrequency = Clamp01(ctx.InteractionFrequency30d.GetValueOrDefault(authorId, 0) / 20d);
+        var mutualConnections = Clamp01(mutualConnectionsByAuthor.GetValueOrDefault(authorId, 0) / 25d);
+
+        var recencyDays = ctx.LastAuthorInteractionUtc.TryGetValue(authorId, out var lastSeen)
+            ? Math.Max(0d, (DateTime.UtcNow - lastSeen).TotalDays)
+            : 365d;
+        var recencySignal = 1d - Clamp01(recencyDays / 90d);
+
+        // Behavioral coupling score:
+        // 0.35 * explicit interaction + 0.25 * mutual connections + 0.20 * recency + 0.20 * silent follow
+        var score = interactionFrequency * 0.35d +
+                    mutualConnections * 0.25d +
+                    recencySignal * 0.20d +
+                    silentFollowWeight * 0.20d;
+
+        return (Clamp01(score), isSilentFollower);
+    }
+
+    public static FatigueState DetectResurfacingFatigue(IEnumerable<UserInteractionEvent> interactionEvents, DateTime nowUtc)
+    {
+        var olderPostEvents = interactionEvents
+            .Where(e => e.CreatedAt >= nowUtc.AddDays(-7) && e.TargetType == "post" && e.DurationSeconds.HasValue)
+            .OrderBy(e => e.CreatedAt)
+            .ToList();
+
+        if (olderPostEvents.Count < 4)
+        {
+            return new FatigueState(false, 0d, 0.45d);
+        }
+
+        var dwells = olderPostEvents.Select(e => (double)e.DurationSeconds!.Value).ToList();
+        var skips = olderPostEvents.Count(e => e.DurationSeconds!.Value <= 2 || e.Type == InteractionEventType.Skip);
+        var skipRate = skips / (double)olderPostEvents.Count;
+
+        // Linear regression slope of dwell times
+        var n = dwells.Count;
+        var sumX = 0d;
+        var sumY = 0d;
+        var sumXy = 0d;
+        var sumX2 = 0d;
+        for (var i = 0; i < n; i++)
+        {
+            sumX += i;
+            sumY += dwells[i];
+            sumXy += i * dwells[i];
+            sumX2 += i * i;
+        }
+
+        var denominator = n * sumX2 - sumX * sumX;
+        var slope = Math.Abs(denominator) > 0.0001d ? (n * sumXy - sumX * sumY) / denominator : 0d;
+
+        // Negative slope means dwell times are dropping over consecutive exposures
+        var negativeSlope = Math.Max(0d, -slope / 10d);
+        var fatigueScore = Math.Clamp(negativeSlope * 0.45d + skipRate * 0.55d, 0d, 1d);
+
+        var isFatigued = fatigueScore > 0.55d;
+        var threshold = isFatigued ? 0.70d : 0.45d;
+
+        return new FatigueState(isFatigued, fatigueScore, threshold);
+    }
+
+    public static List<Dictionary<string, double>> BuildPreferenceClusters(Dictionary<string, double> interestVector)
+    {
+        if (interestVector.Count == 0)
+        {
+            return new List<Dictionary<string, double>>();
+        }
+
+        // Partition user's interest topics into up to 4 clusters (chunked by priority)
+        var sorted = interestVector
+            .OrderByDescending(p => p.Value)
+            .ToList();
+
+        var clusters = new List<Dictionary<string, double>>();
+        const int chunkSize = 5;
+        for (var i = 0; i < sorted.Count && clusters.Count < 4; i += chunkSize)
+        {
+            var cluster = sorted
+                .Skip(i)
+                .Take(chunkSize)
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            clusters.Add(cluster);
+        }
+
+        return clusters;
+    }
+
+    public static double ComputeHeterogeneousScore(
+        IReadOnlyList<Dictionary<string, double>> clusters,
+        IReadOnlyDictionary<string, double> postVector)
+    {
+        if (clusters.Count == 0 || postVector.Count == 0)
+        {
+            return 0d;
+        }
+
+        var scores = new List<double>(clusters.Count);
+        foreach (var cluster in clusters)
+        {
+            scores.Add(CosineSimilarity(cluster, postVector));
+        }
+
+        scores.Sort();
+        // 80th percentile: index = ceil(0.8 * count) - 1
+        var p80Index = Math.Min(scores.Count - 1, (int)Math.Ceiling(scores.Count * 0.8d) - 1);
+        return scores[p80Index];
     }
 
     private async Task<List<AuthorInteractionRow>> BuildAuthorInteractionRowsAsync(Guid userId, DateTime nowUtc, CancellationToken cancellationToken)
@@ -940,7 +1210,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return keys.ToDictionary(key => key, _ => value, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static double CosineSimilarity(
+    public static double CosineSimilarity(
         IReadOnlyDictionary<string, double> userVector,
         IReadOnlyDictionary<string, double> postVector)
     {
@@ -991,12 +1261,14 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return value;
     }
 
+    public sealed record FatigueState(bool IsFatigued, double Score, double Threshold);
+
     private sealed record CandidateSet(
         List<Post> NewPosts,
         List<Post> OldPosts,
         IReadOnlyList<string> TrendingTopics);
 
-    private sealed record ViewerContext(
+    public sealed record ViewerContext(
         HashSet<Guid> FollowingIds,
         HashSet<Guid> BlockedAuthorIds,
         HashSet<Guid> LikedPostIds,
@@ -1005,9 +1277,11 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         HashSet<Guid> CommentedPostIds,
         HashSet<Guid> ViewedPostIds,
         HashSet<Guid> DismissedPostIds,
+        HashSet<Guid> SkippedPostIds,
         HashSet<Guid> HiddenAuthorIds,
         Dictionary<string, double> CurrentInterestVector,
         Dictionary<string, double> HistoricalInterestVector,
+        List<Dictionary<string, double>> PreferenceClusters,
         Dictionary<PostType, double> FormatPreference,
         Dictionary<string, double> TopicDwellSeconds,
         Dictionary<string, double> TopicCompletionRate,
@@ -1016,9 +1290,13 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         Dictionary<Guid, int> PriorInteractions14d,
         Dictionary<Guid, int> InteractionFrequency30d,
         Dictionary<Guid, DateTime> LastAuthorInteractionUtc,
+        Dictionary<Guid, double> ActualDwellSecondsByPost,
+        Dictionary<Guid, double> ActualCompletionByPost,
+        Dictionary<Guid, int> AuthorDwellCounts,
+        FatigueState Fatigue,
         IReadOnlyList<string> TrendingTopics);
 
-    private sealed record UserPostSignals(
+    public sealed record UserPostSignals(
         bool UserLikedThisPost,
         bool UserCommentedBefore,
         bool UserSharedBefore,
@@ -1026,16 +1304,21 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         double UserCompletionRateOnSimilar,
         bool UserViewedButNotInteracted,
         bool UserMarkedNotInterested,
-        bool UserHiddenAuthor);
+        bool UserHiddenAuthor,
+        double DwellResidual,
+        double CompletionResidual,
+        bool SilentInterest,
+        bool SilentAversion);
 
-    private sealed record AcquaintanceSignals(
+    public sealed record AcquaintanceSignals(
         double InteractionFrequency30d,
         double MutualConnections,
         double ContentConsumptionRatio,
         double LastInteractionRecencyDays,
-        double AcquaintanceScore);
+        double AcquaintanceScore,
+        bool IsSilentFollower);
 
-    private sealed record QualitySignals(
+    public sealed record QualitySignals(
         double GlobalEngagementRate,
         double CommentDepth,
         double CompletionRateGlobal,
@@ -1043,12 +1326,13 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         double AiNewsTopicOverlap,
         double AgeDays);
 
-    private sealed record InterestSignals(
+    public sealed record InterestSignals(
         double InterestCosineSimilarity,
+        double HeterogeneousCosineSimilarity,
         double TopicAffinity,
         double FormatPreference);
 
-    private sealed record PredictionSignals(
+    public sealed record PredictionSignals(
         double WillLike,
         double WillComment,
         double WillShare,
