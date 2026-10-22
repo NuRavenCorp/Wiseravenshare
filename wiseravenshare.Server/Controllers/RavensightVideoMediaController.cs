@@ -451,6 +451,17 @@ public sealed class RavensightVideoMediaController : ControllerBase
             persistedVideo = BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription);
         }
 
+        var persistedToCatalog = mediaRecord is not null;
+        var persistedToLibrary = !persistedVideo.Id.StartsWith("local-", StringComparison.OrdinalIgnoreCase);
+        if (!persistedToCatalog && !persistedToLibrary)
+        {
+            await CleanupFailedUploadAsync(saved.File, cancellationToken);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Video upload succeeded but metadata persistence failed. Please retry shortly."
+            });
+        }
+
         return Ok(new
         {
             file = response,
@@ -469,6 +480,33 @@ public sealed class RavensightVideoMediaController : ControllerBase
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }
         });
+    }
+
+    private async Task CleanupFailedUploadAsync(RavensightSavedMediaFile saved, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(saved.RelativePath))
+            {
+                await _blobStorageService.DeleteAsync(saved.RelativePath, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean up blob object {ObjectKey} after video metadata persistence failure.", saved.RelativePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(saved.AbsolutePath) && System.IO.File.Exists(saved.AbsolutePath))
+        {
+            try
+            {
+                System.IO.File.Delete(saved.AbsolutePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to clean up local file {Path} after video metadata persistence failure.", saved.AbsolutePath);
+            }
+        }
     }
 
     private string ResolveExternalVideoUrl()

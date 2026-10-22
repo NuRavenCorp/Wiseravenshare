@@ -7,8 +7,6 @@ import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
 
 async function transcribeFile(file) {
-  const body = new FormData();
-  body.append("audio", file);
   const endpoints = [
     "/api/functions/transcribe-local-file",
     "/api/assistant/audio/transcribe",
@@ -16,14 +14,22 @@ async function transcribeFile(file) {
 
   let lastError = null;
   for (const endpoint of endpoints) {
+    const body = new FormData();
+    body.append("audio", file);
     try {
-      return await apiClient.requestJson(endpoint, {
+      const result = await apiClient.requestJson(endpoint, {
         method: "POST",
         body,
       });
+      const transcript =
+        (result?.lyrics || result?.text || result?.transcript || "").toString().trim();
+      if (transcript.length > 0) {
+        return result;
+      }
+      lastError = new Error("Transcription returned empty output.");
     } catch (error) {
       lastError = error;
-      if (![404, 405].includes(error?.status)) {
+      if (![404, 405, 500, 502, 503, 504].includes(error?.status)) {
         throw error;
       }
     }
