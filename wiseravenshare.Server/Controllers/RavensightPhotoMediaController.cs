@@ -284,12 +284,21 @@ public sealed class RavensightPhotoMediaController : ControllerBase
         catch (PostgresException ex)
         {
             persistenceStatus = "degraded";
-            _logger.LogError(ex, "Photo catalog save failed at DB layer for user {UserId}; returning file response without catalog metadata.", userId);
+            _logger.LogError(ex, "Photo catalog save failed at DB layer for user {UserId}; upload cannot be retained without metadata persistence.", userId);
         }
         catch (Exception ex)
         {
             persistenceStatus = "degraded";
-            _logger.LogError(ex, "Photo catalog save failed unexpectedly for user {UserId}; returning file response without catalog metadata.", userId);
+            _logger.LogError(ex, "Photo catalog save failed unexpectedly for user {UserId}; upload cannot be retained without metadata persistence.", userId);
+        }
+
+        if (mediaRecord is null)
+        {
+            await CleanupFailedUploadAsync(saved, cancellationToken);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Photo upload could not be persisted. Please retry shortly."
+            });
         }
 
         var blobStreamUrl = StreamingUrlHelper.StreamByBlobPath(saved.RelativePath);
@@ -329,6 +338,33 @@ public sealed class RavensightPhotoMediaController : ControllerBase
                 localFolderIdentityKey = preference?.FolderIdentityKey
             }
         });
+    }
+
+    private async Task CleanupFailedUploadAsync(RavensightSavedMediaFile saved, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(saved.RelativePath))
+            {
+                await _blobStorageService.DeleteAsync(saved.RelativePath, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean up blob object {ObjectKey} after photo metadata persistence failure.", saved.RelativePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(saved.AbsolutePath) && System.IO.File.Exists(saved.AbsolutePath))
+        {
+            try
+            {
+                System.IO.File.Delete(saved.AbsolutePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to clean up local file {Path} after photo metadata persistence failure.", saved.AbsolutePath);
+            }
+        }
     }
 
     private string AppendBlobSignatureIfNeeded(string streamPath, string? relativePath)

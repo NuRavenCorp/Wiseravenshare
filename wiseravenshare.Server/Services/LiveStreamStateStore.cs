@@ -790,19 +790,28 @@ FROM app_data.live_streams ls
         if (raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
             || raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
         {
-            var uri = new Uri(raw);
-            var userInfo = uri.UserInfo.Split(':');
-            var builder = new NpgsqlConnectionStringBuilder
+            try
             {
-                Host = uri.Host,
-                Port = uri.Port,
-                Username = Uri.UnescapeDataString(userInfo[0]),
-                Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
-                Database = uri.AbsolutePath.Trim('/'),
-                SslMode = SslMode.Require
-            };
+                var uri = new Uri(raw);
+                var userInfo = uri.UserInfo.Split(':');
+                var builder = new NpgsqlConnectionStringBuilder
+                {
+                    Host = uri.Host,
+                    Port = uri.Port,
+                    Username = Uri.UnescapeDataString(userInfo[0]),
+                    Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
+                    Database = uri.AbsolutePath.Trim('/'),
+                    SslMode = SslMode.Require
+                };
 
-            return builder.ConnectionString;
+                return builder.ConnectionString;
+            }
+            catch (UriFormatException)
+            {
+                // Keep startup alive even when DATABASE_URL is already in ADO.NET form
+                // or has provider-specific formatting that Uri cannot parse.
+                return raw;
+            }
         }
 
         return raw;

@@ -43,7 +43,10 @@ public class SpeechToTextService : ISpeechToTextService
         form.Add(new StringContent(_opts.Model), "model");
         form.Add(new StringContent("verbose_json"), "response_format");
 
-        using var response = await _http.PostAsync("/audio/transcriptions", form, ct);
+        var hasVersionedBasePath = _http.BaseAddress?.AbsolutePath
+            .Contains("/v1", StringComparison.OrdinalIgnoreCase) == true;
+        var endpoint = hasVersionedBasePath ? "audio/transcriptions" : "v1/audio/transcriptions";
+        using var response = await _http.PostAsync(endpoint, form, ct);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
