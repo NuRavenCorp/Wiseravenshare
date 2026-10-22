@@ -116,7 +116,7 @@ public class PostService : IPostService
 
         if (user == null)
         {
-            var fallbackUsername = $"localuser-{userId.ToString("N")[..6]}";
+            var fallbackUsername = $"localuser-{userId.ToString("N")[..12]}";
             user = new User
             {
                 Id = userId,
@@ -127,6 +127,16 @@ public class PostService : IPostService
                 IsActive = true,
                 TruthScore = 50.00m
             };
+
+            try
+            {
+                await _userRepository.AddAsync(user);
+                _logger.LogInformation("Auto-provisioned fallback user {UserId} during post creation.", userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to auto-provision fallback user {UserId} during post creation.", userId);
+            }
         }
 
         // Create post
@@ -180,9 +190,7 @@ public class PostService : IPostService
         var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
         post.Id = createdPostId;
 
-        bool persisted = false;
         await _postRepository.AddAsync(post);
-        persisted = true;
         _logger.LogInformation("Post created by user {UserId}", userId);
         DispatchSocialPublish(post);
         DispatchCrossPlatformPublish(post);
@@ -242,11 +250,6 @@ public class PostService : IPostService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to ingest post {PostId} into content crawler", post.Id);
-        }
-
-        if (!persisted)
-        {
-            return BuildPostDto(post, user);
         }
 
         try

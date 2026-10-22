@@ -86,6 +86,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             var predictions = Predict(userPostSignals, acquaintanceSignals, qualitySignals, interestSignals);
             var isOld = post.CreatedAt < nowUtc.AddDays(-7);
             var feedScore = ComputeFeedScore(predictions, qualitySignals, isOld);
+            feedScore += ComputeFreshnessBoost(post, userId, nowUtc);
             var resurfacingScore = ComputeResurfacingScore(post, predictions, nowUtc);
 
             var scored = new ScoredPost(post, feedScore, resurfacingScore, predictions.WillHideOrReport);
@@ -104,6 +105,11 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .ThenByDescending(item => item.Post.CreatedAt)
             .Select(item => item.Post)
             .ToList();
+
+        if (safePage == 1)
+        {
+            rankedNew = EnsureRecentAuthorVisibility(rankedNew, userId, nowUtc);
+        }
 
         var rankedOld = scoredOld
             .Where(item => item.ResurfacingScore >= 0.45d && item.NegativeRisk < 0.85d)
@@ -471,6 +477,22 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return Math.Max(0d, baseScore - negative);
     }
 
+    private static double ComputeFreshnessBoost(Post post, Guid viewerUserId, DateTime nowUtc)
+    {
+        var ageHours = Math.Max(0d, (nowUtc - post.CreatedAt).TotalHours);
+        if (ageHours > 24d)
+        {
+            return 0d;
+        }
+
+        var freshness = 1d - Clamp01(ageHours / 24d);
+        var authorBoost = post.UserId == viewerUserId
+            ? 0.45d
+            : 0.15d;
+
+        return freshness * authorBoost;
+    }
+
     private static double ComputeResurfacingScore(Post post, PredictionSignals preds, DateTime nowUtc)
     {
         var positive =
@@ -538,6 +560,25 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         }
 
         return result;
+    }
+
+    private static List<Post> EnsureRecentAuthorVisibility(IReadOnlyList<Post> rankedNewPosts, Guid viewerUserId, DateTime nowUtc)
+    {
+        var mustKeep = rankedNewPosts
+            .Where(post => post.UserId == viewerUserId && post.CreatedAt >= nowUtc.AddHours(-24))
+            .OrderByDescending(post => post.CreatedAt)
+            .Take(5)
+            .ToList();
+
+        if (mustKeep.Count == 0)
+        {
+            return rankedNewPosts.ToList();
+        }
+
+        return mustKeep
+            .Concat(rankedNewPosts)
+            .DistinctBy(post => post.Id)
+            .ToList();
     }
 
     private static IReadOnlyList<Post> ApplyDiversity(IReadOnlyList<Post> posts)
