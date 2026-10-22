@@ -1,10 +1,4 @@
 <Solution>
-  <Folder Name="/wiseravenshare.Server/">
-    <Project Path="wiseravenshare.Server/Wiseravenshare.Server.csproj" />
-  </Folder>
-  <Project Path="wieravenshare.client/wieravenshare.client.esproj">
-    <Build />
-    <Deploy />
-  </Project>
-  <Project Path="wieravenshare.Server/Wiseravenshare.Server.csproj" />
+  <Project Path="wiseravenshare.Server/Wiseravenshare.Server.csproj" />
+  <Project Path="wiseravenshare.Server.Tests/wiseravenshare.Server.Tests.csproj" />
 </Solution>
