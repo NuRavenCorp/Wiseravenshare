@@ -342,6 +342,46 @@ namespace Wiseravenshare.Server.Controllers
         }
 
         /// <summary>
+        /// Like a comment
+        /// </summary>
+        [HttpPost("comments/{commentId}/like")]
+        [ProducesResponseType(typeof(CommentInteractionDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> LikeComment(Guid commentId)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.LikeCommentAsync(userId, commentId);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Unlike a comment
+        /// </summary>
+        [HttpDelete("comments/{commentId}/like")]
+        [ProducesResponseType(typeof(CommentInteractionDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> UnlikeComment(Guid commentId)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var state = await _postService.UnlikeCommentAsync(userId, commentId);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return Ok(state);
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Bookmark a post
         /// </summary>
         [HttpPost("{id}/bookmark")]
@@ -399,6 +439,7 @@ namespace Wiseravenshare.Server.Controllers
         /// Increment share count when a user shares a post externally
         /// </summary>
         [HttpPost("{id}/share")]
+        [AllowAnonymous]
         [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         public async Task<IActionResult> SharePost(Guid id)
         {
@@ -556,7 +597,7 @@ namespace Wiseravenshare.Server.Controllers
             if (!hasGuidClaim)
             {
                 _logger.LogWarning("Authenticated request has missing or invalid user id claim. sub={Sub}", rawClaimId ?? "<null>");
-                claimUserId = Guid.NewGuid();
+                throw new UnauthorizedAccessException("Invalid authenticated identity.");
             }
 
             if (hasGuidClaim)
@@ -610,8 +651,7 @@ namespace Wiseravenshare.Server.Controllers
 
             if (string.IsNullOrWhiteSpace(email))
             {
-                _logger.LogWarning("Unable to resolve missing domain user {UserId} because token email claim is missing.", claimUserId);
-                return claimUserId;
+                email = $"local-{claimUserId:N}@local";
             }
 
             try
@@ -632,7 +672,6 @@ namespace Wiseravenshare.Server.Controllers
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "User lookup by email failed for {Email}; falling back to the token identity.", email);
-                return claimUserId;
             }
 
             var displayName = username.Length > 0 ? username : (User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0]).Trim();
@@ -664,15 +703,26 @@ namespace Wiseravenshare.Server.Controllers
                 _logger.LogWarning(ex, "Failed to auto-provision missing domain user {UserId} for {Email}.", claimUserId, email);
                 try
                 {
+                    var fallbackById = await _userRepository.GetByIdAsync(claimUserId);
+                    if (fallbackById is not null)
+                    {
+                        return fallbackById.Id;
+                    }
+
                     var fallbackByEmail = await _userRepository.GetByEmailAsync(email);
-                    return fallbackByEmail?.Id ?? claimUserId;
+                    if (fallbackByEmail is not null)
+                    {
+                        return fallbackByEmail.Id;
+                    }
                 }
                 catch (Exception fallbackEx)
                 {
-                    _logger.LogWarning(fallbackEx, "Recovery lookup failed for {Email}; returning the token identity.", email);
-                    return claimUserId;
+                    _logger.LogWarning(fallbackEx, "Recovery lookup failed for {Email}.", email);
                 }
             }
+
+            _logger.LogWarning("Falling back to token identity {UserId} after unresolved domain mapping.", claimUserId);
+            return claimUserId;
         }
     }
 }

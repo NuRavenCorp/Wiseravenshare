@@ -31,6 +31,8 @@ public interface IPostService
     Task<PostInteractionDto> UnbookmarkPostAsync(Guid userId, Guid postId);
     Task<IReadOnlyList<PostCommentDto>> GetCommentsAsync(Guid postId, int page, int pageSize);
     Task<PostCommentDto> AddCommentAsync(Guid userId, Guid postId, AddPostCommentDto dto);
+    Task<CommentInteractionDto> LikeCommentAsync(Guid userId, Guid commentId);
+    Task<CommentInteractionDto> UnlikeCommentAsync(Guid userId, Guid commentId);
     Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count);
     Task<int> GetPostCountAsync(Guid userId);
     Task TrackViewAsync(Guid postId);
@@ -988,6 +990,46 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Failed to award comment badge for user {UserId}", userId);
         }
         return BuildPostCommentDto(created, interaction.CommentsCount);
+    }
+
+    public async Task<CommentInteractionDto> LikeCommentAsync(Guid userId, Guid commentId)
+    {
+        CommentInteractionState interaction;
+        try
+        {
+            interaction = await _postRepository.LikeCommentAsync(commentId, userId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new NotFoundException(ex.Message);
+        }
+
+        return new CommentInteractionDto
+        {
+            CommentId = interaction.CommentId,
+            LikesCount = interaction.LikesCount,
+            IsLiked = interaction.IsLiked
+        };
+    }
+
+    public async Task<CommentInteractionDto> UnlikeCommentAsync(Guid userId, Guid commentId)
+    {
+        CommentInteractionState interaction;
+        try
+        {
+            interaction = await _postRepository.UnlikeCommentAsync(commentId, userId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new NotFoundException(ex.Message);
+        }
+
+        return new CommentInteractionDto
+        {
+            CommentId = interaction.CommentId,
+            LikesCount = interaction.LikesCount,
+            IsLiked = interaction.IsLiked
+        };
     }
 
     public async Task<IEnumerable<PostDto>> GetTrendingPostsAsync(int count)

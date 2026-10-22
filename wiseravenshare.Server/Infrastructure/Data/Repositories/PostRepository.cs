@@ -280,6 +280,60 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             return comment;
         }
 
+        public async Task<CommentInteractionState> LikeCommentAsync(Guid commentId, Guid userId)
+        {
+            var comment = await _context.Set<Comment>()
+                .FirstOrDefaultAsync(c => c.Id == commentId && !c.IsDeleted);
+            if (comment is null)
+            {
+                throw new InvalidOperationException("Comment not found.");
+            }
+
+            var likesSet = _context.Set<CommentLike>();
+            var alreadyLiked = await likesSet.AnyAsync(l => l.CommentId == commentId && l.UserId == userId && !l.IsDeleted);
+            if (!alreadyLiked)
+            {
+                await likesSet.AddAsync(new CommentLike
+                {
+                    CommentId = commentId,
+                    UserId = userId
+                });
+                await _context.SaveChangesAsync();
+            }
+
+            var likesCount = await likesSet.CountAsync(l => l.CommentId == commentId && !l.IsDeleted);
+            comment.LikesCount = likesCount;
+            await _context.SaveChangesAsync();
+
+            return new CommentInteractionState(commentId, likesCount, true);
+        }
+
+        public async Task<CommentInteractionState> UnlikeCommentAsync(Guid commentId, Guid userId)
+        {
+            var comment = await _context.Set<Comment>()
+                .FirstOrDefaultAsync(c => c.Id == commentId && !c.IsDeleted);
+            if (comment is null)
+            {
+                throw new InvalidOperationException("Comment not found.");
+            }
+
+            var likesSet = _context.Set<CommentLike>();
+            var likeRows = await likesSet
+                .Where(l => l.CommentId == commentId && l.UserId == userId && !l.IsDeleted)
+                .ToListAsync();
+            if (likeRows.Count > 0)
+            {
+                likesSet.RemoveRange(likeRows);
+                await _context.SaveChangesAsync();
+            }
+
+            var likesCount = await likesSet.CountAsync(l => l.CommentId == commentId && !l.IsDeleted);
+            comment.LikesCount = likesCount;
+            await _context.SaveChangesAsync();
+
+            return new CommentInteractionState(commentId, likesCount, false);
+        }
+
         public async Task<PostInteractionState> GetInteractionStateAsync(Guid postId, Guid? userId = null)
         {
             var likesCount = await _context.PostLikes.CountAsync(l => l.PostId == postId);
