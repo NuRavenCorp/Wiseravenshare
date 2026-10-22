@@ -5,18 +5,18 @@ namespace Wiseravenshare.Server.DTOs;
 public sealed class SaveRavensightVideoDto
 {
     public IFormFile? File { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string DestinationFolder { get; set; } = string.Empty;
-    public string Privacy { get; set; } = "unlisted";
-    public string StorageMode { get; set; } = "temporary";
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public string? DestinationFolder { get; set; }
+    public string? Privacy { get; set; }
+    public string? StorageMode { get; set; }
     public bool IsPermanent { get; set; }
-    public string MusicTrackId { get; set; } = string.Empty;
-    public string MusicTrackTitle { get; set; } = string.Empty;
-    public string MusicTrackUrl { get; set; } = string.Empty;
-    public string MusicTrackArtist { get; set; } = string.Empty;
-    public string MusicTrackAlbum { get; set; } = string.Empty;
-    public string MusicTrackGenre { get; set; } = string.Empty;
+    public string? MusicTrackId { get; set; }
+    public string? MusicTrackTitle { get; set; }
+    public string? MusicTrackUrl { get; set; }
+    public string? MusicTrackArtist { get; set; }
+    public string? MusicTrackAlbum { get; set; }
+    public string? MusicTrackGenre { get; set; }
 }
 
 public sealed class SaveRavensightPhotoDto

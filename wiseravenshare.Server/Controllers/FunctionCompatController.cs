@@ -15,6 +15,7 @@ using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Entities.FM;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Interfaces.Services;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services.AiAssistant;
 using Wiseravenshare.Server.Services.Currency;
 using Wiseravenshare.Server.Services;
@@ -921,14 +922,40 @@ public sealed class FunctionCompatController : ControllerBase
     [Authorize]
     public async Task<IActionResult> SocialImport([FromBody] SocialImportRequest request)
     {
+        var userId = ResolveUserId();
+
         if (string.Equals(request.Action, "import", StringComparison.OrdinalIgnoreCase))
         {
+            // Ensure the user exists in the EF Users table before creating Posts with a FK reference.
+            // CreatePost via PostController auto-provisions, but FunctionCompat must do it too.
+            var efUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (efUser == null)
+            {
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? $"local-{userId:N}@local";
+                var rawName = User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0];
+                var safeName = new string(rawName.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+                if (string.IsNullOrWhiteSpace(safeName)) safeName = $"user{userId:N[..6]}";
+                efUser = new Wiseravenshare.Server.Entities.User
+                {
+                    Id = userId,
+                    Email = email,
+                    Username = safeName,
+                    DisplayName = rawName,
+                    PasswordHash = string.Empty,
+                    IsActive = true,
+                    TruthScore = 50.00m
+                };
+                _db.Users.Add(efUser);
+                try { await _db.SaveChangesAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "User auto-provision during social import failed for {UserId}; continuing.", userId); }
+            }
+
             var created = new List<object>();
             foreach (var item in request.Items ?? [])
             {
-                var post = new Post
+                var post = new Wiseravenshare.Server.Entities.Post
                 {
-                    UserId = ResolveUserId(),
+                    UserId = userId,
                     Content = string.IsNullOrWhiteSpace(item.Content) ? "(imported post)" : item.Content,
                     Type = ParsePostType(item.PostType),
                     MediaUrls = item.MediaUris,
@@ -941,16 +968,153 @@ public sealed class FunctionCompatController : ControllerBase
             return Ok(new { imported = created.Count, posts = created });
         }
 
-        var facebook = await _socialPlatformService.GetFacebookFeedAsync(null, 10);
-        var tiktok = await _socialPlatformService.GetTikTokFeedAsync(null, 10);
-        var bluesky = await _socialPlatformService.GetBlueskyFeedAsync(null, 10);
+        // FETCH action: use the current user's stored social-account credentials first,
+        // then fall back to server-level config accounts.
+        var userStore = _serviceProvider.GetRequiredService<UserStore>();
+        userStore.TryGetById(userId.ToString("N"), out var userRecord);
+        var socialFeeds = userRecord?.SocialFeeds ?? new SocialFeedSettings();
+        const int importLimit = 10;
+
+        // ── Facebook ─────────────────────────────────────────────────────────
+        IReadOnlyList<SocialFeedItemDto> facebookItems;
+        if (socialFeeds.Facebook.Enabled && !string.IsNullOrWhiteSpace(socialFeeds.Facebook.AccessToken))
+            facebookItems = await FetchFacebookUserPostsAsync(socialFeeds.Facebook.AccessToken, importLimit);
+        else
+            facebookItems = await _socialPlatformService.GetFacebookFeedAsync(null, importLimit);
+
+        // ── Instagram ─────────────────────────────────────────────────────────
+        IReadOnlyList<SocialFeedItemDto> instagramItems = Array.Empty<SocialFeedItemDto>();
+        if (socialFeeds.Instagram.Enabled && !string.IsNullOrWhiteSpace(socialFeeds.Instagram.AccessToken))
+            instagramItems = await FetchInstagramUserPostsAsync(socialFeeds.Instagram.AccessToken, importLimit);
+
+        // ── TikTok ────────────────────────────────────────────────────────────
+        IReadOnlyList<SocialFeedItemDto> tiktokItems;
+        if (socialFeeds.TikTok.Enabled && !string.IsNullOrWhiteSpace(socialFeeds.TikTok.AccessToken))
+        {
+            var tikTokSvc = _serviceProvider.GetService<ITikTokAggregatorService>();
+            if (tikTokSvc != null)
+            {
+                var catalog = await tikTokSvc.GetVideoCatalogAsync(socialFeeds.TikTok.AccessToken, 0, importLimit);
+                var ttItems = new List<SocialFeedItemDto>();
+                foreach (var video in catalog?.Videos ?? [])
+                {
+                    ttItems.Add(new SocialFeedItemDto
+                    {
+                        Platform = "tiktok",
+                        ExternalId = video.Id,
+                        Text = video.VideoDescription ?? video.Title ?? string.Empty,
+                        MediaUrl = video.CoverImageUrl,
+                        PermalinkUrl = video.ShareUrl ?? video.EmbedLink,
+                        AuthorHandle = socialFeeds.TikTok.Username ?? "you",
+                        CreatedAt = video.CreateTime > 0 ? DateTimeOffset.FromUnixTimeSeconds(video.CreateTime) : null
+                    });
+                }
+                tiktokItems = ttItems;
+            }
+            else tiktokItems = await _socialPlatformService.GetTikTokFeedAsync(null, importLimit);
+        }
+        else
+            tiktokItems = await _socialPlatformService.GetTikTokFeedAsync(null, importLimit);
+
+        // ── Bluesky ───────────────────────────────────────────────────────────
+        var bskyHandle = (socialFeeds.Bluesky.Enabled && !string.IsNullOrWhiteSpace(socialFeeds.Bluesky.Username))
+            ? socialFeeds.Bluesky.Username
+            : null;
+        var blueskyItems = await _socialPlatformService.GetBlueskyFeedAsync(bskyHandle, importLimit);
+
         return Ok(new
         {
-            facebook,
-            instagram = Array.Empty<object>(),
-            tiktok,
-            bluesky
+            facebook = facebookItems,
+            instagram = instagramItems,
+            tiktok = tiktokItems,
+            bluesky = blueskyItems,
         });
+    }
+
+    private async Task<IReadOnlyList<SocialFeedItemDto>> FetchFacebookUserPostsAsync(string accessToken, int limit)
+    {
+        const string graphBase = "https://graph.facebook.com/v26.0";
+        var fields = Uri.EscapeDataString("id,message,created_time,permalink_url,full_picture");
+        var url = $"{graphBase}/me/posts?fields={fields}&limit={Math.Clamp(limit, 1, 25)}&access_token={Uri.EscapeDataString(accessToken)}";
+        try
+        {
+            var httpFactory = _serviceProvider.GetRequiredService<IHttpClientFactory>();
+            using var client = httpFactory.CreateClient();
+            using var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Facebook user import request failed ({Status})", (int)response.StatusCode);
+                return [];
+            }
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                return [];
+            var items = new List<SocialFeedItemDto>();
+            foreach (var entry in data.EnumerateArray())
+            {
+                DateTimeOffset? createdAt = null;
+                if (entry.TryGetProperty("created_time", out var ct) && ct.ValueKind == JsonValueKind.String)
+                    DateTimeOffset.TryParse(ct.GetString(), out var dtParsed);
+                items.Add(new SocialFeedItemDto
+                {
+                    Platform = "facebook",
+                    ExternalId = entry.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
+                    Text = entry.TryGetProperty("message", out var msg) ? msg.GetString() : null,
+                    MediaUrl = entry.TryGetProperty("full_picture", out var pic) ? pic.GetString() : null,
+                    PermalinkUrl = entry.TryGetProperty("permalink_url", out var link) ? link.GetString() : null,
+                    AuthorHandle = "me",
+                    CreatedAt = createdAt
+                });
+            }
+            return items;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Facebook user post import failed.");
+            return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<SocialFeedItemDto>> FetchInstagramUserPostsAsync(string accessToken, int limit)
+    {
+        const string graphBase = "https://graph.instagram.com/v26.0";
+        var fields = Uri.EscapeDataString("id,caption,media_type,media_url,permalink,timestamp");
+        var url = $"{graphBase}/me/media?fields={fields}&limit={Math.Clamp(limit, 1, 25)}&access_token={Uri.EscapeDataString(accessToken)}";
+        try
+        {
+            var httpFactory = _serviceProvider.GetRequiredService<IHttpClientFactory>();
+            using var client = httpFactory.CreateClient();
+            using var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return [];
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                return [];
+            var items = new List<SocialFeedItemDto>();
+            foreach (var entry in data.EnumerateArray())
+            {
+                DateTimeOffset? createdAt = null;
+                if (entry.TryGetProperty("timestamp", out var ts) && ts.ValueKind == JsonValueKind.String)
+                    DateTimeOffset.TryParse(ts.GetString(), out var dtParsed);
+                items.Add(new SocialFeedItemDto
+                {
+                    Platform = "instagram",
+                    ExternalId = entry.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
+                    Text = entry.TryGetProperty("caption", out var cap) ? cap.GetString() : null,
+                    MediaUrl = entry.TryGetProperty("media_url", out var mu) ? mu.GetString() : null,
+                    PermalinkUrl = entry.TryGetProperty("permalink", out var pl) ? pl.GetString() : null,
+                    AuthorHandle = "me",
+                    CreatedAt = createdAt
+                });
+            }
+            return items;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Instagram user post import failed.");
+            return [];
+        }
     }
 
     [HttpPost("spaces-upload")]
