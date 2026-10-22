@@ -382,6 +382,21 @@ export const apiClient = {
     share(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/share`, { method: "POST" });
     },
+    comments(postId, page = 1, pageSize = 100) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/comments?page=${encodeURIComponent(String(page))}&pageSize=${encodeURIComponent(String(pageSize))}`, { method: "GET" });
+    },
+    addComment(postId, payload = {}) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    likeComment(commentId) {
+      return requestJson(`/api/posts/comments/${encodeURIComponent(commentId)}/like`, { method: "POST" });
+    },
+    unlikeComment(commentId) {
+      return requestJson(`/api/posts/comments/${encodeURIComponent(commentId)}/like`, { method: "DELETE" });
+    },
     notInterested(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/not-interested`, { method: "POST" });
     },

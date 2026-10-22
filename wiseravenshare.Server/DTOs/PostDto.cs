@@ -123,6 +123,13 @@ namespace Wiseravenshare.Server.DTOs.Post
         public Guid? ParentCommentId { get; set; }
     }
 
+    public class CommentInteractionDto
+    {
+        public Guid CommentId { get; set; }
+        public int LikesCount { get; set; }
+        public bool IsLiked { get; set; }
+    }
+
     public class CreatePostDto
     {
         [MaxLength(1000)]

@@ -5,7 +5,6 @@ import { Image } from "@/components/ui/image";
 
 export default function PostComments({ postId, commentCount, currentUser, onAuthRequired }) {
   const [comments, setComments] = useState([]);
-  const [authors, setAuthors] = useState({});
   const [likedComments, setLikedComments] = useState({});
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -14,39 +13,28 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
   const [replyText, setReplyText] = useState("");
   const [collapsed, setCollapsed] = useState({});
 
+  const normalizeComment = (comment) => ({
+    id: comment.id,
+    post_id: comment.postId ?? comment.post_id ?? postId,
+    created_by_id: comment.userId ?? comment.created_by_id,
+    parent_id: comment.parentCommentId ?? comment.parent_id ?? null,
+    content: comment.content ?? "",
+    created_date: comment.createdAt ?? comment.created_date ?? new Date().toISOString(),
+    like_count: comment.likesCount ?? comment.like_count ?? 0,
+    replies_count: comment.repliesCount ?? comment.replies_count ?? 0,
+    user: comment.user || comment.author || null,
+  });
+
   useEffect(() => {
-    apiClient.entities.Comment.filter({ post_id: postId }, { sort: "created_date", limit: 100 })
-      .then(async (res) => {
-        const items = res.items || [];
-        setComments(items);
-        // Batch-fetch author profiles
-        const ids = [...new Set(items.map((c) => c.created_by_id).filter(Boolean))];
-        const profiles = {};
-        await Promise.all(
-          ids.map(async (uid) => {
-            try {
-              const r = await apiClient.entities.UserProfile.filter({ created_by_id: uid }, { limit: 1 });
-              profiles[uid] = (r.items || [])[0] || null;
-            } catch { profiles[uid] = null; }
-          })
-        );
-        setAuthors(profiles);
-        // Check which comments the current user has liked
-        if (currentUser) {
-          try {
-            const likesRes = await apiClient.entities.Like.filter(
-              { target_type: "comment", created_by_id: currentUser.id },
-              { limit: 100 }
-            );
-            const likedSet = {};
-            (likesRes.items || []).forEach((l) => {
-              if (items.some((c) => c.id === l.target_id)) likedSet[l.target_id] = true;
-            });
-            setLikedComments(likedSet);
-          } catch {}
-        }
+    setLoading(true);
+    apiClient.posts.comments(postId, 1, 100)
+      .then((res) => {
+        const items = Array.isArray(res) ? res : [];
+        setComments(items.map(normalizeComment));
       })
-      .catch(() => {})
+      .catch(() => {
+        setComments([]);
+      })
       .finally(() => setLoading(false));
   }, [postId, currentUser?.id]);
 
@@ -69,15 +57,13 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
     if (!content.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const newComment = await apiClient.entities.Comment.create({
-        post_id: postId,
+      const newComment = await apiClient.posts.addComment(postId, {
         content: content.trim(),
-        parent_id: parentId || null,
+        parentCommentId: parentId || null,
       });
-      setComments((prev) => [...prev, newComment]);
+      setComments((prev) => [normalizeComment(newComment), ...prev]);
       if (parentId) { setReplyText(""); setReplyTo(null); }
       else setText("");
-      await apiClient.entities.Post.update(postId, { comment_count: (commentCount || 0) + 1 });
     } catch (e) {
       console.error("Comment error:", e);
     } finally {
@@ -90,20 +76,17 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
     const isLiked = !!likedComments[comment.id];
     try {
       if (isLiked) {
-        const res = await apiClient.entities.Like.filter(
-          { target_id: comment.id, target_type: "comment", created_by_id: currentUser.id },
-          { limit: 1 }
-        );
-        const existing = (res.items || [])[0];
-        if (existing) await apiClient.entities.Like.delete(existing.id);
-        setLikedComments((p) => ({ ...p, [comment.id]: false }));
-        await apiClient.entities.Comment.update(comment.id, { like_count: Math.max(0, (comment.like_count || 0) - 1) });
-        setComments((prev) => prev.map((c) => c.id === comment.id ? { ...c, like_count: Math.max(0, (c.like_count || 0) - 1) } : c));
+        const state = await apiClient.posts.unlikeComment(comment.id);
+        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked) }));
+        setComments((prev) => prev.map((c) => c.id === comment.id
+          ? { ...c, like_count: Number(state?.likesCount ?? 0) }
+          : c));
       } else {
-        await apiClient.entities.Like.create({ target_id: comment.id, target_type: "comment" });
-        setLikedComments((p) => ({ ...p, [comment.id]: true }));
-        await apiClient.entities.Comment.update(comment.id, { like_count: (comment.like_count || 0) + 1 });
-        setComments((prev) => prev.map((c) => c.id === comment.id ? { ...c, like_count: (c.like_count || 0) + 1 } : c));
+        const state = await apiClient.posts.likeComment(comment.id);
+        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked ?? true) }));
+        setComments((prev) => prev.map((c) => c.id === comment.id
+          ? { ...c, like_count: Number(state?.likesCount ?? c.like_count + 1) }
+          : c));
       }
     } catch (e) {
       console.error("Comment like error:", e);
@@ -126,8 +109,8 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
     const indent = Math.min(depth, 4) * 16;
     const isCollapsed = collapsed[node.id];
     const replyCount = node.replies.length;
-    const author = authors[node.created_by_id];
-    const authorName = author?.display_name || "Member";
+    const author = node.user || null;
+    const authorName = author?.displayName || author?.display_name || author?.username || "Member";
     const isLiked = !!likedComments[node.id];
     const likeCount = node.like_count || 0;
 
@@ -136,8 +119,8 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
         <div className={`rounded-xl px-3 py-2.5 ${depth > 0 ? "bg-secondary/20 border border-border/40" : "bg-secondary/40"}`}>
           <div className="flex items-center gap-2 mb-1.5">
             <div className="w-6 h-6 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
-              {author?.avatar_uri ? (
-                <Image src={author.avatar_uri} alt={authorName} fittingType="fill" className="w-full h-full" />
+              {(author?.avatarUrl || author?.avatar_uri) ? (
+                <Image src={author?.avatarUrl || author?.avatar_uri} alt={authorName} fittingType="fill" className="w-full h-full" />
               ) : (
                 <span className="text-[10px] font-heading text-primary">{authorName.charAt(0).toUpperCase()}</span>
               )}
