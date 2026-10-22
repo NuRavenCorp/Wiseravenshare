@@ -200,6 +200,17 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
 
       <div className="px-4 pb-3">
         <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        {post.repostOf && (
+          <div className="mt-2 rounded-xl border border-border bg-secondary/20 p-3 space-y-1.5">
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Repeat2 className="w-3 h-3" />
+              Repost from {post.repostOf?.user?.displayName || post.repostOf?.user?.username || "Creator"}
+            </p>
+            {post.repostOf.content && (
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.repostOf.content}</p>
+            )}
+          </div>
+        )}
         {hashtagList.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
             {hashtagList.map((tag, i) => (

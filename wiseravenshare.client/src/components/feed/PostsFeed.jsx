@@ -58,10 +58,17 @@ export default function PostsFeed() {
         setBlockedUsers([]);
         setBlockedIds([]);
       }
-      const result = mode === "following" && user
-        ? await apiClient.posts.feed(1, 40)
-        : await apiClient.posts.trending(40);
-      const normalized = (Array.isArray(result) ? result : result?.items || []).map(normalizePost);
+      let feedResult;
+      if (mode === "following" && user) {
+        feedResult = await apiClient.posts.feed(1, 40);
+        const feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
+        if (feedItems.length === 0) {
+          feedResult = await apiClient.posts.trending(40);
+        }
+      } else {
+        feedResult = await apiClient.posts.trending(40);
+      }
+      const normalized = (Array.isArray(feedResult) ? feedResult : feedResult?.items || []).map(normalizePost);
       setPosts(normalized);
       setShowComposer(Boolean(user));
     } catch (error) {

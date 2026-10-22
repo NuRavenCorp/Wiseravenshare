@@ -56,6 +56,11 @@ public interface IPostRepository : IRepository<Post>
     Task<IReadOnlyList<PostEngagementActor>> GetRecentEngagementActorsAsync(Guid postId, int maxPerType = 3);
     Task IncrementViewAsync(Guid postId);
     Task IncrementShareAsync(Guid postId);
+    /// <summary>
+    /// Returns interaction state for a batch of posts in 3 DB calls instead of 6+ per post.
+    /// Uses denormalized counters on the Post entity; does NOT call SaveChangesAsync.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, PostInteractionState>> GetBatchInteractionStatesAsync(IEnumerable<Guid> postIds, Guid? viewerUserId = null);
 }
 
 public sealed record PostInteractionState(
