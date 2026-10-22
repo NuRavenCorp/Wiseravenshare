@@ -9,11 +9,27 @@ import KaraokePaywall from "@/components/media/KaraokePaywall";
 async function transcribeFile(file) {
   const body = new FormData();
   body.append("audio", file);
-  const result = await apiClient.requestJson("/api/assistant/audio/transcribe", {
-    method: "POST",
-    body,
-  });
-  return result;
+  const endpoints = [
+    "/api/functions/transcribe-local-file",
+    "/api/assistant/audio/transcribe",
+  ];
+
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    try {
+      return await apiClient.requestJson(endpoint, {
+        method: "POST",
+        body,
+      });
+    } catch (error) {
+      lastError = error;
+      if (![404, 405].includes(error?.status)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Unable to transcribe file.");
 }
 
 async function transcribeUrl(url, fileName) {
