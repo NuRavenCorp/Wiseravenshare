@@ -29,6 +29,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   const [shareCount, setShareCount] = useState(post.share_count || 0);
   const [shared, setShared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const menuRef = useRef(null);
   const { toast } = useToast();
   const { openMedia } = useMediaExperience();
@@ -92,6 +93,38 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     } catch (e) { toast({ title: "Could not update block", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
+  const handleNotInterested = async () => {
+    if (!currentUser) return onAuthRequired?.();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiClient.posts.notInterested(post.id);
+      setDismissed(true);
+      setMenuOpen(false);
+      toast({ title: "Got it", description: "We'll show fewer posts like this." });
+    } catch (e) {
+      toast({ title: "Could not update feed preference", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleHideAuthor = async () => {
+    if (!currentUser) return onAuthRequired?.();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiClient.posts.hideAuthor(post.id);
+      setDismissed(true);
+      setMenuOpen(false);
+      toast({ title: "Author hidden", description: "You’ll stop seeing this author in your feed." });
+    } catch (e) {
+      toast({ title: "Could not hide author", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const authorName = author?.display_name || author?.displayName || author?.username || "Creator";
   const timeAgo = new Date(post.created_date || Date.now()).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
@@ -130,6 +163,10 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     const verb = type === "comment" ? "commented" : type === "repost" ? "reposted" : "liked";
     return `${name} ${verb}`;
   });
+
+  if (dismissed) {
+    return null;
+  }
 
   return (
     <article className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden">
@@ -190,6 +227,12 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
                   <button onClick={handleBlock} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
                     <ShieldBan className="w-4 h-4" />
                     {blocked ? "Unblock User" : "Block User"}
+                  </button>
+                  <button onClick={handleNotInterested} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
+                    Not interested
+                  </button>
+                  <button onClick={handleHideAuthor} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
+                    Hide author from feed
                   </button>
                 </div>
               )}

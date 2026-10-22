@@ -10,6 +10,7 @@ using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.Personalization;
 
 namespace Wiseravenshare.Server.Controllers
 {
@@ -24,17 +25,21 @@ namespace Wiseravenshare.Server.Controllers
         private readonly IUserRepository _userRepository;
         private readonly ILogger<PostsController> _logger;
         private readonly OutputCacheInvalidationService _cacheInvalidation;
+        private readonly IPersonalizationService _personalizationService;
+        private static readonly System.Text.RegularExpressions.Regex HashtagRegex = new(@"#([a-zA-Z0-9_]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         public PostsController(
             IPostService postService,
             IUserRepository userRepository,
             ILogger<PostsController> logger,
-            OutputCacheInvalidationService cacheInvalidation)
+            OutputCacheInvalidationService cacheInvalidation,
+            IPersonalizationService personalizationService)
         {
             _postService = postService;
             _userRepository = userRepository;
             _logger = logger;
             _cacheInvalidation = cacheInvalidation;
+            _personalizationService = personalizationService;
         }
 
         /// <summary>
@@ -198,6 +203,7 @@ namespace Wiseravenshare.Server.Controllers
             {
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.LikePostAsync(userId, id);
+                await TryTrackPostInteractionAsync(userId, id, "Like");
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -224,6 +230,7 @@ namespace Wiseravenshare.Server.Controllers
             {
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.UnlikePostAsync(userId, id);
+                await TryTrackPostInteractionAsync(userId, id, "Dislike");
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -250,6 +257,7 @@ namespace Wiseravenshare.Server.Controllers
             {
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.RepostPostAsync(userId, id);
+                await TryTrackPostInteractionAsync(userId, id, "Share");
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -276,6 +284,7 @@ namespace Wiseravenshare.Server.Controllers
             {
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.UnrepostPostAsync(userId, id);
+                await TryTrackPostInteractionAsync(userId, id, "Dismiss");
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -314,6 +323,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var comment = await _postService.AddCommentAsync(userId, id, dto);
+            await TryTrackPostInteractionAsync(userId, id, "Comment");
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(comment);
         }
@@ -328,6 +338,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.BookmarkPostAsync(userId, id);
+            await TryTrackPostInteractionAsync(userId, id, "Bookmark");
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
@@ -342,6 +353,7 @@ namespace Wiseravenshare.Server.Controllers
         {
             var userId = await ResolveEffectiveUserIdAsync();
             var state = await _postService.UnbookmarkPostAsync(userId, id);
+            await TryTrackPostInteractionAsync(userId, id, "Dismiss");
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(state);
         }
@@ -357,6 +369,11 @@ namespace Wiseravenshare.Server.Controllers
             try
             {
                 await _postService.TrackViewAsync(id);
+                if (User.Identity?.IsAuthenticated == true)
+                {
+                    var userId = await ResolveEffectiveUserIdAsync();
+                    await TryTrackPostInteractionAsync(userId, id, "View");
+                }
             }
             catch
             {
@@ -375,6 +392,11 @@ namespace Wiseravenshare.Server.Controllers
             try
             {
                 var state = await _postService.SharePostAsync(id);
+                if (User.Identity?.IsAuthenticated == true)
+                {
+                    var userId = await ResolveEffectiveUserIdAsync();
+                    await TryTrackPostInteractionAsync(userId, id, "Share");
+                }
                 return Ok(state);
             }
             catch (Exception ex)
@@ -406,6 +428,110 @@ namespace Wiseravenshare.Server.Controllers
         {
             var count = await _postService.GetPostCountAsync(userId);
             return Ok(count);
+        }
+
+        /// <summary>
+        /// Mark post as not interested for ranking suppression
+        /// </summary>
+        [HttpPost("{id}/not-interested")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> MarkNotInterested(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                await TryTrackPostInteractionAsync(userId, id, "Dismiss");
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return NoContent();
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Hide an author from the feed (without full account block)
+        /// </summary>
+        [HttpPost("{id}/hide-author")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> HideAuthor(Guid id)
+        {
+            try
+            {
+                var userId = await ResolveEffectiveUserIdAsync();
+                var post = await _postService.GetPostAsync(id);
+                await _personalizationService.TrackInteractionAsync(userId, new TrackInteractionRequest(
+                    "Dismiss",
+                    "author",
+                    post.UserId,
+                    post.User?.DisplayName ?? post.User?.Username ?? "Author",
+                    "author",
+                    null,
+                    100,
+                    null,
+                    HttpContext.Request.Headers.UserAgent.ToString(),
+                    null,
+                    null), HttpContext.RequestAborted);
+
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return NoContent();
+            }
+            catch (NotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        private async Task TrackPostInteractionAsync(Guid userId, Guid postId, string interactionType)
+        {
+            var post = await _postService.GetPostAsync(postId);
+            var tags = ExtractPostTags(post.Content);
+
+            await _personalizationService.TrackInteractionAsync(userId, new TrackInteractionRequest(
+                interactionType,
+                "post",
+                post.Id,
+                string.IsNullOrWhiteSpace(post.Content) ? "Post" : post.Content[..Math.Min(120, post.Content.Length)],
+                post.Type,
+                tags.Length > 0 ? tags : null,
+                null,
+                null,
+                HttpContext.Request.Headers.UserAgent.ToString(),
+                null,
+                null), HttpContext.RequestAborted);
+        }
+
+        private async Task TryTrackPostInteractionAsync(Guid userId, Guid postId, string interactionType)
+        {
+            try
+            {
+                await TrackPostInteractionAsync(userId, postId, interactionType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to track post interaction {InteractionType} for user {UserId} post {PostId}", interactionType, userId, postId);
+            }
+        }
+
+        private static string[] ExtractPostTags(string? content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return Array.Empty<string>();
+            }
+
+            var tags = HashtagRegex
+                .Matches(content)
+                .Select(match => match.Groups[1].Value.Trim().ToLowerInvariant())
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(24)
+                .ToArray();
+
+            return tags;
         }
 
         private async Task<Guid> ResolveEffectiveUserIdAsync()

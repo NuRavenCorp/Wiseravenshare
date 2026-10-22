@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, field_validator
 from live_ranker import rank_live_feed
+from feed_ranker import rank_post_feed
 
 
 logger = logging.getLogger("python-matrix")
@@ -483,6 +484,41 @@ def multiply(payload: MultiplyRequest) -> dict[str, list[list[float]]]:
         )
 
     return response
+
+
+@app.get("/post/feed/ranked")
+def post_feed_ranked(
+    viewer_id: str = Query(..., min_length=1),
+    page_size: int = Query(40, ge=1, le=100),
+    window_days: int = Query(30, ge=1, le=90),
+) -> dict[str, Any]:
+    """
+    Ranked post feed using the 5-trigger, 4-prediction, debias+diversity pipeline.
+    Intended to replace / augment PostRepository.GetFeedAsync for authenticated users.
+    Returns post IDs and scores; the .NET layer fetches full Post DTOs by ID.
+    """
+    try:
+        with get_connection() as conn:
+            posts = rank_post_feed(
+                conn,
+                viewer_id=viewer_id,
+                page_size=page_size,
+                candidate_window_days=window_days,
+            )
+    except psycopg.Error as error:
+        logger.warning("Post feed ranking DB error: %s", error)
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Post feed ranking is unavailable.", "error": str(error)},
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Post feed ranking failed: %s", error)
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Post feed ranking failed.", "error": str(error)},
+        )
+
+    return {"posts": posts, "count": len(posts), "viewer_id": viewer_id}
 
 
 @app.get("/live/feed")
