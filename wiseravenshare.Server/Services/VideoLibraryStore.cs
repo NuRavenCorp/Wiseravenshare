@@ -715,8 +715,15 @@ LIMIT @limit OFFSET @offset;";
 
     private async Task EnsureStateColumnsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
+        // Idempotently add any columns that may have been introduced after an existing table was first created.
         var sql = $@"
 ALTER TABLE {_videosTable}
+    ADD COLUMN IF NOT EXISTS music_track_id TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_title TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_url TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_artist TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_album TEXT NULL,
+    ADD COLUMN IF NOT EXISTS music_track_genre TEXT NULL,
     ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT FALSE;";
 
