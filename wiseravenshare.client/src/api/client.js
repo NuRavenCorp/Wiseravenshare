@@ -382,6 +382,12 @@ export const apiClient = {
     share(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/share`, { method: "POST" });
     },
+    notInterested(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/not-interested`, { method: "POST" });
+    },
+    hideAuthor(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}/hide-author`, { method: "POST" });
+    },
   },
   auth: {
     setToken(token) {

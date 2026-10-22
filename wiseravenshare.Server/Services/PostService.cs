@@ -48,6 +48,7 @@ public class PostService : IPostService
     private readonly IWiseCoinService _wiseCoinService;
     private readonly IEngagementMultiplierService _engagementMultiplierService;
     private readonly IContentCrawlerService _contentCrawler;
+    private readonly IPostFeedRankingService _postFeedRankingService;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -60,6 +61,7 @@ public class PostService : IPostService
         IWiseCoinService wiseCoinService,
         IEngagementMultiplierService engagementMultiplierService,
         IContentCrawlerService contentCrawler,
+        IPostFeedRankingService postFeedRankingService,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -71,6 +73,7 @@ public class PostService : IPostService
         _wiseCoinService = wiseCoinService;
         _engagementMultiplierService = engagementMultiplierService;
         _contentCrawler = contentCrawler;
+        _postFeedRankingService = postFeedRankingService;
         _logger = logger;
     }
 
@@ -462,7 +465,7 @@ public class PostService : IPostService
     {
         try
         {
-            var posts = await _postRepository.GetFeedAsync(userId, page, pageSize);
+            var posts = await _postFeedRankingService.GenerateFeedAsync(userId, page, pageSize);
             return await MapToPostDtosAsync(posts, userId);
         }
         catch (Exception ex)
