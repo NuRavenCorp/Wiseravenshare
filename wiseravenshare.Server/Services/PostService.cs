@@ -178,19 +178,11 @@ public class PostService : IPostService
         post.Id = createdPostId;
 
         bool persisted = false;
-        try
-        {
-            await _postRepository.AddAsync(post);
-            persisted = true;
-            _logger.LogInformation("Post created by user {UserId}", userId);
-            DispatchSocialPublish(post);
-            DispatchCrossPlatformPublish(post);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Post repository persistence failed; returning a local fallback post DTO for user {UserId}", userId);
-            return BuildPostDto(post, user);
-        }
+        await _postRepository.AddAsync(post);
+        persisted = true;
+        _logger.LogInformation("Post created by user {UserId}", userId);
+        DispatchSocialPublish(post);
+        DispatchCrossPlatformPublish(post);
 
         // If repost, update the original post's repost count
         if (dto.RepostOfId.HasValue)
@@ -256,7 +248,7 @@ public class PostService : IPostService
 
         try
         {
-            return await GetPostDtoAsync(post.Id);
+            return await GetPostDtoAsync(post.Id, userId);
         }
         catch (Exception ex)
         {
@@ -475,8 +467,18 @@ public class PostService : IPostService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Post feed query failed; returning an empty fallback feed for user {UserId}", userId);
-            return Array.Empty<PostDto>();
+            _logger.LogWarning(ex, "Post feed query failed; trying own-posts fallback for user {UserId}", userId);
+            try
+            {
+                var ownPosts = await _postRepository.FindAsync(p => !p.IsDeleted && p.UserId == userId);
+                var ordered = ownPosts.OrderByDescending(p => p.CreatedAt).Take(pageSize);
+                return await MapToPostDtosAsync(ordered, userId);
+            }
+            catch (Exception fallbackEx)
+            {
+                _logger.LogWarning(fallbackEx, "Own-posts fallback also failed for user {UserId}.", userId);
+                return Array.Empty<PostDto>();
+            }
         }
     }
 
@@ -631,6 +633,28 @@ public class PostService : IPostService
         await _postRepository.RepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} reposted post {PostId}", userId, postId);
 
+        // Create a visible repost Post so it appears in the user's feed and followers' feeds.
+        var existingReposts = await _postRepository.FindAsync(p => p.UserId == userId && p.RepostOfId == postId && !p.IsDeleted);
+        if (!existingReposts.Any())
+        {
+            try
+            {
+                var repostPost = new Post
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    Content = string.Empty,
+                    Type = post.Type,
+                    RepostOfId = postId
+                };
+                await _postRepository.AddAsync(repostPost);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create visible repost post for user {UserId} reposting {PostId}.", userId, postId);
+            }
+        }
+
         // Award WSC to the post author for receiving a repost (fire-and-forget).
         if (post.UserId != userId)
         {
@@ -711,6 +735,22 @@ public class PostService : IPostService
 
         await _postRepository.UnrepostPostAsync(postId, userId);
         _logger.LogInformation("User {UserId} unreposted post {PostId}", userId, postId);
+
+        // Remove the visible repost Post entry created when the user reposted.
+        var repostPosts = await _postRepository.FindAsync(p => p.UserId == userId && p.RepostOfId == postId && !p.IsDeleted);
+        foreach (var repostPost in repostPosts)
+        {
+            try
+            {
+                repostPost.IsDeleted = true;
+                repostPost.DeletedAt = DateTime.UtcNow;
+                await _postRepository.UpdateAsync(repostPost);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove visible repost post {RepostPostId} for user {UserId}.", repostPost.Id, userId);
+            }
+        }
 
         PostInteractionState unrepostInteraction;
         try
@@ -888,16 +928,27 @@ public class PostService : IPostService
             throw new NotFoundException("Post not found");
         }
 
-        var interaction = await _postRepository.GetInteractionStateAsync(post.Id, viewerUserId);
+        // GetByIdAsync (FindAsync) does not eagerly load navigation properties.
+        // Resolve the author separately so the DTO always has user info.
+        User? author = post.User;
+        if (author == null && post.UserId != Guid.Empty)
+        {
+            try { author = await _userRepository.GetByIdAsync(post.UserId); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to load author for post {PostId}.", postId); }
+        }
+
+        var states = await _postRepository.GetBatchInteractionStatesAsync([postId], viewerUserId);
+        states.TryGetValue(postId, out var interaction);
         var engagementUsers = await BuildPostEngagementUsersAsync(post.Id);
-        return BuildPostDto(post, post.User, interaction, engagementUsers);
+        return BuildPostDto(post, author, interaction, engagementUsers);
     }
 
     private PostDto BuildPostDto(
         Post post,
         User? user,
         PostInteractionState? interaction = null,
-        IReadOnlyList<PostEngagementUserDto>? engagementUsers = null)
+        IReadOnlyList<PostEngagementUserDto>? engagementUsers = null,
+        bool includeNestedPosts = true)
     {
         return new PostDto
         {
@@ -930,6 +981,9 @@ public class PostService : IPostService
             IsLiked = interaction?.IsLiked ?? false,
             IsReposted = interaction?.IsReposted ?? false,
             IsBookmarked = interaction?.IsBookmarked ?? false,
+            RepostOf = (includeNestedPosts && post.RepostOf != null)
+                ? BuildPostDto(post.RepostOf, post.RepostOf.User, includeNestedPosts: false)
+                : null,
             User = user is null ? new UserDto() : MapToUserDto(user),
             EngagementUsers = engagementUsers ?? Array.Empty<PostEngagementUserDto>()
         };
@@ -1123,10 +1177,35 @@ public class PostService : IPostService
 
     private async Task<IEnumerable<PostDto>> MapToPostDtosAsync(IEnumerable<Post> posts, Guid? viewerUserId)
     {
-        var dtos = new List<PostDto>();
-        foreach (var post in posts)
+        var postList = posts.ToList();
+        if (postList.Count == 0) return Array.Empty<PostDto>();
+
+        // Batch all viewer-specific interaction queries into 3 DB calls (instead of N*6 calls).
+        // This also avoids the SaveChangesAsync that GetInteractionStateAsync triggers per post.
+        var postIds = postList.Select(p => p.Id).ToList();
+        var interactionStates = await _postRepository.GetBatchInteractionStatesAsync(postIds, viewerUserId);
+
+        var dtos = new List<PostDto>(postList.Count);
+        foreach (var post in postList)
         {
-            dtos.Add(await GetPostDtoAsync(post.Id, viewerUserId));
+            try
+            {
+                interactionStates.TryGetValue(post.Id, out var interaction);
+                var engagementUsers = await BuildPostEngagementUsersAsync(post.Id);
+                // Use the navigation property already loaded by the feed Include clause.
+                // Fall back to a separate DB lookup only when the navigation property is null.
+                var author = post.User;
+                if (author == null && post.UserId != Guid.Empty)
+                {
+                    try { author = await _userRepository.GetByIdAsync(post.UserId); }
+                    catch { /* skip author info if lookup fails */ }
+                }
+                dtos.Add(BuildPostDto(post, author, interaction, engagementUsers));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to map post {PostId} to DTO; skipping.", post.Id);
+            }
         }
         return dtos;
     }

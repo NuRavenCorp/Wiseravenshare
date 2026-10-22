@@ -54,12 +54,14 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
             // 5. For partial (liked-author) sources, limit to 2 posts each to avoid domination
             var primaryPosts = await _dbSet
+                .AsNoTracking()
                 .Where(p => !p.IsDeleted && primaryIds.Contains(p.UserId))
                 .OrderByDescending(p => p.CreatedAt)
                 .Take(pageSize * page)
                 .Include(p => p.User)
                 .Include(p => p.ReplyTo)
                 .Include(p => p.RepostOf)
+                    .ThenInclude(r => r!.User)
                 .Include(p => p.QuoteOf)
                 .ToListAsync();
 
@@ -68,12 +70,14 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
             {
                 // Fetch up to 2 recent posts per liked author, total capped
                 partialPosts = await _dbSet
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted && partialIds.Contains(p.UserId))
                     .OrderByDescending(p => p.CreatedAt)
                     .Take(partialIds.Count * 2)
                     .Include(p => p.User)
                     .Include(p => p.ReplyTo)
                     .Include(p => p.RepostOf)
+                        .ThenInclude(r => r!.User)
                     .Include(p => p.QuoteOf)
                     .ToListAsync();
 
@@ -105,16 +109,39 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
 
         public async Task<IEnumerable<Post>> GetTrendingPostsAsync(int count)
         {
-            return await _dbSet
-                .Where(p => !p.IsDeleted && p.CreatedAt > DateTime.UtcNow.AddDays(-7))
+            var safeCount = Math.Max(count, 10);
+            var cutoff7d = DateTime.UtcNow.AddDays(-7);
+            var cutoff24h = DateTime.UtcNow.AddHours(-24);
+
+            // Trending: engagement-scored posts from the last 7 days
+            var trending = await _dbSet
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.CreatedAt > cutoff7d)
                 .OrderByDescending(p =>
                     p.LikesCount * 2 +
                     p.RepostsCount * 3 +
                     p.CommentsCount * 1.5 +
                     p.ViewsCount * 0.1)
-                .Take(count)
+                .Take(safeCount)
                 .Include(p => p.User)
                 .ToListAsync();
+
+            // Always pull the most recent posts from last 24 h that aren't already in trending,
+            // so brand-new zero-engagement posts are never invisible.
+            var trendingIds = trending.Select(p => p.Id).ToHashSet();
+            var recent = await _dbSet
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.CreatedAt > cutoff24h && !trendingIds.Contains(p.Id))
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(Math.Min(safeCount / 2, 20))
+                .Include(p => p.User)
+                .ToListAsync();
+
+            return recent
+                .Concat(trending)
+                .DistinctBy(p => p.Id)
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(safeCount);
         }
 
         public async Task<IEnumerable<Post>> GetRepliesAsync(Guid postId)
@@ -324,6 +351,57 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Repositories
         {
             await _context.Database.ExecuteSqlAsync(
                 $"UPDATE app_data.\"Posts\" SET \"SharesCount\" = \"SharesCount\" + 1 WHERE \"Id\" = {postId}");
+        }
+
+        public async Task<IReadOnlyDictionary<Guid, PostInteractionState>> GetBatchInteractionStatesAsync(
+            IEnumerable<Guid> postIds, Guid? viewerUserId = null)
+        {
+            var idList = postIds.ToList();
+            if (idList.Count == 0)
+                return new Dictionary<Guid, PostInteractionState>();
+
+            // 3 viewer-specific queries instead of 6+ per post; no SaveChangesAsync
+            var likedSet = viewerUserId.HasValue
+                ? new HashSet<Guid>(await _context.PostLikes
+                    .Where(l => l.UserId == viewerUserId.Value && idList.Contains(l.PostId))
+                    .Select(l => l.PostId).ToListAsync())
+                : new HashSet<Guid>();
+
+            var repostedSet = viewerUserId.HasValue
+                ? new HashSet<Guid>(await _context.PostReposts
+                    .Where(r => r.UserId == viewerUserId.Value && idList.Contains(r.PostId))
+                    .Select(r => r.PostId).ToListAsync())
+                : new HashSet<Guid>();
+
+            var bookmarkedSet = viewerUserId.HasValue
+                ? new HashSet<Guid>(await _context.PostBookmarks
+                    .Where(b => b.UserId == viewerUserId.Value && idList.Contains(b.PostId))
+                    .Select(b => b.PostId).ToListAsync())
+                : new HashSet<Guid>();
+
+            // Read denormalized counters from the Post rows; no counter refresh needed for reads
+            var postCounters = await _dbSet
+                .AsNoTracking()
+                .Where(p => idList.Contains(p.Id))
+                .Select(p => new
+                {
+                    p.Id, p.LikesCount, p.RepostsCount, p.CommentsCount,
+                    p.BookmarksCount, p.ViewsCount, p.SharesCount
+                })
+                .ToDictionaryAsync(p => p.Id);
+
+            var result = new Dictionary<Guid, PostInteractionState>(idList.Count);
+            foreach (var postId in idList)
+            {
+                if (!postCounters.TryGetValue(postId, out var c)) continue;
+                result[postId] = new PostInteractionState(
+                    c.LikesCount, c.RepostsCount, c.CommentsCount, c.BookmarksCount,
+                    c.ViewsCount, c.SharesCount,
+                    likedSet.Contains(postId),
+                    repostedSet.Contains(postId),
+                    bookmarkedSet.Contains(postId));
+            }
+            return result;
         }
 
         private async Task RefreshPostCountersAsync(
