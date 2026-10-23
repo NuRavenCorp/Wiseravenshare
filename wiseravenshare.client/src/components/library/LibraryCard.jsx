@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import { Image } from "@/components/ui/image";
-import { Music, Play, Check, Trash2 } from "lucide-react";
+import { Music, Play, Check, Trash2, Loader2 } from "lucide-react";
 
-export default function LibraryCard({ item, selected, confirming, onSelect, onPreview, onDelete }) {
+export default function LibraryCard({ item, selected, confirming, deleting = false, onSelect, onPreview, onDelete }) {
   const [url, setUrl] = useState(null);
 
   useEffect(() => {
@@ -22,9 +22,10 @@ export default function LibraryCard({ item, selected, confirming, onSelect, onPr
         type="checkbox"
         checked={selected}
         onChange={onSelect}
+        disabled={deleting}
         className="absolute top-2 left-2 z-10 w-4 h-4 accent-primary"
       />
-      <button onClick={onPreview} className="block w-full text-left">
+      <button onClick={onPreview} disabled={deleting} className="block w-full text-left disabled:opacity-60">
         {item.asset_type === "photo" ? (
           url ? (
             <Image src={url} alt={item.title} className="w-full aspect-square" fittingType="fill" />
@@ -47,14 +48,15 @@ export default function LibraryCard({ item, selected, confirming, onSelect, onPr
         <p className="text-xs text-foreground truncate flex-1">{item.title}</p>
         <button
           onClick={onDelete}
+          disabled={deleting}
           className={`p-1 rounded transition-colors shrink-0 ${
             confirming
               ? "bg-destructive text-destructive-foreground"
-              : "text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              : "text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-60 disabled:pointer-events-none"
           }`}
-          title={confirming ? "Click again to confirm" : "Delete"}
+          title={deleting ? "Deleting…" : (confirming ? "Click again to confirm" : "Delete")}
         >
-          {confirming ? <Check className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+          {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (confirming ? <Check className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />)}
         </button>
       </div>
     </div>

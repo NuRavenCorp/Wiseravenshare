@@ -117,6 +117,7 @@ export default function Library() {
   const [uploading, setUploading] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
+  const [deletingIds, setDeletingIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [confirmingBulk, setConfirmingBulk] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -133,6 +134,12 @@ export default function Library() {
   const { toast } = useToast();
   const { openMedia } = useMediaExperience();
   const fileRefs = useRef({});
+  const compareLibraryItems = useCallback((a, b) => (
+    sort === "name-asc" ? a.title.localeCompare(b.title)
+      : sort === "name-desc" ? b.title.localeCompare(a.title)
+        : sort === "oldest" ? String(a.created_date || "").localeCompare(String(b.created_date || ""))
+          : String(b.created_date || "").localeCompare(String(a.created_date || ""))
+  ), [sort]);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -155,10 +162,7 @@ export default function Library() {
           if (!search.trim()) return true;
           return String(item.title || "").toLowerCase().includes(search.trim().toLowerCase());
         })
-        .sort((a, b) => sort === "name-asc" ? a.title.localeCompare(b.title)
-          : sort === "name-desc" ? b.title.localeCompare(a.title)
-          : sort === "oldest" ? String(a.created_date || "").localeCompare(String(b.created_date || ""))
-          : String(b.created_date || "").localeCompare(String(a.created_date || "")));
+        .sort(compareLibraryItems);
 
       setItems(filtered);
     } catch {
@@ -166,7 +170,7 @@ export default function Library() {
     } finally {
       setLoading(false);
     }
-  }, [filter, search, sort]);
+  }, [compareLibraryItems, filter, search, sort]);
 
   useEffect(() => { localStorage.setItem("wiseravenshare.library.playlists", JSON.stringify(playlists)); }, [playlists]);
 
@@ -329,6 +333,13 @@ export default function Library() {
       return;
     }
     setConfirmingId(null);
+    setDeletingIds((prev) => new Set(prev).add(item.id));
+    setItems((prev) => prev.filter((entry) => entry.id !== item.id));
+    setCounts((prev) => ({
+      ...prev,
+      all: Math.max(0, (prev.all || 0) - 1),
+      [item.asset_type]: Math.max(0, (prev[item.asset_type] || 0) - 1),
+    }));
     try {
       if (item.asset_type === "photo") await apiClient.ravensightMedia.deletePhoto(item.id);
       else if (item.asset_type === "music") await apiClient.ravensightMedia.deleteMusic(item.id);
@@ -338,13 +349,20 @@ export default function Library() {
         next.delete(item.id);
         return next;
       });
-      fetchItems();
       fetchCounts();
     } catch (e) {
+      fetchItems();
+      fetchCounts();
       toast({
         title: "Delete failed",
         description: e?.message || "Could not delete this item.",
         variant: "destructive",
+      });
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
       });
     }
   };
@@ -373,18 +391,36 @@ export default function Library() {
     }
     setConfirmingBulk(false);
     setBulkDeleting(true);
+    const selectedItems = items.filter((item) => selectedIds.has(item.id));
+    const selectedIdSet = new Set(selectedItems.map((item) => item.id));
+    setDeletingIds((prev) => {
+      const next = new Set(prev);
+      selectedItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+    setItems((prev) => prev.filter((item) => !selectedIdSet.has(item.id)));
+    setCounts((prev) => {
+      const next = { ...prev };
+      selectedItems.forEach((item) => {
+        next.all = Math.max(0, (next.all || 0) - 1);
+        next[item.asset_type] = Math.max(0, (next[item.asset_type] || 0) - 1);
+      });
+      return next;
+    });
+    setSelectedIds(new Set());
+    setConfirmingId(null);
     try {
-      const selectedItems = items.filter((item) => selectedIds.has(item.id));
       const results = await Promise.allSettled(selectedItems.map((item) => {
         if (item.asset_type === "photo") return apiClient.ravensightMedia.deletePhoto(item.id);
         if (item.asset_type === "music") return apiClient.ravensightMedia.deleteMusic(item.id);
         return apiClient.ravensightMedia.deleteVideo(item.id);
       }));
       const failedItems = selectedItems.filter((_, index) => results[index].status === "rejected");
-      setSelectedIds(new Set(failedItems.map((item) => item.id)));
-      setConfirmingId(null);
-      fetchItems();
       fetchCounts();
+      if (failedItems.length > 0) {
+        setItems((prev) => [...prev, ...failedItems].sort(compareLibraryItems));
+        setSelectedIds(new Set(failedItems.map((item) => item.id)));
+      }
       toast(failedItems.length
         ? { title: "Some items could not be deleted", description: `${failedItems.length} item(s) failed. They remain selected so you can retry.`, variant: "destructive" }
         : { title: "Items deleted", description: "Selected items have been removed." });
@@ -394,7 +430,14 @@ export default function Library() {
         description: e?.message || "Could not delete selected items.",
         variant: "destructive",
       });
+      fetchItems();
+      fetchCounts();
     } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        selectedItems.forEach((item) => next.delete(item.id));
+        return next;
+      });
       setBulkDeleting(false);
     }
   };
@@ -511,6 +554,11 @@ export default function Library() {
             </div>
           </div>
         )}
+        {deletingIds.size > 0 && (
+          <div className="mb-4 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+            Deleting {deletingIds.size} item{deletingIds.size === 1 ? "" : "s"}…
+          </div>
+        )}
 
         {/* Grid */}
         {loading ? (
@@ -544,6 +592,7 @@ export default function Library() {
                   item={item}
                   selected={selectedIds.has(item.id)}
                   confirming={confirmingId === item.id}
+                  deleting={deletingIds.has(item.id)}
                   onSelect={() => toggleSelect(item.id)}
                   onPreview={() => openMedia(item)}
                   onDelete={() => handleDelete(item)}
