@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "@/api/client";
 
+const normalizeFeedStream = (stream) => {
+  const streamId = stream?.stream_id || stream?.id || "";
+  return {
+    ...stream,
+    stream_id: streamId,
+    title: stream?.title || "Untitled stream",
+    category: stream?.category || (stream?.is_audio_only ? "audio" : "video"),
+    viewer_count: Number.isFinite(stream?.viewer_count) ? stream.viewer_count : 0,
+  };
+};
+
 export function useLiveFeed(viewerId) {
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,7 +27,7 @@ export function useLiveFeed(viewerId) {
 
     try {
       const data = await apiClient.live.feed(viewerId, 50);
-      setFeed(data?.streams || []);
+      setFeed((data?.streams || []).map(normalizeFeedStream));
       setError(null);
     } catch (requestError) {
       try {
@@ -24,7 +35,7 @@ export function useLiveFeed(viewerId) {
           { status: "live" },
           { sort: "-updated_date", limit: 50 },
         );
-        setFeed(fallback?.items || []);
+        setFeed((fallback?.items || []).map(normalizeFeedStream));
         setError(null);
       } catch (fallbackError) {
         setError(fallbackError?.message || requestError?.message || "Unable to load live feed.");

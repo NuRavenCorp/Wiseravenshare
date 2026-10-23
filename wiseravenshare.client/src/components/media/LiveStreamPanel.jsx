@@ -13,14 +13,25 @@ export default function LiveStreamPanel() {
   const [streams, setStreams] = useState([]);
   const [endedStreams, setEndedStreams] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [panelError, setPanelError] = useState("");
   const [selectedStream, setSelectedStream] = useState(null);
   const [expiryById, setExpiryById] = useState({});
   const [keepTextById, setKeepTextById] = useState({});
   const [keepBusyById, setKeepBusyById] = useState({});
   const [deleteBusyById, setDeleteBusyById] = useState({});
 
+  const isOwnedByCurrentUser = (stream) => {
+    const currentUserId = String(user?.id || "").trim().toLowerCase();
+    if (!currentUserId) return false;
+    const ownerIds = [stream?.streamer_id, stream?.created_by_id]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    return ownerIds.includes(currentUserId);
+  };
+
   const fetchStreams = async () => {
     try {
+      setPanelError("");
       const [liveRes, endedRes] = await Promise.all([
         apiClient.entities.LiveStream.filter(
           { status: "live" },
@@ -35,6 +46,10 @@ export default function LiveStreamPanel() {
       ]);
       setStreams(liveRes.items || []);
       setEndedStreams(endedRes.items || []);
+    } catch (requestError) {
+      setStreams([]);
+      setEndedStreams([]);
+      setPanelError(requestError?.message || "Could not load live streams.");
     } finally {
       setLoading(false);
     }
@@ -110,6 +125,7 @@ export default function LiveStreamPanel() {
 
     setDeleteBusyById((prev) => ({ ...prev, [streamId]: true }));
     try {
+      setPanelError("");
       await apiClient.live.delete(streamId);
       setExpiryById((prev) => {
         const next = { ...prev };
@@ -122,6 +138,39 @@ export default function LiveStreamPanel() {
         return next;
       });
       await fetchStreams();
+    } catch (deleteError) {
+      setPanelError(deleteError?.message || "Could not delete stream.");
+    } finally {
+      setDeleteBusyById((prev) => ({ ...prev, [streamId]: false }));
+    }
+  };
+
+  const endAndDeleteStream = async (stream) => {
+    const streamId = stream?.id;
+    if (!streamId) return;
+    const confirmed = window.confirm(
+      `End and delete "${stream.title || "this live stream"}" and its stream files?`,
+    );
+    if (!confirmed) return;
+
+    setDeleteBusyById((prev) => ({ ...prev, [streamId]: true }));
+    try {
+      setPanelError("");
+      try {
+        await apiClient.live.end(streamId);
+      } catch (endError) {
+        if (![404, 409].includes(endError?.status)) {
+          throw endError;
+        }
+      }
+      await apiClient.live.delete(streamId);
+      await fetchStreams();
+      if (selectedStream?.id === streamId) {
+        setMode("list");
+        setSelectedStream(null);
+      }
+    } catch (deleteError) {
+      setPanelError(deleteError?.message || "Could not end/delete stream.");
     } finally {
       setDeleteBusyById((prev) => ({ ...prev, [streamId]: false }));
     }
@@ -167,6 +216,11 @@ export default function LiveStreamPanel() {
           <Plus className="w-3.5 h-3.5" /> Go Live
         </Button>
       </div>
+      {panelError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2">
+          <p className="text-xs text-destructive">{panelError}</p>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-8">
@@ -182,30 +236,46 @@ export default function LiveStreamPanel() {
       ) : (
         <div className="space-y-2">
           {streams.map((s) => (
-            <button
+            <div
               key={s.id}
-              onClick={() => {
-                setSelectedStream(s);
-                setMode("view");
-              }}
-              className="w-full flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-secondary/50 transition-colors text-left"
+              className="w-full flex items-center gap-3 p-3 rounded-lg border border-border bg-card transition-colors text-left"
             >
-              <div className="w-10 h-10 rounded bg-destructive/10 flex items-center justify-center shrink-0">
-                <Radio className="w-5 h-5 text-destructive" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
-                  {s.title}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {s.is_audio_only ? "Audio" : "Video"}
-                </p>
-              </div>
-              <span className="px-2 py-0.5 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-destructive-foreground animate-pulse" />
-                LIVE
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStream(s);
+                  setMode("view");
+                }}
+                className="flex items-center gap-3 min-w-0 flex-1 hover:bg-secondary/40 rounded-md p-1 -m-1"
+              >
+                <div className="w-10 h-10 rounded bg-destructive/10 flex items-center justify-center shrink-0">
+                  <Radio className="w-5 h-5 text-destructive" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {s.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {s.is_audio_only ? "Audio" : "Video"}
+                  </p>
+                </div>
+                <span className="px-2 py-0.5 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-destructive-foreground animate-pulse" />
+                  LIVE
+                </span>
+              </button>
+              {isOwnedByCurrentUser(s) && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => endAndDeleteStream(s)}
+                  disabled={!!deleteBusyById[s.id]}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {deleteBusyById[s.id] ? "Deleting..." : "End & Delete"}
+                </Button>
+              )}
+            </div>
           ))}
         </div>
       )}
