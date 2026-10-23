@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
+import { useWebRtcBroadcaster } from "@/hooks/useWebRtcBroadcaster";
 import {
   Radio,
   StopCircle,
@@ -18,6 +19,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
   const [error, setError] = useState(null);
   const [audioOnly, setAudioOnly] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { viewerCount, startBroadcastSession, stopBroadcastSession } = useWebRtcBroadcaster();
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
   const streamIdRef = useRef(null);
@@ -130,6 +132,15 @@ export default function LiveStreamBroadcaster({ onEnd }) {
         is_audio_only: audioOnly,
       });
       streamIdRef.current = streamId;
+      try {
+        await startBroadcastSession({
+          roomId: streamId,
+          mediaStream,
+          displayName: user?.displayName || user?.username || user?.name || "Host",
+        });
+      } catch {
+        setError("Live started, but real-time viewer signaling is unavailable.");
+      }
 
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(mediaStream, { mimeType });
@@ -191,6 +202,8 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       }
     }
 
+    await stopBroadcastSession();
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -242,8 +255,9 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
+      void stopBroadcastSession();
     };
-  }, []);
+  }, [stopBroadcastSession]);
 
   return (
     <div className="space-y-4">
@@ -330,7 +344,9 @@ export default function LiveStreamBroadcaster({ onEnd }) {
           </div>
           <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
             <span className="text-xs text-muted-foreground">
-              {saving ? "Finalizing stream for auto-save..." : "Live recording in progress (5s auto segments)"}
+              {saving
+                ? "Finalizing stream for auto-save..."
+                : `Live recording in progress (5s auto segments) · ${viewerCount} viewer${viewerCount === 1 ? "" : "s"}`}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => stopStream(true)} disabled={saving}>
