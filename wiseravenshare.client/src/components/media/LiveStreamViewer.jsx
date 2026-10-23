@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
+import { useWebRtcViewer } from "@/hooks/useWebRtcViewer";
 import { Loader2, Radio, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function LiveStreamViewer({ stream, onBack }) {
   const [loading, setLoading] = useState(true);
   const [ended, setEnded] = useState(false);
+  const [realtimeActive, setRealtimeActive] = useState(false);
   const videoRef = useRef(null);
   const lastSeqRef = useRef(stream.chunk_sequence || 0);
   const currentSourceRef = useRef("");
+  const realtimeActiveRef = useRef(false);
+  const { startViewingSession, stopViewingSession } = useWebRtcViewer();
 
   const applyWholeStreamSource = async (next) => {
+    if (realtimeActiveRef.current) return;
     if (!next?.current_chunk_uri) return;
     const playableUrl = await getPlayableUrl(next.current_chunk_uri);
     if (!playableUrl || !videoRef.current) return;
@@ -40,11 +45,36 @@ export default function LiveStreamViewer({ stream, onBack }) {
   };
 
   useEffect(() => {
+    realtimeActiveRef.current = realtimeActive;
+  }, [realtimeActive]);
+
+  useEffect(() => {
     if (!stream) return;
     let disposed = false;
     let unsub;
 
     const setup = async () => {
+      if (stream.status !== "ended") {
+        try {
+          await startViewingSession({
+            roomId: stream.id,
+            displayName: "Viewer",
+            onRemoteStream: (remoteStream) => {
+              const video = videoRef.current;
+              if (!video) return;
+              currentSourceRef.current = "";
+              video.src = "";
+              video.srcObject = remoteStream;
+              setRealtimeActive(true);
+              setLoading(false);
+              video.play().catch(() => {});
+            },
+          });
+        } catch {
+          setRealtimeActive(false);
+        }
+      }
+
       if (stream.current_chunk_uri && stream.chunk_sequence > 0) {
         lastSeqRef.current = stream.chunk_sequence;
         await applyWholeStreamSource(stream);
@@ -72,11 +102,15 @@ export default function LiveStreamViewer({ stream, onBack }) {
     return () => {
       disposed = true;
       if (unsub) unsub();
+      void stopViewingSession();
       if (videoRef.current) {
         videoRef.current.onloadedmetadata = null;
+        if (videoRef.current.srcObject) {
+          videoRef.current.srcObject = null;
+        }
       }
     };
-  }, [stream, ended]);
+  }, [stream, ended, startViewingSession, stopViewingSession]);
 
   if (loading) {
     return (

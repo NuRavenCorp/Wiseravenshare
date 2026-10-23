@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
+using System.Text.Json;
 using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 
@@ -24,6 +25,7 @@ public sealed class LiveController : ControllerBase
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IMediaBlobSignatureService _signatureService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<LiveController> _logger;
 
     public LiveController(
@@ -32,6 +34,7 @@ public sealed class LiveController : ControllerBase
         VideoLibraryStore videoLibraryStore,
         IBlobStorageService blobStorageService,
         IMediaBlobSignatureService signatureService,
+        IConfiguration configuration,
         ILogger<LiveController> logger)
     {
         _httpClientFactory = httpClientFactory;
@@ -39,6 +42,7 @@ public sealed class LiveController : ControllerBase
         _videoLibraryStore = videoLibraryStore;
         _blobStorageService = blobStorageService;
         _signatureService = signatureService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -115,6 +119,102 @@ public sealed class LiveController : ControllerBase
         {
             _logger.LogWarning(ex, "Live feed training data proxy request failed.");
             return StatusCode(503, new { message = "Live feed training data is unavailable." });
+        }
+    }
+
+    [HttpGet("ice-servers")]
+    [AllowAnonymous]
+    public async Task<IActionResult> IceServers(CancellationToken cancellationToken = default)
+    {
+        var appName = (_configuration["MeteredTurn:AppName"] ?? string.Empty).Trim();
+        var credentialApiKey = (_configuration["MeteredTurn:CredentialApiKey"] ?? string.Empty).Trim();
+        var region = (_configuration["MeteredTurn:Region"] ?? string.Empty).Trim();
+        var timeoutSecondsRaw = (_configuration["MeteredTurn:TimeoutSeconds"] ?? string.Empty).Trim();
+        var timeoutSeconds = 4;
+        if (int.TryParse(timeoutSecondsRaw, out var parsedTimeout) && parsedTimeout > 0)
+        {
+            timeoutSeconds = parsedTimeout;
+        }
+
+        if (string.IsNullOrWhiteSpace(appName) || string.IsNullOrWhiteSpace(credentialApiKey))
+        {
+            return Ok(new
+            {
+                providers = "fallback",
+                iceServers = new object[]
+                {
+                    new { urls = "stun:stun.relay.metered.ca:80" },
+                    new { urls = "stun:stun.l.google.com:19302" }
+                }
+            });
+        }
+
+        var meteredUrl = $"https://{appName}.metered.live/api/v1/turn/credentials?apiKey={Uri.EscapeDataString(credentialApiKey)}";
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            meteredUrl = $"{meteredUrl}&region={Uri.EscapeDataString(region)}";
+        }
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+
+            using var response = await client.GetAsync(meteredUrl, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Metered ICE server fetch failed with {StatusCode}: {Detail}",
+                    (int)response.StatusCode,
+                    detail);
+
+                return Ok(new
+                {
+                    providers = "fallback",
+                    iceServers = new object[]
+                    {
+                        new { urls = "stun:stun.relay.metered.ca:80" },
+                        new { urls = "stun:stun.l.google.com:19302" }
+                    }
+                });
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var iceServers = await JsonSerializer.DeserializeAsync<object[]>(stream, cancellationToken: cancellationToken)
+                ?? Array.Empty<object>();
+
+            if (iceServers.Length == 0)
+            {
+                return Ok(new
+                {
+                    providers = "fallback",
+                    iceServers = new object[]
+                    {
+                        new { urls = "stun:stun.relay.metered.ca:80" },
+                        new { urls = "stun:stun.l.google.com:19302" }
+                    }
+                });
+            }
+
+            return Ok(new
+            {
+                providers = "metered",
+                iceServers
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Metered ICE server fetch failed. Falling back to STUN-only config.");
+            return Ok(new
+            {
+                providers = "fallback",
+                iceServers = new object[]
+                {
+                    new { urls = "stun:stun.relay.metered.ca:80" },
+                    new { urls = "stun:stun.l.google.com:19302" }
+                }
+            });
         }
     }
 
