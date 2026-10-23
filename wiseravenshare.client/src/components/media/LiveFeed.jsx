@@ -39,7 +39,7 @@ export default function LiveFeed() {
       <div className="live-feed-grid">
         {feed.map((stream, index) => (
           <article
-            key={stream.stream_id}
+            key={stream.stream_id || stream.id || `${stream.title}-${index}`}
             className="live-card"
             style={{ order: index }}
           >
