@@ -1,12 +1,20 @@
 import { useCallback, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
+import { MeteredPeer } from "@metered-ca/realtime";
 import { resolveApiUrl } from "@/api/client";
-import { createPeerId, getIceServersAsync } from "@/lib/webrtcConfig";
+import {
+  createMeteredRealtimeAuthOptions,
+  createPeerId,
+  getIceServersAsync,
+  shouldUseMeteredRealtime,
+} from "@/lib/webrtcConfig";
 
 export function useWebRtcBroadcaster() {
   const hubRef = useRef(null);
   const roomIdRef = useRef("");
   const peerIdRef = useRef("");
+  const meteredPeerRef = useRef(null);
+  const meteredViewerIdsRef = useRef(new Set());
   const peersRef = useRef({});
   const candidateQueueRef = useRef({});
   const [viewerCount, setViewerCount] = useState(0);
@@ -101,6 +109,16 @@ export function useWebRtcBroadcaster() {
         setConnected(false);
         await previousStop();
       }
+      if (meteredPeerRef.current) {
+        try {
+          meteredPeerRef.current.close("switching-session");
+        } catch {
+          // noop
+        }
+        meteredPeerRef.current = null;
+      }
+      meteredViewerIdsRef.current = new Set();
+      setViewerCount(0);
     })();
 
     const normalizedRoomId = String(roomId || "").trim().toUpperCase();
@@ -112,6 +130,65 @@ export function useWebRtcBroadcaster() {
     }
 
     const myPeerId = String(peerId || createPeerId("broadcaster"));
+
+    if (shouldUseMeteredRealtime()) {
+      const meteredPeer = new MeteredPeer(createMeteredRealtimeAuthOptions());
+      meteredPeerRef.current = meteredPeer;
+      roomIdRef.current = normalizedRoomId;
+      peerIdRef.current = myPeerId;
+
+      const addViewer = (remotePeer) => {
+        if (!remotePeer?.id || remotePeer.id === meteredPeer.peerId) return;
+        meteredViewerIdsRef.current.add(remotePeer.id);
+        setViewerCount(meteredViewerIdsRef.current.size);
+      };
+
+      const removeViewer = (remotePeer) => {
+        if (!remotePeer?.id) return;
+        meteredViewerIdsRef.current.delete(remotePeer.id);
+        setViewerCount(meteredViewerIdsRef.current.size);
+      };
+
+      meteredPeer.on("peer-joined", ({ peer: remotePeer }) => {
+        addViewer(remotePeer);
+      });
+      meteredPeer.on("peer-left", ({ peer: remotePeer }) => {
+        removeViewer(remotePeer);
+      });
+      meteredPeer.on("state-change", ({ to }) => {
+        setConnected(to === "joined");
+      });
+      meteredPeer.on("left", () => {
+        setConnected(false);
+      });
+      meteredPeer.on("error", () => {
+        setConnected(false);
+      });
+
+      meteredPeer.addStream(mediaStream, {
+        role: "camera",
+        label: "live-broadcast",
+      });
+      try {
+        await meteredPeer.join(normalizedRoomId);
+        const snapshot = Array.isArray(meteredPeer.remotePeers)
+          ? meteredPeer.remotePeers
+          : Object.values(meteredPeer.remotePeers || {});
+        meteredViewerIdsRef.current = new Set(
+          snapshot
+            .map((remotePeer) => remotePeer?.id)
+            .filter((remotePeerId) => remotePeerId && remotePeerId !== meteredPeer.peerId),
+        );
+        setViewerCount(meteredViewerIdsRef.current.size);
+        setConnected(true);
+      } catch (error) {
+        setConnected(false);
+        meteredPeerRef.current = null;
+        throw error;
+      }
+      return;
+    }
+
     const hub = new signalR.HubConnectionBuilder()
       .withUrl(resolveApiUrl("/api/hubs/webrtc"))
       .withAutomaticReconnect()
@@ -196,6 +273,22 @@ export function useWebRtcBroadcaster() {
   }, [clearAllPeers, clearPeer, createViewerPeer, enqueueIce, flushIceQueue]);
 
   const stopBroadcastSession = useCallback(async () => {
+    const meteredPeer = meteredPeerRef.current;
+    if (meteredPeer) {
+      try {
+        meteredPeer.close("session-ended");
+      } catch {
+        // noop
+      }
+      meteredPeerRef.current = null;
+      meteredViewerIdsRef.current = new Set();
+      setViewerCount(0);
+      setConnected(false);
+      roomIdRef.current = "";
+      peerIdRef.current = "";
+      return;
+    }
+
     const hub = hubRef.current;
     const roomId = roomIdRef.current;
 
