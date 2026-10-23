@@ -23,6 +23,7 @@ export default function MediaManager({
   multiple = true,
 }) {
   const [confirmIdx, setConfirmIdx] = useState(null);
+  const [deletingIdx, setDeletingIdx] = useState(null);
   const inputRef = useRef(null);
 
   const handleFile = async (e) => {
@@ -57,7 +58,9 @@ export default function MediaManager({
         {items.map((item, idx) => (
           <div
             key={idx}
-            className="relative group rounded-lg overflow-hidden border border-border aspect-video bg-muted/20"
+            className={`relative group rounded-lg overflow-hidden border border-border aspect-video bg-muted/20 transition-opacity ${
+              deletingIdx === idx ? "opacity-50 pointer-events-none" : ""
+            }`}
           >
             {item.type === "video" ? (
               <video src={item.url} className="w-full h-full object-cover" muted />
@@ -71,9 +74,10 @@ export default function MediaManager({
             )}
             <button
               onClick={() => setConfirmIdx(idx)}
+              disabled={deletingIdx !== null}
               className="absolute top-1 right-1 bg-background/80 rounded-full p-1.5 hover:bg-destructive/80 transition-colors"
             >
-              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+              {deletingIdx === idx ? <Loader2 className="w-3.5 h-3.5 animate-spin text-destructive" /> : <Trash2 className="w-3.5 h-3.5 text-destructive" />}
             </button>
           </div>
         ))}
@@ -90,13 +94,21 @@ export default function MediaManager({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                onDelete(confirmIdx);
-                setConfirmIdx(null);
+              onClick={async () => {
+                if (confirmIdx === null) return;
+                const targetIdx = confirmIdx;
+                setDeletingIdx(targetIdx);
+                try {
+                  await Promise.resolve(onDelete(targetIdx));
+                  setConfirmIdx(null);
+                } finally {
+                  setDeletingIdx(null);
+                }
               }}
+              disabled={deletingIdx !== null}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {deletingIdx !== null ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

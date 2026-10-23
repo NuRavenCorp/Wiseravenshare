@@ -58,6 +58,15 @@ WEIGHTS = {
     "max_consecutive_cluster":  2,
     # Insertion ratio: 1 resurfaced post per N new posts
     "resurface_insertion_ratio": 4,
+    # Implicit-residual / counterfactual scoring
+    "implicit_dwell_residual":   0.9,
+    "implicit_completion_residual": 1.1,
+    "implicit_return_residual":  0.5,
+    "counterfactual_interest":   1.0,
+    # Dynamic resurfacing gate
+    "resurface_base_threshold":  0.45,
+    "fatigue_threshold":         0.60,
+    "fatigue_threshold_lift":    0.25,
 }
 
 ACQUAINTANCE_WEIGHTS = {
@@ -247,12 +256,82 @@ def debias_prediction(
     return round(max(0.0, raw_prediction - discount * author_baseline_engagement), 4)
 
 
+# ─── implicit-first helpers (residual + counterfactual + fatigue) ─────────────
+
+def estimate_exposure_propensity(post: CandidatePost) -> float:
+    """
+    Approximate likelihood a user meaningfully saw this post when first published.
+    Low-view posts have low propensity and should be corrected counterfactually.
+    """
+    return round(min(1.0, post.views_count / 500.0), 4)
+
+
+def counterfactual_interest_estimate(
+    observed_interest: float,
+    content_estimate: float,
+    propensity: float,
+) -> float:
+    """
+    MNAR-style correction: "no interaction" on low-exposure posts is unreliable.
+    For low propensity, lean on content estimate. For high propensity, trust
+    observed interaction with inverse-propensity weighting.
+    """
+    p = max(0.01, min(1.0, propensity))
+    if p < 0.3:
+        return round(min(1.0, 0.4 * observed_interest + 0.6 * content_estimate), 4)
+    return round(min(1.0, observed_interest / p), 4)
+
+
+def compute_implicit_residuals(
+    post: CandidatePost,
+    viewer_like_rate: float,
+    viewer_comment_view_ratio: float,
+) -> dict[str, float | bool]:
+    """
+    Residual signals: actual behaviour proxy minus expected behaviour proxy.
+    Captures "what the viewer didn't explicitly say".
+    """
+    views = max(1.0, float(post.views_count))
+    actual_completion = post.comments_count / views
+    expected_completion = max(0.0, viewer_comment_view_ratio)
+
+    actual_dwell_proxy = (post.likes_count + post.comments_count + post.reposts_count) / views
+    expected_dwell_proxy = max(0.0, 0.5 * viewer_like_rate + 0.5 * viewer_comment_view_ratio)
+
+    actual_return_proxy = post.reposts_count / views
+    expected_return_proxy = max(0.0, viewer_like_rate * 0.2)
+
+    completion_residual = actual_completion - expected_completion
+    dwell_residual = actual_dwell_proxy - expected_dwell_proxy
+    return_residual = actual_return_proxy - expected_return_proxy
+
+    silent_interest = (
+        actual_dwell_proxy > expected_dwell_proxy * 1.5
+        and actual_completion > expected_completion * 1.2
+    )
+    silent_aversion = (
+        actual_dwell_proxy < expected_dwell_proxy * 0.4
+        and actual_completion < expected_completion * 0.4
+    )
+
+    return {
+        "dwell_residual": round(dwell_residual, 6),
+        "completion_residual": round(completion_residual, 6),
+        "return_residual": round(return_residual, 6),
+        "silent_interest": silent_interest,
+        "silent_aversion": silent_aversion,
+    }
+
+
 # ─── resurfacing score ────────────────────────────────────────────────────────
 
 def resurfacing_score(
     post: CandidatePost,
     predictions: dict[str, float],
     author_baseline: float,
+    topic_affinity: float,
+    viewer_like_rate: float,
+    viewer_comment_view_ratio: float,
 ) -> float:
     w = WEIGHTS
     preds = predictions
@@ -271,6 +350,25 @@ def resurfacing_score(
         + w["will_spark_discussion"]* preds["will_spark_discussion"]
         + w["acquaintance_score"]  * preds["acquaintance_score"]
     )
+
+    residuals = compute_implicit_residuals(
+        post=post,
+        viewer_like_rate=viewer_like_rate,
+        viewer_comment_view_ratio=viewer_comment_view_ratio,
+    )
+    raw += (
+        w["implicit_dwell_residual"] * float(residuals["dwell_residual"])
+        + w["implicit_completion_residual"] * float(residuals["completion_residual"])
+        + w["implicit_return_residual"] * float(residuals["return_residual"])
+    )
+
+    propensity = estimate_exposure_propensity(post)
+    counterfactual_interest = counterfactual_interest_estimate(
+        observed_interest=incremental_meaningful,
+        content_estimate=topic_affinity,
+        propensity=propensity,
+    )
+    raw += w["counterfactual_interest"] * counterfactual_interest
 
     # Recency decay
     decay = _recency_decay(post.created_at, w["recency_halflife_h"])
@@ -712,8 +810,65 @@ def _load_viewer_signals(
     return {
         "like_rate": user_like_rate,
         "comment_view_ratio": user_avg_comment_view_ratio,
+        "fatigue_score": _load_resurfacing_fatigue_score(conn, viewer_id),
         "author_signals": author_signals,
     }
+
+
+def _load_resurfacing_fatigue_score(conn: psycopg.Connection, viewer_id: str) -> float:
+    """
+    Implicit fatigue proxy for resurfaced content:
+    compare recent engagement on *older* posts (created >=7 days before interaction)
+    in the last 3 days vs the previous 4 days.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH events AS (
+                SELECT l."CreatedAt" AS interacted_at
+                FROM app_data."PostLikes" l
+                JOIN app_data."Posts" p ON p."Id" = l."PostId"
+                WHERE l."UserId" = %s::uuid
+                  AND l."CreatedAt" > now() - interval '7 days'
+                  AND p."CreatedAt" < l."CreatedAt" - interval '7 days'
+                UNION ALL
+                SELECT c."CreatedAt" AS interacted_at
+                FROM app_data."Comments" c
+                JOIN app_data."Posts" p ON p."Id" = c."PostId"
+                WHERE c."UserId" = %s::uuid
+                  AND c."CreatedAt" > now() - interval '7 days'
+                  AND c."IsDeleted" = false
+                  AND p."CreatedAt" < c."CreatedAt" - interval '7 days'
+                UNION ALL
+                SELECT r."CreatedAt" AS interacted_at
+                FROM app_data."PostReposts" r
+                JOIN app_data."Posts" p ON p."Id" = r."PostId"
+                WHERE r."UserId" = %s::uuid
+                  AND r."CreatedAt" > now() - interval '7 days'
+                  AND p."CreatedAt" < r."CreatedAt" - interval '7 days'
+            )
+            SELECT
+                COUNT(*) FILTER (WHERE interacted_at > now() - interval '3 days')::float AS recent_window,
+                COUNT(*) FILTER (
+                    WHERE interacted_at <= now() - interval '3 days'
+                      AND interacted_at > now() - interval '7 days'
+                )::float AS prior_window
+            FROM events
+            """,
+            (viewer_id, viewer_id, viewer_id),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return 0.0
+    recent = float(row[0] or 0.0)
+    prior = float(row[1] or 0.0)
+
+    if prior < 3.0:
+        return 0.0
+    # Higher score means sharper drop in old-content engagement.
+    decline_ratio = max(0.0, 1.0 - (recent / max(prior, 1.0)))
+    return round(min(1.0, decline_ratio), 4)
 
 
 # ─── topic affinity ───────────────────────────────────────────────────────────
@@ -759,6 +914,7 @@ def rank_post_feed(
     # Stage 2 – Load viewer signals in batch
     author_ids = list({c.user_id for c in all_candidates})
     viewer_signals = _load_viewer_signals(conn, viewer_id, author_ids)
+    fatigue_score = float(viewer_signals.get("fatigue_score", 0.0))
 
     # Stage 3 – Score every candidate
     new_posts: list[ScoredPost] = []
@@ -778,7 +934,14 @@ def rank_post_feed(
             acquaintance_score=acquaintance,
         )
 
-        score = resurfacing_score(post, preds, author_baseline)
+        score = resurfacing_score(
+            post,
+            preds,
+            author_baseline,
+            topic_affinity=topic_aff,
+            viewer_like_rate=viewer_signals["like_rate"],
+            viewer_comment_view_ratio=viewer_signals["comment_view_ratio"],
+        )
 
         sp = ScoredPost(
             post_id=post.post_id,
@@ -795,6 +958,7 @@ def rank_post_feed(
                 "topic_affinity": topic_aff,
                 "acquaintance_score": acquaintance,
                 "author_baseline": author_baseline,
+                "fatigue_score": fatigue_score,
             },
         )
 
@@ -806,6 +970,12 @@ def rank_post_feed(
 
     # Sort new posts by recency, resurfaced by resurfacing_score
     new_posts.sort(key=lambda p: p.resurfacing_score, reverse=True)
+    resurfaced.sort(key=lambda p: p.resurfacing_score, reverse=True)
+
+    dynamic_threshold = WEIGHTS["resurface_base_threshold"]
+    if fatigue_score >= WEIGHTS["fatigue_threshold"]:
+        dynamic_threshold += WEIGHTS["fatigue_threshold_lift"]
+    resurfaced = [p for p in resurfaced if p.resurfacing_score >= dynamic_threshold]
 
     # Stage 4 – Diversity composition (Pinterest insight)
     merged = apply_diversity(

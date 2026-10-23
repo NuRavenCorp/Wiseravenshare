@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Infrastructure.Data;
@@ -24,11 +25,13 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
     private readonly AppDbContext _db;
     private readonly ILogger<PostFeedRankingService> _logger;
+    private readonly RankingThresholds _thresholds;
 
-    public PostFeedRankingService(AppDbContext db, ILogger<PostFeedRankingService> logger)
+    public PostFeedRankingService(AppDbContext db, ILogger<PostFeedRankingService> logger, IConfiguration configuration)
     {
         _db = db;
         _logger = logger;
+        _thresholds = RankingThresholds.FromConfiguration(configuration);
     }
 
     public async Task<IReadOnlyList<Post>> GenerateFeedAsync(Guid userId, int page, int pageSize, CancellationToken cancellationToken = default)
@@ -88,6 +91,11 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             var feedScore = ComputeFeedScore(predictions, qualitySignals, isOld);
             feedScore += ComputeFreshnessBoost(post, userId, nowUtc);
             var resurfacingScore = ComputeResurfacingScore(post, predictions, nowUtc);
+
+            if (isOld && !ShouldResurfaceOldPost(predictions, _thresholds))
+            {
+                continue;
+            }
 
             var scored = new ScoredPost(post, feedScore, resurfacingScore, predictions.WillHideOrReport);
             if (isOld)
@@ -248,7 +256,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .GroupBy(row => row.AuthorId)
             .ToDictionary(group => group.Key, group => group.Max(row => row.Timestamp));
 
-        var fatigueState = DetectResurfacingFatigue(interactionEvents, nowUtc);
+        var fatigueState = DetectResurfacingFatigue(interactionEvents, nowUtc, _thresholds);
         var trendingTopics = await ResolveTrendingTopicsAsync(nowUtc, cancellationToken);
 
         return new ViewerContext(
@@ -514,7 +522,9 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         var willComment = Clamp01(userPost.UserDwellTimeOnSimilar * 0.25d + quality.CommentDepth * 0.45d + interest.TopicAffinity * 0.20d + (userPost.SilentInterest ? 0.15d : 0d));
         var willShare = Clamp01(quality.CompletionRateGlobal * 0.40d + (userPost.UserSharedBefore ? 0.30d : 0d) + quality.GlobalEngagementRate * 0.20d);
         var dwellSeconds = Math.Max(0d, userPost.UserDwellTimeOnSimilar * 90d + quality.CompletionRateGlobal * 30d + (userPost.SilentInterest ? 25d : 0d));
+        var predictedCompletion = Clamp01(userPost.UserCompletionRateOnSimilar * 0.55d + quality.CompletionRateGlobal * 0.45d + (userPost.SilentInterest ? 0.10d : 0d));
         var meaningful = Clamp01(interest.HeterogeneousCosineSimilarity * 0.45d + interest.TopicAffinity * 0.30d + (acquaintance.IsSilentFollower ? 0.15d : 0d) + interest.FormatPreference * 0.10d + silentBoost);
+        var sparkDiscussionIfComment = Clamp01(quality.CommentDepth * 0.55d + willComment * 0.25d + quality.GlobalEngagementRate * 0.20d);
 
         var hideOrReport = userPost.UserMarkedNotInterested || userPost.UserHiddenAuthor
             ? 1d
@@ -525,7 +535,9 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             willComment,
             willShare,
             dwellSeconds,
+            predictedCompletion,
             meaningful,
+            sparkDiscussionIfComment,
             hideOrReport,
             interest.HeterogeneousCosineSimilarity,
             acquaintance.AcquaintanceScore);
@@ -567,18 +579,49 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
     {
         var positive =
             preds.WillFindMeaningful * 0.35d +
-            preds.WillLike * 0.18d +
-            preds.WillComment * 0.16d +
-            Math.Min(preds.PredictedDwellTimeSeconds / 60d, 1d) * 0.20d +
-            preds.InterestCosineSimilarity * 0.11d;
+            preds.PredictedCompletion * 0.28d +
+            preds.SparkDiscussionIfComment * 0.22d +
+            Math.Min(preds.PredictedDwellTimeSeconds / 60d, 1d) * 0.10d +
+            preds.InterestCosineSimilarity * 0.05d;
 
         var ageDays = Math.Max(0d, (nowUtc - post.CreatedAt).TotalDays);
         var negative =
-            preds.WillHideOrReport * 0.80d +
+            preds.WillHideOrReport * 1.00d +
             RecencyPenalty(ageDays) * 0.15d;
 
         var acquaintanceBonus = preds.AcquaintanceScore * 0.10d;
         return Math.Max(0d, positive - negative + acquaintanceBonus);
+    }
+
+    private static bool ShouldResurfaceOldPost(PredictionSignals preds, RankingThresholds thresholds)
+    {
+        // Gate 1 (hard veto): negative risk
+        if (preds.WillHideOrReport > thresholds.NegativeVetoThreshold)
+        {
+            return false;
+        }
+
+        // Gate 2: attention prediction
+        var attentionOk = preds.PredictedCompletion > thresholds.AttentionCompletionThreshold
+            || preds.PredictedDwellTimeSeconds > thresholds.AttentionDwellSecondsThreshold;
+        if (!attentionOk)
+        {
+            return false;
+        }
+
+        // Gate 3: meaningful interaction
+        if (preds.WillFindMeaningful <= thresholds.MeaningfulThreshold)
+        {
+            return false;
+        }
+
+        // Gate 4: long-term value (comment/discussion + completion)
+        var longTermValue =
+            preds.WillComment * 0.30d +
+            preds.PredictedCompletion * 0.40d +
+            preds.SparkDiscussionIfComment * 0.30d;
+
+        return longTermValue > thresholds.LongTermValueThreshold;
     }
 
     private static List<Post> ApplyResurfacing(IReadOnlyList<Post> rankedNewPosts, IReadOnlyList<ScoredPost> rankedOldPosts, FatigueState fatigue)
@@ -851,7 +894,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return (Clamp01(score), isSilentFollower);
     }
 
-    public static FatigueState DetectResurfacingFatigue(IEnumerable<UserInteractionEvent> interactionEvents, DateTime nowUtc)
+    public static FatigueState DetectResurfacingFatigue(IEnumerable<UserInteractionEvent> interactionEvents, DateTime nowUtc, RankingThresholds thresholds)
     {
         var olderPostEvents = interactionEvents
             .Where(e => e.CreatedAt >= nowUtc.AddDays(-7) && e.TargetType == "post" && e.DurationSeconds.HasValue)
@@ -860,12 +903,22 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
         if (olderPostEvents.Count < 4)
         {
-            return new FatigueState(false, 0d, 0.45d);
+            return new FatigueState(false, 0d, thresholds.BaseResurfacingThreshold);
         }
 
         var dwells = olderPostEvents.Select(e => (double)e.DurationSeconds!.Value).ToList();
         var skips = olderPostEvents.Count(e => e.DurationSeconds!.Value <= 2 || e.Type == InteractionEventType.Skip);
         var skipRate = skips / (double)olderPostEvents.Count;
+
+        var recentEvents = olderPostEvents.Where(e => e.CreatedAt >= nowUtc.AddDays(-3)).ToList();
+        var priorEvents = olderPostEvents.Where(e => e.CreatedAt < nowUtc.AddDays(-3)).ToList();
+        var recentCompletion = recentEvents.Count == 0
+            ? 0d
+            : recentEvents.Count(e => e.Type == InteractionEventType.Complete) / (double)recentEvents.Count;
+        var priorCompletion = priorEvents.Count == 0
+            ? 0d
+            : priorEvents.Count(e => e.Type == InteractionEventType.Complete) / (double)priorEvents.Count;
+        var completionDrop = Math.Max(0d, priorCompletion - recentCompletion);
 
         // Linear regression slope of dwell times
         var n = dwells.Count;
@@ -886,10 +939,12 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
         // Negative slope means dwell times are dropping over consecutive exposures
         var negativeSlope = Math.Max(0d, -slope / 10d);
-        var fatigueScore = Math.Clamp(negativeSlope * 0.45d + skipRate * 0.55d, 0d, 1d);
+        var fatigueScore = Math.Clamp(negativeSlope * 0.35d + skipRate * 0.45d + completionDrop * 0.20d, 0d, 1d);
 
-        var isFatigued = fatigueScore > 0.55d;
-        var threshold = isFatigued ? 0.70d : 0.45d;
+        var isFatigued = fatigueScore > thresholds.FatigueScoreThreshold;
+        var threshold = isFatigued || completionDrop > thresholds.CompletionDropThreshold
+            ? thresholds.FatiguedResurfacingThreshold
+            : thresholds.BaseResurfacingThreshold;
 
         return new FatigueState(isFatigued, fatigueScore, threshold);
     }
@@ -1263,6 +1318,39 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
     public sealed record FatigueState(bool IsFatigued, double Score, double Threshold);
 
+    public sealed record RankingThresholds(
+        double NegativeVetoThreshold,
+        double AttentionCompletionThreshold,
+        double AttentionDwellSecondsThreshold,
+        double MeaningfulThreshold,
+        double LongTermValueThreshold,
+        double FatigueScoreThreshold,
+        double CompletionDropThreshold,
+        double BaseResurfacingThreshold,
+        double FatiguedResurfacingThreshold)
+    {
+        public static RankingThresholds FromConfiguration(IConfiguration configuration)
+        {
+            var section = configuration.GetSection("FeedRanking:Thresholds");
+            return new RankingThresholds(
+                ReadDouble(section, "NegativeVetoThreshold", 0.30d),
+                ReadDouble(section, "AttentionCompletionThreshold", 0.50d),
+                ReadDouble(section, "AttentionDwellSecondsThreshold", 30d),
+                ReadDouble(section, "MeaningfulThreshold", 0.40d),
+                ReadDouble(section, "LongTermValueThreshold", 0.35d),
+                ReadDouble(section, "FatigueScoreThreshold", 0.55d),
+                ReadDouble(section, "CompletionDropThreshold", 0.15d),
+                ReadDouble(section, "BaseResurfacingThreshold", 0.45d),
+                ReadDouble(section, "FatiguedResurfacingThreshold", 0.70d));
+        }
+
+        private static double ReadDouble(IConfiguration section, string key, double fallback)
+        {
+            var raw = section[key];
+            return double.TryParse(raw, out var parsed) ? parsed : fallback;
+        }
+    }
+
     private sealed record CandidateSet(
         List<Post> NewPosts,
         List<Post> OldPosts,
@@ -1337,7 +1425,9 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         double WillComment,
         double WillShare,
         double PredictedDwellTimeSeconds,
+        double PredictedCompletion,
         double WillFindMeaningful,
+        double SparkDiscussionIfComment,
         double WillHideOrReport,
         double InterestCosineSimilarity,
         double AcquaintanceScore);

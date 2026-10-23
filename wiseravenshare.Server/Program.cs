@@ -1590,6 +1590,43 @@ CREATE TABLE IF NOT EXISTS app_data.content_crawler_catalog (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Users: columns that production databases may be missing
+ALTER TABLE IF EXISTS app_data.""Users""
+    ADD COLUMN IF NOT EXISTS ""PhoneNumber"" TEXT NULL;
+
+-- FM activation-gating columns (CreatorRadioStations)
+ALTER TABLE IF EXISTS app_data.""CreatorRadioStations""
+    ADD COLUMN IF NOT EXISTS ""WiseCoinDeposited"" NUMERIC(18,2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ""StripeSetupComplete"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ""StripeProductId"" CHARACTER VARYING(255) NULL,
+    ADD COLUMN IF NOT EXISTS ""ActivationGatedAt"" TIMESTAMPTZ NULL;
+
+-- Content crawler engagement aggregate
+ALTER TABLE IF EXISTS app_data.content_crawler_catalog
+    ADD COLUMN IF NOT EXISTS engagement_count INTEGER NOT NULL DEFAULT 0;
+
+-- UserBlocks table (may not exist on older schemas)
+CREATE TABLE IF NOT EXISTS app_data.""UserBlocks"" (
+    ""Id"" UUID NOT NULL DEFAULT gen_random_uuid(),
+    ""BlockerId"" UUID NOT NULL,
+    ""BlockedId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""PK_UserBlocks"" PRIMARY KEY (""Id""),
+    CONSTRAINT ""FK_UserBlocks_BlockerId"" FOREIGN KEY (""BlockerId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_UserBlocks_BlockedId"" FOREIGN KEY (""BlockedId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserBlocks_BlockerId_BlockedId""
+    ON app_data.""UserBlocks""(""BlockerId"", ""BlockedId"");
+CREATE INDEX IF NOT EXISTS ""IX_UserBlocks_BlockerId""
+    ON app_data.""UserBlocks""(""BlockerId"");
+CREATE INDEX IF NOT EXISTS ""IX_UserBlocks_BlockedId""
+    ON app_data.""UserBlocks""(""BlockedId"");
 ";
 
     await using var connection = new NpgsqlConnection(connectionString);
