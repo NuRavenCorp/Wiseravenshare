@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
-import { Loader2, Mic, Wand2, Upload, FileAudio2, Film } from "lucide-react";
+import { Loader2, Mic, Wand2, Upload, FileAudio2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
@@ -39,7 +39,17 @@ async function transcribeFile(file) {
 }
 
 async function transcribeUrl(url, fileName) {
-  const response = await fetch(url, { credentials: "include" });
+  let credentials = "include";
+  try {
+    const resolved = new URL(url, window.location.origin);
+    if (resolved.origin !== window.location.origin && /^https?:$/i.test(resolved.protocol)) {
+      credentials = "omit";
+    }
+  } catch {
+    credentials = "include";
+  }
+
+  const response = await fetch(url, { credentials });
   if (!response.ok) {
     throw new Error(`Failed to load media (${response.status})`);
   }

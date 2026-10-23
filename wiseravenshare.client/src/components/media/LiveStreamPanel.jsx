@@ -20,11 +20,13 @@ export default function LiveStreamPanel() {
   const [keepBusyById, setKeepBusyById] = useState({});
   const [deleteBusyById, setDeleteBusyById] = useState({});
 
+  const normalizeId = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
   const isOwnedByCurrentUser = (stream) => {
-    const currentUserId = String(user?.id || "").trim().toLowerCase();
+    const currentUserId = normalizeId(user?.id);
     if (!currentUserId) return false;
-    const ownerIds = [stream?.streamer_id, stream?.created_by_id]
-      .map((value) => String(value || "").trim().toLowerCase())
+    const ownerIds = [stream?.streamer_id, stream?.created_by_id, stream?.host_user_id]
+      .map((value) => normalizeId(value))
       .filter(Boolean);
     return ownerIds.includes(currentUserId);
   };

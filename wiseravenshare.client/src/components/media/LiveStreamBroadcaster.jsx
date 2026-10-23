@@ -154,7 +154,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
     }
   };
 
-  const stopStream = async () => {
+  const stopStream = async (deleteAfterStop = false) => {
     setSaving(true);
     if (flushTimerRef.current) {
       clearInterval(flushTimerRef.current);
@@ -180,9 +180,14 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       try {
         await flushSegment(true);
         await apiClient.live.end(streamId);
+        if (deleteAfterStop) {
+          await apiClient.live.delete(streamId);
+        }
       } catch (e) {
         console.error(e);
-        saveError = "Live stream ended, but finalize/save failed.";
+        saveError = deleteAfterStop
+          ? "Live stream stopped, but delete failed."
+          : "Live stream ended, but finalize/save failed.";
       }
     }
 
@@ -327,9 +332,14 @@ export default function LiveStreamBroadcaster({ onEnd }) {
             <span className="text-xs text-muted-foreground">
               {saving ? "Finalizing stream for auto-save..." : "Live recording in progress (5s auto segments)"}
             </span>
-            <Button variant="destructive" size="sm" onClick={stopStream} disabled={saving}>
-              <StopCircle className="w-4 h-4" /> Stop & Save
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => stopStream(true)} disabled={saving}>
+                <StopCircle className="w-4 h-4" /> Stop & Delete
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => stopStream(false)} disabled={saving}>
+                <StopCircle className="w-4 h-4" /> Stop & Save
+              </Button>
+            </div>
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
