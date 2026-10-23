@@ -10,6 +10,51 @@ let cachedIceServers = null;
 let cachedAt = 0;
 let inflightPromise = null;
 
+export function shouldUseMeteredRealtime() {
+  const apiKey = String(import.meta.env.VITE_METERED_REALTIME_API_KEY || "").trim();
+  const tokenEndpoint = String(import.meta.env.VITE_METERED_REALTIME_TOKEN_ENDPOINT || "").trim();
+  return Boolean(apiKey || tokenEndpoint);
+}
+
+function resolveRealtimeTokenEndpoint(endpoint) {
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+  return resolveApiUrl(endpoint);
+}
+
+export function createMeteredRealtimeAuthOptions() {
+  const apiKey = String(import.meta.env.VITE_METERED_REALTIME_API_KEY || "").trim();
+  const tokenEndpoint = String(import.meta.env.VITE_METERED_REALTIME_TOKEN_ENDPOINT || "").trim();
+
+  if (tokenEndpoint) {
+    const tokenUrl = resolveRealtimeTokenEndpoint(tokenEndpoint);
+    return {
+      tokenProvider: async () => {
+        const response = await fetch(tokenUrl, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!response.ok) {
+          throw new Error(`Realtime token request failed with ${response.status}`);
+        }
+        const payload = await response.json();
+        const token = String(payload?.token || "").trim();
+        if (!token) {
+          throw new Error("Realtime token response missing token.");
+        }
+        return token;
+      },
+    };
+  }
+
+  if (apiKey) {
+    return { apiKey };
+  }
+
+  throw new Error("Missing Metered realtime auth configuration.");
+}
+
 export function getIceServers() {
   const raw = import.meta.env.VITE_WEBRTC_ICE_SERVERS;
   if (!raw) return DEFAULT_ICE_SERVERS;

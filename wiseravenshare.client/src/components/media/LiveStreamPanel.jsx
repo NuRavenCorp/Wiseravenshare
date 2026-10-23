@@ -21,6 +21,11 @@ export default function LiveStreamPanel() {
   const [deleteBusyById, setDeleteBusyById] = useState({});
 
   const normalizeId = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const getStreamId = (streamOrId) => {
+    if (!streamOrId) return "";
+    if (typeof streamOrId === "string") return streamOrId;
+    return streamOrId.id || streamOrId.stream_id || "";
+  };
 
   const isOwnedByCurrentUser = (stream) => {
     const currentUserId = normalizeId(user?.id);
@@ -69,7 +74,7 @@ export default function LiveStreamPanel() {
 
   const refreshEndedExpiry = async (items) => {
     if (!user?.id || !Array.isArray(items) || !items.length) return;
-    await Promise.all(items.map((item) => refreshExpiry(item.id)));
+    await Promise.all(items.map((item) => refreshExpiry(getStreamId(item))));
   };
 
   useEffect(() => {
@@ -148,7 +153,7 @@ export default function LiveStreamPanel() {
   };
 
   const endAndDeleteStream = async (stream) => {
-    const streamId = stream?.id;
+    const streamId = getStreamId(stream);
     if (!streamId) return;
     const confirmed = window.confirm(
       `End and delete "${stream.title || "this live stream"}" and its stream files?`,
@@ -167,7 +172,7 @@ export default function LiveStreamPanel() {
       }
       await apiClient.live.delete(streamId);
       await fetchStreams();
-      if (selectedStream?.id === streamId) {
+      if (getStreamId(selectedStream) === streamId) {
         setMode("list");
         setSelectedStream(null);
       }
@@ -239,7 +244,7 @@ export default function LiveStreamPanel() {
         <div className="space-y-2">
           {streams.map((s) => (
             <div
-              key={s.id}
+              key={getStreamId(s) || s.title}
               className="w-full flex items-center gap-3 p-3 rounded-lg border border-border bg-card transition-colors text-left"
             >
               <button
@@ -271,10 +276,10 @@ export default function LiveStreamPanel() {
                   size="sm"
                   variant="destructive"
                   onClick={() => endAndDeleteStream(s)}
-                  disabled={!!deleteBusyById[s.id]}
+                  disabled={!!deleteBusyById[getStreamId(s)]}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  {deleteBusyById[s.id] ? "Deleting..." : "End & Delete"}
+                  {deleteBusyById[getStreamId(s)] ? "Deleting..." : "End & Delete"}
                 </Button>
               )}
             </div>
@@ -293,13 +298,14 @@ export default function LiveStreamPanel() {
           </div>
           <div className="space-y-3">
             {endedStreams.map((stream) => {
-              const expiry = expiryById[stream.id];
+              const streamId = getStreamId(stream);
+              const expiry = expiryById[streamId];
               const kept = !!expiry?.kept_permanently;
               const urgent = !!expiry?.in_reminder_window;
-              const busy = !!keepBusyById[stream.id];
-              const deleting = !!deleteBusyById[stream.id];
+              const busy = !!keepBusyById[streamId];
+              const deleting = !!deleteBusyById[streamId];
               return (
-                <div key={stream.id} className="rounded-lg border border-border bg-background/40 p-3 space-y-2">
+                <div key={streamId || stream.title} className="rounded-lg border border-border bg-background/40 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm text-foreground font-medium">{stream.title}</p>
@@ -310,13 +316,13 @@ export default function LiveStreamPanel() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button size="sm" variant={kept ? "outline" : "default"} onClick={() => keepStream(stream.id)} disabled={busy || deleting || kept}>
+                      <Button size="sm" variant={kept ? "outline" : "default"} onClick={() => keepStream(streamId)} disabled={busy || deleting || kept}>
                         {kept ? "Kept" : busy ? "Saving..." : "Keep"}
                       </Button>
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => deleteStream(stream.id, stream.title)}
+                        onClick={() => deleteStream(streamId, stream.title)}
                         disabled={busy || deleting}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -328,14 +334,14 @@ export default function LiveStreamPanel() {
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
-                        value={keepTextById[stream.id] || ""}
+                        value={keepTextById[streamId] || ""}
                         onChange={(e) =>
-                          setKeepTextById((prev) => ({ ...prev, [stream.id]: e.target.value }))
+                          setKeepTextById((prev) => ({ ...prev, [streamId]: e.target.value }))
                         }
                         placeholder='Type "keep" to save permanently'
                         className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
                       />
-                      <Button size="sm" variant="outline" onClick={() => sendKeepMessage(stream.id)} disabled={busy || deleting || !(keepTextById[stream.id] || "").trim()}>
+                      <Button size="sm" variant="outline" onClick={() => sendKeepMessage(streamId)} disabled={busy || deleting || !(keepTextById[streamId] || "").trim()}>
                         Send
                       </Button>
                     </div>

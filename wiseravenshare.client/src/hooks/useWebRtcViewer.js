@@ -1,12 +1,20 @@
 import { useCallback, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
+import { MeteredPeer } from "@metered-ca/realtime";
 import { resolveApiUrl } from "@/api/client";
-import { createPeerId, getIceServersAsync } from "@/lib/webrtcConfig";
+import {
+  createMeteredRealtimeAuthOptions,
+  createPeerId,
+  getIceServersAsync,
+  shouldUseMeteredRealtime,
+} from "@/lib/webrtcConfig";
 
 export function useWebRtcViewer() {
   const hubRef = useRef(null);
   const roomIdRef = useRef("");
   const peerIdRef = useRef("");
+  const meteredPeerRef = useRef(null);
+  const meteredRemoteHandlersRef = useRef(new Map());
   const broadcasterPeerRef = useRef(null);
   const broadcasterPeerIdRef = useRef("");
   const candidateQueueRef = useRef([]);
@@ -88,6 +96,15 @@ export function useWebRtcViewer() {
       cleanupPeer();
       setConnected(false);
       hubRef.current = null;
+      if (meteredPeerRef.current) {
+        try {
+          meteredPeerRef.current.close("switching-session");
+        } catch {
+          // noop
+        }
+      }
+      meteredPeerRef.current = null;
+      meteredRemoteHandlersRef.current = new Map();
     })();
 
     const normalizedRoomId = String(roomId || "").trim().toUpperCase();
@@ -96,6 +113,65 @@ export function useWebRtcViewer() {
     }
 
     const myPeerId = String(peerId || createPeerId("viewer"));
+
+    if (shouldUseMeteredRealtime()) {
+      const meteredPeer = new MeteredPeer(createMeteredRealtimeAuthOptions());
+      meteredPeerRef.current = meteredPeer;
+      roomIdRef.current = normalizedRoomId;
+      peerIdRef.current = myPeerId;
+
+      const attachRemotePeer = (remotePeer) => {
+        if (!remotePeer?.id || meteredRemoteHandlersRef.current.has(remotePeer.id)) return;
+        const streamAddedHandler = ({ stream }) => {
+          if (stream) {
+            onRemoteStream?.(stream);
+          }
+        };
+        remotePeer.on("stream-added", streamAddedHandler);
+        meteredRemoteHandlersRef.current.set(remotePeer.id, { remotePeer, streamAddedHandler });
+      };
+
+      const detachRemotePeer = (remotePeer) => {
+        if (!remotePeer?.id) return;
+        const tracked = meteredRemoteHandlersRef.current.get(remotePeer.id);
+        if (tracked?.streamAddedHandler) {
+          tracked.remotePeer.off("stream-added", tracked.streamAddedHandler);
+        }
+        meteredRemoteHandlersRef.current.delete(remotePeer.id);
+      };
+
+      meteredPeer.on("peer-joined", ({ peer: remotePeer }) => {
+        attachRemotePeer(remotePeer);
+      });
+      meteredPeer.on("peer-left", ({ peer: remotePeer }) => {
+        detachRemotePeer(remotePeer);
+      });
+      meteredPeer.on("state-change", ({ to }) => {
+        setConnected(to === "joined");
+      });
+      meteredPeer.on("left", () => {
+        setConnected(false);
+      });
+      meteredPeer.on("error", () => {
+        setConnected(false);
+      });
+
+      try {
+        await meteredPeer.join(normalizedRoomId);
+        const snapshot = Array.isArray(meteredPeer.remotePeers)
+          ? meteredPeer.remotePeers
+          : Object.values(meteredPeer.remotePeers || {});
+        snapshot.forEach((remotePeer) => attachRemotePeer(remotePeer));
+        setConnected(true);
+      } catch (error) {
+        setConnected(false);
+        meteredPeerRef.current = null;
+        meteredRemoteHandlersRef.current = new Map();
+        throw error;
+      }
+      return;
+    }
+
     const hub = new signalR.HubConnectionBuilder()
       .withUrl(resolveApiUrl("/api/hubs/webrtc"))
       .withAutomaticReconnect()
@@ -162,6 +238,29 @@ export function useWebRtcViewer() {
   }, [cleanupPeer, createViewerPeer, flushIceQueue]);
 
   const stopViewingSession = useCallback(async () => {
+    const meteredPeer = meteredPeerRef.current;
+    if (meteredPeer) {
+      for (const tracked of meteredRemoteHandlersRef.current.values()) {
+        try {
+          tracked.remotePeer.off("stream-added", tracked.streamAddedHandler);
+        } catch {
+          // noop
+        }
+      }
+      meteredRemoteHandlersRef.current = new Map();
+      try {
+        meteredPeer.close("session-ended");
+      } catch {
+        // noop
+      }
+      meteredPeerRef.current = null;
+      cleanupPeer();
+      setConnected(false);
+      roomIdRef.current = "";
+      peerIdRef.current = "";
+      return;
+    }
+
     const hub = hubRef.current;
     const roomId = roomIdRef.current;
 
