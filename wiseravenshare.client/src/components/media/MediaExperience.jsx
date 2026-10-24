@@ -65,7 +65,7 @@ function MediaExperienceModal({ request, onClose }) {
         {request.type === "music" ? <MusicPlayer initialTrack={request} initialQueue={request.queue} />
           : mediaError ? <p role="alert" className="py-16 text-center text-sm text-destructive">{mediaError}</p>
           : !url ? <div className="py-16 text-center text-sm text-muted-foreground">Loading media…</div>
-          : request.type === "photo" ? <ZoomableImage src={url} alt={request.title} className="mx-auto max-h-[78vh] w-full rounded-lg" fittingType="fit" />
+          : request.type === "photo" ? <ZoomableImage src={url} alt={request.title} className="mx-auto h-[78vh] w-full rounded-lg" fittingType="fill" />
           : (
             <div>
               <ReactPlayer

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import { useWebRtcBroadcaster } from "@/hooks/useWebRtcBroadcaster";
+import LiveStreamChat from "@/components/media/LiveStreamChat";
 import {
   Radio,
   StopCircle,
@@ -19,6 +20,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
   const [error, setError] = useState(null);
   const [audioOnly, setAudioOnly] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [chatRoomId, setChatRoomId] = useState("");
   const { viewerCount, startBroadcastSession, stopBroadcastSession } = useWebRtcBroadcaster();
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
@@ -132,6 +134,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
         is_audio_only: audioOnly,
       });
       streamIdRef.current = streamId;
+      setChatRoomId(streamId);
       try {
         await startBroadcastSession({
           roomId: streamId,
@@ -159,6 +162,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       }, 5000);
       setStreaming(true);
     } catch (err) {
+      setChatRoomId("");
       setError(
         err.message || "Failed to access camera/microphone. Check permissions."
       );
@@ -212,6 +216,7 @@ export default function LiveStreamBroadcaster({ onEnd }) {
       previewRef.current.srcObject = null;
     }
     streamIdRef.current = null;
+    setChatRoomId("");
     setStreaming(false);
     setSaving(false);
     setTitle("");
@@ -323,24 +328,31 @@ export default function LiveStreamBroadcaster({ onEnd }) {
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="rounded-lg overflow-hidden border border-border bg-black relative">
-            {audioOnly ? (
-              <div className="aspect-video flex items-center justify-center">
-                <Mic className="w-12 h-12 text-primary animate-pulse" />
-              </div>
-            ) : (
-              <video
-                ref={previewRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full aspect-video"
-              />
-            )}
-            <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-destructive-foreground animate-pulse" />
-              LIVE
-            </span>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(280px,1fr)]">
+            <div className="rounded-lg overflow-hidden border border-border bg-black relative">
+              {audioOnly ? (
+                <div className="aspect-video flex items-center justify-center">
+                  <Mic className="w-12 h-12 text-primary animate-pulse" />
+                </div>
+              ) : (
+                <video
+                  ref={previewRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full aspect-video"
+                />
+              )}
+              <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-destructive-foreground animate-pulse" />
+                LIVE
+              </span>
+            </div>
+
+            <LiveStreamChat
+              roomId={chatRoomId}
+              username={user?.displayName || user?.username || user?.name || "Host"}
+            />
           </div>
           <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
             <span className="text-xs text-muted-foreground">

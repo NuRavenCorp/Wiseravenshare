@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AgoraDynamicKey" Version="1.0.0" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.416.2" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
     <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
