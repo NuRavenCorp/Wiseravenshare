@@ -216,6 +216,53 @@ ON CONFLICT (token) DO UPDATE
         }
     }
 
+    public IReadOnlySet<string> GetActiveUserIdsSnapshot()
+    {
+        var now = DateTime.UtcNow;
+        var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pair in _memoryFallback)
+        {
+            if (pair.Value.ExpiresAtUtc >= now && !string.IsNullOrWhiteSpace(pair.Value.UserId))
+            {
+                active.Add(pair.Value.UserId);
+            }
+        }
+
+        if (!TryGetTokensTable())
+        {
+            return active;
+        }
+
+        try
+        {
+            using var connection = new NpgsqlConnection(_connectionString);
+            connection.Open();
+            using var command = new NpgsqlCommand(
+                $"SELECT DISTINCT user_id FROM {_tokensTable} WHERE expires_at_utc >= @now;",
+                connection);
+            command.Parameters.AddWithValue("now", now);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    var userId = reader.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(userId))
+                    {
+                        active.Add(userId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read active user sessions from refresh token store.");
+        }
+
+        return active;
+    }
+
     /// <summary>
     /// Resolves the refresh-token table using the UserStore convention:
     /// 1. Bind existing app_data.refresh_tokens (read probe — no DDL needed).

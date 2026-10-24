@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, Lock, Crown, Sparkles, Rocket, Music } from "lucide-react";
+import { Loader2, CheckCircle, Lock, Crown, Sparkles, Rocket, Music, Mic2 } from "lucide-react";
 
 const PLAN_ICONS = {
   rights_basic: Music,
@@ -10,6 +10,7 @@ const PLAN_ICONS = {
   creator_pro: Crown,
   growth_suite: Rocket,
   studio_plus: Sparkles,
+  karaoke_pro: Mic2,
   podcast_pro: Music,
 };
 

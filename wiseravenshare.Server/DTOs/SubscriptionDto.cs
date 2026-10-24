@@ -30,7 +30,7 @@ public class SubscriptionStatusDto
     public bool HasActiveSubscription { get; set; }
     public string Status { get; set; } = "inactive";
     public string? PriceId { get; set; }
-    /// <summary>Resolved plan key: podcast_pro | studio_plus | growth_suite | creator_pro | etc.</summary>
+    /// <summary>Resolved plan key: podcast_pro | karaoke_pro | studio_plus | growth_suite | creator_pro | etc.</summary>
     public string? PlanKey { get; set; }
     public DateTime? CurrentPeriodEnd { get; set; }
     public bool CancelAtPeriodEnd { get; set; }

@@ -85,7 +85,7 @@ export default function ChatView({ conversation, currentUserId }) {
       const sent = await sendMessage({ recipientUserId, text: trimmed });
       if (!sent) {
         await apiClient.functions.invoke("SendMessage", {
-          conversation_id: conversation.id,
+          conversationId: conversation.id,
           content: trimmed,
         });
         fetchMessages();

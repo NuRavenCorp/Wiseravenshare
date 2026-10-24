@@ -81,6 +81,7 @@ public class SubscriptionService : ISubscriptionService
     // Maps plan keys to their env variable names (monthly + annual) for price ID lookup
     private static readonly (string PlanKey, string[] EnvKeys)[] PlanPriceEnvMap =
     [
+        ("karaoke_pro",      ["STRIPE_PRICE_KARAOKE_PRO_MONTHLY_ID",                    "STRIPE_PRICE_KARAOKE_PRO_ANNUAL_ID"]),
         ("podcast_pro",      ["STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID",                    "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"]),
         ("studio_plus",      ["STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID",                    "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID"]),
         ("growth_suite",     ["STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID",                   "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID"]),
@@ -199,7 +200,13 @@ public class SubscriptionService : ISubscriptionService
 
     private static string NormalizePlan(string? plan)
     {
-        return string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim().ToLowerInvariant();
+        var normalized = string.IsNullOrWhiteSpace(plan) ? "creator_pro" : plan.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "podcast" => "podcast_pro",
+            "karaoke" => "karaoke_pro",
+            _ => normalized
+        };
     }
 
     private static string NormalizeBillingCycle(string? billingCycle)
@@ -213,6 +220,7 @@ public class SubscriptionService : ISubscriptionService
     {
         return NormalizePlan(plan) switch
         {
+            "karaoke_pro"   => 7,
             "growth_suite"   => 14,
             "studio_plus"    => 7,
             "podcast_pro"    => 30,
@@ -243,6 +251,7 @@ public class SubscriptionService : ISubscriptionService
 
     private static string ResolvePlanSectionToken(string plan) => NormalizePlan(plan) switch
     {
+        "karaoke_pro" => "KaraokePro",
         "podcast_pro" => "PodcastPro",
         "studio_plus" => "StudioPlus",
         "growth_suite" => "GrowthSuite",
@@ -257,6 +266,7 @@ public class SubscriptionService : ISubscriptionService
 
     private static (string monthly, string annual) ResolvePlanEnvKeys(string plan) => NormalizePlan(plan) switch
     {
+        "karaoke_pro" => ("STRIPE_PRICE_KARAOKE_PRO_MONTHLY_ID", "STRIPE_PRICE_KARAOKE_PRO_ANNUAL_ID"),
         "podcast_pro" => ("STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID", "STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"),
         "studio_plus" => ("STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID", "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID"),
         "growth_suite" => ("STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID", "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID"),
@@ -742,6 +752,7 @@ public class SubscriptionService : ISubscriptionService
 
         // String-pattern fallback for dev/test price IDs
         var lower = p.ToLowerInvariant();
+        if (lower.Contains("karaoke_pro") || lower.Contains("karaoke-pro")) return "karaoke_pro";
         if (lower.Contains("podcast_pro") || lower.Contains("podcast-pro")) return "podcast_pro";
         if (lower.Contains("studio_plus") || lower.Contains("studio-plus")) return "studio_plus";
         if (lower.Contains("growth_suite") || lower.Contains("growth-suite")) return "growth_suite";
@@ -828,6 +839,15 @@ public class SubscriptionService : ISubscriptionService
                 "monthly-strategy-calls",
                 "custom-episode-templates",
                 "advanced-analytics-export"
+            },
+
+            ["karaoke_pro"] = new[]
+            {
+                "karaoke-studio",
+                "ai-lyric-extraction",
+                "live-scroll-display",
+                "karaoke-unlimited-sessions",
+                "karaoke-performance-share"
             },
 
             // ── Music Rights / IP Protection plans ──────────────────────────────────

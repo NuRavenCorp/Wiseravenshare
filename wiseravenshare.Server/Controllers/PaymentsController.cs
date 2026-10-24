@@ -90,6 +90,13 @@ public class PaymentsController : ControllerBase
                 defaultMonthlyAmount: 99,
                 defaultAnnualAmount: 990),
             BuildCatalogPlan(
+                planId: "karaoke_pro",
+                name: "WRS Karaoke Pro",
+                tagline: "AI lyric extraction and unlimited karaoke sessions",
+                badge: "New",
+                defaultMonthlyAmount: 5,
+                defaultAnnualAmount: 50),
+            BuildCatalogPlan(
                 planId: "podcast_pro",
                 name: "WRS Podcast Pro Bundle",
                 tagline: "Growth Suite + Studio Plus + priority support",
@@ -125,6 +132,8 @@ public class PaymentsController : ControllerBase
         var growthSuiteAnnual = ResolvePriceIdRaw("growth_suite", "annual");
         var studioPlusMonthly = ResolvePriceIdRaw("studio_plus", "monthly");
         var studioPlusAnnual = ResolvePriceIdRaw("studio_plus", "annual");
+        var karaokeProMonthly = ResolvePriceIdRaw("karaoke_pro", "monthly");
+        var karaokeProAnnual = ResolvePriceIdRaw("karaoke_pro", "annual");
         var podcastProMonthly = ResolvePriceIdRaw("podcast_pro", "monthly");
         var podcastProAnnual = ResolvePriceIdRaw("podcast_pro", "annual");
 
@@ -169,6 +178,12 @@ public class PaymentsController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(studioPlusAnnual)) issues.Add("missing: studio_plus annual price id");
         else if (!IsStripePriceId(studioPlusAnnual)) issues.Add("invalid: studio_plus annual must start with price_");
+
+        if (string.IsNullOrWhiteSpace(karaokeProMonthly)) issues.Add("missing: karaoke_pro monthly price id");
+        else if (!IsStripePriceId(karaokeProMonthly)) issues.Add("invalid: karaoke_pro monthly must start with price_");
+
+        if (string.IsNullOrWhiteSpace(karaokeProAnnual)) issues.Add("missing: karaoke_pro annual price id");
+        else if (!IsStripePriceId(karaokeProAnnual)) issues.Add("invalid: karaoke_pro annual must start with price_");
 
         if (string.IsNullOrWhiteSpace(podcastProMonthly)) issues.Add("missing: podcast_pro monthly price id");
         else if (!IsStripePriceId(podcastProMonthly)) issues.Add("invalid: podcast_pro monthly must start with price_");
@@ -216,6 +231,11 @@ public class PaymentsController : ControllerBase
                 {
                     monthly = new { value = studioPlusMonthly, validPriceId = IsStripePriceId(studioPlusMonthly) },
                     annual = new { value = studioPlusAnnual, validPriceId = IsStripePriceId(studioPlusAnnual) }
+                },
+                karaoke_pro = new
+                {
+                    monthly = new { value = karaokeProMonthly, validPriceId = IsStripePriceId(karaokeProMonthly) },
+                    annual = new { value = karaokeProAnnual, validPriceId = IsStripePriceId(karaokeProAnnual) }
                 },
                 podcast_pro = new
                 {
@@ -360,6 +380,9 @@ public class PaymentsController : ControllerBase
             "creator_pro" => "CreatorPro",
             "growth_suite" => "GrowthSuite",
             "studio_plus" => "StudioPlus",
+            "karaoke" => "KaraokePro",
+            "karaoke_pro" => "KaraokePro",
+            "podcast" => "PodcastPro",
             "podcast_pro" => "PodcastPro",
             _ => "CreatorPro"
         };
@@ -375,6 +398,9 @@ public class PaymentsController : ControllerBase
             "creator_pro" => "CREATOR_PRO",
             "growth_suite" => "GROWTH_SUITE",
             "studio_plus" => "STUDIO_PLUS",
+            "karaoke" => "KARAOKE_PRO",
+            "karaoke_pro" => "KARAOKE_PRO",
+            "podcast" => "PODCAST_PRO",
             "podcast_pro" => "PODCAST_PRO",
             _ => "CREATOR_PRO"
         };
@@ -410,6 +436,9 @@ public class PaymentsController : ControllerBase
         {
             "growth_suite" => 14,
             "studio_plus" => 7,
+            "karaoke" => 7,
+            "karaoke_pro" => 7,
+            "podcast" => 30,
             "podcast_pro" => 30,
             _ => 0
         };

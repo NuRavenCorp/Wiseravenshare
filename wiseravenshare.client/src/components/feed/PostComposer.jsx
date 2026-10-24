@@ -36,6 +36,7 @@ export default function PostComposer({ onPosted, compact }) {
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
+  const MAX_POST_LENGTH = 1000;
 
   const currentType = POST_TYPES.find((t) => t.value === postType);
 
@@ -87,6 +88,10 @@ export default function PostComposer({ onPosted, compact }) {
         .filter(Boolean)
         .map((tag) => `%${tag}`);
       const taggedContent = [content.trim(), ...tags, ...partialTags].join(" ");
+      if (taggedContent.length > MAX_POST_LENGTH) {
+        setError(`Post is too long (${taggedContent.length}/${MAX_POST_LENGTH}). Shorten text or tags.`);
+        return;
+      }
 
       const createdPost = await apiClient.requestJson("/api/posts", {
         method: "POST",
