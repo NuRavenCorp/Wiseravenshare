@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -16,6 +18,7 @@ public sealed class AdminUsersController : ControllerBase
 {
     private readonly UserStore _userStore;
     private readonly RefreshTokenStore _refreshTokenStore;
+    private readonly AppDbContext _db;
     private readonly IConfiguration _config;
     private readonly ILogger<AdminUsersController> _logger;
 
@@ -32,11 +35,13 @@ public sealed class AdminUsersController : ControllerBase
     public AdminUsersController(
         UserStore userStore,
         RefreshTokenStore refreshTokenStore,
+        AppDbContext db,
         IConfiguration config,
         ILogger<AdminUsersController> logger)
     {
         _userStore = userStore;
         _refreshTokenStore = refreshTokenStore;
+        _db = db;
         _config = config;
         _logger = logger;
     }
@@ -77,13 +82,41 @@ public sealed class AdminUsersController : ControllerBase
     }
 
     [HttpGet("activity-feed")]
-    public IActionResult GetActivityFeed()
+    public async Task<IActionResult> GetActivityFeed()
     {
         if (!IsAdmin()) return Forbid();
 
+        var users = _userStore.GetAllUsersSnapshot();
         var activeUserIds = _refreshTokenStore.GetActiveUserIdsSnapshot();
-        var items = _userStore
-            .GetAllUsersSnapshot()
+        var parsedUserIds = users
+            .Select(u => new { u.Id, GuidId = Guid.TryParse(u.Id, out var guid) ? guid : Guid.Empty })
+            .Where(x => x.GuidId != Guid.Empty)
+            .ToList();
+
+        var guidIds = parsedUserIds
+            .Select(x => x.GuidId)
+            .Distinct()
+            .ToList();
+
+        var affirmationByGuid = guidIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await _db.Posts
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && guidIds.Contains(p.UserId))
+                .GroupBy(p => p.UserId)
+                .Select(g => new
+                {
+                    UserId = g.Key,
+                    Tally = g.Sum(p => p.LikesCount + p.CommentsCount + p.RepostsCount + p.SharesCount + p.BookmarksCount)
+                })
+                .ToDictionaryAsync(x => x.UserId, x => x.Tally);
+
+        var affirmationByUserId = parsedUserIds.ToDictionary(
+            x => x.Id,
+            x => affirmationByGuid.GetValueOrDefault(x.GuidId, 0),
+            StringComparer.OrdinalIgnoreCase);
+
+        var items = users
             .Select(u => new
             {
                 id = u.Id,
@@ -91,17 +124,29 @@ public sealed class AdminUsersController : ControllerBase
                 email = u.Email,
                 handle = u.Handle,
                 isLoggedOn = activeUserIds.Contains(u.Id),
-                lastSeenAtUtc = u.UpdatedAtUtc
+                lastSeenAtUtc = u.UpdatedAtUtc,
+                affirmationTally = affirmationByUserId.GetValueOrDefault(u.Id, 0)
             })
             .OrderBy(x => x.name)
             .ToList();
+
+        var activeUserCount = items.Count(x => x.isLoggedOn);
+        var inactiveUserCount = items.Count - activeUserCount;
+        var activeAffirmations = items.Where(x => x.isLoggedOn).Sum(x => x.affirmationTally);
+        var inactiveAffirmations = items.Where(x => !x.isLoggedOn).Sum(x => x.affirmationTally);
+        var totalAffirmations = activeAffirmations + inactiveAffirmations;
 
         return Ok(new
         {
             generatedAtUtc = DateTime.UtcNow,
             totalUsers = items.Count,
-            loggedOnUsers = items.Count(x => x.isLoggedOn),
-            loggedOffUsers = items.Count(x => !x.isLoggedOn),
+            activeUserCount,
+            inactiveUserCount,
+            loggedOnUsers = activeUserCount,
+            loggedOffUsers = inactiveUserCount,
+            totalAffirmations,
+            activeAffirmations,
+            inactiveAffirmations,
             items
         });
     }

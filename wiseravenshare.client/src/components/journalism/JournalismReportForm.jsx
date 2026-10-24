@@ -135,7 +135,7 @@ export default function JournalismReportForm({ onPublished }) {
           headline: cleanHeadline,
           description: fields.what || undefined,
           region: fields.where || undefined,
-          verification_status: "under_review",
+          verification_status: "verified",
         });
       } catch (e) {
         console.error("Failed to create journalism report tracker:", e?.message || e);

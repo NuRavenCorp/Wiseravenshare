@@ -1571,7 +1571,7 @@ export const WISERAVENSHARE_ENTITIES = [
       "verification_status"
     ],
     "defaults": {
-      "verification_status": "under_review"
+      "verification_status": "verified"
     },
     "enums": {
       "verification_status": [
@@ -1639,10 +1639,10 @@ export const WISERAVENSHARE_ENTITIES = [
       },
       {
         "name": "verification_status",
-        "storageType": "TEXT NOT NULL DEFAULT 'under_review' CHECK (verification_status IN ('under_review', 'verified', 'rejected'))",
+        "storageType": "TEXT NOT NULL DEFAULT 'verified' CHECK (verification_status IN ('under_review', 'verified', 'rejected'))",
         "valueType": "string",
         "required": true,
-        "defaultValue": "under_review",
+        "defaultValue": "verified",
         "options": [
           "under_review",
           "verified",
@@ -6091,7 +6091,7 @@ export const WISERAVENSHARE_ENTITIES_BY_NAME = {
       "verification_status"
     ],
     "defaults": {
-      "verification_status": "under_review"
+      "verification_status": "verified"
     },
     "enums": {
       "verification_status": [
@@ -6159,10 +6159,10 @@ export const WISERAVENSHARE_ENTITIES_BY_NAME = {
       },
       {
         "name": "verification_status",
-        "storageType": "TEXT NOT NULL DEFAULT 'under_review' CHECK (verification_status IN ('under_review', 'verified', 'rejected'))",
+        "storageType": "TEXT NOT NULL DEFAULT 'verified' CHECK (verification_status IN ('under_review', 'verified', 'rejected'))",
         "valueType": "string",
         "required": true,
-        "defaultValue": "under_review",
+        "defaultValue": "verified",
         "options": [
           "under_review",
           "verified",
