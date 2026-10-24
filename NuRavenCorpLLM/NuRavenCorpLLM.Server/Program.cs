@@ -29,6 +29,7 @@ builder.Services.AddSignalR();
 
 builder.Services.AddScoped<ILlmIntentRouter, LlmIntentRouter>();
 builder.Services.AddScoped<IAiDataOrchestrator, AiDataOrchestrator>();
+builder.Services.AddScoped<IJournalismBiasDetectionService, JournalismBiasDetectionService>();
 builder.Services.Configure<FolderKnowledgeOptions>(builder.Configuration.GetSection("FolderKnowledge"));
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
