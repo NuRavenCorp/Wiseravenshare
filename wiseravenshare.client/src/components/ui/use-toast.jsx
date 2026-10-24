@@ -1,5 +1,6 @@
 // Inspired by react-hot-toast library
 import { useState, useEffect } from "react";
+import { playChirp } from "@/lib/ravenChirp";
 
 const TOAST_LIMIT = 20;
 const TOAST_REMOVE_DELAY = 1000000;
@@ -112,6 +113,8 @@ function dispatch(action) {
 
 function toast({ ...props }) {
   const id = genId();
+
+  playChirp();
 
   const update = (props) =>
     dispatch({

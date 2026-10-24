@@ -12,6 +12,13 @@ const statusStyles = {
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
+  const [activitySummary, setActivitySummary] = useState({
+    activeUserCount: 0,
+    inactiveUserCount: 0,
+    totalAffirmations: 0,
+    activeAffirmations: 0,
+    inactiveAffirmations: 0,
+  });
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -37,11 +44,26 @@ export default function AdminUsers() {
     }
 
     if (activityResult.status === "fulfilled") {
-      setActivityFeed(Array.isArray(activityResult.value?.items) ? activityResult.value.items : []);
+      const feed = activityResult.value || {};
+      setActivityFeed(Array.isArray(feed.items) ? feed.items : []);
+      setActivitySummary({
+        activeUserCount: Number(feed.activeUserCount ?? feed.loggedOnUsers ?? 0),
+        inactiveUserCount: Number(feed.inactiveUserCount ?? feed.loggedOffUsers ?? 0),
+        totalAffirmations: Number(feed.totalAffirmations ?? 0),
+        activeAffirmations: Number(feed.activeAffirmations ?? 0),
+        inactiveAffirmations: Number(feed.inactiveAffirmations ?? 0),
+      });
     } else {
       const message = activityResult.reason?.message || "Could not load active user feed.";
       setActivityError(message);
       setActivityFeed([]);
+      setActivitySummary({
+        activeUserCount: 0,
+        inactiveUserCount: 0,
+        totalAffirmations: 0,
+        activeAffirmations: 0,
+        inactiveAffirmations: 0,
+      });
     }
 
     setLoading(false);
@@ -115,14 +137,14 @@ export default function AdminUsers() {
   const activeCount = users.filter((u) => (u.status || "active") === "active").length;
   const suspendedCount = users.filter((u) => u.status === "suspended").length;
   const blockedCount = users.filter((u) => u.status === "blocked").length;
-  const loggedOnCount = activityFeed.filter((u) => Boolean(u.isLoggedOn)).length;
-  const loggedOffCount = activityFeed.length - loggedOnCount;
+  const activeWindowCount = activitySummary.activeUserCount || activityFeed.filter((u) => Boolean(u.isLoggedOn)).length;
+  const inactiveCount = activitySummary.inactiveUserCount || (activityFeed.length - activeWindowCount);
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-foreground">Active User Feed</h2>
+          <h2 className="text-sm font-semibold text-foreground">Active User Window</h2>
           <button
             onClick={load}
             disabled={loading || activityLoading}
@@ -132,18 +154,22 @@ export default function AdminUsers() {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           <div className="p-3 rounded-xl border border-border bg-background/50">
             <p className="text-2xl font-heading text-foreground">{activityFeed.length}</p>
             <p className="text-xs text-muted-foreground">All users</p>
           </div>
           <div className="p-3 rounded-xl border border-border bg-background/50">
-            <p className="text-2xl font-heading text-green-500">{loggedOnCount}</p>
-            <p className="text-xs text-muted-foreground">Logged on</p>
+            <p className="text-2xl font-heading text-green-500">{activeWindowCount}</p>
+            <p className="text-xs text-muted-foreground">Active users</p>
           </div>
           <div className="p-3 rounded-xl border border-border bg-background/50">
-            <p className="text-2xl font-heading text-muted-foreground">{loggedOffCount}</p>
-            <p className="text-xs text-muted-foreground">Logged off</p>
+            <p className="text-2xl font-heading text-muted-foreground">{inactiveCount}</p>
+            <p className="text-xs text-muted-foreground">Inactive users</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-background/50">
+            <p className="text-2xl font-heading text-primary">{activitySummary.totalAffirmations}</p>
+            <p className="text-xs text-muted-foreground">Affirmations tallied</p>
           </div>
         </div>
 
@@ -166,10 +192,13 @@ export default function AdminUsers() {
                   <div className="min-w-0">
                     <p className="text-sm text-foreground truncate">{u.name || u.email || "Unknown user"}</p>
                     <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      Affirmations: {u.affirmationTally ?? 0}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${u.isLoggedOn ? "bg-green-500/15 text-green-500" : "bg-muted text-muted-foreground"}`}>
-                      {u.isLoggedOn ? "logged on" : "logged off"}
+                      {u.isLoggedOn ? "active" : "inactive"}
                     </span>
                     {u.isLoggedOn ? (
                       <Wifi className="w-3.5 h-3.5 text-green-500" />

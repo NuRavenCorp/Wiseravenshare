@@ -342,7 +342,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
                 !p.IsDeleted &&
                 p.CreatedAt < newCutoff &&
                 p.CreatedAt >= oldCutoff &&
-                (seedAuthors.Contains(p.UserId) || (p.LikesCount + p.CommentsCount + p.RepostsCount + p.SharesCount) >= 6) &&
+                (seedAuthors.Contains(p.UserId) || (p.LikesCount + p.CommentsCount + p.RepostsCount + p.SharesCount + p.BookmarksCount) >= 6) &&
                 !ctx.BlockedAuthorIds.Contains(p.UserId))
             .OrderByDescending(p => p.UpdatedAt)
             .Take(1200)
@@ -457,7 +457,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         DateTime nowUtc,
         IReadOnlyCollection<string> trendingTopics)
     {
-        var engagementRate = (post.LikesCount + post.CommentsCount + post.RepostsCount + post.SharesCount) / Math.Max(1d, post.ViewsCount);
+        var engagementRate = CalculateAffirmationScore(post) / Math.Max(1d, post.ViewsCount);
         var commentDepth = post.CommentsCount / Math.Max(1d, post.LikesCount + post.RepostsCount + 1d);
         var completionGlobal = completionCountByPost.GetValueOrDefault(post.Id, 0) / Math.Max(1d, post.ViewsCount);
         var ageDays = Math.Max(0d, (nowUtc - post.CreatedAt).TotalDays);
@@ -1307,6 +1307,12 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
     private static double RecencyPenalty(double ageDays)
     {
         return Math.Min(0.5d, Math.Max(0d, (ageDays - 30d) / 180d));
+    }
+
+    // Affirmations are positive engagement signals used by ranking and resurfacing.
+    private static double CalculateAffirmationScore(Post post)
+    {
+        return post.LikesCount + post.CommentsCount + post.RepostsCount + post.SharesCount + post.BookmarksCount;
     }
 
     private static double Clamp01(double value)

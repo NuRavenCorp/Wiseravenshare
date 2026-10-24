@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2, ShieldCheck, Eye, XCircle, Newspaper, MapPin,
-  CheckCircle2, X, ExternalLink, LayoutGrid, List
+  CheckCircle2, X, ExternalLink, LayoutGrid, List, ShieldAlert
 } from "lucide-react";
 import JournalismBoard from "@/components/admin/JournalismBoard";
 
@@ -46,6 +46,8 @@ export default function AdminJournalism() {
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView] = useState("list");
 
+  const reviewerName = currentUser?.full_name || currentUser?.email || "Admin";
+
   const fetchReports = async () => {
     try {
       const query = filter === "all" ? {} : { verification_status: filter };
@@ -70,15 +72,15 @@ export default function AdminJournalism() {
     });
   }, [filter]);
 
-  const setStatus = async (report, status) => {
+  const setStatus = async (report, status, customReviewNotes = null) => {
     setSaving(true);
     try {
       await apiClient.entities.JournalismReport.update(report.id, {
         verification_status: status,
         reviewer_id: currentUser?.id,
-        reviewer_name: currentUser?.full_name || currentUser?.email,
+        reviewer_name: reviewerName,
         reviewed_at: new Date().toISOString(),
-        review_notes: notes || report.review_notes || undefined,
+        review_notes: customReviewNotes ?? notes ?? report.review_notes ?? undefined,
       });
       toast({ title: `Marked as ${statusConfig[status].label}` });
       setEditingId(null);
@@ -89,6 +91,13 @@ export default function AdminJournalism() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const flagForReview = async (report) => {
+    const reviewStamp = `Flagged by ${reviewerName} on ${new Date().toLocaleString()}.`;
+    const existing = (report.review_notes || "").trim();
+    const mergedNotes = existing ? `${existing}\n${reviewStamp}` : reviewStamp;
+    await setStatus(report, "under_review", mergedNotes);
   };
 
   const openNotes = (report) => {
@@ -134,6 +143,9 @@ export default function AdminJournalism() {
           </button>
         </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Reports publish by default. Admin can flag a report into <strong>Under Review</strong>, then accept (Verified) or reject.
+      </p>
 
       {view === "board" ? (
         <JournalismBoard />
@@ -241,6 +253,30 @@ export default function AdminJournalism() {
                       </div>
                     )}
                     <div className="flex items-center gap-2 pt-1">
+                      {r.verification_status !== "under_review" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => flagForReview(r)}
+                          disabled={saving}
+                          className="text-amber-300 border-amber-500/30 hover:bg-amber-500/10"
+                        >
+                          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                          Flag for Review
+                        </Button>
+                      )}
+                      {r.verification_status === "under_review" && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => setStatus(r, "verified")} disabled={saving} className="text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10">
+                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                            Accept
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setStatus(r, "rejected")} disabled={saving} className="text-destructive border-destructive/30 hover:bg-destructive/10">
+                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                            Reject
+                          </Button>
+                        </>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => openNotes(r)}>
                         <Eye className="w-3.5 h-3.5" /> Review & Set Status
                       </Button>
