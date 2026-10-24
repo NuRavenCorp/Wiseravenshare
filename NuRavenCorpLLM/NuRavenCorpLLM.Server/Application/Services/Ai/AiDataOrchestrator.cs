@@ -24,6 +24,7 @@ public class AiDataResponse
     public List<OutputBlock> Blocks { get; set; } = new();
     public string? Answer { get; set; }
     public List<SourceCitation> Citations { get; set; } = new();
+    public JournalismBiasAssessment? BiasAssessment { get; set; }
     public int LatencyMs { get; set; }
     public int TokenUsage { get; set; }
 }
@@ -43,6 +44,7 @@ public class AiDataOrchestrator : IAiDataOrchestrator
     private readonly ILlmIntentRouter _router;
     private readonly IEnumerable<IDataSourceAdapter> _adapters;
     private readonly ILlmGateway _llm;
+    private readonly IJournalismBiasDetectionService _biasDetection;
     private readonly IDataQueryRepository _queries;
     private readonly ILogger<AiDataOrchestrator> _logger;
 
@@ -50,12 +52,14 @@ public class AiDataOrchestrator : IAiDataOrchestrator
         ILlmIntentRouter router,
         IEnumerable<IDataSourceAdapter> adapters,
         ILlmGateway llm,
+        IJournalismBiasDetectionService biasDetection,
         IDataQueryRepository queries,
         ILogger<AiDataOrchestrator> logger)
     {
         _router = router;
         _adapters = adapters;
         _llm = llm;
+        _biasDetection = biasDetection;
         _queries = queries;
         _logger = logger;
     }
@@ -96,6 +100,28 @@ public class AiDataOrchestrator : IAiDataOrchestrator
         var results = (await Task.WhenAll(tasks)).Where(x => x != null).Cast<DataResult>().ToList();
         var blocks = ComposeBlocks(results, route.Dimension);
         var evidence = BuildEvidence(results);
+        var biasAssessment = await _biasDetection.AnalyzeAsync(prompt, route, results, ct);
+
+        if (biasAssessment.Applied)
+        {
+            blocks.Add(new OutputBlock
+            {
+                Type = "bias_guard",
+                Title = "Bias & Prejudice Scan (Amateur Journalism Feed)",
+                Data = JsonSerializer.SerializeToElement(new
+                {
+                    biasAssessment.RiskLevel,
+                    biasAssessment.BiasScore,
+                    biasAssessment.PrejudiceScore,
+                    biasAssessment.FlaggedItems,
+                    biasAssessment.AffirmationTally,
+                    biasAssessment.Reasons,
+                    biasAssessment.FlaggedSnippets,
+                    biasAssessment.Summary
+                })
+            });
+            evidence += $"\nBIAS_SCAN: risk={biasAssessment.RiskLevel}, bias={biasAssessment.BiasScore}, prejudice={biasAssessment.PrejudiceScore}, flagged={biasAssessment.FlaggedItems}, affirmations={biasAssessment.AffirmationTally}";
+        }
 
         var answerResp = await _llm.CompleteAsync(new LlmRequest
         {
@@ -103,6 +129,7 @@ public class AiDataOrchestrator : IAiDataOrchestrator
 You are WiseRaven's data analyst. Given the user's question and structured results, write a 2-5 sentence answer.
 Cite sources by display label. Do not invent numbers. If results are empty, say so and suggest adjusting
 date range, source, or dimension.
+If a BIAS_SCAN is present, include one concise line describing bias/prejudice risk and mention affirmation tally.
 """,
             Messages = new() { new LlmMessage("user", $"QUESTION:\n{prompt}\n\nRESULTS:\n{evidence}") },
             Temperature = 0.3,
@@ -128,6 +155,7 @@ date range, source, or dimension.
             Blocks = blocks,
             Answer = answerResp.Content,
             Citations = results.Select(r => new SourceCitation(r.SourceKey, r.SourceKey)).ToList(),
+            BiasAssessment = biasAssessment.Applied ? biasAssessment : null,
             LatencyMs = (int)sw.ElapsedMilliseconds,
             TokenUsage = answerResp.PromptTokens + answerResp.CompletionTokens
         };
@@ -142,7 +170,15 @@ date range, source, or dimension.
             Result = JsonSerializer.SerializeToDocument(new
             {
                 totals = results.Where(r => r.Total.HasValue)
-                    .ToDictionary(r => r.SourceKey, r => r.Total)
+                    .ToDictionary(r => r.SourceKey, r => r.Total),
+                biasAssessment = response.BiasAssessment == null ? null : new
+                {
+                    response.BiasAssessment.RiskLevel,
+                    response.BiasAssessment.BiasScore,
+                    response.BiasAssessment.PrejudiceScore,
+                    response.BiasAssessment.FlaggedItems,
+                    response.BiasAssessment.AffirmationTally
+                }
             }),
             OutputBlocks = JsonSerializer.SerializeToDocument(blocks),
             LatencyMs = response.LatencyMs,
