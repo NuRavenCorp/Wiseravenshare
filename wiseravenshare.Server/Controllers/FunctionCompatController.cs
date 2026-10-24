@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Stripe;
+using Wiseravenshare.Server.Exceptions;
 using WiseRavenShare.Server.Application.Services.Assistant;
 using Wiseravenshare.Server.DTOs.Collaboration;
 using Wiseravenshare.Server.DTOs.Social;
@@ -111,23 +113,105 @@ public sealed class FunctionCompatController : ControllerBase
 
     [HttpPost("create-karaoke-checkout")]
     [HttpPost("CreateKaraokeCheckout")]
-    public IActionResult CreateKaraokeCheckout([FromBody] JsonElement body)
+    public async Task<IActionResult> CreateKaraokeCheckout([FromBody] JsonElement body)
     {
-        var stripeKey = _configuration["Stripe:SecretKey"];
-        if (string.IsNullOrWhiteSpace(stripeKey))
+        var userId = ResolveUserId();
+        if (userId == Guid.Empty)
         {
-            return Ok(new
-            {
-                error = "Karaoke checkout is not available yet.",
-                message = "Payment processing is not configured on this server."
-            });
+            return Unauthorized(new { error = "Unauthorized" });
         }
 
-        return Ok(new
+        var origin = GetAppBaseUrl();
+        var successUrl = $"{origin}/media?karaoke=success";
+        var cancelUrl = $"{origin}/media?karaoke=cancelled";
+
+        try
         {
-            error = "Karaoke checkout is not implemented.",
-            message = "Contact support to enable karaoke access."
-        });
+            var checkout = await _subscriptionService.CreateCheckoutSessionAsync(userId, new global::Wiseravenshare.Server.DTOs.CreateCheckoutSessionRequest
+            {
+                Plan = "karaoke_pro",
+                BillingCycle = "monthly",
+                SuccessUrl = successUrl,
+                CancelUrl = cancelUrl
+            });
+
+            return Ok(new { url = checkout.Url, session_id = checkout.SessionId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Karaoke checkout prerequisites are not met for user {UserId}.", userId);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (NotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Karaoke checkout could not resolve user {UserId}.", userId);
+            return NotFound(new { error = ex.Message });
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Failed to create karaoke checkout session for user {UserId}.", userId);
+            return BadRequest(new { error = ex.StripeError?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("create-podcast-checkout")]
+    [HttpPost("CreatePodcastCheckout")]
+    public async Task<IActionResult> CreatePodcastCheckout([FromBody] JsonElement body)
+    {
+        var userId = ResolveUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { error = "Unauthorized" });
+        }
+
+        var paymentType = body.TryGetProperty("payment_type", out var paymentTypeProp)
+            ? paymentTypeProp.GetString()?.Trim().ToLowerInvariant()
+            : "subscription";
+
+        if (!string.Equals(paymentType, "subscription", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = "Only subscription checkout is supported for podcast plans." });
+        }
+
+        var podcastId = body.TryGetProperty("podcast_id", out var podcastIdProp)
+            ? podcastIdProp.GetString()
+            : null;
+
+        var origin = GetAppBaseUrl();
+        var successUrl = string.IsNullOrWhiteSpace(podcastId)
+            ? $"{origin}/ravensight?podcastCheckout=success"
+            : $"{origin}/ravensight?podcastCheckout=success&podcastId={Uri.EscapeDataString(podcastId)}";
+        var cancelUrl = string.IsNullOrWhiteSpace(podcastId)
+            ? $"{origin}/ravensight?podcastCheckout=cancelled"
+            : $"{origin}/ravensight?podcastCheckout=cancelled&podcastId={Uri.EscapeDataString(podcastId)}";
+
+        try
+        {
+            var checkout = await _subscriptionService.CreateCheckoutSessionAsync(userId, new global::Wiseravenshare.Server.DTOs.CreateCheckoutSessionRequest
+            {
+                Plan = "podcast_pro",
+                BillingCycle = "monthly",
+                SuccessUrl = successUrl,
+                CancelUrl = cancelUrl
+            });
+
+            return Ok(new { url = checkout.Url, session_id = checkout.SessionId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Podcast checkout prerequisites are not met for user {UserId}.", userId);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (NotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Podcast checkout could not resolve user {UserId}.", userId);
+            return NotFound(new { error = ex.Message });
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Failed to create podcast checkout session for user {UserId}.", userId);
+            return BadRequest(new { error = ex.StripeError?.Message ?? ex.Message });
+        }
     }
 
     [HttpPost("transcribe-local-file")]

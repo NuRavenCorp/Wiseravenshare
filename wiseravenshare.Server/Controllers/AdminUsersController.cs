@@ -15,6 +15,7 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class AdminUsersController : ControllerBase
 {
     private readonly UserStore _userStore;
+    private readonly RefreshTokenStore _refreshTokenStore;
     private readonly IConfiguration _config;
     private readonly ILogger<AdminUsersController> _logger;
 
@@ -30,10 +31,12 @@ public sealed class AdminUsersController : ControllerBase
 
     public AdminUsersController(
         UserStore userStore,
+        RefreshTokenStore refreshTokenStore,
         IConfiguration config,
         ILogger<AdminUsersController> logger)
     {
         _userStore = userStore;
+        _refreshTokenStore = refreshTokenStore;
         _config = config;
         _logger = logger;
     }
@@ -71,6 +74,36 @@ public sealed class AdminUsersController : ControllerBase
             .ToList();
 
         return Ok(new { totalCount, page, pageSize, items });
+    }
+
+    [HttpGet("activity-feed")]
+    public IActionResult GetActivityFeed()
+    {
+        if (!IsAdmin()) return Forbid();
+
+        var activeUserIds = _refreshTokenStore.GetActiveUserIdsSnapshot();
+        var items = _userStore
+            .GetAllUsersSnapshot()
+            .Select(u => new
+            {
+                id = u.Id,
+                name = u.Name,
+                email = u.Email,
+                handle = u.Handle,
+                isLoggedOn = activeUserIds.Contains(u.Id),
+                lastSeenAtUtc = u.UpdatedAtUtc
+            })
+            .OrderBy(x => x.name)
+            .ToList();
+
+        return Ok(new
+        {
+            generatedAtUtc = DateTime.UtcNow,
+            totalUsers = items.Count,
+            loggedOnUsers = items.Count(x => x.isLoggedOn),
+            loggedOffUsers = items.Count(x => !x.isLoggedOn),
+            items
+        });
     }
 
     // ── Get single user ───────────────────────────────────────────────────────

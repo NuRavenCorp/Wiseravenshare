@@ -778,6 +778,13 @@ export const apiClient = {
       });
     },
   },
+  admin: {
+    getUserActivityFeed() {
+      return requestJson("/api/admin/users/activity-feed", {
+        method: "GET",
+      });
+    },
+  },
   functions: {
     invoke: invokeFunction,
   },

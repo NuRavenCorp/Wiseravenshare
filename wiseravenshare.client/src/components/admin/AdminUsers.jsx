@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/api/client";
-import { Loader2, Ban, PauseCircle, PlayCircle, Shield, Mail, Search, AlertTriangle } from "lucide-react";
+import { Loader2, Ban, PauseCircle, PlayCircle, Shield, Mail, Search, AlertTriangle, Wifi, WifiOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 const statusStyles = {
@@ -11,6 +11,9 @@ const statusStyles = {
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
+  const [activityFeed, setActivityFeed] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState("");
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
   const [search, setSearch] = useState("");
@@ -18,13 +21,31 @@ export default function AdminUsers() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const result = await apiClient.entities.User.filter({});
+    setActivityLoading(true);
+    setActivityError("");
+    const [usersResult, activityResult] = await Promise.allSettled([
+      apiClient.entities.User.filter({}),
+      apiClient.admin.getUserActivityFeed(),
+    ]);
+
+    if (usersResult.status === "fulfilled") {
+      const result = usersResult.value;
       const userArr = Array.isArray(result) ? result : result.items || [];
       setUsers(userArr);
-    } finally {
-      setLoading(false);
+    } else {
+      setUsers([]);
     }
+
+    if (activityResult.status === "fulfilled") {
+      setActivityFeed(Array.isArray(activityResult.value?.items) ? activityResult.value.items : []);
+    } else {
+      const message = activityResult.reason?.message || "Could not load active user feed.";
+      setActivityError(message);
+      setActivityFeed([]);
+    }
+
+    setLoading(false);
+    setActivityLoading(false);
   };
 
   useEffect(() => {
@@ -40,6 +61,17 @@ export default function AdminUsers() {
         (u.email || "").toLowerCase().includes(q)
     );
   }, [users, search]);
+
+  const filteredActivity = useMemo(() => {
+    if (!search.trim()) return activityFeed;
+    const q = search.toLowerCase();
+    return activityFeed.filter(
+      (u) =>
+        (u.name || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        (u.handle || "").toLowerCase().includes(q)
+    );
+  }, [activityFeed, search]);
 
   const handleStatusChange = async (userId, newStatus) => {
     setUpdating(userId);
@@ -83,9 +115,75 @@ export default function AdminUsers() {
   const activeCount = users.filter((u) => (u.status || "active") === "active").length;
   const suspendedCount = users.filter((u) => u.status === "suspended").length;
   const blockedCount = users.filter((u) => u.status === "blocked").length;
+  const loggedOnCount = activityFeed.filter((u) => Boolean(u.isLoggedOn)).length;
+  const loggedOffCount = activityFeed.length - loggedOnCount;
 
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-foreground">Active User Feed</h2>
+          <button
+            onClick={load}
+            disabled={loading || activityLoading}
+            className="text-xs px-2.5 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground disabled:opacity-60"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl border border-border bg-background/50">
+            <p className="text-2xl font-heading text-foreground">{activityFeed.length}</p>
+            <p className="text-xs text-muted-foreground">All users</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-background/50">
+            <p className="text-2xl font-heading text-green-500">{loggedOnCount}</p>
+            <p className="text-xs text-muted-foreground">Logged on</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-background/50">
+            <p className="text-2xl font-heading text-muted-foreground">{loggedOffCount}</p>
+            <p className="text-xs text-muted-foreground">Logged off</p>
+          </div>
+        </div>
+
+        {activityError && <p className="text-xs text-destructive">{activityError}</p>}
+
+        {activityLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-auto pr-1">
+            {filteredActivity.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No users found.</p>
+            ) : (
+              filteredActivity.map((u) => (
+                <div
+                  key={`activity-${u.id}`}
+                  className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/40"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground truncate">{u.name || u.email || "Unknown user"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${u.isLoggedOn ? "bg-green-500/15 text-green-500" : "bg-muted text-muted-foreground"}`}>
+                      {u.isLoggedOn ? "logged on" : "logged off"}
+                    </span>
+                    {u.isLoggedOn ? (
+                      <Wifi className="w-3.5 h-3.5 text-green-500" />
+                    ) : (
+                      <WifiOff className="w-3.5 h-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         <div className="p-3 rounded-xl border border-border bg-card/50">

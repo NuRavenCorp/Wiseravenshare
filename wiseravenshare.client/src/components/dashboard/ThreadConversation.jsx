@@ -57,9 +57,9 @@ export default function ThreadConversation({ conversation, currentUserId, profil
     setSending(true);
     try {
       await apiClient.functions.invoke("SendMessage", {
-        conversation_id: conversation.id,
+        conversationId: conversation.id,
         content: input.trim(),
-        parent_message_id: replyTo?.id || undefined,
+        parentMessageId: replyTo?.id || undefined,
       });
       setInput("");
       setReplyTo(null);

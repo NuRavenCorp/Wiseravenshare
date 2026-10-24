@@ -19,8 +19,8 @@ export default function ConversationList({ conversations, profiles, currentUserI
     setError(null);
     try {
       const res = await apiClient.functions.invoke("SendMessage", {
-        recipient_email: email,
-        content
+        recipientEmail: email,
+        content: content.trim()
       });
       if (res.data?.error) throw new Error(res.data.error);
       setEmail("");
