@@ -2816,6 +2816,7 @@ app.MapHub<MessageHub>("/api/hubs/messages");
 app.MapHub<CrossPlatformCollaborationHub>("/api/hubs/collaboration");
 app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
 app.MapHub<WebRtcSignalingHub>("/api/hubs/webrtc");
+app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
 
 if (frontendDistExists)

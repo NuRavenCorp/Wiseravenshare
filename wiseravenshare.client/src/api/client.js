@@ -556,6 +556,16 @@ export const apiClient = {
     },
   },
   live: {
+    agoraToken(channelName, uid = 0, role = "publisher") {
+      const query = new URLSearchParams({
+        channelName: String(channelName || ""),
+        uid: String(uid),
+        role: String(role || "publisher"),
+      });
+      return requestJson(`/api/live/agora/token?${query.toString()}`, {
+        method: "GET",
+      });
+    },
     start(streamId, payload = {}) {
       return requestJson(`/api/live/${encodeURIComponent(streamId)}/start`, {
         method: "POST",

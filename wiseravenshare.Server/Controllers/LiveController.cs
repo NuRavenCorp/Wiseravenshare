@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using AgoraIO.Media;
 using Npgsql;
 using System.Text.Json;
 using Wiseravenshare.Server.Shared;
@@ -122,38 +123,117 @@ public sealed class LiveController : ControllerBase
         }
     }
 
+    [HttpGet("agora/token")]
+    [AllowAnonymous]
+    public IActionResult GetAgoraToken(
+        [FromQuery] string channelName,
+        [FromQuery] uint uid = 0,
+        [FromQuery] string role = "publisher")
+    {
+        var normalizedChannelName = (channelName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedChannelName))
+        {
+            return BadRequest(new { message = "channelName is required." });
+        }
+
+        var appId = ReadSetting("Agora:AppId", "AGORA_APP_ID");
+        var appCertificate = ReadSetting("Agora:AppCertificate", "AGORA_APP_CERTIFICATE");
+        if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(appCertificate))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Agora is not configured on this server."
+            });
+        }
+
+        var expiryRaw = ReadSetting("Agora:TokenExpirySeconds", "AGORA_TOKEN_EXPIRY_SECONDS");
+        var expirySeconds = 3600u;
+        if (uint.TryParse(expiryRaw, out var parsedExpiry) && parsedExpiry > 0)
+        {
+            expirySeconds = parsedExpiry;
+        }
+
+        var normalizedRole = (role ?? string.Empty).Trim().ToLowerInvariant();
+        var agoraRole = normalizedRole switch
+        {
+            "subscriber" => RtcTokenBuilder.Role.RoleSubscriber,
+            "attendee" => RtcTokenBuilder.Role.RoleAttendee,
+            "admin" => RtcTokenBuilder.Role.RoleAdmin,
+            _ => RtcTokenBuilder.Role.RolePublisher
+        };
+
+        var privilegeExpiredTs = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() + expirySeconds;
+        var token = RtcTokenBuilder.buildTokenWithUID(
+            appId,
+            appCertificate,
+            normalizedChannelName,
+            uid,
+            agoraRole,
+            privilegeExpiredTs);
+
+        return Ok(new
+        {
+            appId,
+            token,
+            channelName = normalizedChannelName,
+            uid,
+            role = normalizedRole,
+            expiresInSeconds = expirySeconds
+        });
+    }
+
     [HttpGet("ice-servers")]
     [AllowAnonymous]
     public async Task<IActionResult> IceServers(CancellationToken cancellationToken = default)
     {
-        var appName = (_configuration["MeteredTurn:AppName"] ?? string.Empty).Trim();
-        var credentialApiKey = (_configuration["MeteredTurn:CredentialApiKey"] ?? string.Empty).Trim();
-        var region = (_configuration["MeteredTurn:Region"] ?? string.Empty).Trim();
-        var timeoutSecondsRaw = (_configuration["MeteredTurn:TimeoutSeconds"] ?? string.Empty).Trim();
+        var appName = ReadSetting("MeteredTurn:AppName", "METERED_TURN_APP_NAME");
+        var credentialApiKey = ReadSetting("MeteredTurn:CredentialApiKey", "METERED_TURN_API_KEY", "Metered_Turn_Secret_Key");
+        var credentialsEndpoint = ReadSetting("MeteredTurn:CredentialsEndpoint", "METERED_TURN_CREDENTIALS_ENDPOINT");
+        var region = ReadSetting("MeteredTurn:Region", "METERED_TURN_REGION");
+        var username = ReadSetting("MeteredTurn:Username", "METERED_TURN_USERNAME");
+        var password = ReadSetting("MeteredTurn:Password", "METERED_TURN_PASSWORD");
+        var relayHost = ReadSetting("MeteredTurn:RelayHost", "METERED_TURN_RELAY_HOST");
+        var stunHost = ReadSetting("MeteredTurn:StunHost", "METERED_TURN_STUN_HOST");
+        var timeoutSecondsRaw = ReadSetting("MeteredTurn:TimeoutSeconds", "METERED_TURN_TIMEOUT_SECONDS");
+
+        if (string.IsNullOrWhiteSpace(relayHost))
+        {
+            relayHost = "global.relay.metered.ca";
+        }
+
+        if (string.IsNullOrWhiteSpace(stunHost))
+        {
+            stunHost = "stun.relay.metered.ca";
+        }
+
         var timeoutSeconds = 4;
         if (int.TryParse(timeoutSecondsRaw, out var parsedTimeout) && parsedTimeout > 0)
         {
             timeoutSeconds = parsedTimeout;
         }
 
-        if (string.IsNullOrWhiteSpace(appName) || string.IsNullOrWhiteSpace(credentialApiKey))
+        if (!string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
         {
             return Ok(new
             {
-                providers = "fallback",
-                iceServers = new object[]
-                {
-                    new { urls = "stun:stun.relay.metered.ca:80" },
-                    new { urls = "stun:stun.l.google.com:19302" }
-                }
+                providers = "metered-static-credential",
+                iceServers = BuildMeteredStaticCredentialIceServers(username, password, relayHost, stunHost)
             });
         }
 
-        var meteredUrl = $"https://{appName}.metered.live/api/v1/turn/credentials?apiKey={Uri.EscapeDataString(credentialApiKey)}";
-        if (!string.IsNullOrWhiteSpace(region))
+        if (string.IsNullOrWhiteSpace(appName) || string.IsNullOrWhiteSpace(credentialApiKey))
         {
-            meteredUrl = $"{meteredUrl}&region={Uri.EscapeDataString(region)}";
+            if (string.IsNullOrWhiteSpace(credentialsEndpoint) || string.IsNullOrWhiteSpace(credentialApiKey))
+            {
+                return Ok(new { providers = "fallback", iceServers = BuildFallbackIceServers() });
+            }
         }
+
+        var meteredUrl = BuildMeteredCredentialsUrl(
+            appName,
+            credentialApiKey,
+            credentialsEndpoint,
+            region);
 
         try
         {
@@ -169,15 +249,7 @@ public sealed class LiveController : ControllerBase
                     (int)response.StatusCode,
                     detail);
 
-                return Ok(new
-                {
-                    providers = "fallback",
-                    iceServers = new object[]
-                    {
-                        new { urls = "stun:stun.relay.metered.ca:80" },
-                        new { urls = "stun:stun.l.google.com:19302" }
-                    }
-                });
+                return Ok(new { providers = "fallback", iceServers = BuildFallbackIceServers() });
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -186,15 +258,7 @@ public sealed class LiveController : ControllerBase
 
             if (iceServers.Length == 0)
             {
-                return Ok(new
-                {
-                    providers = "fallback",
-                    iceServers = new object[]
-                    {
-                        new { urls = "stun:stun.relay.metered.ca:80" },
-                        new { urls = "stun:stun.l.google.com:19302" }
-                    }
-                });
+                return Ok(new { providers = "fallback", iceServers = BuildFallbackIceServers() });
             }
 
             return Ok(new
@@ -206,16 +270,65 @@ public sealed class LiveController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Metered ICE server fetch failed. Falling back to STUN-only config.");
-            return Ok(new
-            {
-                providers = "fallback",
-                iceServers = new object[]
-                {
-                    new { urls = "stun:stun.relay.metered.ca:80" },
-                    new { urls = "stun:stun.l.google.com:19302" }
-                }
-            });
+            return Ok(new { providers = "fallback", iceServers = BuildFallbackIceServers() });
         }
+    }
+
+    private static object[] BuildFallbackIceServers() => new object[]
+    {
+        new { urls = "stun:stun.relay.metered.ca:80" },
+        new { urls = "stun:stun.l.google.com:19302" }
+    };
+
+    private static object[] BuildMeteredStaticCredentialIceServers(string username, string password, string relayHost, string stunHost) => new object[]
+    {
+        new { urls = $"stun:{stunHost}:80" },
+        new { urls = $"turn:{relayHost}:80", username, credential = password },
+        new { urls = $"turn:{relayHost}:80?transport=tcp", username, credential = password },
+        new { urls = $"turn:{relayHost}:443", username, credential = password },
+        new { urls = $"turns:{relayHost}:443?transport=tcp", username, credential = password }
+    };
+
+    private string ReadSetting(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = (_configuration[key] ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildMeteredCredentialsUrl(
+        string appName,
+        string credentialApiKey,
+        string credentialsEndpoint,
+        string region)
+    {
+        var endpoint = (credentialsEndpoint ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(endpoint))
+        {
+            var delimiter = endpoint.Contains('?') ? "&" : "?";
+            var url = $"{endpoint}{delimiter}apiKey={Uri.EscapeDataString(credentialApiKey)}";
+            if (!string.IsNullOrWhiteSpace(region))
+            {
+                url = $"{url}&region={Uri.EscapeDataString(region)}";
+            }
+
+            return url;
+        }
+
+        var defaultUrl = $"https://{appName}.metered.live/api/v1/turn/credentials?apiKey={Uri.EscapeDataString(credentialApiKey)}";
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            defaultUrl = $"{defaultUrl}&region={Uri.EscapeDataString(region)}";
+        }
+
+        return defaultUrl;
     }
 
     [HttpPost("{streamId}/start")]

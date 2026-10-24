@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
+import { useAuth } from "@/lib/AuthContext";
 import { useWebRtcViewer } from "@/hooks/useWebRtcViewer";
+import LiveStreamChat from "@/components/media/LiveStreamChat";
 import { Loader2, Radio, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function LiveStreamViewer({ stream, onBack }) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [ended, setEnded] = useState(false);
   const [realtimeActive, setRealtimeActive] = useState(false);
@@ -126,30 +129,37 @@ export default function LiveStreamViewer({ stream, onBack }) {
         <ArrowLeft className="w-4 h-4" /> Back to streams
       </Button>
 
-      <div className="rounded-lg overflow-hidden border border-border bg-black relative">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className={`w-full aspect-video ${stream.is_audio_only ? "opacity-0" : ""}`}
-          onEnded={() => {
-            // Keep viewer active between rolling live file updates.
-            if (!ended && videoRef.current) {
-              videoRef.current.play().catch(() => {});
-            }
-          }}
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(280px,1fr)]">
+        <div className="rounded-lg overflow-hidden border border-border bg-black relative">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className={`w-full aspect-video ${stream.is_audio_only ? "opacity-0" : ""}`}
+            onEnded={() => {
+              // Keep viewer active between rolling live file updates.
+              if (!ended && videoRef.current) {
+                videoRef.current.play().catch(() => {});
+              }
+            }}
+          />
+          {stream.is_audio_only && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Radio className="w-12 h-12 text-primary animate-pulse" />
+            </div>
+          )}
+          {!ended && (
+            <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-destructive-foreground animate-pulse" />
+              LIVE
+            </span>
+          )}
+        </div>
+
+        <LiveStreamChat
+          roomId={stream.id}
+          username={user?.displayName || user?.username || user?.name || "Viewer"}
         />
-        {stream.is_audio_only && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Radio className="w-12 h-12 text-primary animate-pulse" />
-          </div>
-        )}
-        {!ended && (
-          <span className="absolute top-3 left-3 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-destructive-foreground animate-pulse" />
-            LIVE
-          </span>
-        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card p-3">

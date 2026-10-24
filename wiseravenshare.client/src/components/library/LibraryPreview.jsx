@@ -40,7 +40,7 @@ export default function LibraryPreview({ item, onClose }) {
             <Loader2 className="w-6 h-6 animate-spin text-primary" />
           </div>
         ) : item.asset_type === "photo" ? (
-          <ZoomableImage src={url} alt={item.title} className="w-full rounded-lg max-h-[75vh]" fittingType="fit" />
+          <ZoomableImage src={url} alt={item.title} className="w-full rounded-lg h-[75vh]" fittingType="fill" />
         ) : item.asset_type === "video" ? (
           <video src={url} controls autoPlay className="w-full rounded-lg border border-border bg-black max-h-[75vh]" />
         ) : (

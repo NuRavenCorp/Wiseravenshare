@@ -19,6 +19,7 @@ export default function LiveStreamPanel() {
   const [keepTextById, setKeepTextById] = useState({});
   const [keepBusyById, setKeepBusyById] = useState({});
   const [deleteBusyById, setDeleteBusyById] = useState({});
+  const [pruneBusy, setPruneBusy] = useState(false);
 
   const normalizeId = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   const getStreamId = (streamOrId) => {
@@ -183,6 +184,41 @@ export default function LiveStreamPanel() {
     }
   };
 
+  const isStaleEndedStream = (stream) => {
+    const streamId = getStreamId(stream);
+    const expiry = expiryById[streamId];
+    if (!expiry || expiry.kept_permanently) return false;
+    return typeof expiry.seconds_remaining === "number" && expiry.seconds_remaining <= 0;
+  };
+
+  const pruneStaleEndedStreams = async () => {
+    const staleStreams = endedStreams.filter(isStaleEndedStream);
+    if (!staleStreams.length) return;
+
+    const confirmed = window.confirm(`Delete ${staleStreams.length} stale saved live episode${staleStreams.length === 1 ? "" : "s"}?`);
+    if (!confirmed) return;
+
+    setPruneBusy(true);
+    try {
+      setPanelError("");
+      await Promise.all(staleStreams.map(async (stream) => {
+        const streamId = getStreamId(stream);
+        if (!streamId) return;
+        setDeleteBusyById((prev) => ({ ...prev, [streamId]: true }));
+        try {
+          await apiClient.live.delete(streamId);
+        } finally {
+          setDeleteBusyById((prev) => ({ ...prev, [streamId]: false }));
+        }
+      }));
+      await fetchStreams();
+    } catch (deleteError) {
+      setPanelError(deleteError?.message || "Could not delete stale live episodes.");
+    } finally {
+      setPruneBusy(false);
+    }
+  };
+
   if (mode === "broadcast") {
     return (
       <LiveStreamBroadcaster
@@ -292,9 +328,19 @@ export default function LiveStreamPanel() {
             <span className="text-sm font-medium text-foreground">
               Saved Live Recordings
             </span>
-            <span className="text-xs text-muted-foreground">
-              Auto-delete after 3 days unless kept
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                Auto-delete after 3 days unless kept
+              </span>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={pruneStaleEndedStreams}
+                disabled={pruneBusy || !endedStreams.some(isStaleEndedStream)}
+              >
+                {pruneBusy ? "Removing stale..." : "Remove Stale"}
+              </Button>
+            </div>
           </div>
           <div className="space-y-3">
             {endedStreams.map((stream) => {

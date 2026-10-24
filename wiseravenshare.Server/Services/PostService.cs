@@ -1,5 +1,6 @@
 // Wiseravenshare.Server/Services/PostService.cs
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
@@ -51,6 +52,7 @@ public class PostService : IPostService
     private readonly IEngagementMultiplierService _engagementMultiplierService;
     private readonly IContentCrawlerService _contentCrawler;
     private readonly IPostFeedRankingService _postFeedRankingService;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PostService> _logger;
 
     public PostService(
@@ -64,6 +66,7 @@ public class PostService : IPostService
         IEngagementMultiplierService engagementMultiplierService,
         IContentCrawlerService contentCrawler,
         IPostFeedRankingService postFeedRankingService,
+        IServiceScopeFactory scopeFactory,
         ILogger<PostService> logger)
     {
         _postRepository = postRepository;
@@ -76,6 +79,7 @@ public class PostService : IPostService
         _engagementMultiplierService = engagementMultiplierService;
         _contentCrawler = contentCrawler;
         _postFeedRankingService = postFeedRankingService;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -227,25 +231,27 @@ public class PostService : IPostService
             _logger.LogWarning(ex, "Failed to award post milestone badge for user {UserId}", userId);
         }
 
-        // Ingest into content crawler for trending detection (fire-and-forget)
-        try
+        // Ingest into content crawler for trending detection (fire-and-forget, isolated scope)
+        var crawlerPostId = post.Id;
+        var crawlerUserId = userId;
+        var crawlerDisplayName = user.DisplayName ?? user.Username ?? "Unknown";
+        var crawlerTitle = post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "";
+        var crawlerTags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
+        _ = Task.Run(async () =>
         {
-            // Extract tags/hashtags from content
-            var tags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
-            _ = _contentCrawler.IngestUserContentAsync(
-                post.Id,
-                "Post",
-                post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "",
-                userId,
-                user.DisplayName ?? user.Username ?? "Unknown",
-                tags,
-                "GLOBAL"
-            );
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to ingest post {PostId} into content crawler", post.Id);
-        }
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var crawler = scope.ServiceProvider.GetRequiredService<IContentCrawlerService>();
+                await crawler.IngestUserContentAsync(
+                    crawlerPostId, "Post", crawlerTitle,
+                    crawlerUserId, crawlerDisplayName, crawlerTags, "GLOBAL");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Background content crawler ingest failed for post {PostId}", crawlerPostId);
+            }
+        });
 
         try
         {
