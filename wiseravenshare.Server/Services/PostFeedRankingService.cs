@@ -16,6 +16,7 @@ public interface IPostFeedRankingService
 public sealed class PostFeedRankingService : IPostFeedRankingService
 {
     private static readonly Regex HashtagRegex = new(@"#([a-zA-Z0-9_]{2,64})", RegexOptions.Compiled);
+    private static readonly Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "the", "and", "for", "with", "this", "that", "from", "have", "will", "your", "about", "into",
@@ -1231,6 +1232,16 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
                 if (!string.IsNullOrWhiteSpace(token))
                 {
                     topics.Add(token);
+                }
+            }
+
+            foreach (Match match in PartialRegex.Matches(post.Content))
+            {
+                var token = NormalizeToken(match.Groups[1].Value);
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    topics.Add(token);
+                    topics.Add($"partial-{token}");
                 }
             }
 

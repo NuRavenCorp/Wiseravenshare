@@ -174,7 +174,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   };
 
   const hashtagList = post.hashtags?.length ? post.hashtags : [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
-  const partialList = [...new Set((post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
+  const partialList = post.partials?.length ? post.partials : [...new Set((post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
   const engagementUsers = Array.isArray(post.engagement_users) ? post.engagement_users : [];
   const engagementSummary = engagementUsers.slice(0, 4).map((entry) => {
     const engagementUser = entry?.user || {};

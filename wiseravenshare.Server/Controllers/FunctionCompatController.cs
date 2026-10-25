@@ -958,7 +958,10 @@ public sealed class FunctionCompatController : ControllerBase
             PublishToTikTok = request.PublishToTikTok,
             PublishToYouTube = request.PublishToYouTube,
             PublishToWiseRavenStream = false,
-            PublishToBluesky = false
+            PublishToBluesky = false,
+            FacebookPageId = request.FacebookPageId,
+            TikTokUsername = request.TikTokUsername,
+            YouTubeChannelId = request.YouTubeChannelId
         };
 
         var requestedPlatforms = ResolveRequestedPlatforms(publishRequest);
@@ -1018,11 +1021,42 @@ public sealed class FunctionCompatController : ControllerBase
     public async Task<IActionResult> SicialGetAccounts()
     {
         var statuses = await _socialPlatformService.GetProviderStatusesAsync();
+        var facebookStatus = statuses.FirstOrDefault(x => x.Platform.Equals("facebook", StringComparison.OrdinalIgnoreCase));
+        var instagramStatus = statuses.FirstOrDefault(x => x.Platform.Equals("instagram", StringComparison.OrdinalIgnoreCase));
+        var tiktokStatus = statuses.FirstOrDefault(x => x.Platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase));
+        var youtubeStatus = statuses.FirstOrDefault(x => x.Platform.Equals("youtube", StringComparison.OrdinalIgnoreCase));
+        var facebookPages = ResolveFacebookPagesFromConfiguration();
+        var tiktokAccounts = ResolveTikTokAccountsFromConfiguration();
+        var youtubeChannels = ResolveYouTubeChannelsFromConfiguration();
+
         return Ok(new
         {
-            facebook = statuses.FirstOrDefault(x => x.Platform.Equals("facebook", StringComparison.OrdinalIgnoreCase)),
-            instagram = statuses.FirstOrDefault(x => x.Platform.Equals("instagram", StringComparison.OrdinalIgnoreCase)),
-            tiktok = statuses.FirstOrDefault(x => x.Platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase)),
+            facebook = new
+            {
+                connected = facebookStatus?.PublishConfigured == true,
+                pages = facebookPages.Select(page => new { id = page.Id, name = page.Name }).ToList(),
+                selectedPageId = facebookPages.FirstOrDefault(page => page.IsDefault)?.Id ?? facebookPages.FirstOrDefault()?.Id,
+                status = facebookStatus
+            },
+            instagram = new
+            {
+                connected = instagramStatus?.PublishConfigured == true,
+                status = instagramStatus
+            },
+            tiktok = new
+            {
+                connected = tiktokStatus?.PublishConfigured == true,
+                accounts = tiktokAccounts.Select(account => new { username = account.Username, label = account.Label }).ToList(),
+                selectedUsername = tiktokAccounts.FirstOrDefault(account => account.IsDefault)?.Username ?? tiktokAccounts.FirstOrDefault()?.Username,
+                status = tiktokStatus
+            },
+            youtube = new
+            {
+                connected = youtubeStatus?.PublishConfigured == true,
+                channels = youtubeChannels.Select(channel => new { id = channel.Id, name = channel.Name }).ToList(),
+                selectedChannelId = youtubeChannels.FirstOrDefault(channel => channel.IsDefault)?.Id ?? youtubeChannels.FirstOrDefault()?.Id,
+                status = youtubeStatus
+            },
             providers = statuses
         });
     }
@@ -1835,6 +1869,71 @@ public sealed class FunctionCompatController : ControllerBase
         return platforms;
     }
 
+    private IReadOnlyList<ConfiguredFacebookPage> ResolveFacebookPagesFromConfiguration()
+    {
+        var pages = _configuration.GetSection("Social:Facebook:Pages")
+            .GetChildren()
+            .Select(section => new ConfiguredFacebookPage(
+                Id: (section["Id"] ?? string.Empty).Trim(),
+                Name: string.IsNullOrWhiteSpace(section["Name"]) ? "Facebook Page" : section["Name"]!.Trim(),
+                IsDefault: bool.TryParse(section["IsDefault"], out var isDefault) && isDefault))
+            .Where(page => !string.IsNullOrWhiteSpace(page.Id))
+            .ToList();
+
+        var singleId = (_configuration["Social:Facebook:PageId"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(singleId) && pages.All(page => !page.Id.Equals(singleId, StringComparison.OrdinalIgnoreCase)))
+        {
+            pages.Insert(0, new ConfiguredFacebookPage(
+                Id: singleId,
+                Name: (_configuration["Social:Facebook:PageName"] ?? "Facebook Page").Trim(),
+                IsDefault: true));
+        }
+
+        return pages;
+    }
+
+    private IReadOnlyList<ConfiguredTikTokAccount> ResolveTikTokAccountsFromConfiguration()
+    {
+        var accounts = _configuration.GetSection("Social:TikTok:Accounts")
+            .GetChildren()
+            .Select(section => new ConfiguredTikTokAccount(
+                Username: (section["Username"] ?? string.Empty).Trim(),
+                Label: string.IsNullOrWhiteSpace(section["Label"]) ? (section["Username"] ?? string.Empty).Trim() : section["Label"]!.Trim(),
+                IsDefault: bool.TryParse(section["IsDefault"], out var isDefault) && isDefault))
+            .Where(account => !string.IsNullOrWhiteSpace(account.Username))
+            .ToList();
+
+        var singleUsername = (_configuration["Social:TikTok:Username"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(singleUsername)
+            && accounts.All(account => !account.Username.Equals(singleUsername, StringComparison.OrdinalIgnoreCase)))
+        {
+            accounts.Insert(0, new ConfiguredTikTokAccount(singleUsername, singleUsername, true));
+        }
+
+        return accounts;
+    }
+
+    private IReadOnlyList<ConfiguredYouTubeChannel> ResolveYouTubeChannelsFromConfiguration()
+    {
+        var channels = _configuration.GetSection("YouTubeSync:Channels")
+            .GetChildren()
+            .Select(section => new ConfiguredYouTubeChannel(
+                Id: (section["Id"] ?? string.Empty).Trim(),
+                Name: string.IsNullOrWhiteSpace(section["Name"]) ? "YouTube Channel" : section["Name"]!.Trim(),
+                IsDefault: bool.TryParse(section["IsDefault"], out var isDefault) && isDefault))
+            .Where(channel => !string.IsNullOrWhiteSpace(channel.Id))
+            .ToList();
+
+        var singleChannelId = (_configuration["YouTubeSync:ChannelId"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(singleChannelId)
+            && channels.All(channel => !channel.Id.Equals(singleChannelId, StringComparison.OrdinalIgnoreCase)))
+        {
+            channels.Insert(0, new ConfiguredYouTubeChannel(singleChannelId, "YouTube Channel", true));
+        }
+
+        return channels;
+    }
+
     private string? ResolveDropboxAccessToken()
     {
         return _configuration["Dropbox:AccessToken"]
@@ -2555,8 +2654,14 @@ public sealed class SocialCrossPostsRequest
     public string? InstagramMediaType { get; set; }
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; }
+    public string? TikTokUsername { get; set; }
+    public string? YouTubeChannelId { get; set; }
     public bool Queue { get; set; } = true;
 }
+
+public sealed record ConfiguredFacebookPage(string Id, string Name, bool IsDefault);
+public sealed record ConfiguredTikTokAccount(string Username, string Label, bool IsDefault);
+public sealed record ConfiguredYouTubeChannel(string Id, string Name, bool IsDefault);
 
 public sealed class SocialCrossPostStatusRequest
 {

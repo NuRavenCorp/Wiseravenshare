@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Wiseravenshare.Server.Services.Personalization;
 
@@ -18,6 +19,8 @@ public interface IGeminiTagService
 
 public sealed class GeminiTagService : IGeminiTagService
 {
+    private static readonly Regex HashtagRegex = new(@"#([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
+    private static readonly Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
     private readonly HttpClient         _http;
     private readonly ILogger<GeminiTagService> _log;
     private readonly string             _apiKey;
@@ -37,8 +40,10 @@ public sealed class GeminiTagService : IGeminiTagService
         if (string.IsNullOrWhiteSpace(content)) return Array.Empty<string>();
 
         var truncated = content.Length > 1200 ? content[..1200] : content;
+        var explicitTags = ExtractExplicitSignalTags(truncated);
         var prompt =
             $"Extract up to {maxTags} short topical tags from the text below. " +
+            "Preserve explicit hashtags (#topic) and partial tags (%topic) as high-priority tags. " +
             "Return ONLY a JSON array of lowercase tag strings, no explanation, no markdown fences.\n\n" +
             truncated;
 
@@ -56,18 +61,44 @@ public sealed class GeminiTagService : IGeminiTagService
         try
         {
             var tags = JsonSerializer.Deserialize<string[]>(raw) ?? Array.Empty<string>();
-            return tags
+            return explicitTags
+                .Concat(tags)
                 .Select(t => t.Trim().ToLowerInvariant())
                 .Where(t => t.Length is >= 2 and <= 80)
                 .Distinct()
                 .Take(maxTags)
                 .ToArray();
         }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Failed to parse Gemini tag response: {Raw}", raw);
-            return Array.Empty<string>();
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Failed to parse Gemini tag response: {Raw}", raw);
+                return Array.Empty<string>();
+            }
         }
+
+        private static IReadOnlyList<string> ExtractExplicitSignalTags(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return Array.Empty<string>();
+            }
+
+            var hashtags = HashtagRegex
+                .Matches(content)
+                .Select(match => match.Groups[1].Value.Trim().ToLowerInvariant())
+                .Where(tag => !string.IsNullOrWhiteSpace(tag));
+
+            var partials = PartialRegex
+                .Matches(content)
+                .Select(match => match.Groups[1].Value.Trim().ToLowerInvariant())
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Select(tag => $"partial-{tag}");
+
+            return hashtags
+                .Concat(partials)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(24)
+                .ToArray();
     }
 
     public async Task<string> SummarizeAsync(string content, CancellationToken ct = default)

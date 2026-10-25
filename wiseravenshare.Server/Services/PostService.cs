@@ -1,5 +1,6 @@
 // Wiseravenshare.Server/Services/PostService.cs
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.IO;
 using System.Net.Sockets;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +46,8 @@ public interface IPostService
 
 public class PostService : IPostService
 {
+    private static readonly Regex HashtagRegex = new(@"#([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
+    private static readonly Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
     private readonly IPostRepository _postRepository;
     private readonly IUserRepository _userRepository;
     private readonly ITruthService _truthService;
@@ -1250,6 +1253,7 @@ public class PostService : IPostService
         IReadOnlyList<PostEngagementUserDto>? engagementUsers = null,
         bool includeNestedPosts = true)
     {
+        var (hashtags, partials, _) = ExtractSignalTags(post.Content);
         return new PostDto
         {
             Id = post.Id,
@@ -1277,6 +1281,8 @@ public class PostService : IPostService
             SharesCount = post.SharesCount,
             BookmarksCount = interaction?.BookmarksCount ?? post.BookmarksCount,
             ViewsCount = post.ViewsCount,
+            Hashtags = hashtags,
+            Partials = partials,
             CreatedAt = post.CreatedAt,
             IsLiked = interaction?.IsLiked ?? false,
             IsReposted = interaction?.IsReposted ?? false,
@@ -1287,6 +1293,41 @@ public class PostService : IPostService
             User = user is null ? new UserDto() : MapToUserDto(user),
             EngagementUsers = engagementUsers ?? Array.Empty<PostEngagementUserDto>()
         };
+    }
+
+    private static (string[] Hashtags, string[] Partials, string[] AllTags) ExtractSignalTags(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return (Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        var hashtags = HashtagRegex
+            .Matches(content)
+            .Select(match => NormalizeMetadataValue(match.Groups[1].Value)?.ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(32)
+            .Cast<string>()
+            .ToArray();
+
+        var partials = PartialRegex
+            .Matches(content)
+            .Select(match => NormalizeMetadataValue(match.Groups[1].Value)?.ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(32)
+            .Cast<string>()
+            .ToArray();
+
+        var all = hashtags
+            .Select(tag => $"#{tag}")
+            .Concat(partials.Select(tag => $"%{tag}"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(48)
+            .ToArray();
+
+        return (hashtags, partials, all);
     }
 
     private async Task<IReadOnlyList<PostEngagementUserDto>> BuildPostEngagementUsersAsync(Guid postId)

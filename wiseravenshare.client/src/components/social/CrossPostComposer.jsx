@@ -12,15 +12,28 @@ export default function CrossPostComposer({ accounts }) {
   const [pageId, setPageId] = useState("");
   const [igMediaUrl, setIgMediaUrl] = useState("");
   const [igMediaType, setIgMediaType] = useState("image");
+  const [postToTikTok, setPostToTikTok] = useState(false);
+  const [tiktokUsername, setTiktokUsername] = useState("");
   const [postToYouTube, setPostToYouTube] = useState(false);
+  const [youtubeChannelId, setYouTubeChannelId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [jobId, setJobId] = useState("");
   const [jobState, setJobState] = useState("");
 
   const fbPages = accounts?.facebook?.pages || [];
-  const igConnected = !!accounts?.instagram;
-  const youtubeConnected = !!accounts?.youtube;
+  const igConnected = !!accounts?.instagram?.connected;
+  const tiktokConnected = !!accounts?.tiktok?.connected;
+  const youtubeConnected = !!accounts?.youtube?.connected;
+  const tiktokAccounts = accounts?.tiktok?.accounts || [];
+  const youtubeChannels = accounts?.youtube?.channels || [];
+
+  useEffect(() => {
+    setPageId((current) => current || accounts?.facebook?.selectedPageId || "");
+    setPostToTikTok(Boolean(accounts?.tiktok?.connected));
+    setTiktokUsername((current) => current || accounts?.tiktok?.selectedUsername || "");
+    setYouTubeChannelId((current) => current || accounts?.youtube?.selectedChannelId || "");
+  }, [accounts]);
 
   useEffect(() => {
     if (!jobId) return undefined;
@@ -41,6 +54,7 @@ export default function CrossPostComposer({ accounts }) {
             if (anySuccess) {
               setContent("");
               setIgMediaUrl("");
+              setPostToTikTok(false);
               setPostToYouTube(false);
             }
           }
@@ -57,19 +71,22 @@ export default function CrossPostComposer({ accounts }) {
 
   const handlePost = async () => {
     if (!content) return;
-    if (!pageId && !igMediaUrl && !postToYouTube) return;
+    if (!pageId && !igMediaUrl && !postToYouTube && !postToTikTok) return;
     setBusy(true);
     setResult(null);
     setJobId("");
     setJobState("");
     try {
       const payload = { content };
-      if (pageId) payload.facebook_page_id = pageId;
+      if (pageId) payload.facebookPageId = pageId;
       if (igMediaUrl) {
-        payload.instagram_media_url = igMediaUrl;
-        payload.instagram_media_type = igMediaType;
+        payload.instagramMediaUrl = igMediaUrl;
+        payload.instagramMediaType = igMediaType;
       }
+      payload.publishToTikTok = Boolean(postToTikTok);
+      if (tiktokUsername) payload.tikTokUsername = tiktokUsername;
       if (postToYouTube) payload.publishToYouTube = true;
+      if (youtubeChannelId) payload.youTubeChannelId = youtubeChannelId;
       payload.queue = true;
       const res = await apiClient.functions.invoke("SocialCrossPost", payload);
       if (res.data?.job_id) {
@@ -78,10 +95,11 @@ export default function CrossPostComposer({ accounts }) {
         setResult(res.data.results || {});
       } else {
         setResult(res.data);
-        const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.youtube?.success;
+        const anySuccess = res.data?.facebook?.success || res.data?.instagram?.success || res.data?.youtube?.success || res.data?.tiktok?.success;
         if (anySuccess) {
           setContent("");
           setIgMediaUrl("");
+          setPostToTikTok(false);
           setPostToYouTube(false);
         }
       }
@@ -92,7 +110,7 @@ export default function CrossPostComposer({ accounts }) {
     }
   };
 
-  const hasAnyConnection = accounts?.facebook || igConnected || youtubeConnected;
+  const hasAnyConnection = accounts?.facebook?.connected || igConnected || tiktokConnected || youtubeConnected;
 
   if (!hasAnyConnection) {
     return (
@@ -186,9 +204,36 @@ export default function CrossPostComposer({ accounts }) {
           </div>
         )}
 
+        {/* TikTok section */}
+        {tiktokConnected && (
+          <div className="p-4 rounded-lg border border-border bg-secondary/20 space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={postToTikTok}
+                onChange={(e) => setPostToTikTok(e.target.checked)}
+                className="w-4 h-4 rounded border-border accent-primary"
+              />
+              <span className="text-sm font-medium">Post to TikTok</span>
+            </label>
+            {tiktokAccounts.length > 0 && (
+              <select
+                value={tiktokUsername}
+                onChange={(e) => setTiktokUsername(e.target.value)}
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground"
+              >
+                <option value="">Select TikTok account…</option>
+                {tiktokAccounts.map((account) => (
+                  <option key={account.username} value={account.username}>{account.label || account.username}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
         {/* YouTube section */}
         {youtubeConnected && (
-          <div className="p-4 rounded-lg border border-border bg-secondary/20">
+          <div className="p-4 rounded-lg border border-border bg-secondary/20 space-y-3">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -203,12 +248,24 @@ export default function CrossPostComposer({ accounts }) {
             <p className="text-xs text-muted-foreground mt-2 ml-7">
               Publishes a text update to your connected YouTube channel.
             </p>
+            {youtubeChannels.length > 0 && (
+              <select
+                value={youtubeChannelId}
+                onChange={(e) => setYouTubeChannelId(e.target.value)}
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground"
+              >
+                <option value="">Select YouTube channel…</option>
+                {youtubeChannels.map((channel) => (
+                  <option key={channel.id} value={channel.id}>{channel.name || channel.id}</option>
+                ))}
+              </select>
+            )}
           </div>
         )}
 
         <Button
           onClick={handlePost}
-          disabled={busy || !!jobId || !content || (!pageId && !igMediaUrl && !postToYouTube)}
+          disabled={busy || !!jobId || !content || (!pageId && !igMediaUrl && !postToYouTube && !postToTikTok)}
           className="w-full"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
@@ -223,9 +280,11 @@ export default function CrossPostComposer({ accounts }) {
 
         {result?.facebook?.queued && <p className="text-sm text-muted-foreground">Facebook: queued…</p>}
         {result?.instagram?.queued && <p className="text-sm text-muted-foreground">Instagram: queued…</p>}
+        {result?.tiktok?.queued && <p className="text-sm text-muted-foreground">TikTok: queued…</p>}
         {result?.youtube?.queued && <p className="text-sm text-muted-foreground">YouTube: queued…</p>}
         {result?.facebook?.pending && <p className="text-sm text-muted-foreground">Facebook: processing…</p>}
         {result?.instagram?.pending && <p className="text-sm text-muted-foreground">Instagram: processing…</p>}
+        {result?.tiktok?.pending && <p className="text-sm text-muted-foreground">TikTok: processing…</p>}
         {result?.youtube?.pending && <p className="text-sm text-muted-foreground">YouTube: processing…</p>}
 
         {result?.facebook?.success && (
@@ -243,6 +302,14 @@ export default function CrossPostComposer({ accounts }) {
         )}
         {result?.instagram?.error && (
           <p className="text-sm text-destructive">Instagram: {result.instagram.error}</p>
+        )}
+        {result?.tiktok?.success && (
+          <p className="text-sm text-accent flex items-center gap-1">
+            <Check className="w-4 h-4" /> TikTok: Posted successfully!
+          </p>
+        )}
+        {result?.tiktok?.error && (
+          <p className="text-sm text-destructive">TikTok: {result.tiktok.error}</p>
         )}
         {result?.youtube?.success && (
           <p className="text-sm text-accent flex items-center gap-1">
