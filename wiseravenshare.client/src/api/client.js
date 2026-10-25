@@ -275,6 +275,12 @@ const entityClient = (entityName) => ({
     });
   },
   async create(payload) {
+    if (String(entityName || "").toLowerCase() === "post") {
+      return requestJson("/api/posts", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
     return requestJson(`/api/entities/${encodeURIComponent(entityName)}`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -901,4 +907,11 @@ export const apiClient = {
   },
   // Expose raw authenticated request for custom use
   requestJson,
+  // Server-native post creation path (compat entities do not support Post.create).
+  async createPost(payload) {
+    return requestJson("/api/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
 };
