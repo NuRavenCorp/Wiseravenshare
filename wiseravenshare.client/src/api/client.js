@@ -373,6 +373,9 @@ export const apiClient = {
     trending(count = 20) {
       return requestJson(`/api/posts/trending?count=${count}`, { method: "GET" });
     },
+    userPosts(userId, page = 1, pageSize = 20) {
+      return requestJson(`/api/posts/user/${encodeURIComponent(userId)}?page=${page}&pageSize=${pageSize}`, { method: "GET" });
+    },
     like(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "POST" });
     },
@@ -387,6 +390,9 @@ export const apiClient = {
     },
     share(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/share`, { method: "POST" });
+    },
+    delete(postId) {
+      return requestJson(`/api/posts/${encodeURIComponent(postId)}`, { method: "DELETE" });
     },
     comments(postId, page = 1, pageSize = 100) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/comments?page=${encodeURIComponent(String(page))}&pageSize=${encodeURIComponent(String(pageSize))}`, { method: "GET" });
