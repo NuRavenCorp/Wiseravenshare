@@ -75,23 +75,6 @@ export default function JournalismReportForm({ onPublished }) {
     }
   };
 
-  const reconcilePublishedReport = async (content) => {
-    try {
-      const snapshot = await apiClient.entities.Post.filter({}, { limit: 25, sort: "-created_date" });
-      const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
-      const now = Date.now();
-      return items.find((item) => {
-        const itemContent = (item?.content || "").trim();
-        if (!itemContent || itemContent !== content) return false;
-        const createdAt = Date.parse(item?.created_date || item?.createdAt || "");
-        if (Number.isNaN(createdAt)) return true;
-        return now - createdAt <= 15 * 60 * 1000;
-      }) || null;
-    } catch {
-      return null;
-    }
-  };
-
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
@@ -163,12 +146,12 @@ export default function JournalismReportForm({ onPublished }) {
         return;
       }
 
-      const post = await apiClient.createPost({
+      const post = await apiClient.entities.Post.create({
         content,
-        type: media.some((item) => item.type === "video") ? "Video" : (media.length > 0 ? "Image" : "Text"),
-        mediaUrl: media[0]?.url || null,
-        mediaUrls: media.length > 0 ? JSON.stringify(media.map((m) => m.url)) : null,
-        locationName: fields.where || null,
+        post_type: "journalism",
+        media_uris: media.map((m) => m.url),
+        region: fields.where || undefined,
+        status: "published",
       });
 
       // Create a tracking record for admin verification
@@ -178,28 +161,14 @@ export default function JournalismReportForm({ onPublished }) {
           headline: cleanHeadline,
           description: fields.what || undefined,
           region: fields.where || undefined,
-          verification_status: "verified",
+          verification_status: "under_review",
         });
       } catch (e) {
         console.error("Failed to create journalism report tracker:", e?.message || e);
       }
       await runIntegrityScoring(post?.id || post?.Id);
     } catch (err) {
-      const content = `${cleanHeadline}\n\n${cleanBody}`;
-      const reconciled = await reconcilePublishedReport(content);
-      if (reconciled?.id) {
-        setError(null);
-        await runIntegrityScoring(reconciled.id);
-        return;
-      }
-
-      const message = (err?.data?.message || err?.message || "Failed to publish report.").toString();
-      const isUpstream503 = err?.status === 503 || message.includes("Error code: 503") || message.includes("via_upstream");
-      setError(
-        isUpstream503
-          ? "Server is warming up. Please wait a few seconds and try again."
-          : message
-      );
+      setError(err?.data?.error || err?.message || "Failed to publish report.");
       setPublishing(false);
     }
   };
