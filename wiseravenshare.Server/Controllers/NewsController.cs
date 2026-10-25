@@ -53,15 +53,16 @@ public sealed class NewsController : ControllerBase
         [FromQuery] string? region = null,
         [FromQuery] string? topic = null,
         [FromQuery] string? language = "en",
-        [FromQuery] int limit = 8,
+        [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
     {
         var normalizedRegion = region?.Trim() ?? string.Empty;
         var normalizedTopic = topic?.Trim() ?? string.Empty;
         var query = BuildBulletinQuery(normalizedRegion, normalizedTopic);
-        var response = await _newsAggregationService.SearchNewsAsync(query, language, Math.Clamp(limit, 1, 12), cancellationToken);
+        var normalizedLimit = Math.Clamp(limit, 1, 30);
+        var response = await _newsAggregationService.SearchNewsAsync(query, language, normalizedLimit, cancellationToken);
         var articles = response.Articles
-            .Take(Math.Clamp(limit, 1, 12))
+            .Take(normalizedLimit)
             .Select(article => new NewsBulletinArticleDto
             {
                 Title = article.Title,
