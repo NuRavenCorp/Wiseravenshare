@@ -165,103 +165,114 @@ public class PostService : IPostService
             IsSensitive = dto.IsSensitive
         };
 
-        // Analyze truth score when available, but never block post creation on the truth service.
-        if (!string.IsNullOrEmpty(dto.Content) && !IsOpinionOrQuestion(dto.Content))
-        {
-            try
-            {
-                var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
-                post.TruthScore = truthResult.TruthScore;
-                post.TruthCorrection = truthResult.Correction;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Truth analysis failed for post creation; continuing without truth metadata.");
-            }
-        }
-        else
-        {
-            // Nullify score for opinions/questions so UI ignores truth checks on them
-            post.TruthScore = null;
-            post.TruthCorrection = null;
-        }
+        // Nullify truth score initially — analysis runs in background after post is saved
+        // so it NEVER blocks the publish request (journalism reports can be 1000+ chars with
+        // many sentences; awaiting per-sentence AI calls here caused upstream 503 timeouts).
+        post.TruthScore = null;
+        post.TruthCorrection = null;
 
         var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
         post.Id = createdPostId;
 
         await PersistPostStrictAsync(post, user);
+
+        // Fire-and-forget truth analysis: updates the post record after publish completes.
+        if (!string.IsNullOrEmpty(dto.Content) && !IsOpinionOrQuestion(dto.Content))
+        {
+            var bgPostId = post.Id;
+            var bgContent = dto.Content;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(25));
+                    var truthTask = _truthService.AnalyzeContentAsync(bgContent);
+                    var completedTask = await Task.WhenAny(truthTask, Task.Delay(25000, cts.Token));
+                    if (completedTask != truthTask)
+                    {
+                        _logger.LogWarning("Background truth analysis timed out for post {PostId}.", bgPostId);
+                        return;
+                    }
+
+                    var truthResult = await truthTask;
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var repo = scope.ServiceProvider.GetRequiredService<IPostRepository>();
+                    var saved = await repo.GetByIdAsync(bgPostId);
+                    if (saved is not null)
+                    {
+                        saved.TruthScore = truthResult.TruthScore;
+                        saved.TruthCorrection = truthResult.Correction;
+                        await repo.UpdateAsync(saved);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Background truth analysis failed for post {PostId}.", bgPostId);
+                }
+            });
+        }
+
         _logger.LogInformation("Post created by user {UserId}", userId);
         DispatchSocialPublish(post);
         DispatchCrossPlatformPublish(post);
 
-        // If repost, update the original post's repost count
-        if (dto.RepostOfId.HasValue)
-        {
-            try
-            {
-                var originalPost = await _postRepository.GetByIdAsync(dto.RepostOfId.Value);
-                if (originalPost != null)
-                {
-                    originalPost.RepostsCount++;
-                    await _postRepository.UpdateAsync(originalPost);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to update repost count for post {PostId}", dto.RepostOfId.Value);
-            }
-        }
-
-        try
-        {
-            await AwardCreationRewardAsync(post, user);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", post.Id);
-        }
-
-        try
-        {
-            var postCount = await _postRepository.GetPostCountAsync(userId);
-            await _wiseCoinService.AwardJobWellDoneBadgeAsync(userId, "post_created", postCount);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to award post milestone badge for user {UserId}", userId);
-        }
-
-        // Ingest into content crawler for trending detection (fire-and-forget, isolated scope)
-        var crawlerPostId = post.Id;
-        var crawlerUserId = userId;
-        var crawlerDisplayName = user.DisplayName ?? user.Username ?? "Unknown";
-        var crawlerTitle = post.Content?.Substring(0, Math.Min(100, post.Content.Length)) ?? "";
-        var crawlerTags = ExtractHashtags(post.Content ?? string.Empty).ToArray();
+        // All post-save enrichment runs in the background — none of it should block the HTTP response.
+        var bgPost = post;
+        var bgUser = user;
+        var bgUserId = userId;
         _ = Task.Run(async () =>
         {
+            // Repost count
+            if (dto.RepostOfId.HasValue)
+            {
+                try
+                {
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var repo = scope.ServiceProvider.GetRequiredService<IPostRepository>();
+                    var originalPost = await repo.GetByIdAsync(dto.RepostOfId.Value);
+                    if (originalPost != null)
+                    {
+                        originalPost.RepostsCount++;
+                        await repo.UpdateAsync(originalPost);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to update repost count for post {PostId}", dto.RepostOfId.Value);
+                }
+            }
+
+            // WiseCoin creation reward
+            try { await AwardCreationRewardAsync(bgPost, bgUser); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to award WiseCoin post reward for post {PostId}", bgPost.Id); }
+
+            // Milestone badge
             try
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
+                var wsc = scope.ServiceProvider.GetRequiredService<IWiseCoinService>();
+                var pr = scope.ServiceProvider.GetRequiredService<IPostRepository>();
+                var postCount = await pr.GetPostCountAsync(bgUserId);
+                await wsc.AwardJobWellDoneBadgeAsync(bgUserId, "post_created", postCount);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to award post milestone badge for user {UserId}", bgUserId); }
+
+            // Content crawler ingest
+            try
+            {
+                var crawlerTitle = bgPost.Content?.Substring(0, Math.Min(100, bgPost.Content.Length)) ?? "";
+                var crawlerTags = ExtractHashtags(bgPost.Content ?? string.Empty).ToArray();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var crawler = scope.ServiceProvider.GetRequiredService<IContentCrawlerService>();
                 await crawler.IngestUserContentAsync(
-                    crawlerPostId, "Post", crawlerTitle,
-                    crawlerUserId, crawlerDisplayName, crawlerTags, "GLOBAL");
+                    bgPost.Id, "Post", crawlerTitle,
+                    bgUserId, bgUser.DisplayName ?? bgUser.Username ?? "Unknown", crawlerTags, "GLOBAL");
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Background content crawler ingest failed for post {PostId}", crawlerPostId);
-            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Background content crawler ingest failed for post {PostId}", bgPost.Id); }
         });
 
-        try
-        {
-            return await GetPostDtoAsync(post.Id, userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Post could not be reloaded after creation for user {UserId}; returning the local fallback DTO.", userId);
-            return BuildPostDto(post, user);
-        }
+        // Return the post immediately — no reload DB round-trip needed on the hot path.
+        return BuildPostDto(post, user);
     }
 
     private async Task PersistPostStrictAsync(Post post, User user)
@@ -514,18 +525,42 @@ public class PostService : IPostService
         if (!string.IsNullOrEmpty(dto.Content))
         {
             post.Content = dto.Content;
+            post.TruthScore = null;
+            post.TruthCorrection = null;
 
             if (!IsOpinionOrQuestion(dto.Content))
             {
-                // Re-analyze truth score
-                var truthResult = await _truthService.AnalyzeContentAsync(dto.Content);
-                post.TruthScore = truthResult.TruthScore;
-                post.TruthCorrection = truthResult.Correction;
-            }
-            else
-            {
-                post.TruthScore = null;
-                post.TruthCorrection = null;
+                var bgPostId = postId;
+                var bgContent = dto.Content;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(25));
+                        var truthTask = _truthService.AnalyzeContentAsync(bgContent);
+                        var completedTask = await Task.WhenAny(truthTask, Task.Delay(25000, cts.Token));
+                        if (completedTask != truthTask)
+                        {
+                            _logger.LogWarning("Background truth re-analysis timed out for post {PostId}.", bgPostId);
+                            return;
+                        }
+
+                        var truthResult = await truthTask;
+                        await using var scope = _scopeFactory.CreateAsyncScope();
+                        var repo = scope.ServiceProvider.GetRequiredService<IPostRepository>();
+                        var saved = await repo.GetByIdAsync(bgPostId);
+                        if (saved is not null)
+                        {
+                            saved.TruthScore = truthResult.TruthScore;
+                            saved.TruthCorrection = truthResult.Correction;
+                            await repo.UpdateAsync(saved);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Background truth re-analysis failed for post {PostId}.", bgPostId);
+                    }
+                });
             }
         }
 
