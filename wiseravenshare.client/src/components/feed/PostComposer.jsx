@@ -13,6 +13,19 @@ const POST_TYPES = [
   { value: "music", label: "Music", icon: Music, accept: "audio/*" },
 ];
 
+const toServerPostType = (postType) => {
+  switch ((postType || "").toLowerCase()) {
+    case "photo":
+      return "Image";
+    case "video":
+      return "Video";
+    case "music":
+      return "Audio";
+    default:
+      return "Text";
+  }
+};
+
 export default function PostComposer({ onPosted, compact }) {
   const [content, setContent] = useState("");
   const [postType, setPostType] = useState("text");
@@ -67,7 +80,8 @@ export default function PostComposer({ onPosted, compact }) {
       const tags = hashtags
         .split(/[,\s]+/)
         .map((t) => t.replace(/^#/, "").trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((tag) => `#${tag}`);
       const partialTags = partials
         .split(/[ ,\s]+/)
         .map((value) => value.replace(/^%/, "").trim())
@@ -79,12 +93,12 @@ export default function PostComposer({ onPosted, compact }) {
         return;
       }
 
-      const createdPost = await apiClient.entities.Post.create({
+      const createdPost = await apiClient.createPost({
         content: taggedContent,
-        post_type: postType,
-        media_uris: mediaUrls,
+        type: toServerPostType(postType),
+        mediaUrl: mediaUrls[0] || null,
+        mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
         hashtags: tags,
-        status: "published",
       });
       setContent("");
       setHashtags("");
@@ -93,7 +107,7 @@ export default function PostComposer({ onPosted, compact }) {
       setPostType("text");
       onPosted?.(createdPost);
     } catch (err) {
-      setError(err?.data?.error || err?.message || "Failed to post. Please try again.");
+      setError(err?.data?.message || err?.message || "Failed to post. Please try again.");
     } finally {
       setPosting(false);
     }

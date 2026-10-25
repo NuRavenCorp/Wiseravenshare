@@ -18,6 +18,21 @@ import {
 
 const TRIGGERS = ["post", "send", "thread", "like", "repost", "delete"];
 
+const toServerPostType = (postType) => {
+  switch ((postType || "").toLowerCase()) {
+    case "photo":
+    case "image":
+      return "Image";
+    case "video":
+      return "Video";
+    case "music":
+    case "audio":
+      return "Audio";
+    default:
+      return "Text";
+  }
+};
+
 function parseCommand(transcript) {
   const t = transcript.trim();
   if (!t) return { action: null, text: "" };
@@ -49,11 +64,9 @@ export default function VoiceQuickPost({ onPosted }) {
     }
     setPosting(true);
     try {
-      await apiClient.entities.Post.create({
+      await apiClient.createPost({
         content: body,
-        post_type: "text",
-        status: "published",
-        ...(thread ? { partials: [body] } : {}),
+        type: "Text",
       });
       toast({ title: thread ? "Thread started" : "Post published" });
       setContent("");
@@ -106,13 +119,12 @@ export default function VoiceQuickPost({ onPosted }) {
         { limit: 1 }
       );
       if ((dup.items || []).length) { toast({ title: "Already reposted" }); return; }
-      await apiClient.entities.Post.create({
+      await apiClient.createPost({
         content: post.content,
-        media_uris: post.media_uris || [],
-        hashtags: post.hashtags || [],
-        post_type: post.post_type || "text",
-        external_source: post.id,
-        status: "published",
+        type: toServerPostType(post.post_type),
+        mediaUrl: Array.isArray(post.media_uris) && post.media_uris.length > 0 ? post.media_uris[0] : null,
+        mediaUrls: Array.isArray(post.media_uris) && post.media_uris.length > 0 ? JSON.stringify(post.media_uris) : null,
+        repostOfId: post.id,
       });
       await apiClient.entities.Post.update(post.id, { repost_count: (post.repost_count || 0) + 1 });
       toast({ title: "Reposted latest post" });

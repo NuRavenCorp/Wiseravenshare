@@ -146,18 +146,19 @@ export default function JournalismReportForm({ onPublished }) {
         return;
       }
 
-      const post = await apiClient.entities.Post.create({
+      const post = await apiClient.createPost({
         content,
-        post_type: "journalism",
-        media_uris: media.map((m) => m.url),
-        region: fields.where || undefined,
-        status: "published",
+        type: media.some((item) => item.type === "video") ? "Video" : (media.length > 0 ? "Image" : "Text"),
+        mediaUrl: media[0]?.url || null,
+        mediaUrls: media.length > 0 ? JSON.stringify(media.map((m) => m.url)) : null,
+        locationName: fields.where || null,
       });
 
       // Create a tracking record for admin verification
       try {
+        const createdPostId = post?.id || post?.Id;
         await apiClient.entities.JournalismReport.create({
-          post_id: post.id,
+          post_id: createdPostId,
           headline: cleanHeadline,
           description: fields.what || undefined,
           region: fields.where || undefined,
@@ -168,7 +169,7 @@ export default function JournalismReportForm({ onPublished }) {
       }
       await runIntegrityScoring(post?.id || post?.Id);
     } catch (err) {
-      setError(err?.data?.error || err?.message || "Failed to publish report.");
+      setError(err?.data?.message || err?.message || "Failed to publish report.");
       setPublishing(false);
     }
   };
