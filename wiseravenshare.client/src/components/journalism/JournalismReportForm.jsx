@@ -14,6 +14,7 @@ const FIELDS = [
   { key: "why", label: "Why", placeholder: "Why did it happen? Context, causes, motivations..." },
   { key: "how", label: "How", placeholder: "How did it happen? Process, method, sequence..." },
 ];
+const MAX_POST_LENGTH = 1000;
 
 export default function JournalismReportForm({ onPublished }) {
   const [media, setMedia] = useState([]);
@@ -121,12 +122,21 @@ export default function JournalismReportForm({ onPublished }) {
     setError(null);
     try {
       const content = `${cleanHeadline}\n\n${cleanBody}`;
-      const post = await apiClient.entities.Post.create({
-        content,
-        post_type: "journalism",
-        media_uris: media.map((m) => m.url),
-        region: fields.where || undefined,
-        status: "published",
+      if (content.length > MAX_POST_LENGTH) {
+        setError(`Report is too long (${content.length}/${MAX_POST_LENGTH}). Shorten the headline or body.`);
+        setPublishing(false);
+        return;
+      }
+
+      const post = await apiClient.requestJson("/api/posts", {
+        method: "POST",
+        body: JSON.stringify({
+          content,
+          type: media.some((item) => item.type === "video") ? "Video" : (media.length > 0 ? "Image" : "Text"),
+          mediaUrl: media[0]?.url || null,
+          mediaUrls: media.length > 0 ? JSON.stringify(media.map((m) => m.url)) : null,
+          locationName: fields.where || null,
+        }),
       });
       // Create a tracking record for admin verification
       try {
@@ -155,7 +165,7 @@ export default function JournalismReportForm({ onPublished }) {
         setScoring(false);
       }
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to publish report.");
+      setError(err?.data?.message || err?.message || "Failed to publish report.");
       setPublishing(false);
     }
   };

@@ -894,8 +894,9 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         return (Clamp01(score), isSilentFollower);
     }
 
-    public static FatigueState DetectResurfacingFatigue(IEnumerable<UserInteractionEvent> interactionEvents, DateTime nowUtc, RankingThresholds thresholds)
+    public static FatigueState DetectResurfacingFatigue(IEnumerable<UserInteractionEvent> interactionEvents, DateTime nowUtc, RankingThresholds? thresholds = null)
     {
+        thresholds ??= RankingThresholds.Default;
         var olderPostEvents = interactionEvents
             .Where(e => e.CreatedAt >= nowUtc.AddDays(-7) && e.TargetType == "post" && e.DurationSeconds.HasValue)
             .OrderBy(e => e.CreatedAt)
@@ -939,7 +940,7 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
         // Negative slope means dwell times are dropping over consecutive exposures
         var negativeSlope = Math.Max(0d, -slope / 10d);
-        var fatigueScore = Math.Clamp(negativeSlope * 0.35d + skipRate * 0.45d + completionDrop * 0.20d, 0d, 1d);
+        var fatigueScore = Math.Clamp(negativeSlope * 0.40d + skipRate * 0.45d + completionDrop * 0.25d, 0d, 1d);
 
         var isFatigued = fatigueScore > thresholds.FatigueScoreThreshold;
         var threshold = isFatigued || completionDrop > thresholds.CompletionDropThreshold
@@ -1335,6 +1336,8 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         double BaseResurfacingThreshold,
         double FatiguedResurfacingThreshold)
     {
+        public static RankingThresholds Default { get; } = new(0.30d, 0.50d, 30d, 0.40d, 0.35d, 0.55d, 0.15d, 0.45d, 0.70d);
+
         public static RankingThresholds FromConfiguration(IConfiguration configuration)
         {
             var section = configuration.GetSection("FeedRanking:Thresholds");

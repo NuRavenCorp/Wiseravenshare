@@ -383,9 +383,34 @@ public sealed class FunctionCompatController : ControllerBase
     [HttpPost("generate-journalism-report")]
     public async Task<IActionResult> GenerateJournalismReport([FromBody] FunctionPromptRequest request)
     {
-        return Ok(await RunPromptAsync(
-            "You are a newsroom research assistant. Produce a structured journalism report with headline, lede, background, evidence, counterpoints, and next steps.",
-            request));
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+        {
+            return Ok(new { error = "Prompt is required." });
+        }
+
+        var response = await _chatService.ChatAsync(new AiChatRequest
+        {
+            Message = "You are a newsroom research assistant. Produce a structured journalism report with headline, lede, background, evidence, counterpoints, and next steps.\n\nUser prompt:\n" + request.Prompt,
+            Model = request.Model,
+            UseCrawlerContext = true
+        });
+
+        if (response.Success && !string.IsNullOrWhiteSpace(response.Reply))
+        {
+            return Ok(new
+            {
+                reply = response.Reply,
+                model = response.Model
+            });
+        }
+
+        _logger.LogWarning("Journalism report AI generation failed; returning structured fallback. Error: {Error}", response.Error);
+        return Ok(new
+        {
+            reply = BuildFallbackJournalismReport(request.Prompt),
+            model = "fallback-journalism-v1",
+            warning = response.Error ?? "AI generation failed."
+        });
     }
 
     [HttpPost("score-truth")]
@@ -1486,6 +1511,77 @@ public sealed class FunctionCompatController : ControllerBase
             reply = response.Reply,
             model = response.Model
         };
+    }
+
+    private static string BuildFallbackJournalismReport(string prompt)
+    {
+        var who = ReadJournalismField(prompt, "Who");
+        var what = ReadJournalismField(prompt, "What");
+        var where = ReadJournalismField(prompt, "Where");
+        var when = ReadJournalismField(prompt, "When");
+        var why = ReadJournalismField(prompt, "Why");
+        var how = ReadJournalismField(prompt, "How");
+
+        var headline = !string.IsNullOrWhiteSpace(what)
+            ? $"Report: {TrimSentence(what, 90)}"
+            : "Community Incident Report";
+
+        var lede = $"A developing report describes {DefaultIfEmpty(what, "an event")} involving {DefaultIfEmpty(who, "local participants")} in {DefaultIfEmpty(where, "an unspecified location")}.";
+        var timeline = $"The reported timeframe is {DefaultIfEmpty(when, "not yet confirmed")}, and the current explanation points to {DefaultIfEmpty(why, "causes still under review")}.";
+        var process = $"Initial account of how events unfolded: {DefaultIfEmpty(how, "details are still being gathered from witnesses and evidence")}.";
+
+        return string.Join("\n\n", new[]
+        {
+            headline,
+            "Lede\n" + lede,
+            "Background\n" + timeline,
+            "Evidence & Verification\n" +
+            "- Cross-check names, times, and locations against independent records.\n" +
+            "- Confirm uploaded media metadata (timestamp, source, geolocation where available).\n" +
+            "- Seek at least one additional witness or official source before final publication.",
+            "Counterpoints\n" +
+            "- Include statements from any directly affected parties.\n" +
+            "- Distinguish verified facts from unverified claims.",
+            "Next Steps\n" +
+            process + "\n" +
+            "- Update this report as new verified facts are obtained."
+        });
+    }
+
+    private static string ReadJournalismField(string prompt, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return string.Empty;
+        }
+
+        var prefix = fieldName + ":";
+        foreach (var line in prompt.Split('\n'))
+        {
+            var trimmed = (line ?? string.Empty).Trim();
+            if (!trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return trimmed[prefix.Length..].Trim();
+        }
+
+        return string.Empty;
+    }
+
+    private static string DefaultIfEmpty(string value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static string TrimSentence(string input, int maxLength)
+    {
+        var text = (input ?? string.Empty).Trim();
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        return text[..Math.Max(0, maxLength)].TrimEnd().TrimEnd('.', ',', ';', ':') + "…";
     }
 
     private async Task<object> BuildLocalAnalyticsAsync(int days, bool includeTopContent)
