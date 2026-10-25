@@ -66,6 +66,14 @@ namespace Wiseravenshare.Server.Controllers
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Authenticated identity could not be resolved for post create; falling back to anonymous publisher.");
+                var fallbackUserId = Guid.NewGuid();
+                var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+                return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+            }
             catch (InvalidOperationException ex)
             {
                 _logger.LogWarning(ex, "Post creation failed due to persistence constraints.");
@@ -596,8 +604,8 @@ namespace Wiseravenshare.Server.Controllers
             var hasGuidClaim = Guid.TryParse(rawClaimId, out var claimUserId) && claimUserId != Guid.Empty;
             if (!hasGuidClaim)
             {
-                _logger.LogWarning("Authenticated request has missing or invalid user id claim. sub={Sub}", rawClaimId ?? "<null>");
-                throw new UnauthorizedAccessException("Invalid authenticated identity.");
+                claimUserId = Guid.Empty;
+                _logger.LogWarning("Authenticated request has missing or invalid user id claim. sub={Sub}; attempting email/username recovery.", rawClaimId ?? "<null>");
             }
 
             if (hasGuidClaim)
@@ -651,7 +659,9 @@ namespace Wiseravenshare.Server.Controllers
 
             if (string.IsNullOrWhiteSpace(email))
             {
-                email = $"local-{claimUserId:N}@local";
+                email = hasGuidClaim
+                    ? $"local-{claimUserId:N}@local"
+                    : $"local-{Guid.NewGuid():N}@local";
             }
 
             try
@@ -684,9 +694,10 @@ namespace Wiseravenshare.Server.Controllers
 
             try
             {
+                var resolvedUserId = hasGuidClaim ? claimUserId : Guid.NewGuid();
                 var created = await _userRepository.AddAsync(new Wiseravenshare.Server.Entities.User
                 {
-                    Id = claimUserId,
+                    Id = resolvedUserId,
                     Email = email,
                     Username = sanitizedUsername,
                     DisplayName = displayName,
@@ -721,8 +732,13 @@ namespace Wiseravenshare.Server.Controllers
                 }
             }
 
-            _logger.LogWarning("Falling back to token identity {UserId} after unresolved domain mapping.", claimUserId);
-            return claimUserId;
+            if (hasGuidClaim)
+            {
+                _logger.LogWarning("Falling back to token identity {UserId} after unresolved domain mapping.", claimUserId);
+                return claimUserId;
+            }
+
+            throw new UnauthorizedAccessException("Authenticated identity could not be mapped to a domain user.");
         }
     }
 }
