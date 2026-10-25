@@ -791,6 +791,8 @@ public class AuthController : ControllerBase
                   <ul>
                     <li>https://wise-ravens.com/api/auth/oauth/google/callback</li>
                     <li>https://wiseravenshare.com/api/auth/oauth/google/callback</li>
+                    <li>https://wise-ravens.com/api/auth/oauth/youtube/callback</li>
+                    <li>https://wiseravenshare.com/api/auth/oauth/youtube/callback</li>
                   </ul>
                 </body>
                 </html>
@@ -2262,10 +2264,6 @@ public class AuthController : ControllerBase
                 _configuration["Authentication:OAuthProviders:Facebook:RedirectUri"],
                 _configuration["FACEBOOK_OAUTH_REDIRECT_URI"],
                 _configuration["FACEBOOK_REDIRECT_URI"]),
-            "youtube" => ResolveOAuthSettingValue(
-                _configuration["Authentication:OAuthProviders:Google:RedirectUri"],
-                _configuration["GOOGLE_OAUTH_REDIRECT_URI"],
-                _configuration["GOOGLE_REDIRECT_URI"]),
             _ => string.Empty
         };
 

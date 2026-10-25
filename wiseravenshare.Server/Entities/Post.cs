@@ -49,6 +49,7 @@ namespace Wiseravenshare.Server.Entities
         Video,
         Audio,
         Podcast,
-        TruthClaim
+        TruthClaim,
+        Affirmation
     }
 }

@@ -26,5 +26,6 @@ public enum UserActivityType
     CommentPosted,
     MediaLiked,
     Followed,
-    YouTubeImport
+    YouTubeImport,
+    AffirmationReflected
 }
