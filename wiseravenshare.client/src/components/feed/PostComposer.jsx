@@ -93,15 +93,12 @@ export default function PostComposer({ onPosted, compact }) {
         return;
       }
 
-      const createdPost = await apiClient.requestJson("/api/posts", {
-        method: "POST",
-        body: JSON.stringify({
-          content: taggedContent,
-          type: toServerPostType(postType),
-          mediaUrl: mediaUrls[0] || null,
-          mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
-          hashtags: tags,
-        }),
+      const createdPost = await apiClient.createPost({
+        content: taggedContent,
+        type: toServerPostType(postType),
+        mediaUrl: mediaUrls[0] || null,
+        mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
+        hashtags: tags,
       });
       setContent("");
       setHashtags("");
@@ -110,7 +107,9 @@ export default function PostComposer({ onPosted, compact }) {
       setPostType("text");
       onPosted?.(createdPost);
     } catch (err) {
-      setError(err.message || "Failed to post. Please try again.");
+      const msg = err?.data?.message || err?.message || "";
+      const is503 = err?.status === 503 || msg.includes("via_upstream") || msg.includes("Error code: 503");
+      setError(is503 ? "Server is warming up — please try again in a moment." : (msg || "Failed to post. Please try again."));
     } finally {
       setPosting(false);
     }
