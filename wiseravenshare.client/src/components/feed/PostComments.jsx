@@ -3,7 +3,7 @@ import { apiClient } from "@/api/client";
 import { Send, Loader2, Reply, CornerDownRight, Heart } from "lucide-react";
 import { Image } from "@/components/ui/image";
 
-export default function PostComments({ postId, commentCount, currentUser, onAuthRequired }) {
+export default function PostComments({ postId, commentCount, currentUser, onAuthRequired, onCountChange }) {
   const [comments, setComments] = useState([]);
   const [likedComments, setLikedComments] = useState({});
   const [loading, setLoading] = useState(true);
@@ -61,6 +61,12 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
         content: content.trim(),
         parentCommentId: parentId || null,
       });
+      const persistedCount = Number(newComment?.commentsCount);
+      if (Number.isFinite(persistedCount) && persistedCount >= 0) {
+        onCountChange?.(persistedCount);
+      } else if (!parentId) {
+        onCountChange?.(Math.max(0, Number(commentCount || 0) + 1));
+      }
       setComments((prev) => [normalizeComment(newComment), ...prev]);
       if (parentId) { setReplyText(""); setReplyTo(null); }
       else setText("");

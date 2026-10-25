@@ -14,24 +14,11 @@ import {
   Repeat2,
   Trash2,
   Send,
+  History,
+  Play,
 } from "lucide-react";
 
-const TRIGGERS = ["post", "send", "thread", "like", "repost", "delete"];
-
-const toServerPostType = (postType) => {
-  switch ((postType || "").toLowerCase()) {
-    case "photo":
-    case "image":
-      return "Image";
-    case "video":
-      return "Video";
-    case "music":
-    case "audio":
-      return "Audio";
-    default:
-      return "Text";
-  }
-};
+const TRIGGERS = ["post", "send", "thread", "like", "repost", "delete", "review", "play"];
 
 function parseCommand(transcript) {
   const t = transcript.trim();
@@ -44,6 +31,21 @@ function parseCommand(transcript) {
   return { action: "post", text: t };
 }
 
+const normalizeCollection = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+};
+
+const splitThreadSegments = (text) => {
+  const segments = String(text || "")
+    .split(/\n\s*\n/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  return segments.length > 0 ? segments : [String(text || "").trim()].filter(Boolean);
+};
+
 export default function VoiceQuickPost({ onPosted }) {
   const { isAuthenticated } = useAuth();
   const { toast } = useToast();
@@ -53,8 +55,41 @@ export default function VoiceQuickPost({ onPosted }) {
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
   const [heard, setHeard] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const [showPastPosts, setShowPastPosts] = useState(false);
+  const [pastPosts, setPastPosts] = useState([]);
   const recRef = useRef(null);
   const handlerRef = useRef(null);
+
+  const loadPastPosts = async () => {
+    setReviewing(true);
+    try {
+      const me = await apiClient.auth.me();
+      const userId = me?.id || me?.userId || me?.sub;
+      if (!userId) {
+        throw new Error("Could not resolve your account.");
+      }
+
+      const res = await apiClient.posts.userPosts(userId, 1, 20);
+      const posts = normalizeCollection(res).map((post) => ({
+        ...post,
+        media_uris: post.mediaUrls || post.media_uris || (post.mediaUrl ? [post.mediaUrl] : []),
+        created_date: post.createdAt || post.created_date,
+        post_type: post.type || post.post_type || "Text",
+      }));
+      setPastPosts(posts);
+      setShowPastPosts(true);
+      if (posts.length === 0) {
+        toast({ title: "No past posts found" });
+      } else {
+        toast({ title: `Loaded ${posts.length} past post${posts.length === 1 ? "" : "s"}` });
+      }
+    } catch (e) {
+      toast({ title: "Review failed", description: e?.message, variant: "destructive" });
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const publishPost = async (text, thread) => {
     const body = (text || "").trim();
@@ -64,12 +99,25 @@ export default function VoiceQuickPost({ onPosted }) {
     }
     setPosting(true);
     try {
-      await apiClient.createPost({
-        content: body,
-        type: "Text",
-      });
+      if (thread) {
+        const posts = splitThreadSegments(body).map((segment) => ({ content: segment, type: "Text" }));
+        if (posts.length > 1) {
+          await apiClient.posts.createThread({ posts });
+        } else {
+          await apiClient.createPost({
+            content: body,
+            type: "Text",
+          });
+        }
+      } else {
+        await apiClient.createPost({
+          content: body,
+          type: "Text",
+        });
+      }
       toast({ title: thread ? "Thread started" : "Post published" });
       setContent("");
+      setIsThread(false);
       onPosted?.();
     } catch (e) {
       toast({ title: "Failed to post", description: e?.message, variant: "destructive" });
@@ -80,26 +128,17 @@ export default function VoiceQuickPost({ onPosted }) {
 
   const likeRecent = async () => {
     try {
-      const res = await apiClient.entities.Post.filter(
-        { status: "published" },
-        { sort: "-created_date", limit: 1 }
-      );
-      const post = (res.items || [])[0];
+      const feed = await apiClient.posts.feed(1, 25);
+      const post = normalizeCollection(feed)[0];
       if (!post) { toast({ title: "No post to like" }); return; }
-      const me = await apiClient.auth.me();
-      const lk = await apiClient.entities.Like.filter(
-        { target_id: post.id, target_type: "post", created_by_id: me.id },
-        { limit: 1 }
-      );
-      if ((lk.items || []).length) {
-        await apiClient.entities.Like.delete(lk.items[0].id);
-        await apiClient.entities.Post.update(post.id, { like_count: Math.max(0, (post.like_count || 0) - 1) });
+      if (post.isLiked === true || post.is_liked === true) {
+        await apiClient.posts.unlike(post.id);
         toast({ title: "Unliked latest post" });
       } else {
-        await apiClient.entities.Like.create({ target_id: post.id, target_type: "post" });
-        await apiClient.entities.Post.update(post.id, { like_count: (post.like_count || 0) + 1 });
+        await apiClient.posts.like(post.id);
         toast({ title: "Liked latest post" });
       }
+      onPosted?.();
     } catch (e) {
       toast({ title: "Like failed", description: e?.message, variant: "destructive" });
     }
@@ -107,27 +146,16 @@ export default function VoiceQuickPost({ onPosted }) {
 
   const repostRecent = async () => {
     try {
-      const res = await apiClient.entities.Post.filter(
-        { status: "published" },
-        { sort: "-created_date", limit: 1 }
-      );
-      const post = (res.items || [])[0];
+      const feed = await apiClient.posts.feed(1, 25);
+      const post = normalizeCollection(feed)[0];
       if (!post) { toast({ title: "No post to repost" }); return; }
-      const me = await apiClient.auth.me();
-      const dup = await apiClient.entities.Post.filter(
-        { external_source: post.id, created_by_id: me.id },
-        { limit: 1 }
-      );
-      if ((dup.items || []).length) { toast({ title: "Already reposted" }); return; }
-      await apiClient.createPost({
-        content: post.content,
-        type: toServerPostType(post.post_type),
-        mediaUrl: Array.isArray(post.media_uris) && post.media_uris.length > 0 ? post.media_uris[0] : null,
-        mediaUrls: Array.isArray(post.media_uris) && post.media_uris.length > 0 ? JSON.stringify(post.media_uris) : null,
-        repostOfId: post.id,
-      });
-      await apiClient.entities.Post.update(post.id, { repost_count: (post.repost_count || 0) + 1 });
+      if (post.isReposted === true || post.is_reposted === true) {
+        toast({ title: "Already reposted" });
+        return;
+      }
+      await apiClient.posts.repost(post.id);
       toast({ title: "Reposted latest post" });
+      onPosted?.();
     } catch (e) {
       toast({ title: "Repost failed", description: e?.message, variant: "destructive" });
     }
@@ -136,13 +164,15 @@ export default function VoiceQuickPost({ onPosted }) {
   const deleteRecent = async () => {
     try {
       const me = await apiClient.auth.me();
-      const res = await apiClient.entities.Post.filter(
-        { created_by_id: me.id, status: "published" },
-        { sort: "-created_date", limit: 1 }
-      );
-      const post = (res.items || [])[0];
+      const userId = me?.id || me?.userId || me?.sub;
+      if (!userId) {
+        toast({ title: "Delete failed", description: "Could not resolve your account.", variant: "destructive" });
+        return;
+      }
+      const res = await apiClient.posts.userPosts(userId, 1, 1);
+      const post = normalizeCollection(res)[0];
       if (!post) { toast({ title: "You have no post to delete" }); return; }
-      await apiClient.entities.Post.delete(post.id);
+      await apiClient.posts.delete(post.id);
       toast({ title: "Deleted your last post" });
       onPosted?.();
     } catch (e) {
@@ -172,6 +202,10 @@ export default function VoiceQuickPost({ onPosted }) {
         break;
       case "delete":
         await deleteRecent();
+        break;
+      case "review":
+      case "play":
+        await loadPastPosts();
         break;
     }
   };
@@ -282,6 +316,10 @@ export default function VoiceQuickPost({ onPosted }) {
             {posting ? <Loader2 className="w-4 h-4 animate-spin" /> : isThread ? <MessagesSquare className="w-4 h-4" /> : <Send className="w-4 h-4" />}
             {isThread ? "Start Thread" : "Post"}
           </Button>
+          <Button onClick={loadPastPosts} disabled={reviewing} variant="outline">
+            {reviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <History className="w-4 h-4" />}
+            Review Past Posts
+          </Button>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground ml-auto flex-wrap">
             <Heart className="w-3 h-3" /> like
             <Repeat2 className="w-3 h-3 ml-1" /> repost
@@ -298,9 +336,53 @@ export default function VoiceQuickPost({ onPosted }) {
           </p>
         )}
         <p className="text-[11px] text-muted-foreground">
-          Trigger words: post · send · thread · like · repost · delete
+          Trigger words: post · send · thread · like · repost · delete · review · play
         </p>
       </div>
+
+      {showPastPosts && (
+        <div className="mt-5 rounded-2xl border border-border bg-card/60 backdrop-blur p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Play className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium text-foreground">Past Posts Review</span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowPastPosts(false)}>Hide</Button>
+          </div>
+
+          {pastPosts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No past posts available yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {pastPosts.map((post) => {
+                const media = Array.isArray(post.media_uris) ? post.media_uris : [];
+                const primaryMedia = media[0];
+                const type = String(post.post_type || "").toLowerCase();
+                return (
+                  <article key={post.id} className="rounded-xl border border-border bg-background/50 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs uppercase tracking-wider text-muted-foreground">{post.post_type || "Text"}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {post.created_date ? new Date(post.created_date).toLocaleString() : "Unknown time"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground whitespace-pre-wrap">{post.content || ""}</p>
+                    {primaryMedia && (
+                      type.includes("video") ? (
+                        <video src={primaryMedia} controls playsInline className="w-full max-h-72 rounded-lg bg-black" />
+                      ) : type.includes("audio") || type.includes("music") ? (
+                        <audio src={primaryMedia} controls className="w-full" />
+                      ) : (
+                        <img src={primaryMedia} alt="Past post media" className="w-full max-h-72 rounded-lg object-cover" loading="lazy" />
+                      )
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

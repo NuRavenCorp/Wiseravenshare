@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
-import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music } from "lucide-react";
+import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2 } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import PostComments from "./PostComments";
 import ShareMenu from "./ShareMenu";
@@ -26,6 +26,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   const [busy, setBusy] = useState(false);
   const [reposted, setReposted] = useState(false);
   const [repostCount, setRepostCount] = useState(post.repost_count || 0);
+  const [commentCount, setCommentCount] = useState(post.comment_count || 0);
   const [shareCount, setShareCount] = useState(post.share_count || 0);
   const [shared, setShared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -44,6 +45,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     setLikeCount(post.like_count || 0);
     setReposted(Boolean(post.is_reposted));
     setRepostCount(post.repost_count || 0);
+    setCommentCount(post.comment_count || 0);
     if (currentUser) {
       apiClient.social.followStatus(post.created_by_id)
         .then((res) => { if (mounted) setFollowing(Boolean(res.isFollowing)); }).catch(() => {});
@@ -120,6 +122,24 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       toast({ title: "Author hidden", description: "You’ll stop seeing this author in your feed." });
     } catch (e) {
       toast({ title: "Could not hide author", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (!currentUser || !isOwn) return onAuthRequired?.();
+    if (busy) return;
+    const approved = typeof window === "undefined" ? true : window.confirm("Delete this post permanently?");
+    if (!approved) return;
+    setBusy(true);
+    try {
+      await apiClient.posts.delete(post.id);
+      setDismissed(true);
+      setMenuOpen(false);
+      toast({ title: "Post deleted" });
+    } catch (e) {
+      toast({ title: "Could not delete post", description: e.message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -211,29 +231,41 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
               {blocked ? "Unblock User" : "Block User"}
             </button>
           )}
-          {!isOwn && (
+          {currentUser && (
             <div className="relative" ref={menuRef}>
               <button onClick={() => setMenuOpen((o) => !o)} className="p-1.5 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground">
                 <MoreVertical className="w-4 h-4" />
               </button>
               {menuOpen && (
                 <div className="absolute right-0 mt-2 w-44 rounded-lg border border-border bg-popover shadow-lg z-20 py-1">
-                  {currentUser && (
+                  {!isOwn && (
                     <button onClick={handleFollow} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-foreground disabled:opacity-50">
                       {following ? <UserMinus className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
                       {following ? "Unfollow" : "Follow"}
                     </button>
                   )}
-                  <button onClick={handleBlock} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
-                    <ShieldBan className="w-4 h-4" />
-                    {blocked ? "Unblock User" : "Block User"}
-                  </button>
-                  <button onClick={handleNotInterested} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
-                    Not interested
-                  </button>
-                  <button onClick={handleHideAuthor} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
-                    Hide author from feed
-                  </button>
+                  {!isOwn && (
+                    <button onClick={handleBlock} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
+                      <ShieldBan className="w-4 h-4" />
+                      {blocked ? "Unblock User" : "Block User"}
+                    </button>
+                  )}
+                  {!isOwn && (
+                    <button onClick={handleNotInterested} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
+                      Not interested
+                    </button>
+                  )}
+                  {!isOwn && (
+                    <button onClick={handleHideAuthor} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
+                      Hide author from feed
+                    </button>
+                  )}
+                  {isOwn && (
+                    <button onClick={handleDeletePost} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
+                      <Trash2 className="w-4 h-4" />
+                      Delete post
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -295,7 +327,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
         </button>
         <button onClick={() => setShowComments((s) => !s)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <MessageCircle className="w-4 h-4" />
-          <span>{post.comment_count || 0}</span>
+          <span>{commentCount}</span>
         </button>
         <div className="relative ml-auto">
           <button onClick={() => setShareOpen((o) => !o)} disabled={busy} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors disabled:opacity-50">
@@ -313,7 +345,13 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       </div>
 
       {showComments && (
-        <PostComments postId={post.id} commentCount={post.comment_count} currentUser={currentUser} onAuthRequired={onAuthRequired} />
+        <PostComments
+          postId={post.id}
+          commentCount={commentCount}
+          currentUser={currentUser}
+          onAuthRequired={onAuthRequired}
+          onCountChange={setCommentCount}
+        />
       )}
     </article>
   );
