@@ -1,7 +1,10 @@
+using System.Linq;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.DTOs.Post;
+using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Shared;
@@ -26,17 +29,20 @@ public sealed partial class EntityCompatController : ControllerBase
     private readonly AppDbContext _db;
     private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly IMediaBlobSignatureService _signatureService;
+    private readonly IPostService _postService;
     private readonly ILogger<EntityCompatController> _logger;
 
     public EntityCompatController(
         AppDbContext db,
         LiveStreamStateStore liveStreamStateStore,
         IMediaBlobSignatureService signatureService,
+        IPostService postService,
         ILogger<EntityCompatController> logger)
     {
         _db = db;
         _liveStreamStateStore = liveStreamStateStore;
         _signatureService = signatureService;
+        _postService = postService;
         _logger = logger;
     }
 
@@ -133,10 +139,15 @@ public sealed partial class EntityCompatController : ControllerBase
 
     [HttpPost("{entityName}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public IActionResult Create(
+    public async Task<IActionResult> Create(
         string entityName,
         [FromBody] JsonElement payload)
     {
+        if (string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreatePostCompat(payload);
+        }
+
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound(new { message = $"Entity '{entityName}' does not support create in compat mode." });
@@ -185,11 +196,16 @@ public sealed partial class EntityCompatController : ControllerBase
 
     [HttpPatch("{entityName}/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public IActionResult Update(
+    public async Task<IActionResult> Update(
         string entityName,
         string id,
         [FromBody] JsonElement payload)
     {
+        if (string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
+        {
+            return await UpdatePostCompat(id, payload);
+        }
+
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound(new { message = $"Entity '{entityName}' does not support update in compat mode." });
@@ -300,6 +316,41 @@ public sealed partial class EntityCompatController : ControllerBase
         return Ok(updated);
     }
 
+    [HttpDelete("{entityName}/{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(string entityName, string id)
+    {
+        if (!string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(new { message = $"Entity '{entityName}' does not support delete in compat mode." });
+        }
+
+        var userId = User.GetUserId();
+        if (!Guid.TryParse(id, out var postId))
+        {
+            return BadRequest(new { message = "Invalid post id." });
+        }
+
+        var post = await _db.Posts.FirstOrDefaultAsync(p => p.Id == postId);
+        if (post is null)
+        {
+            return NotFound(new { message = "Post not found." });
+        }
+
+        var isAdmin = User.IsInRole("Admin");
+        if (post.UserId != userId && !isAdmin)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "You do not own this post." });
+        }
+
+        post.IsDeleted = true;
+        post.DeletedAt = DateTime.UtcNow;
+        post.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private async Task<EntityFilterResponse> FilterPostsAsync(
@@ -308,19 +359,71 @@ public sealed partial class EntityCompatController : ControllerBase
         int limit,
         CancellationToken cancellationToken)
     {
-        var posts = await _db.Posts
-            .AsNoTracking()
-            .Where(p => p.UserId == userId && !p.IsDeleted)
-            .OrderByDescending(p => p.CreatedAt)
+        var createdByIdRaw = ReadString(body, "query.created_by_id");
+        var status = ReadString(body, "query.status");
+        var postType = ReadString(body, "query.post_type");
+        var externalSource = ReadString(body, "query.external_source");
+        var sort = ReadString(body, "options.sort");
+
+        var query = _db.Posts.AsNoTracking();
+
+        if (Guid.TryParse(createdByIdRaw, out var createdById) && createdById != Guid.Empty)
+        {
+            query = query.Where(p => p.UserId == createdById);
+        }
+        else if (string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(p => p.UserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = status.Equals("archived", StringComparison.OrdinalIgnoreCase)
+                ? query.Where(p => p.IsDeleted)
+                : query.Where(p => !p.IsDeleted);
+        }
+
+        if (!string.IsNullOrWhiteSpace(postType)
+            && Enum.TryParse<PostType>(postType, true, out var parsedType))
+        {
+            query = query.Where(p => p.Type == parsedType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(externalSource)
+            && Guid.TryParse(externalSource, out var repostOfId)
+            && repostOfId != Guid.Empty)
+        {
+            query = query.Where(p => p.RepostOfId == repostOfId);
+        }
+
+        query = sort switch
+        {
+            "created_date" => query.OrderBy(p => p.CreatedAt),
+            "updated_date" => query.OrderBy(p => p.UpdatedAt),
+            "-updated_date" => query.OrderByDescending(p => p.UpdatedAt),
+            _ => query.OrderByDescending(p => p.CreatedAt),
+        };
+
+        var posts = await query
             .Take(limit)
             .Select(p => new
             {
                 id = p.Id,
                 created_by_id = p.UserId,
                 content = p.Content,
-                status = "published",
+                status = p.IsDeleted ? "archived" : "published",
                 created_date = p.CreatedAt,
-                updated_at = p.UpdatedAt
+                updated_date = p.UpdatedAt,
+                like_count = p.LikesCount,
+                repost_count = p.RepostsCount,
+                comment_count = p.CommentsCount,
+                share_count = p.SharesCount,
+                bookmark_count = p.BookmarksCount,
+                view_count = p.ViewsCount,
+                post_type = p.Type.ToString().ToLowerInvariant(),
+                media_uris = p.MediaUrls,
+                external_source = p.RepostOfId,
+                truth_score = p.TruthScore
             })
             .ToListAsync(cancellationToken);
 
@@ -540,6 +643,246 @@ public sealed partial class EntityCompatController : ControllerBase
         var raw = ReadString(body, dotPath);
         return DateTime.TryParse(raw, out var parsed) ? parsed : null;
     }
+
+private async Task<IActionResult> CreatePostCompat(JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    var content = ReadString(payload, "content");
+    if (string.IsNullOrWhiteSpace(content))
+    {
+        return BadRequest(new { message = "content is required." });
+    }
+
+    var mediaUrisJson = ReadString(payload, "mediaUrls");
+    var mediaUrisArray = TryReadStringArray(payload, "media_uris");
+    if (string.IsNullOrWhiteSpace(mediaUrisJson) && mediaUrisArray?.Length > 0)
+    {
+        mediaUrisJson = JsonSerializer.Serialize(mediaUrisArray);
+    }
+
+    var dto = new CreatePostDto
+    {
+        Content = content,
+        Type = ReadString(payload, "type") ?? "Text",
+        MediaUrl = ReadString(payload, "mediaUrl") ?? mediaUrisArray?.FirstOrDefault(),
+        MediaUrls = mediaUrisJson,
+        YoutubeUrl = ReadString(payload, "youtubeUrl"),
+        TikTokUrl = ReadString(payload, "tiktokUrl"),
+        FacebookUrl = ReadString(payload, "facebookUrl"),
+        LocationName = ReadString(payload, "location_name"),
+        IsTruthDispatch = ReadBool(payload, "truthDispatch", false),
+        TruthDeclarationAccepted = ReadBool(payload, "truthDeclarationAccepted", false),
+        IsSensitive = ReadBool(payload, "is_sensitive", false),
+        Latitude = TryReadDecimal(payload, "latitude") is { } latitude ? (double)latitude : null,
+        Longitude = TryReadDecimal(payload, "longitude") is { } longitude ? (double)longitude : null,
+        RepostOfId = TryReadGuid(payload, "repostOfId") ?? TryReadGuid(payload, "external_source")
+    };
+
+    var created = await _postService.CreatePostAsync(userId, dto);
+    return Ok(created);
+}
+
+private async Task<IActionResult> UpdatePostCompat(string id, JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (!Guid.TryParse(id, out var postId))
+    {
+        return BadRequest(new { message = "Invalid post id." });
+    }
+
+    var post = await _db.Posts.FirstOrDefaultAsync(p => p.Id == postId);
+    if (post is null)
+    {
+        return NotFound(new { message = "Post not found." });
+    }
+
+    var isAdmin = User.IsInRole("Admin");
+    if (post.UserId != userId && !isAdmin)
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "You do not own this post." });
+    }
+
+    var content = ReadString(payload, "content");
+    if (!string.IsNullOrWhiteSpace(content))
+    {
+        post.Content = content;
+    }
+
+    var mediaUris = TryReadStringArray(payload, "media_uris");
+    if (mediaUris?.Length > 0)
+    {
+        post.MediaUrls = mediaUris;
+    }
+    else
+    {
+        var mediaUrlsJson = ReadString(payload, "mediaUrls");
+        if (!string.IsNullOrWhiteSpace(mediaUrlsJson))
+        {
+            try
+            {
+                post.MediaUrls = JsonSerializer.Deserialize<string[]>(mediaUrlsJson) ?? post.MediaUrls;
+            }
+            catch
+            {
+                // Keep existing media urls when payload is not JSON.
+            }
+        }
+    }
+
+    if (TryReadInt(payload, "like_count", out var likeCount))
+    {
+        post.LikesCount = Math.Max(0, likeCount);
+    }
+
+    if (TryReadInt(payload, "repost_count", out var repostCount))
+    {
+        post.RepostsCount = Math.Max(0, repostCount);
+    }
+
+    if (TryReadInt(payload, "comment_count", out var commentCount))
+    {
+        post.CommentsCount = Math.Max(0, commentCount);
+    }
+
+    if (TryReadInt(payload, "share_count", out var shareCount))
+    {
+        post.SharesCount = Math.Max(0, shareCount);
+    }
+
+    if (TryReadInt(payload, "bookmark_count", out var bookmarkCount))
+    {
+        post.BookmarksCount = Math.Max(0, bookmarkCount);
+    }
+
+    if (TryReadInt(payload, "view_count", out var viewCount))
+    {
+        post.ViewsCount = Math.Max(0, viewCount);
+    }
+
+    if (TryReadBool(payload, "is_sensitive", out var isSensitive))
+    {
+        post.IsSensitive = isSensitive;
+    }
+
+    var status = ReadString(payload, "status");
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        var archive = status.Equals("archived", StringComparison.OrdinalIgnoreCase);
+        post.IsDeleted = archive;
+        post.DeletedAt = archive ? DateTime.UtcNow : null;
+    }
+
+    if (TryReadDecimal(payload, "truth_score") is { } truthScore)
+    {
+        post.TruthScore = truthScore;
+    }
+
+    var truthStatus = ReadString(payload, "truth_status");
+    if (!string.IsNullOrWhiteSpace(truthStatus))
+    {
+        post.TruthCorrection = truthStatus;
+    }
+
+    post.UpdatedAt = DateTime.UtcNow;
+    await _db.SaveChangesAsync();
+
+    return Ok(new
+    {
+        id = post.Id,
+        created_by_id = post.UserId,
+        content = post.Content,
+        status = post.IsDeleted ? "archived" : "published",
+        created_date = post.CreatedAt,
+        updated_date = post.UpdatedAt,
+        like_count = post.LikesCount,
+        repost_count = post.RepostsCount,
+        comment_count = post.CommentsCount,
+        share_count = post.SharesCount,
+        bookmark_count = post.BookmarksCount,
+        view_count = post.ViewsCount,
+        post_type = post.Type.ToString().ToLowerInvariant(),
+        media_uris = post.MediaUrls,
+        external_source = post.RepostOfId,
+        truth_score = post.TruthScore
+    });
+}
+
+private static Guid? TryReadGuid(JsonElement body, string dotPath)
+{
+    var raw = ReadString(body, dotPath);
+    return Guid.TryParse(raw, out var value) && value != Guid.Empty ? value : null;
+}
+
+private static decimal? TryReadDecimal(JsonElement body, string dotPath)
+{
+    try
+    {
+        var parts = dotPath.Split('.');
+        var current = body;
+        foreach (var part in parts)
+        {
+            if (!current.TryGetProperty(part, out current))
+            {
+                return null;
+            }
+        }
+
+        if (current.ValueKind == JsonValueKind.Number && current.TryGetDecimal(out var numeric))
+        {
+            return numeric;
+        }
+
+        if (current.ValueKind == JsonValueKind.String && decimal.TryParse(current.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+private static string[]? TryReadStringArray(JsonElement body, string dotPath)
+{
+    try
+    {
+        var parts = dotPath.Split('.');
+        var current = body;
+        foreach (var part in parts)
+        {
+            if (!current.TryGetProperty(part, out current))
+            {
+                return null;
+            }
+        }
+
+        if (current.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return current
+            .EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Cast<string>()
+            .ToArray();
+    }
+    catch
+    {
+        return null;
+    }
+}
+
 }
 
 public sealed class EntityFilterResponse

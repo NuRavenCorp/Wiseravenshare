@@ -909,9 +909,31 @@ export const apiClient = {
   requestJson,
   // Server-native post creation path (compat entities do not support Post.create).
   async createPost(payload) {
-    return requestJson("/api/posts", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const path = "/api/posts";
+    const options = { method: "POST", body: JSON.stringify(payload) };
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await requestJson(path, options);
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.data?.message || error?.message || "");
+        const transient =
+          error?.status === 503 ||
+          message.includes("Error code: 503") ||
+          message.includes("via_upstream") ||
+          message.toLowerCase().includes("timed out") ||
+          message.toLowerCase().includes("temporarily unavailable");
+
+        if (!transient || attempt === 3) {
+          throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+      }
+    }
+
+    throw lastError;
   },
 };

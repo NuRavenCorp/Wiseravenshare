@@ -1,7 +1,10 @@
 // Wiseravenshare.Server/Services/PostService.cs
 using System.Text.Json;
+using System.IO;
+using System.Net.Sockets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Entities.Currency;
@@ -284,6 +287,12 @@ public class PostService : IPostService
         }
         catch (Exception ex)
         {
+            if (await PostAlreadyPersistedAsync(post.Id))
+            {
+                _logger.LogWarning(ex, "Post {PostId} appears persisted despite initial save exception; continuing.", post.Id);
+                return;
+            }
+
             _logger.LogWarning(ex, "Initial post persistence failed for user {UserId}. Retrying after user reconciliation.", post.UserId);
         }
 
@@ -296,9 +305,102 @@ public class PostService : IPostService
         }
         catch (Exception retryEx)
         {
+            if (await PostAlreadyPersistedAsync(post.Id))
+            {
+                _logger.LogWarning(retryEx, "Post {PostId} appears persisted despite retry save exception; continuing.", post.Id);
+                return;
+            }
+
             _logger.LogError(retryEx, "Post persistence failed after retry for user {UserId}.", post.UserId);
-            throw new InvalidOperationException("Post could not be saved. Please try again.");
+            throw new InvalidOperationException(BuildPostPersistenceFailureMessage(retryEx), retryEx);
         }
+    }
+
+    private async Task<bool> PostAlreadyPersistedAsync(Guid postId)
+    {
+        try
+        {
+            return await _postRepository.GetByIdAsync(postId) is not null;
+        }
+        catch (Exception lookupEx)
+        {
+            _logger.LogWarning(lookupEx, "Failed checking persisted post state for {PostId}.", postId);
+            return false;
+        }
+    }
+
+    private static string BuildPostPersistenceFailureMessage(Exception exception)
+    {
+        if (IsTransientDatabaseException(exception))
+        {
+            return "Database is temporarily unavailable. Please retry in a moment.";
+        }
+
+        var postgres = FindPostgresException(exception);
+        if (postgres is not null)
+        {
+            return postgres.SqlState switch
+            {
+                PostgresErrorCodes.ForeignKeyViolation => "Post could not be saved because a related record is missing. Refresh and retry.",
+                PostgresErrorCodes.NotNullViolation => "Post could not be saved because required fields were missing.",
+                PostgresErrorCodes.UniqueViolation => "Post could not be saved because a duplicate record was detected. Please retry.",
+                _ => "Post could not be saved due to a database constraint. Please retry."
+            };
+        }
+
+        return "Post could not be saved. Please try again.";
+    }
+
+    private static PostgresException? FindPostgresException(Exception exception)
+    {
+        var current = exception;
+        while (current is not null)
+        {
+            if (current is PostgresException postgresException)
+            {
+                return postgresException;
+            }
+
+            current = current.InnerException;
+        }
+
+        return null;
+    }
+
+    private static bool IsTransientDatabaseException(Exception exception)
+    {
+        var current = exception;
+        while (current is not null)
+        {
+            if (current is TimeoutException || current is IOException || current is SocketException)
+            {
+                return true;
+            }
+
+            if (current is NpgsqlException npgsqlException)
+            {
+                if (npgsqlException.IsTransient)
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(npgsqlException.SqlState))
+                {
+                    var sqlState = npgsqlException.SqlState;
+                    if (sqlState.StartsWith("08", StringComparison.Ordinal)
+                        || sqlState == "40001"
+                        || sqlState == "40P01"
+                        || sqlState == "57P01")
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     private async Task<Guid> EnsurePersistedUserForPostAsync(Guid requestedUserId, User candidate)
