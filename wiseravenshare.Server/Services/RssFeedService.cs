@@ -172,14 +172,23 @@ public class RssFeedService : IRssFeedService
             if (!string.IsNullOrWhiteSpace(url)) return url;
         }
 
-        // 2. Media:content / Media:thumbnail
+        // 2. Media:content / Media:thumbnail (Yahoo Media RSS namespace)
         var mediaNs = XNamespace.Get("http://search.yahoo.com/mrss/");
         var mediaThumbnail = item.Element(mediaNs + "thumbnail")?.Attribute("url")?.Value
             ?? item.Element(mediaNs + "content")?.Attribute("url")?.Value;
 
         if (!string.IsNullOrWhiteSpace(mediaThumbnail)) return mediaThumbnail;
 
-        // 3. Img tag in description
+        // 3. <content:encoded> CDATA that Google News and others embed
+        var contentNs = XNamespace.Get("http://purl.org/rss/1.0/modules/content/");
+        var encoded = item.Element(contentNs + "encoded")?.Value?.Trim();
+        if (!string.IsNullOrWhiteSpace(encoded))
+        {
+            var fromEncoded = ExtractFirstImgSrc(encoded);
+            if (!string.IsNullOrWhiteSpace(fromEncoded)) return fromEncoded;
+        }
+
+        // 4. Img tag in description
         return ExtractFirstImgSrc(description);
     }
 
@@ -190,6 +199,15 @@ public class RssFeedService : IRssFeedService
             ?? entry.Element(mediaNs + "content")?.Attribute("url")?.Value;
 
         if (!string.IsNullOrWhiteSpace(mediaThumbnail)) return mediaThumbnail;
+
+        // <content:encoded> CDATA
+        var contentNs = XNamespace.Get("http://purl.org/rss/1.0/modules/content/");
+        var encoded = entry.Element(contentNs + "encoded")?.Value?.Trim();
+        if (!string.IsNullOrWhiteSpace(encoded))
+        {
+            var fromEncoded = ExtractFirstImgSrc(encoded);
+            if (!string.IsNullOrWhiteSpace(fromEncoded)) return fromEncoded;
+        }
 
         return ExtractFirstImgSrc(content);
     }

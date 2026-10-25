@@ -145,6 +145,16 @@ export default function JournalismReportForm({ onPublished }) {
     }
   };
 
+  const attemptPublish = async (content, mediaPayload) => {
+    return apiClient.requestJson("/api/posts", {
+      method: "POST",
+      body: JSON.stringify({
+        content,
+        ...mediaPayload,
+      }),
+    });
+  };
+
   const handlePublish = async () => {
     const cleanHeadline = draftHeadline.trim();
     const cleanBody = draftBody.trim();
@@ -162,16 +172,30 @@ export default function JournalismReportForm({ onPublished }) {
         return;
       }
 
-      const post = await apiClient.requestJson("/api/posts", {
-        method: "POST",
-        body: JSON.stringify({
-          content,
-          type: media.some((item) => item.type === "video") ? "Video" : (media.length > 0 ? "Image" : "Text"),
-          mediaUrl: media[0]?.url || null,
-          mediaUrls: media.length > 0 ? JSON.stringify(media.map((m) => m.url)) : null,
-          locationName: fields.where || null,
-        }),
-      });
+      const mediaPayload = {
+        type: media.some((item) => item.type === "video") ? "Video" : (media.length > 0 ? "Image" : "Text"),
+        mediaUrl: media[0]?.url || null,
+        mediaUrls: media.length > 0 ? JSON.stringify(media.map((m) => m.url)) : null,
+        locationName: fields.where || null,
+      };
+
+      let post = null;
+      let lastErr = null;
+      // Up to 3 attempts with short back-off to handle cold-start 503s
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          post = await attemptPublish(content, mediaPayload);
+          break;
+        } catch (err) {
+          lastErr = err;
+          const msg = (err?.data?.message || err?.message || "").toString();
+          const is503 = err?.status === 503 || msg.includes("Error code: 503") || msg.includes("via_upstream") || msg.includes("timed out");
+          if (!is503 || attempt === 3) throw err;
+          // Brief wait before retry (1s, 2s)
+          await new Promise((r) => setTimeout(r, attempt * 1000));
+        }
+      }
+
       // Create a tracking record for admin verification
       try {
         await apiClient.entities.JournalismReport.create({
@@ -195,10 +219,10 @@ export default function JournalismReportForm({ onPublished }) {
       }
 
       const message = (err?.data?.message || err?.message || "Failed to publish report.").toString();
-      const isUpstream503 = message.includes("Error code: 503") || message.includes("via_upstream");
+      const isUpstream503 = err?.status === 503 || message.includes("Error code: 503") || message.includes("via_upstream");
       setError(
         isUpstream503
-          ? "Publish request timed out upstream. Please retry in a moment."
+          ? "Server is warming up. Please wait a few seconds and try again."
           : message
       );
       setPublishing(false);

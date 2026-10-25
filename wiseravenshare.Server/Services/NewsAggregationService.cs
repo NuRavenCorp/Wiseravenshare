@@ -96,9 +96,26 @@ public sealed class NewsAggregationService : INewsAggregationService
             .SelectMany(p => p.Articles)
             .Where(a => !string.IsNullOrWhiteSpace(a.Title))
             .GroupBy(CreateDeduplicationKey)
-            .Select(group => group
-                .OrderByDescending(x => x.PublishedAtUtc ?? DateTimeOffset.MinValue)
-                .First())
+            .Select(group =>
+            {
+                // Pick the most recently published article, but prefer one with an image.
+                var best = group
+                    .OrderByDescending(x => !string.IsNullOrWhiteSpace(x.ImageUrl))
+                    .ThenByDescending(x => x.PublishedAtUtc ?? DateTimeOffset.MinValue)
+                    .First();
+
+                // If the winner still has no image, try to borrow one from any sibling.
+                if (string.IsNullOrWhiteSpace(best.ImageUrl))
+                {
+                    var sibling = group.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.ImageUrl));
+                    if (sibling is not null)
+                    {
+                        best.ImageUrl = sibling.ImageUrl;
+                    }
+                }
+
+                return best;
+            })
             .OrderByDescending(a => a.PublishedAtUtc ?? DateTimeOffset.MinValue)
             .Take(normalizedLimit)
             .ToList();
