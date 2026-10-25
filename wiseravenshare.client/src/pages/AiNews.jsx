@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 export default function AiNews() {
   const [region, setRegion] = useState("");
   const [topic, setTopic] = useState("");
+  const [itemLimit, setItemLimit] = useState(20);
   const [news, setNews] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -18,7 +19,7 @@ export default function AiNews() {
     setError(null);
     if (!opts.silent) setNews(null);
     try {
-      const res = await apiClient.news.getBulletin({ region, topic, limit: 8 });
+      const res = await apiClient.news.getBulletin({ region, topic, limit: itemLimit });
       if (res?.error) {
         setError(res.error);
       } else if (res && typeof res === "object") {
@@ -38,7 +39,7 @@ export default function AiNews() {
     if (autoLoaded.current) return;
     autoLoaded.current = true;
     generate({ silent: true });
-  }, []);
+  }, [itemLimit]);
 
   return (
     <div className="min-h-screen bg-background bg-grain">
@@ -76,6 +77,25 @@ export default function AiNews() {
             <div>
               <label className="text-xs tracking-wider uppercase text-muted-foreground mb-1.5 block">Topic (optional)</label>
               <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. technology" className="bg-background/60" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <label className="text-xs tracking-wider uppercase text-muted-foreground mb-1.5 block">Items in feed</label>
+            <div className="flex flex-wrap gap-2">
+              {[12, 20, 30].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setItemLimit(value)}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    itemLimit === value
+                      ? "border-primary/60 bg-primary/10 text-primary"
+                      : "border-border bg-background/60 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {value} items
+                </button>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-3 mt-4">

@@ -64,7 +64,8 @@ public sealed partial class EntityCompatController : ControllerBase
             return entityName.ToLowerInvariant() switch
             {
                 "post" => Ok(await FilterPostsAsync(userId, body, limit, cancellationToken)),
-                "conversation" => Ok(await FilterConversationsAsync(userId, limit, cancellationToken)),
+                "conversation" => Ok(await FilterConversationsAsync(userId, body, limit, cancellationToken)),
+                "message" => Ok(await FilterMessagesAsync(userId, body, limit, cancellationToken)),
                 "livestream" => Ok(FilterLiveStreams(body, limit)),
                 _ => Ok(EmptyResult())
             };
@@ -125,6 +126,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 "conversation" => await _db.Conversations
                     .AsNoTracking()
                     .CountAsync(c => c.Participants.Any(p => p.UserId == userId), cancellationToken),
+                "message" => await CountMessagesAsync(userId, body, cancellationToken),
                 "livestream" => CountLiveStreams(body),
                 _ => 0
             };
@@ -146,6 +148,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
         {
             return await CreatePostCompat(payload);
+        }
+
+        if (string.Equals(entityName, "Message", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreateMessageCompat(payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -436,17 +443,34 @@ public sealed partial class EntityCompatController : ControllerBase
 
     private async Task<EntityFilterResponse> FilterConversationsAsync(
         Guid userId,
+        JsonElement body,
         int limit,
         CancellationToken cancellationToken)
     {
-        var conversations = await _db.Conversations
+        var sort = ReadString(body, "options.sort");
+        var query = _db.Conversations
             .AsNoTracking()
-            .Where(c => c.Participants.Any(p => p.UserId == userId))
-            .OrderByDescending(c => c.UpdatedAt)
+            .Where(c => c.Participants.Any(p => p.UserId == userId));
+
+        query = sort switch
+        {
+            "created_date" => query.OrderBy(c => c.CreatedAt),
+            "-created_date" => query.OrderByDescending(c => c.CreatedAt),
+            "last_message_at" => query.OrderBy(c => c.LastMessageAt ?? c.CreatedAt),
+            "-last_message_at" => query.OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt),
+            "updated_at" => query.OrderBy(c => c.UpdatedAt),
+            _ => query.OrderByDescending(c => c.LastMessageAt ?? c.UpdatedAt)
+        };
+
+        var conversations = await query
             .Take(limit)
             .Select(c => new
             {
                 id = c.Id,
+                participants = c.Participants.Select(p => p.UserId).ToArray(),
+                type = c.IsGroup ? "group" : "direct",
+                title = c.GroupName,
+                last_message_at = c.LastMessageAt,
                 created_date = c.CreatedAt,
                 updated_at = c.UpdatedAt
             })
@@ -457,6 +481,83 @@ public sealed partial class EntityCompatController : ControllerBase
             Items = conversations.Cast<object>().ToList(),
             Total = conversations.Count
         };
+    }
+
+    private async Task<EntityFilterResponse> FilterMessagesAsync(
+        Guid userId,
+        JsonElement body,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var conversationId = TryReadGuid(body, "query.conversation_id")
+            ?? TryReadGuid(body, "query.conversationId");
+        if (!conversationId.HasValue)
+        {
+            return EmptyResult();
+        }
+
+        var isParticipant = await _db.ConversationParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.ConversationId == conversationId.Value && p.UserId == userId, cancellationToken);
+        if (!isParticipant)
+        {
+            return EmptyResult();
+        }
+
+        var sort = ReadString(body, "options.sort");
+        var query = _db.Messages
+            .AsNoTracking()
+            .Where(m => m.ConversationId == conversationId.Value);
+
+        query = sort switch
+        {
+            "-created_date" => query.OrderByDescending(m => m.CreatedAt),
+            "updated_at" => query.OrderBy(m => m.UpdatedAt),
+            "-updated_at" => query.OrderByDescending(m => m.UpdatedAt),
+            _ => query.OrderBy(m => m.CreatedAt)
+        };
+
+        var messages = await query
+            .Take(limit)
+            .Select(m => new
+            {
+                id = m.Id,
+                conversation_id = m.ConversationId,
+                content = m.Content,
+                created_by_id = m.SenderId,
+                created_date = m.CreatedAt,
+                updated_at = m.UpdatedAt,
+                parent_message_id = m.ReplyToId
+            })
+            .ToListAsync(cancellationToken);
+
+        return new EntityFilterResponse
+        {
+            Items = messages.Cast<object>().ToList(),
+            Total = messages.Count
+        };
+    }
+
+    private async Task<int> CountMessagesAsync(Guid userId, JsonElement body, CancellationToken cancellationToken)
+    {
+        var conversationId = TryReadGuid(body, "query.conversation_id")
+            ?? TryReadGuid(body, "query.conversationId");
+        if (!conversationId.HasValue)
+        {
+            return 0;
+        }
+
+        var isParticipant = await _db.ConversationParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.ConversationId == conversationId.Value && p.UserId == userId, cancellationToken);
+        if (!isParticipant)
+        {
+            return 0;
+        }
+
+        return await _db.Messages
+            .AsNoTracking()
+            .CountAsync(m => m.ConversationId == conversationId.Value, cancellationToken);
     }
 
     private async Task<object> AggregatePostsAsync(Guid userId, CancellationToken cancellationToken)
@@ -685,6 +786,65 @@ private async Task<IActionResult> CreatePostCompat(JsonElement payload)
 
     var created = await _postService.CreatePostAsync(userId, dto);
     return Ok(created);
+}
+
+private async Task<IActionResult> CreateMessageCompat(JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    var conversationId = TryReadGuid(payload, "conversation_id")
+        ?? TryReadGuid(payload, "conversationId");
+    if (!conversationId.HasValue)
+    {
+        return BadRequest(new { message = "conversation_id is required." });
+    }
+
+    var isParticipant = await _db.ConversationParticipants
+        .AsNoTracking()
+        .AnyAsync(p => p.ConversationId == conversationId.Value && p.UserId == userId);
+    if (!isParticipant)
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not a participant in this conversation." });
+    }
+
+    var content = ReadString(payload, "content");
+    if (string.IsNullOrWhiteSpace(content))
+    {
+        return BadRequest(new { message = "content is required." });
+    }
+
+    var message = new Message
+    {
+        ConversationId = conversationId.Value,
+        SenderId = userId,
+        Content = content.Trim(),
+        Type = MessageType.Text,
+        ReplyToId = TryReadGuid(payload, "parent_message_id") ?? TryReadGuid(payload, "parentMessageId")
+    };
+
+    _db.Messages.Add(message);
+    var conversation = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId.Value);
+    if (conversation is not null)
+    {
+        conversation.LastMessageAt = DateTime.UtcNow;
+    }
+
+    await _db.SaveChangesAsync();
+
+    return Ok(new
+    {
+        id = message.Id,
+        conversation_id = message.ConversationId,
+        content = message.Content,
+        created_by_id = message.SenderId,
+        created_date = message.CreatedAt,
+        updated_at = message.UpdatedAt,
+        parent_message_id = message.ReplyToId
+    });
 }
 
 private async Task<IActionResult> UpdatePostCompat(string id, JsonElement payload)

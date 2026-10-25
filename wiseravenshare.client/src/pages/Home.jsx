@@ -6,6 +6,7 @@ import { Image } from "@/components/ui/image";
 import { useBrandLogo } from "@/lib/branding";
 import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
 import HomeTiles from "@/components/landing/HomeTiles";
+import PostsFeed from "@/components/feed/PostsFeed";
 
 const INTRO_KEY = "wrs_intro_seen";
 
@@ -60,44 +61,56 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 py-16">
-        <div className="max-w-2xl w-full text-center space-y-6">
-          <h1 className="font-display text-4xl md:text-5xl tracking-wide text-foreground">
-            WISE<span className="text-accent">RAVEN</span>SHARE
-          </h1>
-          <p className="text-base text-muted-foreground">
-            Share, create, and verify — a creator platform built on integrity.
-          </p>
+      <main className="flex-1 px-6 py-16">
+        <div className="mx-auto max-w-5xl space-y-14">
+          <div className="max-w-2xl mx-auto text-center space-y-6">
+            <h1 className="font-display text-4xl md:text-5xl tracking-wide text-foreground">
+              WISE<span className="text-accent">RAVEN</span>SHARE
+            </h1>
+            <p className="text-base text-muted-foreground">
+              Share, create, and verify — a creator platform built on integrity.
+            </p>
 
-          <HomeTiles detailed={learnMode} />
+            <HomeTiles detailed={learnMode} />
 
-          {learnMode ? (
-            <button
-              onClick={introSeen ? collapseLearn : finishLearning}
-              className="text-xs text-primary hover:underline inline-flex items-center gap-1"
-            >
-              <ChevronUp className="w-3 h-3" />
-              {introSeen ? "Show compact view" : "I'm ready — hide the descriptions"}
-            </button>
-          ) : (
-            <button
-              onClick={returnToLearn}
-              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
-            >
-              <GraduationCap className="w-3.5 h-3.5" /> Learn about the features
-            </button>
-          )}
-
-          <div className="flex items-center justify-center gap-3 pt-2">
-            {isAuthenticated ? (
-              <Button asChild className="rounded-full px-8"><Link to="/dashboard">Enter Studio</Link></Button>
+            {learnMode ? (
+              <button
+                onClick={introSeen ? collapseLearn : finishLearning}
+                className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ChevronUp className="w-3 h-3" />
+                {introSeen ? "Show compact view" : "I'm ready — hide the descriptions"}
+              </button>
             ) : (
-              <>
-                <Button asChild className="rounded-full px-8"><Link to="/login"><LogIn className="w-4 h-4" /> Login</Link></Button>
-                <Button asChild variant="outline" className="rounded-full px-8"><Link to="/register">Sign up</Link></Button>
-              </>
+              <button
+                onClick={returnToLearn}
+                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
+              >
+                <GraduationCap className="w-3.5 h-3.5" /> Learn about the features
+              </button>
             )}
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              {isAuthenticated ? (
+                <Button asChild className="rounded-full px-8"><Link to="/dashboard">Enter Studio</Link></Button>
+              ) : (
+                <>
+                  <Button asChild className="rounded-full px-8"><Link to="/login"><LogIn className="w-4 h-4" /> Login</Link></Button>
+                  <Button asChild variant="outline" className="rounded-full px-8"><Link to="/register">Sign up</Link></Button>
+                </>
+              )}
+            </div>
           </div>
+
+          <section className="space-y-5">
+            <div className="text-center space-y-2">
+              <h2 className="font-heading text-2xl text-foreground">Recent Posts</h2>
+              <p className="text-sm text-muted-foreground">
+                See the latest posts from the flock right on the main page.
+              </p>
+            </div>
+            <PostsFeed />
+          </section>
         </div>
       </main>
 
