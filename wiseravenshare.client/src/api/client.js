@@ -901,25 +901,4 @@ export const apiClient = {
   },
   // Expose raw authenticated request for custom use
   requestJson,
-  // Retry-aware post creation shared by PostComposer, JournalismReportForm, etc.
-  async createPost(payload) {
-    const path = "/api/posts";
-    const options = { method: "POST", body: JSON.stringify(payload) };
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        return await requestJson(path, options);
-      } catch (err) {
-        lastErr = err;
-        const is503 =
-          err?.status === 503 ||
-          (err?.message || "").includes("503") ||
-          (err?.data?.message || "").includes("via_upstream") ||
-          (err?.data?.message || "").includes("timed out");
-        if (!is503 || attempt === 3) throw err;
-        await new Promise((r) => setTimeout(r, attempt * 1200));
-      }
-    }
-    throw lastErr;
-  },
 };
