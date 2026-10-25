@@ -83,12 +83,37 @@ public sealed class NewsAggregationService : INewsAggregationService
 
         var providerTasks = new[]
         {
+            // ── existing providers ─────────────────────────────────────────
             FetchBbcNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
             FetchGoogleNewsRssAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
             FetchNprRssAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
             FetchNewsDataIoAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
             FetchMediastackAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
-            FetchSerpApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken)
+            FetchSerpApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            // ── free RSS — always on, no key required ─────────────────────
+            FetchGenericRssAsync("reuters",    "Reuters",           "https://feeds.reuters.com/reuters/topNews",                                    normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("aljazeera",  "Al Jazeera",        "https://www.aljazeera.com/xml/rss/all.xml",                                   normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("dw",         "Deutsche Welle",    "https://rss.dw.com/rdf/rss-en-all",                                           normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("france24",   "France 24",         "https://www.france24.com/en/rss",                                             normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("voa",        "Voice of America",  "https://www.voanews.com/api/z_opjpeg-pu9fga",                                 normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("abc-news",   "ABC News",          "https://feeds.abcnews.com/abcnews/topstories",                                 normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("cbs-news",   "CBS News",          "https://www.cbsnews.com/latest/rss/main",                                     normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("nbc-news",   "NBC News",          "https://feeds.nbcnews.com/nbcnews/public/news",                               normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("thehill",    "The Hill",          "https://thehill.com/rss/syndicator/19110/feed/",                              normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("politico",   "Politico",          "https://rss.politico.com/politics-news.xml",                                  normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("guardian",   "The Guardian",      "https://www.theguardian.com/world/rss",                                       normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("apnews",     "AP News",           "https://apnews.com/rss",                                                      normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("foxnews",    "Fox News",          "https://moxie.foxnews.com/google-publisher/latest.xml",                       normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("usa-today",  "USA Today",         "https://rssfeeds.usatoday.com/usatoday-NewsTopStories",                       normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("time",       "TIME",              "https://time.com/newsfeed/",                                                  normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("techcrunch", "TechCrunch",        "https://techcrunch.com/feed/",                                                normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("wired",      "Wired",             "https://www.wired.com/feed/rss",                                              normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("bbc-world",  "BBC World",         "https://feeds.bbci.co.uk/news/world/rss.xml",                                 normalizedQuery, normalizedLimit, cancellationToken),
+            FetchGenericRssAsync("euronews",   "Euronews",          "https://www.euronews.com/rss",                                                normalizedQuery, normalizedLimit, cancellationToken),
+            // ── optional API key sources ──────────────────────────────────
+            FetchGNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            FetchGuardianApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            FetchTheNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken)
         };
         var providers = (await Task.WhenAll(providerTasks)).ToList();
 
@@ -545,6 +570,228 @@ public sealed class NewsAggregationService : INewsAggregationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SerpApi request failed.");
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
+    }
+
+    // ── Generic RSS helper (covers all no-key RSS feeds) ─────────────────
+    private async Task<ProviderFetchResult> FetchGenericRssAsync(
+        string providerName, string sourceName, string feedUrl,
+        string query, int limit, CancellationToken cancellationToken)
+    {
+        var configKey = $"NewsApis:{providerName}:Enabled";
+        var enabledOverride = _configuration.GetValue<bool?>(configKey.Replace("-", "").Replace("_", ""));
+        if (enabledOverride == false)
+        {
+            return ProviderFetchResult.NotConfigured(providerName, $"{sourceName} is disabled by configuration.");
+        }
+
+        try
+        {
+            var items = await _rssFeedService.FetchAndParseFeedAsync(feedUrl, Math.Min(limit * 3, 30));
+            var articles = items
+                .Where(item => IsMatchForQuery(query, item.Text, item.Text))
+                .Select(item => MapRssItemToArticle(providerName, sourceName, item))
+                .Where(article => !string.IsNullOrWhiteSpace(article.Title))
+                .Take(limit)
+                .ToList();
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "{Source} RSS request timed out.", sourceName);
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "{Source} RSS request failed.", sourceName);
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
+    }
+
+    // ── GNews API (free tier: 100 req/day, returns images) ───────────────
+    private async Task<ProviderFetchResult> FetchGNewsApiAsync(string query, string language, int limit, CancellationToken cancellationToken)
+    {
+        const string providerName = "gnews";
+        var apiKey = _configuration["NewsApis:GNews:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return ProviderFetchResult.NotConfigured(providerName, "GNews API key is missing.");
+        }
+
+        var url =
+            $"https://gnews.io/api/v4/top-headlines?q={Uri.EscapeDataString(query)}&token={Uri.EscapeDataString(apiKey)}&lang={Uri.EscapeDataString(language)}&max={Math.Min(limit, 10)}";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return ProviderFetchResult.Failed(providerName, $"HTTP {(int)response.StatusCode}: {TrimError(body)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("articles", out var articlesNode)
+                || articlesNode.ValueKind != JsonValueKind.Array)
+            {
+                return ProviderFetchResult.Success(providerName, []);
+            }
+
+            var articles = new List<NewsArticle>();
+            foreach (var item in articlesNode.EnumerateArray())
+            {
+                var sourceNode = item.TryGetProperty("source", out var src) ? src : default;
+                var sourceName = sourceNode.ValueKind == JsonValueKind.Object && sourceNode.TryGetProperty("name", out var srcName)
+                    ? srcName.GetString() : null;
+
+                articles.Add(new NewsArticle
+                {
+                    Provider = providerName,
+                    Source = sourceName,
+                    Title = item.TryGetProperty("title", out var title) ? title.GetString() ?? string.Empty : string.Empty,
+                    Description = item.TryGetProperty("description", out var desc) ? desc.GetString() : null,
+                    Url = item.TryGetProperty("url", out var link) ? link.GetString() : null,
+                    ImageUrl = item.TryGetProperty("image", out var img) ? img.GetString() : null,
+                    Author = item.TryGetProperty("source", out var srcNode) && srcNode.TryGetProperty("name", out var srcNameNode) ? srcNameNode.GetString() : null,
+                    PublishedAtUtc = ParseDate(item, "publishedAt")
+                });
+            }
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "GNews API request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GNews API request failed.");
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
+    }
+
+    // ── The Guardian Open Platform (free: 500 req/day, has images) ───────
+    private async Task<ProviderFetchResult> FetchGuardianApiAsync(string query, string language, int limit, CancellationToken cancellationToken)
+    {
+        const string providerName = "guardian-api";
+        if (!string.IsNullOrWhiteSpace(language) && !language.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProviderFetchResult.NotConfigured(providerName, "Guardian API supports English only.");
+        }
+
+        var apiKey = _configuration["NewsApis:Guardian:ApiKey"] ?? "test";
+        var url =
+            $"https://content.guardianapis.com/search?q={Uri.EscapeDataString(query)}&api-key={Uri.EscapeDataString(apiKey)}&show-fields=trailText,thumbnail&page-size={Math.Min(limit, 10)}&order-by=newest";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return ProviderFetchResult.Failed(providerName, $"HTTP {(int)response.StatusCode}: {TrimError(body)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("response", out var resp)
+                || !resp.TryGetProperty("results", out var results)
+                || results.ValueKind != JsonValueKind.Array)
+            {
+                return ProviderFetchResult.Success(providerName, []);
+            }
+
+            var articles = new List<NewsArticle>();
+            foreach (var item in results.EnumerateArray())
+            {
+                var fields = item.TryGetProperty("fields", out var f) ? f : default;
+                var thumbnail = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("thumbnail", out var tn) ? tn.GetString() : null;
+                var trailText = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("trailText", out var tt) ? tt.GetString() : null;
+
+                articles.Add(new NewsArticle
+                {
+                    Provider = providerName,
+                    Source = "The Guardian",
+                    Title = item.TryGetProperty("webTitle", out var title) ? title.GetString() ?? string.Empty : string.Empty,
+                    Description = trailText,
+                    Url = item.TryGetProperty("webUrl", out var url2) ? url2.GetString() : null,
+                    ImageUrl = thumbnail,
+                    Author = "The Guardian",
+                    PublishedAtUtc = ParseDate(item, "webPublicationDate")
+                });
+            }
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Guardian API request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Guardian API request failed.");
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
+    }
+
+    // ── TheNewsAPI.com (free tier: 100 req/day, has images) ──────────────
+    private async Task<ProviderFetchResult> FetchTheNewsApiAsync(string query, string language, int limit, CancellationToken cancellationToken)
+    {
+        const string providerName = "thenewsapi";
+        var apiKey = _configuration["NewsApis:TheNewsApi:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return ProviderFetchResult.NotConfigured(providerName, "TheNewsAPI key is missing.");
+        }
+
+        var url =
+            $"https://api.thenewsapi.com/v1/news/top?api_token={Uri.EscapeDataString(apiKey)}&search={Uri.EscapeDataString(query)}&language={Uri.EscapeDataString(language)}&limit={Math.Min(limit, 10)}";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return ProviderFetchResult.Failed(providerName, $"HTTP {(int)response.StatusCode}: {TrimError(body)}");
+            }
+
+            using var document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array)
+            {
+                return ProviderFetchResult.Success(providerName, []);
+            }
+
+            var articles = new List<NewsArticle>();
+            foreach (var item in data.EnumerateArray())
+            {
+                articles.Add(new NewsArticle
+                {
+                    Provider = providerName,
+                    Source = item.TryGetProperty("source", out var src) ? src.GetString() : null,
+                    Title = item.TryGetProperty("title", out var title) ? title.GetString() ?? string.Empty : string.Empty,
+                    Description = item.TryGetProperty("description", out var desc) ? desc.GetString() : null,
+                    Url = item.TryGetProperty("url", out var link) ? link.GetString() : null,
+                    ImageUrl = item.TryGetProperty("image_url", out var img) ? img.GetString() : null,
+                    Author = item.TryGetProperty("source", out var src2) ? src2.GetString() : null,
+                    PublishedAtUtc = ParseDate(item, "published_at")
+                });
+            }
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "TheNewsAPI request timed out.");
+            return ProviderFetchResult.Failed(providerName, "Provider request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TheNewsAPI request failed.");
             return ProviderFetchResult.Failed(providerName, ex.Message);
         }
     }
