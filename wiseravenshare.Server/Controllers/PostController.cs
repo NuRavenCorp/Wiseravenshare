@@ -26,7 +26,8 @@ namespace Wiseravenshare.Server.Controllers
         private readonly ILogger<PostsController> _logger;
         private readonly OutputCacheInvalidationService _cacheInvalidation;
         private readonly IPersonalizationService _personalizationService;
-        private static readonly System.Text.RegularExpressions.Regex HashtagRegex = new(@"#([a-zA-Z0-9_]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex HashtagRegex = new(@"#([\p{L}\p{N}_-]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         public PostsController(
             IPostService postService,
@@ -57,12 +58,14 @@ namespace Wiseravenshare.Server.Controllers
                 {
                     var userId = await ResolveEffectiveUserIdAsync();
                     var post = await _postService.CreatePostAsync(userId, dto);
+                    await TryTrackPostCreationAsync(userId, post);
                     await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                     return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
                 }
 
                 var fallbackUserId = Guid.NewGuid();
                 var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+                await TryTrackPostCreationAsync(fallbackUserId, fallbackPost);
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
             }
@@ -71,6 +74,7 @@ namespace Wiseravenshare.Server.Controllers
                 _logger.LogWarning(ex, "Authenticated identity could not be resolved for post create; falling back to anonymous publisher.");
                 var fallbackUserId = Guid.NewGuid();
                 var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
+                await TryTrackPostCreationAsync(fallbackUserId, fallbackPost);
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
             }
@@ -550,7 +554,7 @@ namespace Wiseravenshare.Server.Controllers
         private async Task TrackPostInteractionAsync(Guid userId, Guid postId, string interactionType)
         {
             var post = await _postService.GetPostAsync(postId);
-            var tags = ExtractPostTags(post.Content);
+            var tags = ExtractPostSignalTags(post.Content);
 
             await _personalizationService.TrackInteractionAsync(userId, new TrackInteractionRequest(
                 interactionType,
@@ -566,6 +570,30 @@ namespace Wiseravenshare.Server.Controllers
                 null), HttpContext.RequestAborted);
         }
 
+        private async Task TryTrackPostCreationAsync(Guid userId, PostDto post)
+        {
+            try
+            {
+                var tags = ExtractPostSignalTags(post.Content);
+                await _personalizationService.TrackInteractionAsync(userId, new TrackInteractionRequest(
+                    "Share",
+                    "post",
+                    post.Id,
+                    string.IsNullOrWhiteSpace(post.Content) ? "Post" : post.Content[..Math.Min(120, post.Content.Length)],
+                    post.Type,
+                    tags.Length > 0 ? tags : null,
+                    tags.Length,
+                    null,
+                    HttpContext.Request.Headers.UserAgent.ToString(),
+                    null,
+                    null), HttpContext.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to track post creation signals for user {UserId} post {PostId}", userId, post.Id);
+            }
+        }
+
         private async Task TryTrackPostInteractionAsync(Guid userId, Guid postId, string interactionType)
         {
             try
@@ -578,14 +606,14 @@ namespace Wiseravenshare.Server.Controllers
             }
         }
 
-        private static string[] ExtractPostTags(string? content)
+        private static string[] ExtractPostSignalTags(string? content)
         {
             if (string.IsNullOrWhiteSpace(content))
             {
                 return Array.Empty<string>();
             }
 
-            var tags = HashtagRegex
+            var hashtags = HashtagRegex
                 .Matches(content)
                 .Select(match => match.Groups[1].Value.Trim().ToLowerInvariant())
                 .Where(tag => !string.IsNullOrWhiteSpace(tag))
@@ -593,7 +621,20 @@ namespace Wiseravenshare.Server.Controllers
                 .Take(24)
                 .ToArray();
 
-            return tags;
+            var partials = PartialRegex
+                .Matches(content)
+                .Select(match => match.Groups[1].Value.Trim().ToLowerInvariant())
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(24)
+                .ToArray();
+
+            return hashtags
+                .Select(tag => $"#{tag}")
+                .Concat(partials.Select(tag => $"%{tag}"))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(32)
+                .ToArray();
         }
 
         private async Task<Guid> ResolveEffectiveUserIdAsync()

@@ -55,6 +55,9 @@ public class PublishSocialContentRequest
     public bool PublishToYouTube { get; set; } = false;
     public bool PublishToWiseRavenStream { get; set; } = false;
     public bool PublishToBluesky { get; set; } = false;
+    public string? FacebookPageId { get; set; }
+    public string? TikTokUsername { get; set; }
+    public string? YouTubeChannelId { get; set; }
 }
 
 public class SocialPublishResultDto

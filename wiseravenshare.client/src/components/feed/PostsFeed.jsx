@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { apiClient } from "@/api/client";
 import { Loader2, Feather, LayoutGrid, Clock, TrendingUp, Users, X, ShieldBan, ShieldCheck } from "lucide-react";
 import PostCard from "./PostCard";
@@ -24,7 +24,14 @@ const normalizePost = (post) => ({
     user: entry.user || null,
   })),
   hashtags: post.hashtags || [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((tag) => tag.slice(1)))],
+  partials: post.partials || [...new Set((post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).map((tag) => tag.slice(1)))],
 });
+
+const getAgeHours = (createdDate) => {
+  const millis = Date.parse(createdDate || "");
+  if (Number.isNaN(millis)) return 24;
+  return Math.max(0, (Date.now() - millis) / 3_600_000);
+};
 
 export default function PostsFeed() {
   const [posts, setPosts] = useState([]);
@@ -83,19 +90,57 @@ export default function PostsFeed() {
 
   const handleAuthRequired = () => apiClient.auth.redirectToLogin(window.location.pathname + window.location.hash);
   const visiblePosts = posts.filter((post) => !blockedIds.includes(String(post.created_by_id))).filter((post) => !tag || (tag.startsWith("%")
-    ? post.content?.toLowerCase().includes(tag.toLowerCase())
+    ? post.partials?.some((value) => `%${String(value).toLowerCase()}` === tag.toLowerCase())
     : post.hashtags?.some((value) => String(value).replace(/^#/, "").toLowerCase() === tag.toLowerCase())));
-  const trendingTopics = Object.entries(posts.reduce((counts, post) => {
-    (post.hashtags || []).forEach((hashtag) => {
-      const key = `#${String(hashtag).replace(/^#/, "").toLowerCase()}`;
-      counts[key] = (counts[key] || 0) + 1;
+  const { trendingTopics, trendingItems, rankedPosts } = useMemo(() => {
+    const counts = {};
+    visiblePosts.forEach((post) => {
+      (post.hashtags || []).forEach((hashtag) => {
+        const key = `#${String(hashtag).replace(/^#/, "").toLowerCase()}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      (post.partials || []).forEach((partial) => {
+        const key = `%${String(partial).replace(/^%/, "").toLowerCase()}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
     });
-    (post.content?.match(/%[\p{L}\p{N}_-]+/gu) || []).forEach((partial) => {
-      const key = partial.toLowerCase();
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    return counts;
-  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+    const topics = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const scored = visiblePosts.map((post) => {
+      const likes = Number(post.like_count || 0);
+      const reposts = Number(post.repost_count || 0);
+      const comments = Number(post.comment_count || 0);
+      const shares = Number(post.share_count || 0);
+      const views = Number(post.viewsCount || post.views_count || 0);
+      const ageHours = getAgeHours(post.created_date);
+      const freshness = Math.exp(-ageHours / 48);
+      const truthScore = Number(post.truthScore ?? post.truth_score ?? 50);
+
+      const tagMomentum = [
+        ...(post.hashtags || []).map((value) => `#${String(value).replace(/^#/, "").toLowerCase()}`),
+        ...(post.partials || []).map((value) => `%${String(value).replace(/^%/, "").toLowerCase()}`),
+      ].reduce((sum, key) => sum + Number(counts[key] || 0), 0);
+
+      const relevanceScore =
+        likes * 2.5 +
+        reposts * 3.5 +
+        comments * 2.2 +
+        shares * 2.0 +
+        views * 0.04 +
+        tagMomentum * 1.6 +
+        freshness * 12 +
+        (truthScore / 100) * 6;
+
+      return { ...post, relevanceScore: Number(relevanceScore.toFixed(2)) };
+    }).sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+    return {
+      trendingTopics: topics,
+      trendingItems: scored.slice(0, 6),
+      rankedPosts: scored,
+    };
+  }, [visiblePosts]);
+  const displayedPosts = mode === "trending" ? rankedPosts : visiblePosts;
   const removeBlockedUser = async (userId) => {
     const blocked = String(userId);
     setBlockedIds((current) => [...new Set([...current, blocked])]);
@@ -131,6 +176,23 @@ export default function PostsFeed() {
       {showComposer && <PostComposer compact onPosted={handlePosted} />}
       {currentUser && blockedUsers.length > 0 && <details className="rounded-lg border border-border bg-card/50 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground"><ShieldBan className="h-4 w-4" /> Blocked accounts ({blockedUsers.length})</summary><div className="mt-3 space-y-2">{blockedUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 rounded-md bg-background/60 px-3 py-2"><span className="truncate text-sm">{user.name || user.handle || user.id}</span><button onClick={() => unblockUser(user.id)} className="flex items-center gap-1 text-xs text-primary hover:underline"><ShieldCheck className="h-3.5 w-3.5" /> Unblock</button></div>)}</div></details>}
       {trendingTopics.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"><span className="mr-1 text-xs font-medium text-muted-foreground">Trending topics</span>{trendingTopics.map(([topic, count]) => <button key={topic} onClick={() => openTag(topic.startsWith("#") ? topic.slice(1) : topic)} className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary hover:bg-primary/10">{topic}<span className="ml-1 opacity-60">{count}</span></button>)}</div>}
+      {trendingItems.length > 0 && (
+        <div className="rounded-lg border border-border bg-card/40 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <TrendingUp className="h-3.5 w-3.5" /> Trending items by relevance
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {trendingItems.map((item) => (
+              <div key={item.id} className="rounded-md border border-border/70 bg-background/60 px-3 py-2">
+                <p className="text-sm text-foreground line-clamp-2">{item.content || "Untitled post"}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Score {item.relevanceScore} · {item.like_count || 0} likes · {item.repost_count || 0} reposts · {item.comment_count || 0} comments
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card/50 p-1">
           <button onClick={() => { setTag(""); setMode("following"); }} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === "following" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}><Users className="h-3.5 w-3.5" /> Following</button>
@@ -140,13 +202,13 @@ export default function PostsFeed() {
         </div>
         {tag && <button onClick={() => setTag("")} className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary">{tag.startsWith("%") ? tag : `#${tag}`}<X className="h-3 w-3" /></button>}
       </div>
-      {visiblePosts.length === 0 ? (
+      {displayedPosts.length === 0 ? (
         <div className="py-12 text-center"><Feather className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">{tag ? `No posts found for ${tag.startsWith("%") ? tag : `#${tag}`}.` : "No posts in this feed yet. Be the first to share."}</p></div>
       ) : view === "timeline" ? (
-        <PostTimeline posts={visiblePosts} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />
+        <PostTimeline posts={displayedPosts} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
-          {visiblePosts.map((post) => <PostCard key={post.id} post={post} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />)}
+          {displayedPosts.map((post) => <PostCard key={post.id} post={post} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />)}
         </div>
       )}
     </div>

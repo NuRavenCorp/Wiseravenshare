@@ -44,6 +44,7 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly IRssFeedService _rssFeedService;
     private readonly ITikTokAggregatorService _tikTokAggregatorService;
     private readonly IStreamTransferService _streamTransfer;
+    private sealed record FacebookPageDestination(string Id, string Name, string AccessToken, bool IsDefault);
 
     public SocialPlatformService(
         HttpClient httpClient,
@@ -65,20 +66,15 @@ public class SocialPlatformService : ISocialPlatformService
 
     public async Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit)
     {
-        var resolvedPageId = string.IsNullOrWhiteSpace(pageId)
-            ? _configuration["Social:Facebook:PageId"]
-            : pageId;
-
-        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
-
-        if (string.IsNullOrWhiteSpace(resolvedPageId) || string.IsNullOrWhiteSpace(pageToken))
+        var destination = ResolveFacebookDestination(pageId);
+        if (destination is null)
         {
             return [];
         }
 
         var safeLimit = Math.Clamp(limit, 1, 25);
         var fields = "id,message,created_time,permalink_url,full_picture";
-        var url = $"{FacebookGraphBase}/{resolvedPageId}/posts?fields={Uri.EscapeDataString(fields)}&limit={safeLimit}&access_token={Uri.EscapeDataString(pageToken)}";
+        var url = $"{FacebookGraphBase}/{destination.Id}/posts?fields={Uri.EscapeDataString(fields)}&limit={safeLimit}&access_token={Uri.EscapeDataString(destination.AccessToken)}";
 
         using var response = await _httpClient.GetAsync(url);
         if (!response.IsSuccessStatusCode)
@@ -105,7 +101,7 @@ public class SocialPlatformService : ISocialPlatformService
                 Text = entry.TryGetProperty("message", out var message) ? message.GetString() : null,
                 MediaUrl = entry.TryGetProperty("full_picture", out var picture) ? picture.GetString() : null,
                 PermalinkUrl = entry.TryGetProperty("permalink_url", out var permalink) ? permalink.GetString() : null,
-                AuthorHandle = resolvedPageId,
+                AuthorHandle = destination.Id,
                 CreatedAt = ParseDate(entry, "created_time")
             });
         }
@@ -340,10 +336,10 @@ public class SocialPlatformService : ISocialPlatformService
         {
             response.Results.Add(mediaType switch
             {
-                SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl),
-                SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl),
-                SocialMediaType.Music => await PublishMusicToFacebookAsync(message, request.LinkUrl, request.MusicUrl),
-                _ => await PublishToFacebookAsync(message, request.LinkUrl, null)
+                SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl, request.FacebookPageId),
+                SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl, request.FacebookPageId),
+                SocialMediaType.Music => await PublishMusicToFacebookAsync(message, request.LinkUrl, request.MusicUrl, request.FacebookPageId),
+                _ => await PublishToFacebookAsync(message, request.LinkUrl, null, request.FacebookPageId)
             });
         }
 
@@ -469,28 +465,28 @@ public class SocialPlatformService : ISocialPlatformService
         return SocialMediaType.Text;
     }
 
-    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl, string? videoUrl = null)
+    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl, string? videoUrl = null, string? requestedPageId = null)
     {
-        var pageId = _configuration["Social:Facebook:PageId"];
-        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
-
-        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(pageToken))
+        var destination = ResolveFacebookDestination(requestedPageId);
+        if (destination is null)
         {
             return new SocialPublishResultDto
             {
                 Platform = "facebook",
                 Success = false,
-                Error = "Facebook is not configured. Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
+                Error = string.IsNullOrWhiteSpace(requestedPageId)
+                    ? "Facebook is not configured. Set Social:Facebook:PageId/PageAccessToken or Social:Facebook:Pages."
+                    : $"Facebook destination '{requestedPageId}' is not configured with an access token."
             };
         }
 
         // Real video posts must go through the /videos edge; the /feed edge only accepts text, links and photos.
         if (!string.IsNullOrWhiteSpace(videoUrl))
         {
-            return await PublishVideoToFacebookAsync(pageId, pageToken, message, videoUrl);
+            return await PublishVideoToFacebookAsync(destination.Id, destination.AccessToken, message, videoUrl);
         }
 
-        return await PublishToFacebookFeedAsync(pageId, pageToken, message, linkUrl);
+        return await PublishToFacebookFeedAsync(destination.Id, destination.AccessToken, message, linkUrl);
     }
 
     private async Task<SocialPublishResultDto> PublishVideoToFacebookAsync(string pageId, string pageToken, string message, string videoUrl)
@@ -596,22 +592,22 @@ public class SocialPlatformService : ISocialPlatformService
         }
     }
 
-    private async Task<SocialPublishResultDto> PublishPhotoToFacebookAsync(string message, string? linkUrl, string? photoUrl)
+    private async Task<SocialPublishResultDto> PublishPhotoToFacebookAsync(string message, string? linkUrl, string? photoUrl, string? requestedPageId = null)
     {
-        var pageId = _configuration["Social:Facebook:PageId"];
-        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
-
-        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(pageToken))
+        var destination = ResolveFacebookDestination(requestedPageId);
+        if (destination is null)
         {
             return new SocialPublishResultDto
             {
                 Platform = "facebook",
                 Success = false,
-                Error = "Facebook is not configured. Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
+                Error = string.IsNullOrWhiteSpace(requestedPageId)
+                    ? "Facebook is not configured. Set Social:Facebook:PageId/PageAccessToken or Social:Facebook:Pages."
+                    : $"Facebook destination '{requestedPageId}' is not configured with an access token."
             };
         }
 
-        return await PublishPhotoToFacebookConfiguredAsync(pageId, pageToken, message, linkUrl, photoUrl);
+        return await PublishPhotoToFacebookConfiguredAsync(destination.Id, destination.AccessToken, message, linkUrl, photoUrl);
     }
 
     private async Task<SocialPublishResultDto> PublishPhotoToFacebookConfiguredAsync(string pageId, string pageToken, string message, string? linkUrl, string? photoUrl)
@@ -674,22 +670,22 @@ public class SocialPlatformService : ISocialPlatformService
         }
     }
 
-    private async Task<SocialPublishResultDto> PublishMusicToFacebookAsync(string message, string? linkUrl, string? musicUrl)
+    private async Task<SocialPublishResultDto> PublishMusicToFacebookAsync(string message, string? linkUrl, string? musicUrl, string? requestedPageId = null)
     {
-        var pageId = _configuration["Social:Facebook:PageId"];
-        var pageToken = _configuration["Social:Facebook:PageAccessToken"];
-
-        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(pageToken))
+        var destination = ResolveFacebookDestination(requestedPageId);
+        if (destination is null)
         {
             return new SocialPublishResultDto
             {
                 Platform = "facebook",
                 Success = false,
-                Error = "Facebook is not configured. Set Social:Facebook:PageId and Social:Facebook:PageAccessToken."
+                Error = string.IsNullOrWhiteSpace(requestedPageId)
+                    ? "Facebook is not configured. Set Social:Facebook:PageId/PageAccessToken or Social:Facebook:Pages."
+                    : $"Facebook destination '{requestedPageId}' is not configured with an access token."
             };
         }
 
-        return await PublishMusicToFacebookConfiguredAsync(pageId, pageToken, message, linkUrl, musicUrl);
+        return await PublishMusicToFacebookConfiguredAsync(destination.Id, destination.AccessToken, message, linkUrl, musicUrl);
     }
 
     private async Task<SocialPublishResultDto> PublishMusicToFacebookConfiguredAsync(string pageId, string pageToken, string message, string? linkUrl, string? musicUrl)
@@ -1127,9 +1123,46 @@ public class SocialPlatformService : ISocialPlatformService
 
     private bool IsFacebookNativeConfigured()
     {
-        var pageId = _configuration["Social:Facebook:PageId"];
-        var accessToken = _configuration["Social:Facebook:PageAccessToken"];
-        return !string.IsNullOrWhiteSpace(pageId) && !string.IsNullOrWhiteSpace(accessToken);
+        return ResolveFacebookDestination(null) is not null;
+    }
+
+    private FacebookPageDestination? ResolveFacebookDestination(string? requestedPageId)
+    {
+        var pages = ResolveFacebookDestinations();
+        if (!string.IsNullOrWhiteSpace(requestedPageId))
+        {
+            return pages.FirstOrDefault(page => page.Id.Equals(requestedPageId.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return pages.FirstOrDefault(page => page.IsDefault)
+            ?? pages.FirstOrDefault();
+    }
+
+    private IReadOnlyList<FacebookPageDestination> ResolveFacebookDestinations()
+    {
+        var pages = _configuration.GetSection("Social:Facebook:Pages")
+            .GetChildren()
+            .Select(section => new FacebookPageDestination(
+                Id: (section["Id"] ?? string.Empty).Trim(),
+                Name: string.IsNullOrWhiteSpace(section["Name"]) ? "Facebook Page" : section["Name"]!.Trim(),
+                AccessToken: (section["AccessToken"] ?? string.Empty).Trim(),
+                IsDefault: bool.TryParse(section["IsDefault"], out var isDefault) && isDefault))
+            .Where(page => !string.IsNullOrWhiteSpace(page.Id) && !string.IsNullOrWhiteSpace(page.AccessToken))
+            .ToList();
+
+        var legacyPageId = (_configuration["Social:Facebook:PageId"] ?? string.Empty).Trim();
+        var legacyPageToken = (_configuration["Social:Facebook:PageAccessToken"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(legacyPageId) && !string.IsNullOrWhiteSpace(legacyPageToken)
+            && pages.All(page => !page.Id.Equals(legacyPageId, StringComparison.OrdinalIgnoreCase)))
+        {
+            pages.Insert(0, new FacebookPageDestination(
+                Id: legacyPageId,
+                Name: (_configuration["Social:Facebook:PageName"] ?? "Facebook Page").Trim(),
+                AccessToken: legacyPageToken,
+                IsDefault: true));
+        }
+
+        return pages;
     }
 
     private bool IsYouTubeSyncConfigured()

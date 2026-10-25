@@ -63,6 +63,10 @@ namespace Wiseravenshare.Server.DTOs.Post
         public int SharesCount { get; set; }
         public int BookmarksCount { get; set; }
         public int ViewsCount { get; set; }
+        [JsonPropertyName("hashtags")]
+        public string[] Hashtags { get; set; } = Array.Empty<string>();
+        [JsonPropertyName("partials")]
+        public string[] Partials { get; set; } = Array.Empty<string>();
         public DateTime CreatedAt { get; set; }
         public UserDto User { get; set; } = null!;
         public PostDto? ReplyTo { get; set; }
