@@ -58,6 +58,40 @@ export default function JournalismReportForm({ onPublished }) {
     return { headline, body };
   };
 
+  const runIntegrityScoring = async (postId) => {
+    setPublishing(false);
+    setScoring(true);
+    try {
+      const res = await apiClient.functions.invoke("ScoreTruth", {
+        postId,
+      });
+      setIntegrityResult(res.data);
+    } catch {
+      setError(
+        "Report published, but the integrity filter failed. You can score it manually from TruthSeeker."
+      );
+    } finally {
+      setScoring(false);
+    }
+  };
+
+  const reconcilePublishedReport = async (content) => {
+    try {
+      const snapshot = await apiClient.entities.Post.filter({}, { limit: 25, sort: "-created_date" });
+      const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+      const now = Date.now();
+      return items.find((item) => {
+        const itemContent = (item?.content || "").trim();
+        if (!itemContent || itemContent !== content) return false;
+        const createdAt = Date.parse(item?.created_date || item?.createdAt || "");
+        if (Number.isNaN(createdAt)) return true;
+        return now - createdAt <= 15 * 60 * 1000;
+      }) || null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
@@ -150,22 +184,23 @@ export default function JournalismReportForm({ onPublished }) {
       } catch (e) {
         console.error("Failed to create journalism report tracker:", e?.message || e);
       }
-      setPublishing(false);
-      setScoring(true);
-      try {
-        const res = await apiClient.functions.invoke("ScoreTruth", {
-          postId: post.id,
-        });
-        setIntegrityResult(res.data);
-      } catch {
-        setError(
-          "Report published, but the integrity filter failed. You can score it manually from TruthSeeker."
-        );
-      } finally {
-        setScoring(false);
-      }
+      await runIntegrityScoring(post?.id || post?.Id);
     } catch (err) {
-      setError(err?.data?.message || err?.message || "Failed to publish report.");
+      const content = `${cleanHeadline}\n\n${cleanBody}`;
+      const reconciled = await reconcilePublishedReport(content);
+      if (reconciled?.id) {
+        setError(null);
+        await runIntegrityScoring(reconciled.id);
+        return;
+      }
+
+      const message = (err?.data?.message || err?.message || "Failed to publish report.").toString();
+      const isUpstream503 = message.includes("Error code: 503") || message.includes("via_upstream");
+      setError(
+        isUpstream503
+          ? "Publish request timed out upstream. Please retry in a moment."
+          : message
+      );
       setPublishing(false);
     }
   };
