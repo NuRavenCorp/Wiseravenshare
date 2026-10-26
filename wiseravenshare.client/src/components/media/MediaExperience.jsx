@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useState } from "react";
 import ReactPlayer from "react-player";
-import { X } from "lucide-react";
+import { ChevronUp, Minimize2, X } from "lucide-react";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import ZoomableImage from "@/components/media/ZoomableImage";
 import MusicPlayer from "@/components/media/MusicPlayer";
@@ -9,6 +9,7 @@ const MediaExperienceContext = createContext(null);
 
 export function MediaExperienceProvider({ children }) {
   const [request, setRequest] = useState(null);
+  const [musicExpanded, setMusicExpanded] = useState(false);
   const openMedia = useCallback((media) => {
     const kind = String(media?.type || media?.asset_type || "").toLowerCase();
     const type = kind === "audio" || kind === "music" ? "music"
@@ -18,13 +19,34 @@ export function MediaExperienceProvider({ children }) {
     const url = media?.url || media?.file_uri || media?.mediaUrl || media?.videoUrl || media?.imageUrl || "";
     if (!type || (!url && !(type === "music" && mediaId))) return;
     setRequest({ ...media, id: mediaId ?? media?.id, type, url, title: media.title || media.fileName || "Untitled media" });
+    if (type === "music") {
+      setMusicExpanded(true);
+    }
   }, []);
-  const closeMedia = useCallback(() => setRequest(null), []);
+  const closeMedia = useCallback(() => {
+    setMusicExpanded(false);
+    setRequest((current) => (current?.type === "music" ? current : null));
+  }, []);
+  const stopMusic = useCallback(() => {
+    setMusicExpanded(false);
+    setRequest((current) => (current?.type === "music" ? null : current));
+  }, []);
 
   return (
     <MediaExperienceContext.Provider value={{ openMedia, closeMedia }}>
       {children}
-      {request && <MediaExperienceModal key={`${request.type}:${request.id || request.url}`} request={request} onClose={closeMedia} />}
+      {request?.type === "music" ? (
+        <PersistentMusicPlayer
+          key={`${request.type}:${request.id || request.url}`}
+          request={request}
+          expanded={musicExpanded}
+          onExpand={() => setMusicExpanded(true)}
+          onMinimize={() => setMusicExpanded(false)}
+          onStop={stopMusic}
+        />
+      ) : request ? (
+        <MediaExperienceModal key={`${request.type}:${request.id || request.url}`} request={request} onClose={closeMedia} />
+      ) : null}
     </MediaExperienceContext.Provider>
   );
 }
@@ -84,5 +106,38 @@ function MediaExperienceModal({ request, onClose }) {
           )}
       </section>
     </div>
+  );
+}
+
+function PersistentMusicPlayer({ request, expanded, onExpand, onMinimize, onStop }) {
+  return (
+    <>
+      <div className={`fixed bottom-4 right-4 z-[100] w-[min(56rem,calc(100vw-2rem))] transition-all ${expanded ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none"}`}>
+        <section className="rounded-xl border border-border bg-background p-4 shadow-2xl">
+          <header className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="truncate text-sm font-semibold">{request.title}</h2>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={onMinimize} aria-label="Minimize music player" className="rounded p-1 text-muted-foreground hover:text-foreground">
+                <Minimize2 className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={onStop} aria-label="Stop music player" className="rounded p-1 text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </header>
+          <MusicPlayer initialTrack={request} initialQueue={request.queue} />
+        </section>
+      </div>
+      {!expanded && (
+        <button
+          type="button"
+          onClick={onExpand}
+          className="fixed bottom-4 right-4 z-[100] flex max-w-[80vw] items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-xs text-foreground shadow-lg hover:bg-secondary/40"
+        >
+          <ChevronUp className="h-4 w-4 text-primary" />
+          <span className="truncate">Now playing: {request.title}</span>
+        </button>
+      )}
+    </>
   );
 }
