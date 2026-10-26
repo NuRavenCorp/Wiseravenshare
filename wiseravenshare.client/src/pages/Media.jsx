@@ -86,6 +86,11 @@ export default function Media() {
     playTrack(selected[0], selected);
   };
 
+  const playAllTracks = () => {
+    if (!tracks.length) return;
+    playTrack(tracks[0], tracks);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -129,6 +134,7 @@ export default function Media() {
               }} />
               {tracks.length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={playAllTracks} disabled={!tracks.length} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play all</button>
                   <button type="button" onClick={selectAllTracks} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50">Select all</button>
                   <button type="button" onClick={clearTrackSelection} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Clear</button>
                   <button type="button" onClick={playSelectedTracks} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play selected</button>
