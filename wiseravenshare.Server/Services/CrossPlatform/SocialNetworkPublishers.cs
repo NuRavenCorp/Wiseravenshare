@@ -37,7 +37,13 @@ public class TwitterPublisher : ICrossPlatformPublisher
             return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
         }
 
-        return !string.IsNullOrWhiteSpace(_configuration["Social:Twitter:AccessToken"]);
+        var nativeConfigured = !string.IsNullOrWhiteSpace(_configuration["Social:Twitter:AccessToken"]);
+        if (UseZernioFallback())
+        {
+            return nativeConfigured || !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return nativeConfigured;
     }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
@@ -57,6 +63,11 @@ public class TwitterPublisher : ICrossPlatformPublisher
         var accessToken = _configuration["Social:Twitter:AccessToken"];
         if (string.IsNullOrWhiteSpace(accessToken))
         {
+            if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+            {
+                return await PublishViaZernioAsync(request, text);
+            }
+
             return CrossPlatformErrors.NotConfigured(Platform, "Social:Twitter:AccessToken");
         }
 
@@ -75,7 +86,20 @@ public class TwitterPublisher : ICrossPlatformPublisher
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Twitter publish failed ({Status}): {Body}", (int)response.StatusCode, body);
-                return CrossPlatformErrors.Failed(Platform, $"Twitter publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+                var nativeError = CrossPlatformErrors.Failed(Platform, $"Twitter publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+                if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request, text);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native Twitter publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             using var document = JsonDocument.Parse(body);
@@ -95,6 +119,18 @@ public class TwitterPublisher : ICrossPlatformPublisher
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Twitter publish threw for post {PostId}", request.PostId);
+            if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+            {
+                var fallbackResult = await PublishViaZernioAsync(request, text);
+                if (fallbackResult.Success)
+                {
+                    return fallbackResult;
+                }
+
+                fallbackResult.Error = $"Native Twitter publish failed: {ex.Message} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                return fallbackResult;
+            }
+
             return CrossPlatformErrors.Failed(Platform, $"Twitter publish failed: {ex.Message}");
         }
     }
@@ -175,6 +211,19 @@ public class TwitterPublisher : ICrossPlatformPublisher
         return provider == "zernio";
     }
 
+    private bool UseZernioFallback()
+    {
+        var provider = (_configuration["Social:Twitter:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        if (provider is "fallback" or "native-fallback" or "zernio-fallback")
+        {
+            return true;
+        }
+
+        return _configuration.GetValue("Social:Zernio:FallbackEnabled", false);
+    }
+
     private static string? ReadJsonString(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var property))
@@ -225,7 +274,13 @@ public class LinkedInPublisher : ICrossPlatformPublisher
             return !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
         }
 
-        return !string.IsNullOrWhiteSpace(_configuration["Social:LinkedIn:AccessToken"]);
+        var nativeConfigured = !string.IsNullOrWhiteSpace(_configuration["Social:LinkedIn:AccessToken"]);
+        if (UseZernioFallback())
+        {
+            return nativeConfigured || !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]);
+        }
+
+        return nativeConfigured;
     }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
@@ -238,6 +293,11 @@ public class LinkedInPublisher : ICrossPlatformPublisher
         var accessToken = _configuration["Social:LinkedIn:AccessToken"];
         if (string.IsNullOrWhiteSpace(accessToken))
         {
+            if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+            {
+                return await PublishViaZernioAsync(request);
+            }
+
             return CrossPlatformErrors.NotConfigured(Platform, "Social:LinkedIn:AccessToken");
         }
 
@@ -246,7 +306,20 @@ public class LinkedInPublisher : ICrossPlatformPublisher
             var authorUrn = await ResolveAuthorUrnAsync(accessToken);
             if (string.IsNullOrWhiteSpace(authorUrn))
             {
-                return CrossPlatformErrors.Failed(Platform, "Could not resolve LinkedIn author URN. Set Social:LinkedIn:AuthorUrn or ensure r_liteprofile scope.");
+                var nativeError = CrossPlatformErrors.Failed(Platform, "Could not resolve LinkedIn author URN. Set Social:LinkedIn:AuthorUrn or ensure r_liteprofile scope.");
+                if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native LinkedIn publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             var payload = BuildPostPayload(authorUrn, request);
@@ -265,7 +338,20 @@ public class LinkedInPublisher : ICrossPlatformPublisher
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("LinkedIn publish failed ({Status}): {Body}", (int)response.StatusCode, body);
-                return CrossPlatformErrors.Failed(Platform, $"LinkedIn publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+                var nativeError = CrossPlatformErrors.Failed(Platform, $"LinkedIn publish failed ({(int)response.StatusCode}): {body.Truncate(400)}");
+                if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native LinkedIn publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             // Response header x-restli-id holds the created post id.
@@ -284,6 +370,18 @@ public class LinkedInPublisher : ICrossPlatformPublisher
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "LinkedIn publish threw for post {PostId}", request.PostId);
+            if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
+            {
+                var fallbackResult = await PublishViaZernioAsync(request);
+                if (fallbackResult.Success)
+                {
+                    return fallbackResult;
+                }
+
+                fallbackResult.Error = $"Native LinkedIn publish failed: {ex.Message} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                return fallbackResult;
+            }
+
             return CrossPlatformErrors.Failed(Platform, $"LinkedIn publish failed: {ex.Message}");
         }
     }
@@ -362,6 +460,19 @@ public class LinkedInPublisher : ICrossPlatformPublisher
             .Trim()
             .ToLowerInvariant();
         return provider == "zernio";
+    }
+
+    private bool UseZernioFallback()
+    {
+        var provider = (_configuration["Social:LinkedIn:Provider"] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        if (provider is "fallback" or "native-fallback" or "zernio-fallback")
+        {
+            return true;
+        }
+
+        return _configuration.GetValue("Social:Zernio:FallbackEnabled", false);
     }
 
     private static string? ReadJsonString(JsonElement element, string propertyName)

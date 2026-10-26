@@ -521,6 +521,7 @@ public class PostService : IPostService
                     PostId = post.Id,
                     Message = post.Content ?? string.Empty,
                     MediaUrl = string.IsNullOrWhiteSpace(mediaUrl) ? null : mediaUrl,
+                    MediaUrls = ResolveMediaUrls(post)?.ToList(),
                     MediaType = mediaType
                     // Platforms omitted -> fans out to every configured platform.
                 });

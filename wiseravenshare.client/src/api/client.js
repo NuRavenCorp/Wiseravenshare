@@ -631,6 +631,11 @@ export const apiClient = {
         method: "GET",
       });
     },
+    join(streamId) {
+      return requestJson(`/api/live/${encodeURIComponent(streamId)}/join`, {
+        method: "POST",
+      });
+    },
   },
   ravensightMedia: {
     backup() {

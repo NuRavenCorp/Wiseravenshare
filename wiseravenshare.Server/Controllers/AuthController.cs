@@ -2680,7 +2680,10 @@ public class AuthController : ControllerBase
                     Email = fallbackEmail,
                     AccessToken = tokenPayload.AccessToken,
                     RefreshToken = tokenPayload.RefreshToken,
-                    TokenExpiresAt = tokenPayload.TokenExpiresAt
+                    TokenExpiresAt = tokenPayload.TokenExpiresAt,
+                    // DestinationId for YouTube = the UC-prefixed channel ID needed for the Data API.
+                    DestinationId = !string.IsNullOrWhiteSpace(channelId) ? channelId : string.Empty,
+                    DestinationName = !string.IsNullOrWhiteSpace(channelTitle) ? channelTitle : resolvedName
                 };
             }
         }
@@ -2781,13 +2784,44 @@ public class AuthController : ControllerBase
         using var profileJson = await JsonDocument.ParseAsync(profileStream);
         var root = profileJson.RootElement;
 
+        // Fetch the user's managed Pages to determine the publish destination.
+        string destinationId = string.Empty;
+        string destinationToken = string.Empty;
+        string destinationName = string.Empty;
+        try
+        {
+            var pagesUrl = $"https://graph.facebook.com/v26.0/me/accounts?fields=id,name,access_token&access_token={Uri.EscapeDataString(accessToken)}";
+            using var pagesResponse = await httpClient.GetAsync(pagesUrl);
+            if (pagesResponse.IsSuccessStatusCode)
+            {
+                await using var pagesStream = await pagesResponse.Content.ReadAsStreamAsync();
+                using var pagesJson = await JsonDocument.ParseAsync(pagesStream);
+                if (pagesJson.RootElement.TryGetProperty("data", out var pagesDataNode)
+                    && pagesDataNode.ValueKind == JsonValueKind.Array
+                    && pagesDataNode.GetArrayLength() > 0)
+                {
+                    var firstPage = pagesDataNode[0];
+                    destinationId = firstPage.TryGetProperty("id", out var pidNode) ? pidNode.GetString() ?? string.Empty : string.Empty;
+                    destinationToken = firstPage.TryGetProperty("access_token", out var ptNode) ? ptNode.GetString() ?? string.Empty : string.Empty;
+                    destinationName = firstPage.TryGetProperty("name", out var pnNode) ? pnNode.GetString() ?? string.Empty : string.Empty;
+                }
+            }
+        }
+        catch
+        {
+            // Non-fatal: user may not have pages. Publish will fall back to user token.
+        }
+
         return new SocialProfile
         {
             ProviderUserId = root.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty,
             Name = root.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty,
             Email = root.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? string.Empty : string.Empty,
             AccessToken = accessToken,
-            TokenExpiresAt = tokenExpiresAt
+            TokenExpiresAt = tokenExpiresAt,
+            DestinationId = destinationId,
+            DestinationToken = destinationToken,
+            DestinationName = destinationName
         };
     }
 
@@ -3046,7 +3080,10 @@ public class AuthController : ControllerBase
             Designation = designation,
             AccessToken = profile.AccessToken,
             RefreshToken = profile.RefreshToken,
-            TokenExpiresAt = profile.TokenExpiresAt
+            TokenExpiresAt = profile.TokenExpiresAt,
+            DestinationId = profile.DestinationId,
+            DestinationToken = profile.DestinationToken,
+            DestinationName = profile.DestinationName
         };
     }
 
@@ -3821,6 +3858,12 @@ LIMIT 1;";
         public string AccessToken { get; init; } = string.Empty;
         public string RefreshToken { get; init; } = string.Empty;
         public DateTimeOffset? TokenExpiresAt { get; init; }
+        /// <summary>Platform-specific publish destination ID (Facebook Page ID, YouTube Channel ID, TikTok display username).</summary>
+        public string DestinationId { get; init; } = string.Empty;
+        /// <summary>Page-level access token for publish destinations that require it (Facebook pages).</summary>
+        public string DestinationToken { get; init; } = string.Empty;
+        /// <summary>Human-readable name of the publish destination (page name, channel title).</summary>
+        public string DestinationName { get; init; } = string.Empty;
     }
 
     private sealed class PodcastControlState

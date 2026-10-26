@@ -362,6 +362,16 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     }
   };
 
+  const handlePlayAll = () => {
+    if (tracks.length === 0) return;
+    setCurrentIdx(0);
+    setPlaying(false);
+    const audio = playerRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-8">
@@ -534,15 +544,20 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
         ) : (
           <>
             <div className="flex items-center justify-between">
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.size === tracks.length}
-                  onChange={toggleSelectAll}
-                  className="accent-primary"
-                />
-                Select All
-              </label>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handlePlayAll} disabled={tracks.length === 0}>
+                  Play all
+                </Button>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === tracks.length}
+                    onChange={toggleSelectAll}
+                    className="accent-primary"
+                  />
+                  Select All
+                </label>
+              </div>
               {selectedIds.size > 0 && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-foreground">{selectedIds.size} selected</span>

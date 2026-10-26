@@ -36,6 +36,9 @@ public class CrossPlatformPublishService : ICrossPlatformPublishService
 
     public async Task<CrossPlatformPublishResponse> PublishAsync(Guid userId, CrossPlatformPublishRequest request)
     {
+        // Ensure the per-user identity is carried through for token resolution.
+        if (request.UserId == Guid.Empty) request.UserId = userId;
+
         var response = new CrossPlatformPublishResponse { PostId = request.PostId };
         var requested = (request.Platforms is { Count: > 0 })
             ? request.Platforms

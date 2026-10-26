@@ -75,6 +75,12 @@ public sealed class SocialFeedConnection
     public string AccessToken { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
     public DateTimeOffset? TokenExpiresAt { get; set; }
+    /// <summary>Platform-specific publish destination: Facebook Page ID, YouTube Channel ID, TikTok username.</summary>
+    public string DestinationId { get; set; } = string.Empty;
+    /// <summary>Per-destination access token (required for Facebook pages, which use page-level tokens distinct from the user token).</summary>
+    public string DestinationToken { get; set; } = string.Empty;
+    /// <summary>Human-readable name for the publish destination (e.g., Facebook page name, YouTube channel title).</summary>
+    public string DestinationName { get; set; } = string.Empty;
 }
 
 public sealed class UserResponse

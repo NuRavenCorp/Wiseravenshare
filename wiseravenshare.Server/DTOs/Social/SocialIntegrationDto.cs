@@ -58,6 +58,8 @@ public class PublishSocialContentRequest
     public string? FacebookPageId { get; set; }
     public string? TikTokUsername { get; set; }
     public string? YouTubeChannelId { get; set; }
+    /// <summary>Per-user Facebook page access token (overrides server config when the user has connected Facebook via OAuth).</summary>
+    public string? FacebookPageAccessToken { get; set; }
 }
 
 public class SocialPublishResultDto

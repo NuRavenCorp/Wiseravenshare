@@ -28,6 +28,9 @@ public class CrossPlatformPublishRequest
     [Required]
     public Guid PostId { get; set; }
 
+    /// <summary>The authenticated user making the request. Required for per-user OAuth token resolution.</summary>
+    public Guid UserId { get; set; }
+
     [Required]
     [MaxLength(5000)]
     public string Message { get; set; } = string.Empty;
@@ -36,9 +39,24 @@ public class CrossPlatformPublishRequest
     [MaxLength(2048)]
     public string? MediaUrl { get; set; }
 
+    /// <summary>Optional multiple media URLs (e.g., photo carousel payloads for providers that support them).</summary>
+    public List<string>? MediaUrls { get; set; }
+
     /// <summary>auto | text | photo | video</summary>
     [MaxLength(20)]
     public string MediaType { get; set; } = SocialMediaType.Auto;
+
+    /// <summary>Optional scheduled UTC timestamp (ISO-8601) for providers that support scheduling.</summary>
+    [MaxLength(64)]
+    public string? ScheduleAtUtc { get; set; }
+
+    /// <summary>Optional per-request override for provider draft mode.</summary>
+    public bool? SaveAsDraft { get; set; }
+
+    /// <summary>Optional per-request interaction controls.</summary>
+    public bool? DisableComment { get; set; }
+    public bool? DisableDuet { get; set; }
+    public bool? DisableStitch { get; set; }
 
     /// <summary>Platforms to publish to. Empty/omitted means all configured platforms.</summary>
     public List<string>? Platforms { get; set; }

@@ -941,6 +941,33 @@ public sealed class FunctionCompatController : ControllerBase
             return BadRequest(new { error = "content is required" });
         }
 
+        // Resolve per-user social destinations from UserStore as defaults when not supplied by client.
+        var userStore = _serviceProvider.GetRequiredService<UserStore>();
+        var userId = ResolveUserId();
+        SocialFeedSettings? userFeeds = null;
+        if (userId != Guid.Empty && userStore.TryGetById(userId.ToString(), out var userRecord) && userRecord is not null)
+        {
+            userFeeds = userRecord.SocialFeeds;
+        }
+
+        var resolvedFbPageId = !string.IsNullOrWhiteSpace(request.FacebookPageId)
+            ? request.FacebookPageId
+            : (!string.IsNullOrWhiteSpace(userFeeds?.Facebook?.DestinationId) ? userFeeds.Facebook.DestinationId : null);
+
+        var resolvedFbPageToken = !string.IsNullOrWhiteSpace(userFeeds?.Facebook?.DestinationToken)
+            ? userFeeds.Facebook.DestinationToken
+            : null;
+
+        var resolvedTikTokUsername = !string.IsNullOrWhiteSpace(request.TikTokUsername)
+            ? request.TikTokUsername
+            : (!string.IsNullOrWhiteSpace(userFeeds?.TikTok?.DestinationId) ? userFeeds.TikTok.DestinationId
+               : (!string.IsNullOrWhiteSpace(userFeeds?.TikTok?.Username) ? userFeeds.TikTok.Username : null));
+
+        var resolvedYtChannelId = !string.IsNullOrWhiteSpace(request.YouTubeChannelId)
+            ? request.YouTubeChannelId
+            : (!string.IsNullOrWhiteSpace(userFeeds?.YouTube?.DestinationId) ? userFeeds.YouTube.DestinationId
+               : (!string.IsNullOrWhiteSpace(userFeeds?.YouTube?.Username) ? userFeeds.YouTube.Username : null));
+
         var publishRequest = new PublishSocialContentRequest
         {
             Message = request.Content.Trim(),
@@ -953,15 +980,16 @@ public sealed class FunctionCompatController : ControllerBase
             MediaType = request.InstagramMediaType?.Equals("video", StringComparison.OrdinalIgnoreCase) == true
                 ? SocialMediaType.Video
                 : SocialMediaType.Photo,
-            PublishToFacebook = !string.IsNullOrWhiteSpace(request.FacebookPageId),
+            PublishToFacebook = !string.IsNullOrWhiteSpace(resolvedFbPageId),
             PublishToInstagram = !string.IsNullOrWhiteSpace(request.InstagramMediaUrl),
             PublishToTikTok = request.PublishToTikTok,
             PublishToYouTube = request.PublishToYouTube,
             PublishToWiseRavenStream = false,
             PublishToBluesky = false,
-            FacebookPageId = request.FacebookPageId,
-            TikTokUsername = request.TikTokUsername,
-            YouTubeChannelId = request.YouTubeChannelId
+            FacebookPageId = resolvedFbPageId,
+            FacebookPageAccessToken = resolvedFbPageToken,
+            TikTokUsername = resolvedTikTokUsername,
+            YouTubeChannelId = resolvedYtChannelId
         };
 
         var requestedPlatforms = ResolveRequestedPlatforms(publishRequest);
@@ -1025,36 +1053,102 @@ public sealed class FunctionCompatController : ControllerBase
         var instagramStatus = statuses.FirstOrDefault(x => x.Platform.Equals("instagram", StringComparison.OrdinalIgnoreCase));
         var tiktokStatus = statuses.FirstOrDefault(x => x.Platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase));
         var youtubeStatus = statuses.FirstOrDefault(x => x.Platform.Equals("youtube", StringComparison.OrdinalIgnoreCase));
-        var facebookPages = ResolveFacebookPagesFromConfiguration();
-        var tiktokAccounts = ResolveTikTokAccountsFromConfiguration();
-        var youtubeChannels = ResolveYouTubeChannelsFromConfiguration();
+
+        // Load per-user social connections from UserStore (populated at OAuth connect time).
+        var userStore = _serviceProvider.GetRequiredService<UserStore>();
+        var userId = ResolveUserId();
+        SocialFeedSettings? userFeeds = null;
+        if (userId != Guid.Empty && userStore.TryGetById(userId.ToString(), out var userRecord) && userRecord is not null)
+        {
+            userFeeds = userRecord.SocialFeeds;
+        }
+
+        var userFb = userFeeds?.Facebook;
+        var userIg = userFeeds?.Instagram;
+        var userTt = userFeeds?.TikTok;
+        var userYt = userFeeds?.YouTube;
+
+        // Build per-user Facebook page list. Use stored page from OAuth if available; fall back to config-level pages.
+        var facebookPages = new List<object>();
+        string? selectedFbPageId = null;
+        if (!string.IsNullOrWhiteSpace(userFb?.DestinationId))
+        {
+            facebookPages.Add(new { id = userFb.DestinationId, name = string.IsNullOrWhiteSpace(userFb.DestinationName) ? "My Facebook Page" : userFb.DestinationName });
+            selectedFbPageId = userFb.DestinationId;
+        }
+        else
+        {
+            var configPages = ResolveFacebookPagesFromConfiguration();
+            facebookPages.AddRange(configPages.Select(page => (object)new { id = page.Id, name = page.Name }));
+            selectedFbPageId = configPages.FirstOrDefault(page => page.IsDefault)?.Id ?? configPages.FirstOrDefault()?.Id;
+        }
+
+        // TikTok: prefer stored display username over open_id.
+        var tiktokAccounts = new List<object>();
+        string? selectedTikTokUsername = null;
+        if (!string.IsNullOrWhiteSpace(userTt?.DestinationId))
+        {
+            tiktokAccounts.Add(new { username = userTt.DestinationId, label = string.IsNullOrWhiteSpace(userTt.DestinationName) ? userTt.DestinationId : userTt.DestinationName });
+            selectedTikTokUsername = userTt.DestinationId;
+        }
+        else if (!string.IsNullOrWhiteSpace(userTt?.Username))
+        {
+            tiktokAccounts.Add(new { username = userTt.Username, label = userTt.Username });
+            selectedTikTokUsername = userTt.Username;
+        }
+        else
+        {
+            var configAccounts = ResolveTikTokAccountsFromConfiguration();
+            tiktokAccounts.AddRange(configAccounts.Select(a => (object)new { username = a.Username, label = a.Label }));
+            selectedTikTokUsername = configAccounts.FirstOrDefault(a => a.IsDefault)?.Username ?? configAccounts.FirstOrDefault()?.Username;
+        }
+
+        // YouTube: DestinationId = UC-prefixed channel ID from OAuth.
+        var youtubeChannels = new List<object>();
+        string? selectedYtChannelId = null;
+        if (!string.IsNullOrWhiteSpace(userYt?.DestinationId))
+        {
+            youtubeChannels.Add(new { id = userYt.DestinationId, name = string.IsNullOrWhiteSpace(userYt.DestinationName) ? "My YouTube Channel" : userYt.DestinationName });
+            selectedYtChannelId = userYt.DestinationId;
+        }
+        else if (!string.IsNullOrWhiteSpace(userYt?.Username))
+        {
+            youtubeChannels.Add(new { id = userYt.Username, name = userYt.Username });
+            selectedYtChannelId = userYt.Username;
+        }
+        else
+        {
+            var configChannels = ResolveYouTubeChannelsFromConfiguration();
+            youtubeChannels.AddRange(configChannels.Select(c => (object)new { id = c.Id, name = c.Name }));
+            selectedYtChannelId = configChannels.FirstOrDefault(c => c.IsDefault)?.Id ?? configChannels.FirstOrDefault()?.Id;
+        }
 
         return Ok(new
         {
             facebook = new
             {
-                connected = facebookStatus?.PublishConfigured == true,
-                pages = facebookPages.Select(page => new { id = page.Id, name = page.Name }).ToList(),
-                selectedPageId = facebookPages.FirstOrDefault(page => page.IsDefault)?.Id ?? facebookPages.FirstOrDefault()?.Id,
+                connected = userFb?.Enabled == true || facebookStatus?.PublishConfigured == true,
+                pages = facebookPages,
+                selectedPageId = selectedFbPageId,
                 status = facebookStatus
             },
             instagram = new
             {
-                connected = instagramStatus?.PublishConfigured == true,
+                connected = userIg?.Enabled == true || instagramStatus?.PublishConfigured == true,
                 status = instagramStatus
             },
             tiktok = new
             {
-                connected = tiktokStatus?.PublishConfigured == true,
-                accounts = tiktokAccounts.Select(account => new { username = account.Username, label = account.Label }).ToList(),
-                selectedUsername = tiktokAccounts.FirstOrDefault(account => account.IsDefault)?.Username ?? tiktokAccounts.FirstOrDefault()?.Username,
+                connected = userTt?.Enabled == true || tiktokStatus?.PublishConfigured == true,
+                accounts = tiktokAccounts,
+                selectedUsername = selectedTikTokUsername,
                 status = tiktokStatus
             },
             youtube = new
             {
-                connected = youtubeStatus?.PublishConfigured == true,
-                channels = youtubeChannels.Select(channel => new { id = channel.Id, name = channel.Name }).ToList(),
-                selectedChannelId = youtubeChannels.FirstOrDefault(channel => channel.IsDefault)?.Id ?? youtubeChannels.FirstOrDefault()?.Id,
+                connected = userYt?.Enabled == true || youtubeStatus?.PublishConfigured == true,
+                channels = youtubeChannels,
+                selectedChannelId = selectedYtChannelId,
                 status = youtubeStatus
             },
             providers = statuses

@@ -1,9 +1,10 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Wiseravenshare.Server.Hubs;
 
-[AllowAnonymous]
+[Authorize]
 public sealed class LiveChatHub : Hub
 {
     public async Task JoinRoom(string roomId)
@@ -18,10 +19,10 @@ public sealed class LiveChatHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupName(normalizedRoomId));
     }
 
-    public async Task SendMessage(string roomId, string user, string message)
+    public async Task SendMessage(string roomId, string message)
     {
         var normalizedRoomId = NormalizeRoomId(roomId);
-        var sender = string.IsNullOrWhiteSpace(user) ? "Guest" : user.Trim();
+        var sender = ResolveSenderName();
         var body = string.IsNullOrWhiteSpace(message)
             ? throw new HubException("Message is required.")
             : message.Trim();
@@ -33,6 +34,22 @@ public sealed class LiveChatHub : Hub
 
         await Clients.Group(GroupName(normalizedRoomId))
             .SendAsync("ReceiveMessage", sender, body, DateTimeOffset.UtcNow);
+    }
+
+    private string ResolveSenderName()
+    {
+        var displayName = Context.User?.FindFirstValue("name")
+            ?? Context.User?.FindFirstValue(ClaimTypes.Name)
+            ?? Context.User?.FindFirstValue(ClaimTypes.Email)
+            ?? Context.User?.FindFirstValue("email")
+            ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            return displayName.Trim();
+        }
+
+        return "Member";
     }
 
     private static string NormalizeRoomId(string roomId)

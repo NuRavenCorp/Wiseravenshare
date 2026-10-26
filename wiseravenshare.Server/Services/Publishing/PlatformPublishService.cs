@@ -320,6 +320,7 @@ public class PlatformPublishService : IPlatformPublishService
             PostId = content.Id,
             Message = Truncate(message, bodyLimit),
             MediaUrl = content.MediaUrls?.FirstOrDefault(),
+            MediaUrls = content.MediaUrls?.ToList(),
             MediaType = InferMediaType(content.Type),
             Platforms = new List<string> { platformKey }
         };

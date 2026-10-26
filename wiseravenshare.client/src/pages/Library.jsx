@@ -531,6 +531,9 @@ export default function Library() {
             <select aria-label="Sort library" value={sort} onChange={(e) => setSort(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
               <option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name-asc">Name A–Z</option><option value="name-desc">Name Z–A</option>
             </select>
+            <Button size="sm" variant="outline" onClick={playAll} disabled={!items.some((item) => item.asset_type === "music")}>
+              <Play className="h-4 w-4" /> Play all
+            </Button>
             <Button size="sm" variant={view === "feed" ? "default" : "outline"} onClick={() => { setFilter("video"); setView(view === "feed" ? "grid" : "feed"); }}><Clapperboard className="h-4 w-4" /> Video Feed</Button>
           </div>
         </div>
