@@ -16,6 +16,8 @@ export default function CrossPostComposer({ accounts }) {
   const [tiktokUsername, setTiktokUsername] = useState("");
   const [postToYouTube, setPostToYouTube] = useState(false);
   const [youtubeChannelId, setYouTubeChannelId] = useState("");
+  const [youtubeMediaType, setYoutubeMediaType] = useState("video");
+  const [youtubePhotoUrl, setYoutubePhotoUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [jobId, setJobId] = useState("");
@@ -85,7 +87,13 @@ export default function CrossPostComposer({ accounts }) {
       }
       payload.publishToTikTok = Boolean(postToTikTok);
       if (tiktokUsername) payload.tikTokUsername = tiktokUsername;
-      if (postToYouTube) payload.publishToYouTube = true;
+      if (postToYouTube) {
+        payload.publishToYouTube = true;
+        if (youtubeMediaType === "photo" && youtubePhotoUrl) {
+          payload.youTubePhotoUrl = youtubePhotoUrl;
+          payload.youTubeMediaType = "photo";
+        }
+      }
       if (youtubeChannelId) payload.youTubeChannelId = youtubeChannelId;
       payload.queue = true;
       const res = await apiClient.functions.invoke("SocialCrossPost", payload);
@@ -245,9 +253,49 @@ export default function CrossPostComposer({ accounts }) {
                 <Youtube className="w-4 h-4 text-primary" /> Post to YouTube
               </span>
             </label>
-            <p className="text-xs text-muted-foreground mt-2 ml-7">
-              Publishes a text update to your connected YouTube channel.
-            </p>
+            {postToYouTube && (
+              <>
+                <div className="flex gap-2 ml-7">
+                  <button
+                    onClick={() => setYoutubeMediaType("video")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                      youtubeMediaType === "video"
+                        ? "bg-primary/15 text-primary border border-primary/30"
+                        : "border border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Video className="w-3.5 h-3.5" /> Video
+                  </button>
+                  <button
+                    onClick={() => setYoutubeMediaType("photo")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                      youtubeMediaType === "photo"
+                        ? "bg-primary/15 text-primary border border-primary/30"
+                        : "border border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Image className="w-3.5 h-3.5" /> Photo (Community Post)
+                  </button>
+                </div>
+                {youtubeMediaType === "photo" ? (
+                  <>
+                    <p className="text-xs text-amber-500 ml-7">
+                      ⚠ YouTube does not support photo uploads via API. Your photo will be posted to your channel's <strong>Community tab</strong> as a text post with a link to the image. Requires a channel with 500+ subscribers and an OAuth token configured on the server.
+                    </p>
+                    <Input
+                      value={youtubePhotoUrl}
+                      onChange={(e) => setYoutubePhotoUrl(e.target.value)}
+                      placeholder="https://example.com/photo.jpg"
+                      className="ml-7"
+                    />
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground ml-7">
+                    Publishes a video to your connected YouTube channel. Provide a public video URL below.
+                  </p>
+                )}
+              </>
+            )}
             {youtubeChannels.length > 0 && (
               <select
                 value={youtubeChannelId}

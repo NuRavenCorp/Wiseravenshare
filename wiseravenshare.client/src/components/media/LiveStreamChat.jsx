@@ -93,7 +93,6 @@ export default function LiveStreamChat({ roomId, username }) {
       await connection.invoke(
         "SendMessage",
         normalizedRoomId,
-        String(username || "Guest"),
         trimmed,
       );
       setInput("");

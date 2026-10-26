@@ -7,7 +7,7 @@ import LiveFeed from "@/components/media/LiveFeed";
 import { Radio, Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function LiveStreamPanel() {
+export default function LiveStreamPanel({ initialStreamId = "" }) {
   const { user } = useAuth();
   const [mode, setMode] = useState("list");
   const [streams, setStreams] = useState([]);
@@ -35,6 +35,19 @@ export default function LiveStreamPanel() {
       .map((value) => normalizeId(value))
       .filter(Boolean);
     return ownerIds.includes(currentUserId);
+  };
+
+  const joinStream = async (stream) => {
+    const streamId = getStreamId(stream);
+    if (!streamId) return;
+    try {
+      setPanelError("");
+      await apiClient.live.join(streamId);
+      setSelectedStream(stream);
+      setMode("view");
+    } catch (joinError) {
+      setPanelError(joinError?.message || "Could not join stream.");
+    }
   };
 
   const fetchStreams = async () => {
@@ -88,6 +101,14 @@ export default function LiveStreamPanel() {
     if (!endedStreams.length) return;
     void refreshEndedExpiry(endedStreams);
   }, [endedStreams, user?.id]);
+
+  useEffect(() => {
+    const normalizedTargetId = getStreamId(initialStreamId);
+    if (!normalizedTargetId || mode !== "list" || !streams.length) return;
+    const targetStream = streams.find((stream) => getStreamId(stream) === normalizedTargetId);
+    if (!targetStream) return;
+    void joinStream(targetStream);
+  }, [initialStreamId, mode, streams]);
 
   const formatRemaining = (secondsRemaining) => {
     if (typeof secondsRemaining !== "number") return "No expiry set";
@@ -246,7 +267,7 @@ export default function LiveStreamPanel() {
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-card p-4">
-        <LiveFeed />
+        <LiveFeed onJoin={joinStream} />
       </div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -307,6 +328,14 @@ export default function LiveStreamPanel() {
                   LIVE
                 </span>
               </button>
+              {!isOwnedByCurrentUser(s) && (
+                <Button
+                  size="sm"
+                  onClick={() => joinStream(s)}
+                >
+                  Join
+                </Button>
+              )}
               {isOwnedByCurrentUser(s) && (
                 <Button
                   size="sm"

@@ -43,10 +43,16 @@ public class FacebookPublisher : ICrossPlatformPublisher
     {
         if (UseZernio())
         {
-            return !string.IsNullOrWhiteSpace(GetZernioApiKey());
+            return CanUseZernio();
         }
 
-        return !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
+        var nativeConfigured = !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
+        if (UseZernioFallback())
+        {
+            return nativeConfigured || CanUseZernio();
+        }
+
+        return nativeConfigured;
     }
 
     public virtual async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
@@ -63,7 +69,7 @@ public class FacebookPublisher : ICrossPlatformPublisher
 
         try
         {
-            return request.MediaType switch
+            var nativeResult = request.MediaType switch
             {
                 SocialMediaType.Video when !string.IsNullOrWhiteSpace(request.MediaUrl)
                     => await PostFormAsync($"{GraphBase}/{PageId}/videos", new Dictionary<string, string>
@@ -85,10 +91,36 @@ public class FacebookPublisher : ICrossPlatformPublisher
                         ["access_token"] = AccessToken
                     }, request.MediaUrl))
             };
+
+            if (!nativeResult.Success && UseZernioFallback() && CanUseZernio())
+            {
+                var fallbackResult = await PublishViaZernioAsync(request);
+                if (fallbackResult.Success)
+                {
+                    return fallbackResult;
+                }
+
+                fallbackResult.Error = $"Native {Platform} publish failed: {nativeResult.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                return fallbackResult;
+            }
+
+            return nativeResult;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "{Platform} publish threw for post {PostId}", Platform, request.PostId);
+            if (UseZernioFallback() && CanUseZernio())
+            {
+                var fallbackResult = await PublishViaZernioAsync(request);
+                if (fallbackResult.Success)
+                {
+                    return fallbackResult;
+                }
+
+                fallbackResult.Error = $"Native {Platform} publish failed: {ex.Message} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                return fallbackResult;
+            }
+
             return CrossPlatformErrors.Failed(Platform, $"{Platform} publish failed: {ex.Message}");
         }
     }
@@ -233,6 +265,19 @@ public class FacebookPublisher : ICrossPlatformPublisher
         return provider == "zernio";
     }
 
+    protected bool UseZernioFallback()
+    {
+        var provider = (_configuration[ProviderKey] ?? "native")
+            .Trim()
+            .ToLowerInvariant();
+        if (provider is "fallback" or "native-fallback" or "zernio-fallback")
+        {
+            return true;
+        }
+
+        return _configuration.GetValue("Social:Zernio:FallbackEnabled", false);
+    }
+
     protected static string? ReadJsonString(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var property))
@@ -254,6 +299,8 @@ public class FacebookPublisher : ICrossPlatformPublisher
         _configuration["Social:Zernio:ApiKey"]
         ?? _configuration["Social_Zernio_APIKey"]
         ?? _configuration["ZERNIO_API_KEY"];
+
+    protected bool CanUseZernio() => !string.IsNullOrWhiteSpace(GetZernioApiKey());
 }
 
 /// <summary>
@@ -281,6 +328,11 @@ public class InstagramPublisher : FacebookPublisher
 
     public override async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
+        if (UseZernio())
+        {
+            return await PublishViaZernioAsync(request);
+        }
+
         if (!IsConfigured())
         {
             return CrossPlatformErrors.NotConfigured(Platform, $"{IdKey} and {TokenKey}");
@@ -288,6 +340,11 @@ public class InstagramPublisher : FacebookPublisher
 
         if (string.IsNullOrWhiteSpace(request.MediaUrl) || request.MediaType == SocialMediaType.Text)
         {
+            if (UseZernioFallback() && CanUseZernio())
+            {
+                return await PublishViaZernioAsync(request);
+            }
+
             return new CrossPlatformPublishResultDto
             {
                 Platform = Platform,
@@ -320,7 +377,20 @@ public class InstagramPublisher : FacebookPublisher
             {
                 _logger.LogWarning("Instagram container creation failed ({Status}): {Body}",
                     (int)containerResponse.StatusCode, containerBody);
-                return CrossPlatformErrors.Failed(Platform, $"Instagram container creation failed ({(int)containerResponse.StatusCode}): {TrimError(containerBody)}");
+                var nativeError = CrossPlatformErrors.Failed(Platform, $"Instagram container creation failed ({(int)containerResponse.StatusCode}): {TrimError(containerBody)}");
+                if (UseZernioFallback() && CanUseZernio())
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native Instagram publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             string? creationId;
@@ -331,7 +401,20 @@ public class InstagramPublisher : FacebookPublisher
 
             if (string.IsNullOrWhiteSpace(creationId))
             {
-                return CrossPlatformErrors.Failed(Platform, "Instagram did not return a media container id.");
+                var nativeError = CrossPlatformErrors.Failed(Platform, "Instagram did not return a media container id.");
+                if (UseZernioFallback() && CanUseZernio())
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native Instagram publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             // Step 2: publish the container.
@@ -346,7 +429,20 @@ public class InstagramPublisher : FacebookPublisher
 
             if (!publishResponse.IsSuccessStatusCode)
             {
-                return CrossPlatformErrors.Failed(Platform, $"Instagram publish failed ({(int)publishResponse.StatusCode}): {TrimError(publishBody)}");
+                var nativeError = CrossPlatformErrors.Failed(Platform, $"Instagram publish failed ({(int)publishResponse.StatusCode}): {TrimError(publishBody)}");
+                if (UseZernioFallback() && CanUseZernio())
+                {
+                    var fallbackResult = await PublishViaZernioAsync(request);
+                    if (fallbackResult.Success)
+                    {
+                        return fallbackResult;
+                    }
+
+                    fallbackResult.Error = $"Native Instagram publish failed: {nativeError.Error ?? "Unknown error"} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                    return fallbackResult;
+                }
+
+                return nativeError;
             }
 
             using var publishDoc = JsonDocument.Parse(publishBody);
@@ -363,6 +459,18 @@ public class InstagramPublisher : FacebookPublisher
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Instagram publish threw for post {PostId}", request.PostId);
+            if (UseZernioFallback() && CanUseZernio())
+            {
+                var fallbackResult = await PublishViaZernioAsync(request);
+                if (fallbackResult.Success)
+                {
+                    return fallbackResult;
+                }
+
+                fallbackResult.Error = $"Native Instagram publish failed: {ex.Message} | Zernio fallback failed: {fallbackResult.Error ?? "Unknown error"}";
+                return fallbackResult;
+            }
+
             return CrossPlatformErrors.Failed(Platform, $"Instagram publish failed: {ex.Message}");
         }
     }

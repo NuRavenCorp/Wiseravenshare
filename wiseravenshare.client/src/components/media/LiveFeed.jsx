@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { useLiveFeed } from "@/hooks/useLiveFeed";
 import "@/Styles/live-feed.css";
 
-export default function LiveFeed() {
+export default function LiveFeed({ onJoin }) {
   const { user } = useAuth();
   const viewerId = user?.id || null;
   const { feed, loading, error, refresh } = useLiveFeed(viewerId);
@@ -49,6 +49,15 @@ export default function LiveFeed() {
               <p>
                 {stream.category || "general"} · {stream.viewer_count || 0} watching
               </p>
+              {typeof onJoin === "function" && (
+                <button
+                  type="button"
+                  className="mt-2"
+                  onClick={() => onJoin(stream)}
+                >
+                  Join live
+                </button>
+              )}
             </div>
           </article>
         ))}

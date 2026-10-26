@@ -41,6 +41,7 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly IConfiguration _configuration;
     private readonly ILogger<SocialPlatformService> _logger;
     private readonly IYouTubeService _youTubeService;
+    private readonly IYouTubeTokenService _youTubeTokenService;
     private readonly IRssFeedService _rssFeedService;
     private readonly ITikTokAggregatorService _tikTokAggregatorService;
     private readonly IStreamTransferService _streamTransfer;
@@ -51,6 +52,7 @@ public class SocialPlatformService : ISocialPlatformService
         IConfiguration configuration,
         ILogger<SocialPlatformService> logger,
         IYouTubeService youTubeService,
+        IYouTubeTokenService youTubeTokenService,
         IRssFeedService rssFeedService,
         ITikTokAggregatorService tikTokAggregatorService,
         IStreamTransferService streamTransfer)
@@ -59,6 +61,7 @@ public class SocialPlatformService : ISocialPlatformService
         _configuration = configuration;
         _logger = logger;
         _youTubeService = youTubeService;
+        _youTubeTokenService = youTubeTokenService;
         _rssFeedService = rssFeedService;
         _tikTokAggregatorService = tikTokAggregatorService;
         _streamTransfer = streamTransfer;
@@ -336,10 +339,10 @@ public class SocialPlatformService : ISocialPlatformService
         {
             response.Results.Add(mediaType switch
             {
-                SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl, request.FacebookPageId),
-                SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl, request.FacebookPageId),
-                SocialMediaType.Music => await PublishMusicToFacebookAsync(message, request.LinkUrl, request.MusicUrl, request.FacebookPageId),
-                _ => await PublishToFacebookAsync(message, request.LinkUrl, null, request.FacebookPageId)
+                SocialMediaType.Video => await PublishToFacebookAsync(message, request.LinkUrl, request.VideoUrl, request.FacebookPageId, request.FacebookPageAccessToken),
+                SocialMediaType.Photo => await PublishPhotoToFacebookAsync(message, request.LinkUrl, request.PhotoUrl, request.FacebookPageId, request.FacebookPageAccessToken),
+                SocialMediaType.Music => await PublishMusicToFacebookAsync(message, request.LinkUrl, request.MusicUrl, request.FacebookPageId, request.FacebookPageAccessToken),
+                _ => await PublishToFacebookAsync(message, request.LinkUrl, null, request.FacebookPageId, request.FacebookPageAccessToken)
             });
         }
 
@@ -373,22 +376,25 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToInstagramAsync(message, request.VideoUrl, request.PhotoUrl, mediaType));
         }
 
-        if (request.PublishToYouTube && (mediaType == SocialMediaType.Photo || mediaType == SocialMediaType.Music))
+        if (request.PublishToYouTube && mediaType == SocialMediaType.Music)
         {
-            // YouTube accepts video only via API; music and photos should go to Facebook.
-            var mediaName = mediaType == SocialMediaType.Music ? "music" : "photo";
+            // Music-only posts are not supported on YouTube or YouTube Community.
             response.Results.Add(new SocialPublishResultDto
             {
                 Platform = "youtube",
                 Success = false,
-                Error = $"YouTube does not support {mediaName} posts via API. Share to Facebook instead."
+                Error = "YouTube does not support music-only posts via API. Share as a video instead."
             });
         }
         else if (request.PublishToYouTube)
         {
+            // Photo posts are routed to the YouTube Community Post alternative inside PublishToYouTubeAsync.
             response.Results.Add(await PublishToYouTubeAsync(
+                userId,
                 message,
                 request.VideoUrl,
+                request.PhotoUrl,
+                mediaType,
                 request.YouTubeTitle,
                 request.YouTubeDescription));
         }
@@ -465,9 +471,9 @@ public class SocialPlatformService : ISocialPlatformService
         return SocialMediaType.Text;
     }
 
-    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl, string? videoUrl = null, string? requestedPageId = null)
+    private async Task<SocialPublishResultDto> PublishToFacebookAsync(string message, string? linkUrl, string? videoUrl = null, string? requestedPageId = null, string? userPageAccessToken = null)
     {
-        var destination = ResolveFacebookDestination(requestedPageId);
+        var destination = ResolveFacebookDestinationWithUserToken(requestedPageId, userPageAccessToken);
         if (destination is null)
         {
             return new SocialPublishResultDto
@@ -592,9 +598,9 @@ public class SocialPlatformService : ISocialPlatformService
         }
     }
 
-    private async Task<SocialPublishResultDto> PublishPhotoToFacebookAsync(string message, string? linkUrl, string? photoUrl, string? requestedPageId = null)
+    private async Task<SocialPublishResultDto> PublishPhotoToFacebookAsync(string message, string? linkUrl, string? photoUrl, string? requestedPageId = null, string? userPageAccessToken = null)
     {
-        var destination = ResolveFacebookDestination(requestedPageId);
+        var destination = ResolveFacebookDestinationWithUserToken(requestedPageId, userPageAccessToken);
         if (destination is null)
         {
             return new SocialPublishResultDto
@@ -670,9 +676,9 @@ public class SocialPlatformService : ISocialPlatformService
         }
     }
 
-    private async Task<SocialPublishResultDto> PublishMusicToFacebookAsync(string message, string? linkUrl, string? musicUrl, string? requestedPageId = null)
+    private async Task<SocialPublishResultDto> PublishMusicToFacebookAsync(string message, string? linkUrl, string? musicUrl, string? requestedPageId = null, string? userPageAccessToken = null)
     {
-        var destination = ResolveFacebookDestination(requestedPageId);
+        var destination = ResolveFacebookDestinationWithUserToken(requestedPageId, userPageAccessToken);
         if (destination is null)
         {
             return new SocialPublishResultDto
@@ -948,19 +954,19 @@ public class SocialPlatformService : ISocialPlatformService
     }
 
     private async Task<SocialPublishResultDto> PublishToYouTubeAsync(
+        Guid userId,
         string message,
         string? videoUrl,
+        string? photoUrl,
+        string? mediaType,
         string? youtubeTitle,
         string? youtubeDescription)
     {
-        if (string.IsNullOrWhiteSpace(videoUrl))
+        // Photo/text posts: route to YouTube Community Post via per-user OAuth token.
+        var isPhoto = string.Equals(mediaType, SocialMediaType.Photo, StringComparison.OrdinalIgnoreCase);
+        if (isPhoto || string.IsNullOrWhiteSpace(videoUrl))
         {
-            return new SocialPublishResultDto
-            {
-                Platform = "youtube",
-                Success = false,
-                Error = "YouTube publish requires a public videoUrl."
-            };
+            return await PublishToYouTubeCommunityAsync(userId, message, photoUrl ?? videoUrl);
         }
 
         try
@@ -993,6 +999,86 @@ public class SocialPlatformService : ISocialPlatformService
                 Platform = "youtube",
                 Success = false,
                 Error = ex.Message
+            };
+        }
+    }
+
+    /// <summary>
+    /// Alternative route for photo/text posts to YouTube Community tab.
+    /// Uses the per-user access token stored at YouTube connect time (with auto-refresh).
+    /// Falls back gracefully with a clear message prompting the user to connect their channel.
+    /// </summary>
+    private async Task<SocialPublishResultDto> PublishToYouTubeCommunityAsync(Guid userId, string message, string? mediaUrl)
+    {
+        // Resolve per-user token (auto-refreshed if expired) from the YouTube connection stored at OAuth time.
+        var userIdStr = userId != Guid.Empty ? userId.ToString() : null;
+        var accessToken = userIdStr is not null
+            ? await _youTubeTokenService.GetValidAccessTokenAsync(userIdStr)
+            : null;
+
+        // Fall back to global config token for backward-compat / service accounts.
+        if (string.IsNullOrWhiteSpace(accessToken))
+            accessToken = _configuration["Social:YouTube:OAuthAccessToken"];
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = false,
+                Error = "YouTube photo posts require your channel to be connected. " +
+                        "Go to Social Hub → Connect → YouTube and grant posting permissions."
+            };
+        }
+
+        var text = string.IsNullOrWhiteSpace(mediaUrl)
+            ? message
+            : $"{message}\n\n📸 {mediaUrl}";
+        if (text.Length > 5000) text = text[..5000];
+
+        try
+        {
+            using var httpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                "https://www.googleapis.com/youtube/v3/communityPosts?part=snippet");
+            httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            httpRequest.Content = System.Net.Http.Json.JsonContent.Create(new
+            {
+                snippet = new { textOriginalContent = text, type = "text" }
+            });
+
+            using var response = await _httpClient.SendAsync(httpRequest);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YouTube Community Post failed ({Status}): {Body}", (int)response.StatusCode, body);
+                return new SocialPublishResultDto
+                {
+                    Platform = "youtube",
+                    Success = false,
+                    Error = $"YouTube Community Post failed ({(int)response.StatusCode}): {(body.Length > 300 ? body[..300] : body)}"
+                };
+            }
+
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            var postId = document.RootElement.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = true,
+                ExternalPostUrl = string.IsNullOrWhiteSpace(postId) ? null : $"https://www.youtube.com/post/{postId}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "YouTube Community Post threw.");
+            return new SocialPublishResultDto
+            {
+                Platform = "youtube",
+                Success = false,
+                Error = $"YouTube Community Post error: {ex.Message}"
             };
         }
     }
@@ -1136,6 +1222,17 @@ public class SocialPlatformService : ISocialPlatformService
 
         return pages.FirstOrDefault(page => page.IsDefault)
             ?? pages.FirstOrDefault();
+    }
+
+    private FacebookPageDestination? ResolveFacebookDestinationWithUserToken(string? requestedPageId, string? userPageAccessToken)
+    {
+        // If caller supplies a per-user page token, use it directly without requiring a config entry.
+        if (!string.IsNullOrWhiteSpace(requestedPageId) && !string.IsNullOrWhiteSpace(userPageAccessToken))
+        {
+            return new FacebookPageDestination(requestedPageId.Trim(), "User Page", userPageAccessToken.Trim(), true);
+        }
+
+        return ResolveFacebookDestination(requestedPageId);
     }
 
     private IReadOnlyList<FacebookPageDestination> ResolveFacebookDestinations()

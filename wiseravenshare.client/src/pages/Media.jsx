@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import Navbar from "@/components/landing/Navbar";
 import VideoPlayer from "@/components/media/VideoPlayer";
 import VideoLibrary from "@/components/media/VideoLibrary";
@@ -28,6 +29,8 @@ const tabs = [
 ];
 
 export default function Media() {
+  const [searchParams] = useSearchParams();
+  const streamIdFromQuery = String(searchParams.get("streamId") || "").trim();
   const [tab, setTab] = useState("video");
   const [tracks, setTracks] = useState([]);
   const [tracksLoading, setTracksLoading] = useState(false);
@@ -53,6 +56,13 @@ export default function Media() {
       return next;
     });
   }, [tracks]);
+
+  useEffect(() => {
+    const queryTab = String(searchParams.get("tab") || "").trim().toLowerCase();
+    if (queryTab && tabs.some((item) => item.id === queryTab)) {
+      setTab(queryTab);
+    }
+  }, [searchParams]);
 
   const playTrack = (track, allTracks) => {
     openMedia({
@@ -191,7 +201,7 @@ export default function Media() {
         )}
         {tab === "radio" && <FMRadioPage />}
         {tab === "karaoke" && <KaraokeExtractor />}
-        {tab === "live" && <LiveStreamPanel />}
+        {tab === "live" && <LiveStreamPanel initialStreamId={streamIdFromQuery} />}
         {tab === "rights" && <RightsManager />}
         {tab === "drm" && <DRMManager />}
         {tab === "cloud" && <CloudMediaPanel />}

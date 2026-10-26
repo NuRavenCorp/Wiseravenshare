@@ -1,8 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using AgoraIO.Media;
 using Npgsql;
 using System.Text.Json;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Hubs;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 
@@ -26,6 +31,8 @@ public sealed class LiveController : ControllerBase
     private readonly VideoLibraryStore _videoLibraryStore;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IMediaBlobSignatureService _signatureService;
+    private readonly AppDbContext _db;
+    private readonly IHubContext<NotificationHub> _notificationHub;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LiveController> _logger;
 
@@ -35,6 +42,8 @@ public sealed class LiveController : ControllerBase
         VideoLibraryStore videoLibraryStore,
         IBlobStorageService blobStorageService,
         IMediaBlobSignatureService signatureService,
+        AppDbContext db,
+        IHubContext<NotificationHub> notificationHub,
         IConfiguration configuration,
         ILogger<LiveController> logger)
     {
@@ -43,6 +52,8 @@ public sealed class LiveController : ControllerBase
         _videoLibraryStore = videoLibraryStore;
         _blobStorageService = blobStorageService;
         _signatureService = signatureService;
+        _db = db;
+        _notificationHub = notificationHub;
         _configuration = configuration;
         _logger = logger;
     }
@@ -333,7 +344,10 @@ public sealed class LiveController : ControllerBase
 
     [HttpPost("{streamId}/start")]
     [Authorize]
-    public IActionResult StartStream([FromRoute] string streamId, [FromBody] LiveStreamStartRequest? body = null)
+    public async Task<IActionResult> StartStream(
+        [FromRoute] string streamId,
+        [FromBody] LiveStreamStartRequest? body = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(streamId))
         {
@@ -348,6 +362,11 @@ public sealed class LiveController : ControllerBase
         var now = DateTime.UtcNow;
         var title = string.IsNullOrWhiteSpace(body?.title) ? "Untitled live" : body.title.Trim();
         var audioOnly = body?.is_audio_only ?? false;
+        var hadExisting = _liveStreamStateStore.TryGet(streamId, out var priorStream) && priorStream is not null;
+        var alreadyLive = hadExisting
+            && string.Equals(priorStream!.status, "live", StringComparison.OrdinalIgnoreCase)
+            && !priorStream.ended_at.HasValue
+            && priorStream.deleted_at is null;
         LiveStreamState? existing;
         try
         {
@@ -388,11 +407,64 @@ public sealed class LiveController : ControllerBase
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Live service is temporarily unavailable." });
         }
 
+        if (!alreadyLive && existing is not null)
+        {
+            try
+            {
+                await NotifyConnectionsLiveStartedAsync(existing, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Live notification fan-out failed for stream {StreamId}", existing.id);
+            }
+        }
+
         return Ok(new
         {
             stream_id = existing.id,
             started_at = existing.started_at,
             status = existing.status
+        });
+    }
+
+    [HttpPost("{streamId}/join")]
+    [Authorize]
+    public IActionResult JoinStream([FromRoute] string streamId)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+        {
+            return BadRequest(new { message = "streamId is required." });
+        }
+
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        if (!_liveStreamStateStore.TryGet(streamId, out var stream))
+        {
+            return NotFound(new { message = "Stream not found." });
+        }
+
+        if (stream.deleted_at is not null)
+        {
+            return NotFound(new { message = "Stream is no longer available." });
+        }
+
+        if (!string.Equals(stream.status, "live", StringComparison.OrdinalIgnoreCase) || stream.ended_at.HasValue)
+        {
+            return Conflict(new { message = "Stream is not currently live." });
+        }
+
+        return Ok(new
+        {
+            stream_id = stream.id,
+            status = stream.status,
+            title = stream.title,
+            join_method = "Open viewer, connect to /api/hubs/live-chat, then send chat messages while signed in.",
+            chat_room_id = stream.id,
+            join_path = $"/media?tab=live&streamId={Uri.EscapeDataString(stream.id)}",
+            streamer_id = stream.streamer_id
         });
     }
 
@@ -771,6 +843,130 @@ public sealed class LiveController : ControllerBase
                 && secondsRemaining.Value <= 24 * 3600
                 && !stream.kept_permanently
         });
+    }
+
+    private async Task NotifyConnectionsLiveStartedAsync(LiveStreamState stream, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(stream.streamer_id, out var streamerUserId))
+        {
+            return;
+        }
+
+        var recipientIds = await ResolveLiveRecipientIdsAsync(streamerUserId, cancellationToken);
+        if (recipientIds.Count == 0)
+        {
+            return;
+        }
+
+        var streamerDisplayName = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == streamerUserId)
+            .Select(user => string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? "Someone you follow";
+
+        var message = $"{streamerDisplayName} is live now: {stream.title}";
+        var joinLink = $"/media?tab=live&streamId={Uri.EscapeDataString(stream.id)}";
+
+        foreach (var recipientId in recipientIds)
+        {
+            var notificationPayload = new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = "live",
+                message,
+                link = joinLink,
+                stream_id = stream.id,
+                streamer_id = stream.streamer_id,
+                title = stream.title,
+                sent_at = DateTime.UtcNow
+            };
+
+            // SignalR push for online users.
+            await _notificationHub.Clients
+                .Group(NotificationHub.BuildUserGroup(recipientId.ToString()))
+                .SendAsync("LiveStarted", notificationPayload, cancellationToken);
+
+            // Persist notification so users can see it later in NotificationBell.
+            try
+            {
+                await _db.Database.ExecuteSqlInterpolatedAsync($@"
+INSERT INTO ""Notification"" (id, recipient_id, type, message, link, read)
+VALUES ({Guid.NewGuid().ToString("N")}, {recipientId.ToString()}, {"system"}, {message}, {joinLink}, {false});", cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Notification insert skipped for recipient {RecipientId}", recipientId);
+            }
+        }
+    }
+
+    private async Task<HashSet<Guid>> ResolveLiveRecipientIdsAsync(Guid streamerUserId, CancellationToken cancellationToken)
+    {
+        var recipients = new HashSet<Guid>();
+
+        var followerIds = await _db.UserFollows
+            .AsNoTracking()
+            .Where(follow => !follow.IsDeleted && follow.FollowingId == streamerUserId)
+            .Select(follow => follow.FollowerId)
+            .ToListAsync(cancellationToken);
+        foreach (var followerId in followerIds)
+        {
+            recipients.Add(followerId);
+        }
+
+        var streamerConversationIds = await _db.ConversationParticipants
+            .AsNoTracking()
+            .Where(participant => !participant.IsDeleted && participant.UserId == streamerUserId)
+            .Select(participant => participant.ConversationId)
+            .ToListAsync(cancellationToken);
+
+        if (streamerConversationIds.Count > 0)
+        {
+            var connectionIds = await _db.ConversationParticipants
+                .AsNoTracking()
+                .Where(participant => !participant.IsDeleted
+                    && streamerConversationIds.Contains(participant.ConversationId)
+                    && participant.UserId != streamerUserId)
+                .Select(participant => participant.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            foreach (var connectionId in connectionIds)
+            {
+                recipients.Add(connectionId);
+            }
+        }
+
+        var sharedProjectIds = await _db.ProjectMembers
+            .AsNoTracking()
+            .Where(member => !member.IsDeleted
+                && member.IsActive
+                && member.UserId == streamerUserId)
+            .Select(member => member.ProjectId)
+            .ToListAsync(cancellationToken);
+
+        if (sharedProjectIds.Count > 0)
+        {
+            var projectMemberIds = await _db.ProjectMembers
+                .AsNoTracking()
+                .Where(member => !member.IsDeleted
+                    && member.IsActive
+                    && sharedProjectIds.Contains(member.ProjectId)
+                    && member.UserId != streamerUserId)
+                .Select(member => member.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            foreach (var projectMemberId in projectMemberIds)
+            {
+                recipients.Add(projectMemberId);
+            }
+        }
+
+        recipients.Remove(streamerUserId);
+        recipients.Remove(Guid.Empty);
+        return recipients;
     }
 
     private IReadOnlyList<object> BuildLocalFeed(int limit)
