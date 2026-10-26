@@ -63,15 +63,6 @@ export default function Media() {
     });
   };
 
-  const shuffleTracks = (list) => {
-    const next = [...list];
-    for (let i = next.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [next[i], next[j]] = [next[j], next[i]];
-    }
-    return next;
-  };
-
   const toggleTrackSelection = (trackId) => {
     setSelectedTrackIds((prev) => {
       const next = new Set(prev);
@@ -89,28 +80,15 @@ export default function Media() {
     setSelectedTrackIds(new Set());
   };
 
-  const playSelectedTracksInOrder = () => {
+  const playSelectedTracks = () => {
     const selected = tracks.filter((track) => selectedTrackIds.has(track.id));
     if (!selected.length) return;
     playTrack(selected[0], selected);
   };
 
-  const playSelectedTracksShuffled = () => {
-    const selected = tracks.filter((track) => selectedTrackIds.has(track.id));
-    if (!selected.length) return;
-    const shuffled = shuffleTracks(selected);
-    playTrack(shuffled[0], shuffled);
-  };
-
-  const playAllTracksInOrder = () => {
+  const playAllTracks = () => {
     if (!tracks.length) return;
     playTrack(tracks[0], tracks);
-  };
-
-  const playAllTracksShuffled = () => {
-    if (!tracks.length) return;
-    const shuffled = shuffleTracks(tracks);
-    playTrack(shuffled[0], shuffled);
   };
 
   return (
@@ -156,12 +134,10 @@ export default function Media() {
               }} />
               {tracks.length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={playAllTracksInOrder} disabled={!tracks.length} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play all (order)</button>
-                  <button type="button" onClick={playAllTracksShuffled} disabled={!tracks.length} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play all (shuffle)</button>
+                  <button type="button" onClick={playAllTracks} disabled={!tracks.length} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play all</button>
                   <button type="button" onClick={selectAllTracks} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50">Select all</button>
                   <button type="button" onClick={clearTrackSelection} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Clear</button>
-                  <button type="button" onClick={playSelectedTracksInOrder} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play selected (order)</button>
-                  <button type="button" onClick={playSelectedTracksShuffled} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play selected (shuffle)</button>
+                  <button type="button" onClick={playSelectedTracks} disabled={!selectedTrackIds.size} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/50 disabled:opacity-50">Play selected</button>
                   <span className="text-xs text-muted-foreground">{selectedTrackIds.size} selected</span>
                 </div>
               )}
