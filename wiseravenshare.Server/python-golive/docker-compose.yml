@@ -19,8 +19,8 @@ services:
 
   wiseraven-api:
     build:
-      context: ../..
-      dockerfile: wiseravenshare.Server/python-golive/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: wiseraven-api
     restart: unless-stopped
     ports:
