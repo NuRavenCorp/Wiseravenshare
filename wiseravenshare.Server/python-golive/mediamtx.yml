@@ -1,0 +1,21 @@
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+hlsVariant: lowLatency
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: "*"
+
+api: yes
+apiAddress: :9997
+
+authMethod: http
+authHTTPAddress: http://wiseraven-api:8000/live/auth
+
+pathDefaults:
+  source: publisher

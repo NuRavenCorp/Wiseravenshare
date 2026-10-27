@@ -28,7 +28,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      python-matrix:
+      python-matrix-api:
+        condition: service_healthy
+      python-live-ranker:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
@@ -39,8 +41,11 @@ services:
       Authentication__Jwt__Key: ${Authentication__Jwt__Key:-WRS_Development_JWT_Secret_2026_Change_Me_1234567890}
       Persistence__RequireDatabase: ${PERSISTENCE_REQUIRE_DATABASE:-true}
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-wiseravenshare_db};Username=${POSTGRES_USER:-wiseravenshare_user};Password=${POSTGRES_PASSWORD:-wiseravenshare_dev_password};SSL Mode=Disable;Trust Server Certificate=true
-      PythonMatrixService__BaseUrl: ${PYTHON_MATRIX_BASE_URL:-http://python-matrix:8005}
+      PythonMatrixService__BaseUrl: ${PYTHON_MATRIX_BASE_URL:-http://python-matrix-api:8005}
+      PythonLiveRankerService__BaseUrl: ${PYTHON_LIVE_RANKER_BASE_URL:-http://python-matrix-api:8005}
+      PythonPostRankerService__BaseUrl: ${PYTHON_POST_RANKER_BASE_URL:-http://python-matrix-api:8005}
       PythonServices__Enabled: ${PYTHON_SERVICES_ENABLED:-false}
+      KaraokeService__BaseUrl: ${KARAOKE_SERVICE_BASE_URL:-http://python-karaoke:8002}
       Redis__ConnectionString: ${REDIS_CONNECTION_STRING:-redis:6379}
       S3__Endpoint: ${S3_ENDPOINT:-http://minio:9000}
       S3__AccessKey: ${S3_ACCESS_KEY:-minioadmin}
@@ -68,20 +73,31 @@ services:
       retries: 5
       start_period: 15s
 
-  python-matrix:
+  python-matrix-api:
     build:
       context: ..
       dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
-    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-matrix
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-matrix-api
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       PORT: 8005
       DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
       NURAVEN_CORP_LLM_SCORER_URL: ${NURAVEN_CORP_LLM_SCORER_URL:-}
       RANKER_MODEL_TIMEOUT_SECONDS: ${RANKER_MODEL_TIMEOUT_SECONDS:-1.5}
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      QUEUE_TOPICS_ENABLED: "true"
+      POST_FEED_TOPIC: ${POST_FEED_TOPIC:-post.feed.ranked}
+      LIVE_FEED_TOPIC: ${LIVE_FEED_TOPIC:-live.feed.ranked}
+      LIVE_TRAINING_TOPIC: ${LIVE_TRAINING_TOPIC:-live.training.data}
+      ENGAGEMENT_ACTION_TOPIC: ${ENGAGEMENT_ACTION_TOPIC:-engagement.action}
+      TAGS_TOPIC: ${TAGS_TOPIC:-worker.tags}
+      AUDIO_TOPIC: ${AUDIO_TOPIC:-worker.audio}
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
     ports:
       - "${PYTHON_MATRIX_PORT:-8005}:8005"
     networks:
@@ -92,6 +108,183 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  python-post-ranker:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-post-ranker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+      NURAVEN_CORP_LLM_SCORER_URL: ${NURAVEN_CORP_LLM_SCORER_URL:-}
+      RANKER_MODEL_TIMEOUT_SECONDS: ${RANKER_MODEL_TIMEOUT_SECONDS:-1.5}
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${POST_FEED_TOPIC:-post.feed.ranked}
+      HANDLER_NAME: post_feed_ranked
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis,os; redis.Redis.from_url(os.getenv('REDIS_URL','redis://redis:6379/0')).ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  python-live-ranker:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-live-ranker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+      NURAVEN_CORP_LLM_SCORER_URL: ${NURAVEN_CORP_LLM_SCORER_URL:-}
+      RANKER_MODEL_TIMEOUT_SECONDS: ${RANKER_MODEL_TIMEOUT_SECONDS:-1.5}
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${LIVE_FEED_TOPIC:-live.feed.ranked}
+      HANDLER_NAME: live_feed
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis,os; redis.Redis.from_url(os.getenv('REDIS_URL','redis://redis:6379/0')).ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  python-live-training-worker:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-live-training-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wiseravenshare_user}:${POSTGRES_PASSWORD:-wiseravenshare_dev_password}@postgres:5432/${POSTGRES_DB:-wiseravenshare_db}
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${LIVE_TRAINING_TOPIC:-live.training.data}
+      HANDLER_NAME: live_training_data
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+
+  python-engagement-worker:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-engagement-worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${ENGAGEMENT_ACTION_TOPIC:-engagement.action}
+      HANDLER_NAME: engagement_action
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+
+  worker-tags:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-worker-tags
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${TAGS_TOPIC:-worker.tags}
+      HANDLER_NAME: worker_tags
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis,os; redis.Redis.from_url(os.getenv('REDIS_URL','redis://redis:6379/0')).ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker-audio:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-worker-audio
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      JOB_TOPIC: ${AUDIO_TOPIC:-worker.audio}
+      HANDLER_NAME: worker_audio
+    command: ["python", "job_worker.py"]
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis,os; redis.Redis.from_url(os.getenv('REDIS_URL','redis://redis:6379/0')).ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  python-metrics-aggregator:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-metrics-aggregator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      REDIS_URL: ${PYTHON_REDIS_URL:-redis://redis:6379/0}
+      PG_DSN: ${PYTHON_PG_DSN:-postgresql://wiseravenshare_user:wiseravenshare_dev_password@postgres:5432/wiseravenshare_db}
+      AGGREGATE_MODE: loop
+      AGGREGATE_LOOP_SECONDS: ${AGGREGATE_LOOP_SECONDS:-600}
+    command: ["python", "aggregate.py"]
+    networks:
+      - wiseravenshare-net
+
+  python-metrics-api:
+    build:
+      context: ..
+      dockerfile: wiseravenshare.Server/python-matrix/Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-metrics-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: ${PYTHON_METRICS_API_PORT:-8010}
+      PG_DSN: ${PYTHON_PG_DSN:-postgresql://wiseravenshare_user:wiseravenshare_dev_password@postgres:5432/wiseravenshare_db}
+    command: ["uvicorn", "metrics_api:app", "--host", "0.0.0.0", "--port", "8010"]
+    ports:
+      - "${PYTHON_METRICS_API_PORT:-8010}:8010"
+    networks:
+      - wiseravenshare-net
 
   ollama:
     image: ollama/ollama:latest
@@ -137,7 +330,6 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     networks:
       - wiseravenshare-net
-    profiles: ["with-cache"]
 
   minio:
     image: minio/minio:latest
@@ -186,10 +378,47 @@ services:
     networks:
       - wiseravenshare-net
 
+  # ── Karaoke vocal-separation service ──────────────────────────────────────
+  python-karaoke:
+    build:
+      context: ../python-karaoke
+      dockerfile: Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-python-karaoke
+    restart: unless-stopped
+    environment:
+      PORT: 8002
+      MODELS_CACHE_DIR: /app/models_cache
+      OUTPUT_BASE_DIR: /tmp/karaoke_jobs
+      INTERNAL_TOKEN: ${KARAOKE_INTERNAL_TOKEN:-}
+      SEPARATOR_MODEL: ${KARAOKE_SEPARATOR_MODEL:-mel_band_roformer_karaoke_by_aufr33_viperx_sdr_10.1956.ckpt}
+      DEMUCS_FALLBACK_MODEL: ${KARAOKE_DEMUCS_MODEL:-htdemucs_ft}
+      GENIUS_TOKEN: ${GENIUS_TOKEN:-}
+      # Spaces upload (shares same bucket as the main app)
+      Storage__Blob__Endpoint: ${BLOB_ENDPOINT:-}
+      Storage__Blob__AccessKey__Id: ${BLOB_ACCESS_KEY_ID:-}
+      Storage__Blob__SecretKey: ${BLOB_SECRET_KEY:-}
+      Storage__Blob__BucketName: ${BLOB_BUCKET_NAME:-}
+      Storage__Blob__ProjectFolder: ${BLOB_PROJECT_FOLDER:-wiseravenshare/}
+      Storage__Blob__Region: ${BLOB_REGION:-nyc3}
+      MAX_JOB_AGE_HOURS: ${KARAOKE_JOB_RETENTION_HOURS:-24}
+    volumes:
+      - karaoke-models:/app/models_cache
+    ports:
+      - "${KARAOKE_PORT:-8002}:8002"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
+
 volumes:
   postgres-data:
   ollama-models:
   minio-data:
+  karaoke-models:
 
 networks:
   wiseravenshare-net:

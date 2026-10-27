@@ -1,0 +1,41 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.17.0
+    container_name: wiseraven-mediamtx
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+      - "8888:8888"
+      - "8889:8889"
+      - "8189:8189/udp"
+      - "9997:9997"
+    environment:
+      - MTX_WEBRTCADDITIONALHOSTS=${PUBLIC_WEBRTC_HOST}
+      - MTX_RTSPTRANSPORTS=tcp
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    networks:
+      - wiseraven-net
+
+  wiseraven-api:
+    build:
+      context: ../..
+      dockerfile: wiseravenshare.Server/python-golive/Dockerfile
+    container_name: wiseraven-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MEDIAMTX_API=http://mediamtx:9997
+      - MIN_ACCOUNT_AGE_DAYS=${MIN_ACCOUNT_AGE_DAYS:-30}
+      - MIN_FOLLOWERS_TO_GO_LIVE=${MIN_FOLLOWERS_TO_GO_LIVE:-100}
+      - TOXIC_AT=${TOXIC_AT:-0.7}
+      - SPOILER_AT=${SPOILER_AT:-0.7}
+    depends_on:
+      - mediamtx
+    networks:
+      - wiseraven-net
+
+networks:
+  wiseraven-net:
+    driver: bridge
