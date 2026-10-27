@@ -6,7 +6,7 @@ namespace WiseRavenShare.Server.Application.Services.Assistant;
 
 public interface ISpeechToTextService
 {
-    Task<SttResult> TranscribeAsync(Stream audio, string mimeType, CancellationToken ct = default);
+    Task<SttResult> TranscribeAsync(Stream audio, string mimeType, string? fileName = null, CancellationToken ct = default);
 }
 
 public class WhisperOptions
@@ -34,12 +34,15 @@ public class SpeechToTextService : ISpeechToTextService
         }
     }
 
-    public async Task<SttResult> TranscribeAsync(Stream audio, string mimeType, CancellationToken ct = default)
+    public async Task<SttResult> TranscribeAsync(Stream audio, string mimeType, string? fileName = null, CancellationToken ct = default)
     {
+        var normalizedMimeType = NormalizeMimeType(mimeType, fileName);
+        var normalizedFileName = NormalizeFileName(fileName, normalizedMimeType);
+
         using var form = new MultipartFormDataContent();
         var audioContent = new StreamContent(audio);
-        audioContent.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
-        form.Add(audioContent, "file", "audio.webm");
+        audioContent.Headers.ContentType = new MediaTypeHeaderValue(normalizedMimeType);
+        form.Add(audioContent, "file", normalizedFileName);
         form.Add(new StringContent(_opts.Model), "model");
         form.Add(new StringContent("verbose_json"), "response_format");
 
@@ -55,5 +58,48 @@ public class SpeechToTextService : ISpeechToTextService
         var lang = root.TryGetProperty("language", out var l) ? l.GetString() : null;
         var dur = root.TryGetProperty("duration", out var d) ? (int)(d.GetDouble() * 1000) : 0;
         return new SttResult(text, lang, null, dur);
+    }
+
+    private static string NormalizeMimeType(string? mimeType, string? fileName)
+    {
+        var value = mimeType?.Trim();
+        if (!string.IsNullOrWhiteSpace(value) &&
+            !value.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase) &&
+            MediaTypeHeaderValue.TryParse(value, out var parsed))
+        {
+            return parsed.MediaType ?? "audio/webm";
+        }
+
+        var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+        return ext switch
+        {
+            ".mp3" => "audio/mpeg",
+            ".mpga" => "audio/mpeg",
+            ".m4a" => "audio/mp4",
+            ".mp4" => "video/mp4",
+            ".wav" => "audio/wav",
+            ".webm" => "audio/webm",
+            ".ogg" => "audio/ogg",
+            _ => "audio/webm"
+        };
+    }
+
+    private static string NormalizeFileName(string? fileName, string mimeType)
+    {
+        if (!string.IsNullOrWhiteSpace(fileName) && Path.HasExtension(fileName))
+        {
+            return Path.GetFileName(fileName);
+        }
+
+        var ext = mimeType.ToLowerInvariant() switch
+        {
+            "audio/mpeg" => ".mp3",
+            "audio/mp4" => ".m4a",
+            "video/mp4" => ".mp4",
+            "audio/wav" => ".wav",
+            "audio/ogg" => ".ogg",
+            _ => ".webm"
+        };
+        return $"audio{ext}";
     }
 }

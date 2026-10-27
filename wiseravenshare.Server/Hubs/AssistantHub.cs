@@ -91,7 +91,7 @@ public class AssistantHub : Hub
         try
         {
             using var ms = new MemoryStream(Convert.FromBase64String(base64Audio));
-            var sttResult = await _stt.TranscribeAsync(ms, mimeType, ct);
+            var sttResult = await _stt.TranscribeAsync(ms, mimeType, null, ct);
             
             var userId = Context.User!.GetUserId();
             await Clients.Caller.SendAsync("transcript", sttResult.Text, cancellationToken: ct);
