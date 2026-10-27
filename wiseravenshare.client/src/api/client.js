@@ -454,6 +454,14 @@ export const apiClient = {
         body: JSON.stringify(payload),
       });
     },
+    async checkUsername(handle) {
+      if (!handle || handle.trim().length < 3) {
+        return { available: false, suggestion: null, reason: "Too short" };
+      }
+      return requestJson(`/api/auth/check-username?handle=${encodeURIComponent(handle.trim())}`, {
+        method: "GET",
+      });
+    },
     async me() {
       const token = readStoredToken();
       if (!token) {

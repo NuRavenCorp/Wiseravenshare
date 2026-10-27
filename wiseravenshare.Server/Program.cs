@@ -1955,6 +1955,53 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.ConfigureWarnings(w =>
         w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
+
+// ── ASP.NET Core Identity (Identity schema – isolated from app_data.Users) ──────────────────
+// Uses a dedicated WrIdentityDbContext mapped to the "identity" Postgres schema.
+// Existing JWT/custom auth continues untouched; Identity endpoints are at /api/identity/*.
+builder.Services.AddDbContext<Wiseravenshare.Server.Infrastructure.Data.WrIdentityDbContext>(options =>
+    options.UseNpgsql(defaultConnectionString, npgsqlOptions =>
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "identity")));
+
+// AddIdentityApiEndpoints chains AddIdentityCore + AddApiEndpoints; appending
+// AddRoles<IdentityRole>() gives the full role management surface (RoleManager).
+builder.Services
+    .AddIdentityApiEndpoints<Wiseravenshare.Server.Entities.Identity.ApplicationUser>(options =>
+    {
+        // Enforce unique email/username at the Identity layer.
+        options.User.RequireUniqueEmail = true;
+        // Password rules match the existing custom policy.
+        options.Password.RequiredLength = 8;
+        options.Password.RequireDigit = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireNonAlphanumeric = true;
+        // Lockout defaults (mirror existing manual lockout logic).
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    })
+    .AddRoles<Microsoft.AspNetCore.Identity.IdentityRole>()
+    .AddEntityFrameworkStores<Wiseravenshare.Server.Infrastructure.Data.WrIdentityDbContext>();
+
+// Secure cookie options for Identity (API-only: redirect suppressed → 401).
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.HttpOnly   = true;
+    options.Cookie.SameSite   = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; // Always in prod, relaxed in dev
+    options.Cookie.Name       = "wr.identity";
+    // Prevent MVC-style redirect to /Account/Login for API callers.
+    options.Events.OnRedirectToLogin = ctx =>
+    {
+        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = ctx =>
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    };
+});
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 // Generic repository open registration (currency/badge subsystems resolve IRepository<TEntity>).
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Wiseravenshare.Server.Infrastructure.Data.Repositories.Repository<>));
@@ -2409,6 +2456,33 @@ if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authenticatio
     app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
 }
 
+// ── Seed Identity roles at startup ──────────────────────────────────────────
+// Runs idempotently: skips roles that already exist.
+using (var seedScope = app.Services.CreateScope())
+{
+    try
+    {
+        var roleManager = seedScope.ServiceProvider
+            .GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<Microsoft.AspNetCore.Identity.IdentityRole>>();
+
+        string[] defaultRoles = ["Admin", "Moderator", "User"];
+        foreach (var roleName in defaultRoles)
+        {
+            if (!await roleManager.RoleExistsAsync(roleName))
+            {
+                await roleManager.CreateAsync(new Microsoft.AspNetCore.Identity.IdentityRole(roleName));
+                app.Logger.LogInformation("Identity role '{Role}' created.", roleName);
+            }
+        }
+    }
+    catch (Exception seedEx)
+    {
+        // Role seeding is non-critical: log and continue so startup doesn't fail if
+        // the identity DB is temporarily unreachable.
+        app.Logger.LogWarning(seedEx, "Identity role seeding failed (non-fatal). Roles will be created on next startup.");
+    }
+}
+
 string ResolveStripeConfig(string sectionKey, params string[] envKeys)
 {
     var value = app.Configuration[sectionKey];
@@ -2836,6 +2910,10 @@ if (frontendDistExists)
 }
 
 app.MapControllers();
+
+// Map built-in Identity minimal-API endpoints under /api/identity/
+// so they never shadow the existing /api/auth/* JWT controllers.
+app.MapGroup("/api/identity").MapIdentityApi<Wiseravenshare.Server.Entities.Identity.ApplicationUser>();
 app.MapHub<EvolutionHub>("/api/hubs/evolution");
 app.MapHub<NotificationHub>("/api/hubs/notifications");
 app.MapHub<MessageHub>("/api/hubs/messages");

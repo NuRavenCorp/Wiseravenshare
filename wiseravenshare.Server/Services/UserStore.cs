@@ -197,6 +197,58 @@ public sealed class UserStore
         return _usersByEmail.ContainsKey(email.Trim());
     }
 
+    public bool HandleExists(string handle)
+    {
+        if (string.IsNullOrWhiteSpace(handle))
+        {
+            return false;
+        }
+
+        var normalized = handle.Trim().ToLowerInvariant();
+        return _usersByEmail.Values.Any(u =>
+            string.Equals(u.Handle, normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Generates a unique, URL-safe handle. Starts from the requested value (or derives one from
+    /// name/email), appends a numeric suffix if the base handle is already taken, and falls back
+    /// to a short GUID tail when the suffix space is exhausted.
+    /// </summary>
+    public string GenerateUniqueHandle(string name, string email, string? requestedHandle = null)
+    {
+        string baseHandle;
+
+        if (!string.IsNullOrWhiteSpace(requestedHandle))
+        {
+            // Sanitize the caller-supplied handle: keep alphanumerics and underscores only.
+            var cleaned = new string(requestedHandle.Trim().ToLowerInvariant()
+                .Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+            baseHandle = string.IsNullOrWhiteSpace(cleaned) ? BuildHandle(name, email) : cleaned;
+        }
+        else
+        {
+            baseHandle = BuildHandle(name, email);
+        }
+
+        if (!HandleExists(baseHandle))
+        {
+            return baseHandle;
+        }
+
+        for (var suffix = 1; suffix <= 9999; suffix++)
+        {
+            var candidate = $"{baseHandle}{suffix}";
+            if (!HandleExists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        // Ultimate fallback: truncate + partial GUID
+        var trimmed = baseHandle.Length > 12 ? baseHandle[..12] : baseHandle;
+        return $"{trimmed}{Guid.NewGuid().ToString("N")[..6]}";
+    }
+
     public bool TryGetByEmail(string email, out UserRecord? user)
     {
         return _usersByEmail.TryGetValue(email.Trim(), out user);
@@ -234,7 +286,8 @@ public sealed class UserStore
         string bio,
         string location,
         string website,
-        string avatar)
+        string avatar,
+        string? username = null)
     {
         var normalizedEmail = email.Trim();
         var safeName = string.IsNullOrWhiteSpace(name) ? normalizedEmail.Split('@')[0] : name.Trim();
@@ -245,7 +298,7 @@ public sealed class UserStore
             Email = normalizedEmail,
             Name = safeName,
             EmailVerified = true,
-            Handle = BuildHandle(safeName, normalizedEmail),
+            Handle = GenerateUniqueHandle(safeName, normalizedEmail, username),
             PasswordHash = HashPassword(password),
             Bio = bio.Trim(),
             Location = location.Trim(),

@@ -4,8 +4,37 @@ import { appParams } from '@/lib/app-params';
 
 const AuthContext = createContext();
 
+/**
+ * Derives a normalised roles array from the user object returned by /api/auth/verify.
+ * Sources checked in priority order:
+ *   1. user.roles  (explicit array — future-proof)
+ *   2. user.teamRole (string from JWT ClaimTypes.Role)
+ *   3. user.accessScope / user.isAdmin — mapped to "Admin"
+ *   4. Fallback: ["User"]
+ */
+function deriveRoles(user) {
+  if (!user) return [];
+
+  if (Array.isArray(user.roles) && user.roles.length > 0) {
+    return user.roles.map(r => String(r));
+  }
+
+  const roles = [];
+
+  if (user.isAdmin || String(user.accessScope || '').toLowerCase() === 'admin') {
+    roles.push('Admin');
+  }
+
+  const teamRole = String(user.teamRole || '').toLowerCase();
+  if (teamRole === 'moderator') roles.push('Moderator');
+
+  if (roles.length === 0) roles.push('User');
+  return roles;
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [userRoles, setUserRoles] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
@@ -83,6 +112,7 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingAuth(true);
       const currentUser = await apiClient.auth.me();
       setUser(currentUser);
+      setUserRoles(deriveRoles(currentUser));
       setIsAuthenticated(true);
       setIsLoadingAuth(false);
       setAuthChecked(true);
@@ -90,6 +120,7 @@ export const AuthProvider = ({ children }) => {
       console.error('User auth check failed:', error);
       setIsLoadingAuth(false);
       setIsAuthenticated(false);
+      setUserRoles([]);
       setAuthChecked(true);
       
       // An expired saved token should not prevent access to public pages.
@@ -102,6 +133,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = (shouldRedirect = true) => {
     setUser(null);
+    setUserRoles([]);
     setIsAuthenticated(false);
     
     if (shouldRedirect) {
@@ -118,9 +150,25 @@ export const AuthProvider = ({ children }) => {
     apiClient.auth.redirectToLogin(window.location.href);
   };
 
+  /** Returns true when the authenticated user has the given role (case-insensitive). */
+  const hasRole = (role) => {
+    if (!role || !isAuthenticated) return false;
+    const target = String(role).toLowerCase();
+    return userRoles.some(r => r.toLowerCase() === target);
+  };
+
+  /** Returns true when the authenticated user has ALL of the given roles. */
+  const hasAllRoles = (roles = []) =>
+    Array.isArray(roles) && roles.every(r => hasRole(r));
+
+  /** Returns true when the authenticated user has ANY of the given roles. */
+  const hasAnyRole = (roles = []) =>
+    Array.isArray(roles) && roles.some(r => hasRole(r));
+
   return (
     <AuthContext.Provider value={{ 
       user, 
+      userRoles,
       isAuthenticated, 
       isLoadingAuth,
       isLoadingPublicSettings,
@@ -130,7 +178,10 @@ export const AuthProvider = ({ children }) => {
       logout,
       navigateToLogin,
       checkUserAuth,
-      checkAppState
+      checkAppState,
+      hasRole,
+      hasAllRoles,
+      hasAnyRole,
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 
@@ -9,8 +9,24 @@ const DefaultFallback = () => (
   </div>
 );
 
-export default function ProtectedRoute({ fallback = <DefaultFallback />, unauthenticatedElement }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, authError, checkUserAuth } = useAuth();
+/**
+ * ProtectedRoute – guards a route tree against unauthenticated access.
+ *
+ * Props:
+ *   fallback             – element shown while the auth check is in progress
+ *   unauthenticatedElement – element (or redirect) rendered when not signed in
+ *   allowedRoles         – optional string[] of role names; when supplied the user
+ *                          must have at least one of them, otherwise they see
+ *                          `unauthorizedElement` (default: <Navigate to="/unauthorized" />)
+ *   unauthorizedElement  – element shown when role check fails
+ */
+export default function ProtectedRoute({
+  fallback = <DefaultFallback />,
+  unauthenticatedElement,
+  allowedRoles,
+  unauthorizedElement = <Navigate to="/unauthorized" replace />,
+}) {
+  const { isAuthenticated, isLoadingAuth, authChecked, authError, checkUserAuth, hasAnyRole } = useAuth();
 
   useEffect(() => {
     if (!authChecked && !isLoadingAuth) {
@@ -31,6 +47,11 @@ export default function ProtectedRoute({ fallback = <DefaultFallback />, unauthe
 
   if (!isAuthenticated) {
     return unauthenticatedElement;
+  }
+
+  // Role guard: only applied when allowedRoles is a non-empty array.
+  if (Array.isArray(allowedRoles) && allowedRoles.length > 0 && !hasAnyRole(allowedRoles)) {
+    return unauthorizedElement;
   }
 
   return <Outlet />;
