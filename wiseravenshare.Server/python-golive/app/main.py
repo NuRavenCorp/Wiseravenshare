@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -8,7 +9,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 app = FastAPI(title="WiseRaven Go Live API")
 
@@ -17,6 +18,8 @@ MIN_ACCOUNT_AGE_DAYS = int(os.getenv("MIN_ACCOUNT_AGE_DAYS", "30"))
 MIN_FOLLOWERS_TO_GO_LIVE = int(os.getenv("MIN_FOLLOWERS_TO_GO_LIVE", "100"))
 TOXIC_AT = float(os.getenv("TOXIC_AT", "0.7"))
 SPOILER_AT = float(os.getenv("SPOILER_AT", "0.7"))
+LIVE_INFO_RETENTION_DAYS = max(int(os.getenv("LIVE_INFO_RETENTION_DAYS", "7")), 1)
+LIVE_INFO_RETENTION_SECONDS = LIVE_INFO_RETENTION_DAYS * 24 * 60 * 60
 
 RULES = {
     "question": "highlight",
@@ -25,6 +28,10 @@ RULES = {
     "backseat": "hide",
     "spam": "hide",
 }
+
+state_lock = threading.Lock()
+stream_registry: dict[str, dict[str, Any]] = {}
+moderation_events: list[dict[str, Any]] = []
 
 
 class UserGateRequest(BaseModel):
@@ -38,6 +45,52 @@ class UserGateRequest(BaseModel):
 class ChatMessage(BaseModel):
     user: str
     text: str
+
+
+def retention_cutoff_epoch() -> float:
+    return time.time() - LIVE_INFO_RETENTION_SECONDS
+
+
+def purge_expired_info() -> dict[str, int]:
+    cutoff = retention_cutoff_epoch()
+    removed_streams = 0
+    removed_events = 0
+    with state_lock:
+        expired_stream_paths = [
+            stream_path
+            for stream_path, meta in stream_registry.items()
+            if float(meta.get("created_at", 0.0)) < cutoff
+        ]
+        for stream_path in expired_stream_paths:
+            del stream_registry[stream_path]
+            removed_streams += 1
+
+        retained_events = [event for event in moderation_events if float(event.get("timestamp", 0.0)) >= cutoff]
+        removed_events = len(moderation_events) - len(retained_events)
+        moderation_events[:] = retained_events
+    return {"streams_removed": removed_streams, "events_removed": removed_events}
+
+
+def record_stream_publish(stream_path: str, user_id: int) -> None:
+    now = time.time()
+    with state_lock:
+        stream_meta = stream_registry.get(stream_path)
+        if stream_meta is None:
+            stream_registry[stream_path] = {
+                "stream_path": stream_path,
+                "user_id": user_id,
+                "created_at": now,
+                "last_publish_at": now,
+                "publish_count": 1,
+            }
+            return
+        stream_meta["last_publish_at"] = now
+        stream_meta["publish_count"] = int(stream_meta.get("publish_count", 0)) + 1
+
+
+def record_moderation_event(governed: dict[str, Any]) -> None:
+    with state_lock:
+        moderation_events.append(governed)
 
 
 def can_go_live(user: UserGateRequest) -> tuple[bool, str]:
@@ -115,6 +168,17 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+@app.get("/live/retention")
+async def live_retention() -> dict[str, Any]:
+    purge_expired_info()
+    with state_lock:
+        return {
+            "retention_days": LIVE_INFO_RETENTION_DAYS,
+            "active_stream_info_count": len(stream_registry),
+            "moderation_event_count": len(moderation_events),
+        }
+
+
 @app.post("/live/entry-check")
 async def live_entry_check(user: UserGateRequest) -> dict[str, Any]:
     allowed, reason = can_go_live(user)
@@ -123,6 +187,7 @@ async def live_entry_check(user: UserGateRequest) -> dict[str, Any]:
 
 @app.post("/live/auth")
 async def live_auth(request: Request) -> dict[str, str]:
+    purge_expired_info()
     payload = await request.json()
     action = str(payload.get("action", ""))
     path = str(payload.get("path", ""))
@@ -143,12 +208,14 @@ async def live_auth(request: Request) -> dict[str, str]:
         allowed, reason = can_go_live(mock_user)
         if not allowed:
             raise HTTPException(401, reason)
+        record_stream_publish(path, user_id)
 
     return {"status": "ok"}
 
 
 @app.get("/live/streams")
 async def list_streams() -> dict[str, Any]:
+    purge_expired_info()
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.get(f"{MEDIAMTX_API}/v3/paths/list")
         response.raise_for_status()
@@ -166,6 +233,7 @@ async def kick_stream(path: str) -> dict[str, str]:
 
 @app.websocket("/live/{stream_path}/chat")
 async def live_chat(stream_path: str, websocket: WebSocket) -> None:
+    purge_expired_info()
     await websocket.accept()
     try:
         async for raw_message in websocket.iter_text():
@@ -182,6 +250,9 @@ async def live_chat(stream_path: str, websocket: WebSocket) -> None:
                     "timestamp": time.time(),
                     "stream_path": stream_path,
                 }
+            governed["stream_path"] = stream_path
+            record_moderation_event(governed)
+            purge_expired_info()
             await websocket.send_json(governed)
     except WebSocketDisconnect:
         return

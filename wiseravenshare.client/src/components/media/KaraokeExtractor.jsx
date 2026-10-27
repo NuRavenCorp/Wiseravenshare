@@ -29,7 +29,7 @@ async function transcribeFile(file) {
       lastError = new Error("Transcription returned empty output.");
     } catch (error) {
       lastError = error;
-      if (![404, 405, 500, 502, 503, 504].includes(error?.status)) {
+      if (![400, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
         throw error;
       }
     }
@@ -39,6 +39,39 @@ async function transcribeFile(file) {
 }
 
 async function transcribeUrl(url, fileName) {
+  const extensionFromMime = (mime) => {
+    const normalized = (mime || "").toLowerCase();
+    if (normalized.includes("audio/mpeg")) return ".mp3";
+    if (normalized.includes("audio/mp4")) return ".m4a";
+    if (normalized.includes("video/mp4")) return ".mp4";
+    if (normalized.includes("audio/wav")) return ".wav";
+    if (normalized.includes("audio/ogg")) return ".ogg";
+    if (normalized.includes("audio/webm") || normalized.includes("video/webm")) return ".webm";
+    return "";
+  };
+
+  const normalizeFileName = (baseName, sourceUrl, mime) => {
+    const rawName = (baseName || "karaoke-media").trim();
+    const hasExt = /\.[a-z0-9]{2,8}$/i.test(rawName);
+    if (hasExt) return rawName;
+
+    let ext = "";
+    try {
+      const parsed = new URL(sourceUrl, window.location.origin);
+      const urlPath = parsed.pathname || "";
+      const match = urlPath.match(/\.[a-z0-9]{2,8}$/i);
+      ext = match?.[0] || "";
+    } catch {
+      ext = "";
+    }
+
+    if (!ext) {
+      ext = extensionFromMime(mime);
+    }
+
+    return `${rawName}${ext || ".webm"}`;
+  };
+
   let credentials = "include";
   try {
     const resolved = new URL(url, window.location.origin);
@@ -55,7 +88,8 @@ async function transcribeUrl(url, fileName) {
   }
 
   const blob = await response.blob();
-  const file = new File([blob], fileName || "karaoke-media", {
+  const normalizedName = normalizeFileName(fileName || "karaoke-media", url, blob.type);
+  const file = new File([blob], normalizedName, {
     type: blob.type || "application/octet-stream",
   });
   return transcribeFile(file);

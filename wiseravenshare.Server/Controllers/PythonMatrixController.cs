@@ -91,6 +91,54 @@ public sealed class PythonMatrixController : ControllerBase
         }
     }
 
+    [HttpGet("post/feed/ranked")]
+    public async Task<IActionResult> RankedPostFeed(
+        [FromQuery(Name = "viewer_id")] string viewerId,
+        [FromQuery(Name = "page_size")] int pageSize = 40,
+        [FromQuery(Name = "window_days")] int windowDays = 30,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(viewerId))
+        {
+            return BadRequest(new { message = "viewer_id is required." });
+        }
+
+        var clampedPageSize = Math.Clamp(pageSize, 1, 100);
+        var clampedWindowDays = Math.Clamp(windowDays, 1, 90);
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            var relativeUrl =
+                $"post/feed/ranked?viewer_id={Uri.EscapeDataString(viewerId.Trim())}&page_size={clampedPageSize}&window_days={clampedWindowDays}";
+            var response = await client.GetAsync(relativeUrl, cancellationToken);
+            return await ProxyJsonResponse(response, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Python matrix ranked post feed request failed.");
+            return StatusCode(503, new { message = "Python matrix post ranking is unavailable." });
+        }
+    }
+
+    [HttpPost("engagement/action")]
+    public async Task<IActionResult> EngagementAction([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("engagement/action", payload, cancellationToken);
+    }
+
+    [HttpPost("engagement/partials/track")]
+    public async Task<IActionResult> EngagementPartialsTrack([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("engagement/partials/track", payload, cancellationToken);
+    }
+
+    [HttpPost("engagement/posts/score")]
+    public async Task<IActionResult> EngagementPostScore([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("engagement/posts/score", payload, cancellationToken);
+    }
+
     [HttpGet("media/render")]
     public async Task<IActionResult> RenderMedia([FromQuery] string source, CancellationToken cancellationToken)
     {

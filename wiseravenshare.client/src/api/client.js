@@ -364,6 +364,14 @@ export const apiClient = {
     feed(page = 1, pageSize = 20) {
       return requestJson(`/api/posts/feed?page=${page}&pageSize=${pageSize}`, { method: "GET" });
     },
+    rankedFeed(viewerId, pageSize = 40, windowDays = 30) {
+      const query = new URLSearchParams({
+        viewer_id: String(viewerId || ""),
+        page_size: String(pageSize),
+        window_days: String(windowDays),
+      });
+      return requestJson(`/api/python-matrix/post/feed/ranked?${query.toString()}`, { method: "GET" });
+    },
     createThread(payload) {
       return requestJson("/api/posts/threads", {
         method: "POST",
@@ -564,6 +572,34 @@ export const apiClient = {
       return requestJson("/api/python-matrix/multiply", {
         method: "POST",
         body: JSON.stringify(payload),
+      });
+    },
+    rankedPostFeed(viewerId, pageSize = 40, windowDays = 30) {
+      const query = new URLSearchParams({
+        viewer_id: String(viewerId || ""),
+        page_size: String(pageSize),
+        window_days: String(windowDays),
+      });
+      return requestJson(`/api/python-matrix/post/feed/ranked?${query.toString()}`, {
+        method: "GET",
+      });
+    },
+    engagementAction(payload) {
+      return requestJson("/api/python-matrix/engagement/action", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    trackPartial(payload) {
+      return requestJson("/api/python-matrix/engagement/partials/track", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    scorePost(payload) {
+      return requestJson("/api/python-matrix/engagement/posts/score", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
       });
     },
   },

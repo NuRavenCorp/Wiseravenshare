@@ -44,6 +44,40 @@ export default function PostsFeed() {
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
 
+  const applyRankedOrder = useCallback((feedItems, rankedPayload) => {
+    const items = Array.isArray(feedItems) ? [...feedItems] : [];
+    const rankedRows = Array.isArray(rankedPayload?.posts) ? rankedPayload.posts : [];
+    if (rankedRows.length === 0 || items.length === 0) {
+      return items;
+    }
+
+    const byId = new Map(items.map((item) => [String(item?.id || ""), item]));
+    const rankedScoreById = new Map(
+      rankedRows
+        .map((entry) => [String(entry?.post_id || entry?.postId || ""), Number(entry?.resurfacing_score ?? 0)])
+        .filter(([id]) => id)
+    );
+
+    const ordered = [];
+    for (const row of rankedRows) {
+      const postId = String(row?.post_id || row?.postId || "");
+      if (!postId || !byId.has(postId)) continue;
+      const post = byId.get(postId);
+      byId.delete(postId);
+      ordered.push({
+        ...post,
+        matrix_rank_score: rankedScoreById.get(postId) ?? null,
+        matrix_rank_trigger: row?.trigger || null,
+      });
+    }
+
+    for (const leftover of byId.values()) {
+      ordered.push(leftover);
+    }
+
+    return ordered;
+  }, []);
+
   const fetchPosts = useCallback(async () => {
     setLoading(true);
     try {
@@ -67,11 +101,21 @@ export default function PostsFeed() {
       }
       let feedResult;
       if (mode === "following" && user) {
+        let rankedFeed = null;
+        try {
+          rankedFeed = await apiClient.posts.rankedFeed(user.id, 40, 30);
+        } catch {
+          rankedFeed = null;
+        }
+
         feedResult = await apiClient.posts.feed(1, 40);
-        const feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
+        let feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
+        feedItems = applyRankedOrder(feedItems, rankedFeed);
         if (feedItems.length === 0) {
           feedResult = await apiClient.posts.trending(40);
+          feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
         }
+        feedResult = feedItems;
       } else {
         feedResult = await apiClient.posts.trending(40);
       }
@@ -84,7 +128,7 @@ export default function PostsFeed() {
     } finally {
       setLoading(false);
     }
-  }, [mode]);
+  }, [applyRankedOrder, mode]);
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 

@@ -89,7 +89,7 @@ public class AssistantController : ControllerBase
         using var s = audio.OpenReadStream();
         try
         {
-            var result = await _stt.TranscribeAsync(s, audio.ContentType ?? "audio/webm", ct);
+            var result = await _stt.TranscribeAsync(s, audio.ContentType ?? "audio/webm", audio.FileName, ct);
             return Ok(result);
         }
         catch (Exception ex)

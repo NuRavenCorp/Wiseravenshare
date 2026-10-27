@@ -31,6 +31,7 @@ services:
       - MIN_FOLLOWERS_TO_GO_LIVE=${MIN_FOLLOWERS_TO_GO_LIVE:-100}
       - TOXIC_AT=${TOXIC_AT:-0.7}
       - SPOILER_AT=${SPOILER_AT:-0.7}
+      - LIVE_INFO_RETENTION_DAYS=${LIVE_INFO_RETENTION_DAYS:-7}
     depends_on:
       - mediamtx
     networks:

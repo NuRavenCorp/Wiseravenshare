@@ -240,7 +240,7 @@ public sealed class FunctionCompatController : ControllerBase
             var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
                 ? "application/octet-stream"
                 : audio.ContentType;
-            var result = await _speechToTextService.TranscribeAsync(stream, contentType, cancellationToken);
+            var result = await _speechToTextService.TranscribeAsync(stream, contentType, audio.FileName, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)
