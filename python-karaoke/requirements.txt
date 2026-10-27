@@ -1,0 +1,11 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+python-multipart==0.0.20
+httpx==0.28.1
+aiofiles==24.1.0
+audio-separator[cpu]==0.30.0
+demucs-onnx==0.3.0
+requests==2.32.3
+pydantic==2.10.6
+psycopg[binary]==3.2.9
+boto3==1.35.99

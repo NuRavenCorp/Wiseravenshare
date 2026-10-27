@@ -2,19 +2,25 @@ import json
 import logging
 import math
 import os
+import re
+import time
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 import psycopg
+import redis
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from live_ranker import rank_live_feed
 from feed_ranker import rank_post_feed
+from job_queue import enqueue_job
 
 
 logger = logging.getLogger("python-matrix")
@@ -33,6 +39,12 @@ RANKER_MODEL_TIMEOUT_SECONDS = float(os.environ.get("RANKER_MODEL_TIMEOUT_SECOND
 MEDIA_RENDERER_TIMEOUT_SECONDS = float(os.environ.get("MEDIA_RENDERER_TIMEOUT_SECONDS", "12"))
 MEDIA_RENDERER_MAX_BYTES = int(os.environ.get("MEDIA_RENDERER_MAX_BYTES", str(200 * 1024 * 1024)))
 MEDIA_RENDERER_ORIGIN = os.environ.get("MEDIA_RENDERER_ORIGIN", "http://127.0.0.1:5242").strip().rstrip("/")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0").strip()
+QUEUE_TOPICS_ENABLED = os.environ.get("QUEUE_TOPICS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+POST_FEED_TOPIC = os.environ.get("POST_FEED_TOPIC", "post.feed.ranked").strip()
+LIVE_FEED_TOPIC = os.environ.get("LIVE_FEED_TOPIC", "live.feed.ranked").strip()
+LIVE_TRAINING_TOPIC = os.environ.get("LIVE_TRAINING_TOPIC", "live.training.data").strip()
+ENGAGEMENT_ACTION_TOPIC = os.environ.get("ENGAGEMENT_ACTION_TOPIC", "engagement.action").strip()
 MEDIA_RENDERER_ALLOWED_HOSTS = {
     value.strip().lower()
     for value in os.environ.get(
@@ -42,9 +54,184 @@ MEDIA_RENDERER_ALLOWED_HOSTS = {
     if value.strip()
 }
 
+ACTION_WEIGHTS = {
+    "post": 10,
+    "repost": 8,
+    "comment": 5,
+    "like": 1,
+    "dislike": -2,
+}
+
+FEED_WEIGHTS = {
+    "like": 1.0,
+    "comment": 5.0,
+    "repost": 8.0,
+    "share_link": 20.0,
+    "dislike": -15.0,
+    "report": -50.0,
+    "mute": -30.0,
+}
+
+HASHTAG_WINDOW_SECONDS = 3600
+HASHTAG_RECENCY_HALF_LIFE_MINUTES = 120
+_redis_client: redis.Redis | None = None
+
 
 def get_connection() -> psycopg.Connection:
     return psycopg.connect(DATABASE_URL)
+
+
+def get_redis_client() -> redis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_client
+
+
+def _utc_date_key(epoch_seconds: float) -> str:
+    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def _normalize_hashtag(tag: str) -> str:
+    value = (tag or "").strip()
+    if value.startswith("#"):
+        value = value[1:]
+    return value.lower()
+
+
+def _extract_hashtags(text: str) -> list[str]:
+    return [match.group(1) for match in re.finditer(r"#(\w+)", text or "")]
+
+
+def split_camel_hashtag(tag: str) -> str:
+    token = (tag or "").lstrip("#")
+    if not token:
+        return ""
+    return " ".join(part for part in re.split(r"(?=[A-Z])", token) if part)
+
+
+def find_partial_hashtags(text: str, pattern: str) -> list[str]:
+    normalized_pattern = (pattern or "").strip().lower()
+    if not normalized_pattern:
+        return []
+    hashtags = _extract_hashtags(text)
+    return [f"#{tag}" for tag in hashtags if normalized_pattern in tag.lower()]
+
+
+def record_user_action(
+    user_id: str,
+    action: str,
+    target_id: str | None = None,
+    timestamp: float | None = None,
+) -> None:
+    action_key = (action or "").strip().lower()
+    if action_key not in ACTION_WEIGHTS:
+        raise ValueError(f"Unsupported action '{action}'.")
+
+    now_ts = float(timestamp if timestamp is not None else datetime.now(timezone.utc).timestamp())
+    day_key = _utc_date_key(now_ts)
+    redis_client = get_redis_client()
+    pipe = redis_client.pipeline()
+    pipe.hincrby(f"user:{user_id}:metrics", action_key, 1)
+    pipe.hincrby(f"user:{user_id}:daily:{day_key}", action_key, 1)
+    pipe.zincrby("user:engagement:ranked", ACTION_WEIGHTS[action_key], user_id)
+    if target_id:
+        pipe.hincrby(f"post:{target_id}:metrics", action_key, 1)
+        pipe.zincrby("post:engagement:ranked", ACTION_WEIGHTS[action_key], target_id)
+    pipe.execute()
+
+
+def record_partial_engagement(user_id: str, partial: str, target_id: str) -> None:
+    normalized_partial = (partial or "").strip().lower()
+    if not normalized_partial:
+        raise ValueError("Partial pattern is required.")
+    redis_client = get_redis_client()
+    key = f"partial:{normalized_partial}"
+    pipe = redis_client.pipeline()
+    pipe.hincrby(f"user:{user_id}:partials", normalized_partial, 1)
+    pipe.zincrby(f"{key}:ranked", 1, target_id)
+    pipe.execute()
+
+
+def record_hashtag_event(hashtag: str, user_id: str, timestamp: float | None = None) -> None:
+    normalized_tag = _normalize_hashtag(hashtag)
+    if not normalized_tag:
+        raise ValueError("Hashtag is required.")
+    now_ts = float(timestamp if timestamp is not None else datetime.now(timezone.utc).timestamp())
+    cutoff = now_ts - HASHTAG_WINDOW_SECONDS
+    redis_client = get_redis_client()
+    events_key = f"hashtag:{normalized_tag}:events"
+    meta_key = f"hashtag:{normalized_tag}:meta"
+    event_member = f"{now_ts:.6f}|{user_id}|{uuid.uuid4().hex}"
+    pipe = redis_client.pipeline()
+    pipe.zadd(events_key, {event_member: now_ts})
+    pipe.zremrangebyscore(events_key, "-inf", cutoff)
+    pipe.hsetnx(meta_key, "first_seen", str(now_ts))
+    pipe.execute()
+
+
+def compute_trending_score(hashtag: str, now: float | None = None) -> float:
+    normalized_tag = _normalize_hashtag(hashtag)
+    if not normalized_tag:
+        return 0.0
+
+    now_ts = float(now if now is not None else datetime.now(timezone.utc).timestamp())
+    cutoff = now_ts - HASHTAG_WINDOW_SECONDS
+    redis_client = get_redis_client()
+    events_key = f"hashtag:{normalized_tag}:events"
+    meta_key = f"hashtag:{normalized_tag}:meta"
+
+    events = redis_client.zrangebyscore(events_key, cutoff, "+inf", withscores=True)
+    if len(events) < 3:
+        return 0.0
+
+    user_ids: set[str] = set()
+    recent_count = 0
+    midpoint = now_ts - (HASHTAG_WINDOW_SECONDS / 2)
+
+    for member, event_ts in events:
+        parts = str(member).split("|", 2)
+        if len(parts) >= 2:
+            user_ids.add(parts[1])
+        if float(event_ts) > midpoint:
+            recent_count += 1
+
+    total_events = len(events)
+    earlier_count = total_events - recent_count
+    velocity = total_events / (HASHTAG_WINDOW_SECONDS / 60)
+    acceleration = recent_count / max(earlier_count, 1)
+    diversity = len(user_ids) / max(total_events, 1)
+
+    first_seen_raw = redis_client.hget(meta_key, "first_seen")
+    try:
+        first_seen = float(first_seen_raw) if first_seen_raw else now_ts
+    except ValueError:
+        first_seen = now_ts
+    age_minutes = max(0.0, (now_ts - first_seen) / 60)
+    recency_factor = math.exp(-age_minutes / HASHTAG_RECENCY_HALF_LIFE_MINUTES)
+
+    score = velocity * (1 + acceleration) * diversity * recency_factor
+    return round(score, 4)
+
+
+def score_post_for_user(post_metrics: dict[str, float], user_affinity: float = 1.0) -> float:
+    base_score = sum(
+        FEED_WEIGHTS.get(action, 0.0) * float(count)
+        for action, count in post_metrics.items()
+    )
+    return round(base_score * float(user_affinity), 4)
+
+
+def _dispatch_topic_job(topic: str, payload: dict[str, Any]) -> JSONResponse:
+    started_at = time.perf_counter()
+    result = enqueue_job(topic, payload)
+    status_code = int(result.get("status_code", 200))
+    body = result.get("body", {})
+    if isinstance(body, dict):
+        body.setdefault("topic", topic)
+        body.setdefault("queued", True)
+        body.setdefault("latency_ms", round((time.perf_counter() - started_at) * 1000, 2))
+    return JSONResponse(status_code=status_code, content=body)
 
 
 def ensure_history_table() -> None:
@@ -291,6 +478,41 @@ class MultiplyRequest(BaseModel):
         return validate_matrix(value, "right")
 
 
+class EngagementActionRequest(BaseModel):
+    user_id: str
+    action: str
+    target_id: str | None = None
+    hashtags: list[str] = Field(default_factory=list)
+    text: str | None = None
+    timestamp: float | None = None
+
+
+class HashtagEventRequest(BaseModel):
+    hashtag: str
+    user_id: str
+    timestamp: float | None = None
+
+
+class PartialEngagementRequest(BaseModel):
+    user_id: str
+    partial: str
+    target_id: str
+
+
+class PartialSearchRequest(BaseModel):
+    text: str
+    pattern: str
+
+
+class PostScoreRequest(BaseModel):
+    post_metrics: dict[str, float]
+    user_affinity: float = 1.0
+
+
+class QueueJobRequest(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
@@ -351,6 +573,24 @@ def database_health():
         "status": "ok",
         "database": "postgres",
     }
+
+
+@app.post("/queue/jobs/{topic}")
+def queue_job(topic: str, payload: QueueJobRequest) -> JSONResponse:
+    if not QUEUE_TOPICS_ENABLED:
+        return JSONResponse(
+            status_code=409,
+            content={"message": "Queue topics are disabled on this instance."},
+        )
+    normalized_topic = (topic or "").strip()
+    if not normalized_topic:
+        return JSONResponse(status_code=400, content={"message": "topic is required."})
+    try:
+        return _dispatch_topic_job(normalized_topic, payload.payload)
+    except TimeoutError as error:
+        return JSONResponse(status_code=504, content={"message": str(error)})
+    except Exception as error:  # noqa: BLE001
+        return JSONResponse(status_code=503, content={"message": "Queue dispatch failed.", "error": str(error)})
 
 
 @app.get("/media/render")
@@ -486,6 +726,202 @@ def multiply(payload: MultiplyRequest) -> dict[str, list[list[float]]]:
     return response
 
 
+@app.post("/engagement/action")
+def engagement_action(payload: EngagementActionRequest) -> dict[str, Any]:
+    if QUEUE_TOPICS_ENABLED:
+        try:
+            return _dispatch_topic_job(ENGAGEMENT_ACTION_TOPIC, payload.model_dump())
+        except TimeoutError as error:
+            return JSONResponse(status_code=504, content={"message": str(error)})
+        except Exception as error:  # noqa: BLE001
+            return JSONResponse(status_code=503, content={"message": "Queue dispatch failed.", "error": str(error)})
+
+    user_id = payload.user_id.strip()
+    if not user_id:
+        return JSONResponse(status_code=400, content={"message": "user_id is required."})
+
+    action = payload.action.strip().lower()
+    if action not in ACTION_WEIGHTS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "message": f"Unsupported action '{payload.action}'.",
+                "supported_actions": sorted(ACTION_WEIGHTS.keys()),
+            },
+        )
+
+    try:
+        record_user_action(
+            user_id=user_id,
+            action=action,
+            target_id=(payload.target_id or "").strip() or None,
+            timestamp=payload.timestamp,
+        )
+        hashtags = {_normalize_hashtag(tag) for tag in payload.hashtags if _normalize_hashtag(tag)}
+        if payload.text:
+            hashtags.update(_normalize_hashtag(tag) for tag in _extract_hashtags(payload.text))
+        for hashtag in hashtags:
+            if hashtag:
+                record_hashtag_event(hashtag, user_id, payload.timestamp)
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Engagement counters are unavailable.", "error": str(error)},
+        )
+
+    return {"status": "ok", "user_id": user_id, "action": action}
+
+
+@app.get("/engagement/users/{user_id}/metrics")
+def engagement_user_metrics(
+    user_id: str,
+    day: str | None = Query(default=None),
+) -> dict[str, Any]:
+    normalized_user_id = user_id.strip()
+    if not normalized_user_id:
+        return JSONResponse(status_code=400, content={"message": "user_id is required."})
+
+    try:
+        redis_client = get_redis_client()
+        total = redis_client.hgetall(f"user:{normalized_user_id}:metrics")
+        response: dict[str, Any] = {"user_id": normalized_user_id, "total": total}
+        if day:
+            response["daily"] = redis_client.hgetall(f"user:{normalized_user_id}:daily:{day}")
+        return response
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Engagement counters are unavailable.", "error": str(error)},
+        )
+
+
+@app.get("/engagement/rank/users")
+def engagement_user_rank(limit: int = Query(default=20, ge=1, le=500)) -> dict[str, Any]:
+    try:
+        redis_client = get_redis_client()
+        ranked = redis_client.zrevrange("user:engagement:ranked", 0, limit - 1, withscores=True)
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "User engagement ranking is unavailable.", "error": str(error)},
+        )
+
+    return {
+        "items": [{"user_id": user_id, "score": score} for user_id, score in ranked],
+        "count": len(ranked),
+    }
+
+
+@app.get("/engagement/rank/posts")
+def engagement_post_rank(limit: int = Query(default=20, ge=1, le=500)) -> dict[str, Any]:
+    try:
+        redis_client = get_redis_client()
+        ranked = redis_client.zrevrange("post:engagement:ranked", 0, limit - 1, withscores=True)
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Post engagement ranking is unavailable.", "error": str(error)},
+        )
+
+    return {
+        "items": [{"post_id": post_id, "score": score} for post_id, score in ranked],
+        "count": len(ranked),
+    }
+
+
+@app.post("/engagement/hashtags/event")
+def engagement_hashtag_event(payload: HashtagEventRequest) -> dict[str, Any]:
+    normalized_user_id = payload.user_id.strip()
+    if not normalized_user_id:
+        return JSONResponse(status_code=400, content={"message": "user_id is required."})
+    normalized_hashtag = _normalize_hashtag(payload.hashtag)
+    if not normalized_hashtag:
+        return JSONResponse(status_code=400, content={"message": "hashtag is required."})
+
+    try:
+        record_hashtag_event(normalized_hashtag, normalized_user_id, payload.timestamp)
+        score = compute_trending_score(normalized_hashtag)
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Hashtag trend counters are unavailable.", "error": str(error)},
+        )
+
+    return {"hashtag": f"#{normalized_hashtag}", "trending_score": score}
+
+
+@app.get("/engagement/hashtags/{hashtag}/score")
+def engagement_hashtag_score(hashtag: str) -> dict[str, Any]:
+    normalized_hashtag = _normalize_hashtag(hashtag)
+    if not normalized_hashtag:
+        return JSONResponse(status_code=400, content={"message": "hashtag is required."})
+
+    try:
+        redis_client = get_redis_client()
+        now_ts = datetime.now(timezone.utc).timestamp()
+        cutoff = now_ts - HASHTAG_WINDOW_SECONDS
+        events = redis_client.zrangebyscore(
+            f"hashtag:{normalized_hashtag}:events",
+            cutoff,
+            "+inf",
+        )
+        unique_users = {
+            part[1]
+            for part in (str(member).split("|", 2) for member in events)
+            if len(part) >= 2
+        }
+        score = compute_trending_score(normalized_hashtag, now_ts)
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Hashtag trend counters are unavailable.", "error": str(error)},
+        )
+
+    return {
+        "hashtag": f"#{normalized_hashtag}",
+        "window_seconds": HASHTAG_WINDOW_SECONDS,
+        "post_count": len(events),
+        "unique_users": len(unique_users),
+        "trending_score": score,
+    }
+
+
+@app.post("/engagement/partials/find")
+def engagement_partials_find(payload: PartialSearchRequest) -> dict[str, Any]:
+    matches = find_partial_hashtags(payload.text, payload.pattern)
+    return {
+        "pattern": payload.pattern,
+        "matches": matches,
+        "normalized_terms": [split_camel_hashtag(match) for match in matches],
+    }
+
+
+@app.post("/engagement/partials/track")
+def engagement_partials_track(payload: PartialEngagementRequest) -> dict[str, Any]:
+    user_id = payload.user_id.strip()
+    target_id = payload.target_id.strip()
+    if not user_id or not target_id:
+        return JSONResponse(status_code=400, content={"message": "user_id and target_id are required."})
+
+    try:
+        record_partial_engagement(user_id, payload.partial, target_id)
+    except ValueError as error:
+        return JSONResponse(status_code=400, content={"message": str(error)})
+    except redis.RedisError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"message": "Partial engagement counters are unavailable.", "error": str(error)},
+        )
+
+    return {"status": "ok", "user_id": user_id, "partial": payload.partial.lower(), "target_id": target_id}
+
+
+@app.post("/engagement/posts/score")
+def engagement_post_score(payload: PostScoreRequest) -> dict[str, Any]:
+    score = score_post_for_user(payload.post_metrics, payload.user_affinity)
+    return {"score": score, "user_affinity": payload.user_affinity}
+
+
 @app.get("/post/feed/ranked")
 def post_feed_ranked(
     viewer_id: str = Query(..., min_length=1),
@@ -497,6 +933,21 @@ def post_feed_ranked(
     Intended to replace / augment PostRepository.GetFeedAsync for authenticated users.
     Returns post IDs and scores; the .NET layer fetches full Post DTOs by ID.
     """
+    if QUEUE_TOPICS_ENABLED:
+        try:
+            return _dispatch_topic_job(
+                POST_FEED_TOPIC,
+                {
+                    "viewer_id": viewer_id,
+                    "page_size": page_size,
+                    "window_days": window_days,
+                },
+            )
+        except TimeoutError as error:
+            return JSONResponse(status_code=504, content={"message": str(error)})
+        except Exception as error:  # noqa: BLE001
+            return JSONResponse(status_code=503, content={"message": "Queue dispatch failed.", "error": str(error)})
+
     try:
         with get_connection() as conn:
             posts = rank_post_feed(
@@ -526,6 +977,20 @@ async def live_feed(
     viewer_id: str = Query(..., min_length=1),
     limit: int = Query(50, ge=1, le=MAX_LIVE_FEED_LIMIT),
 ) -> dict[str, Any]:
+    if QUEUE_TOPICS_ENABLED:
+        try:
+            return _dispatch_topic_job(
+                LIVE_FEED_TOPIC,
+                {
+                    "viewer_id": viewer_id,
+                    "limit": limit,
+                },
+            )
+        except TimeoutError as error:
+            return JSONResponse(status_code=504, content={"message": str(error)})
+        except Exception as error:  # noqa: BLE001
+            return JSONResponse(status_code=503, content={"message": "Queue dispatch failed.", "error": str(error)})
+
     try:
         predictor = score_stream_with_nuraven_model if NURAVEN_CORP_LLM_SCORER_URL else None
         streams = await rank_live_feed(DATABASE_URL, viewer_id, limit, predictor)
@@ -547,6 +1012,19 @@ async def live_feed(
 def live_training_data(
     limit: int = Query(500, ge=1, le=MAX_TRAINING_SAMPLE_LIMIT),
 ) -> dict[str, Any]:
+    if QUEUE_TOPICS_ENABLED:
+        try:
+            return _dispatch_topic_job(
+                LIVE_TRAINING_TOPIC,
+                {
+                    "limit": limit,
+                },
+            )
+        except TimeoutError as error:
+            return JSONResponse(status_code=504, content={"message": str(error)})
+        except Exception as error:  # noqa: BLE001
+            return JSONResponse(status_code=503, content={"message": "Queue dispatch failed.", "error": str(error)})
+
     try:
         ensure_live_rank_impressions_table()
         with get_connection() as connection:

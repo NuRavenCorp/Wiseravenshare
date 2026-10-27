@@ -75,7 +75,7 @@ public sealed class LiveController : ControllerBase
 
         try
         {
-            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var client = _httpClientFactory.CreateClient("PythonLiveRankerService");
             var response = await client.GetAsync(query, cancellationToken);
             var raw = await response.Content.ReadAsStringAsync(cancellationToken);
             var mediaType = response.Content.Headers.ContentType?.MediaType;
@@ -110,7 +110,7 @@ public sealed class LiveController : ControllerBase
 
         try
         {
-            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var client = _httpClientFactory.CreateClient("PythonLiveRankerService");
             var response = await client.GetAsync(query, cancellationToken);
             var raw = await response.Content.ReadAsStringAsync(cancellationToken);
             var mediaType = response.Content.Headers.ContentType?.MediaType;

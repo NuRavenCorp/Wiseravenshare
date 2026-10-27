@@ -2197,6 +2197,32 @@ builder.Services.AddHttpClient("PythonMatrixService", client =>
 {
     ConnectTimeout = TimeSpan.FromSeconds(5),
 });
+builder.Services.AddHttpClient("PythonLiveRankerService", client =>
+{
+    var baseUrl = builder.Configuration["PythonLiveRankerService:BaseUrl"]
+        ?? builder.Configuration["PythonLiveRankerService__BaseUrl"]
+        ?? builder.Configuration["PythonMatrixService:BaseUrl"]
+        ?? builder.Configuration["PythonMatrixService__BaseUrl"]
+        ?? "http://localhost:8005";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(5),
+});
+builder.Services.AddHttpClient("PythonPostRankerService", client =>
+{
+    var baseUrl = builder.Configuration["PythonPostRankerService:BaseUrl"]
+        ?? builder.Configuration["PythonPostRankerService__BaseUrl"]
+        ?? builder.Configuration["PythonMatrixService:BaseUrl"]
+        ?? builder.Configuration["PythonMatrixService__BaseUrl"]
+        ?? "http://localhost:8005";
+    client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    ConnectTimeout = TimeSpan.FromSeconds(5),
+});
 builder.Services.AddHttpClient<INewsAggregationService, NewsAggregationService>();
 builder.Services.AddHttpClient<IDeepSeekService, DeepSeekService>();
 builder.Services.AddScoped<IEnhancedTruthEngine, EnhancedTruthVerificationEngine>();
