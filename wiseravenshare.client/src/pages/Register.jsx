@@ -1,20 +1,92 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
+import { UserPlus, Mail, Lock, AtSign, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import GoogleIcon from "@/components/GoogleIcon";
 import { safeReturnTo } from "@/lib/authReturnTo";
+
+const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
+
+function sanitizeHandle(raw) {
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
+}
+
+function deriveFromEmail(email) {
+  return sanitizeHandle((email || "").split("@")[0] || "");
+}
 
 export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState(null); // null | "checking" | "available" | "taken" | "invalid"
+  const [usernameSuggestion, setUsernameSuggestion] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const debounceRef = useRef(null);
+  const emailPopulatedRef = useRef(false);
+
+  // Auto-populate username from email when the field is still empty
+  useEffect(() => {
+    if (emailPopulatedRef.current || username) return;
+    const derived = deriveFromEmail(email);
+    if (derived.length >= 3) {
+      emailPopulatedRef.current = true;
+      setUsername(derived);
+    }
+  }, [email, username]);
+
+  // Debounced availability check whenever username changes
+  useEffect(() => {
+    const value = username.trim();
+    if (!value) {
+      setUsernameStatus(null);
+      setUsernameSuggestion(null);
+      return;
+    }
+    const sanitized = sanitizeHandle(value);
+    if (!USERNAME_RE.test(sanitized)) {
+      setUsernameStatus("invalid");
+      setUsernameSuggestion(null);
+      return;
+    }
+    setUsernameStatus("checking");
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const result = await apiClient.auth.checkUsername(sanitized);
+        if (result?.available) {
+          setUsernameStatus("available");
+          setUsernameSuggestion(null);
+        } else {
+          setUsernameStatus("taken");
+          setUsernameSuggestion(result?.suggestion || null);
+        }
+      } catch {
+        setUsernameStatus(null);
+      }
+    }, 420);
+    return () => clearTimeout(debounceRef.current);
+  }, [username]);
+
+  const handleUsernameChange = (e) => {
+    const raw = e.target.value;
+    const sanitized = sanitizeHandle(raw);
+    setUsername(sanitized);
+    emailPopulatedRef.current = true;
+  };
+
+  const acceptSuggestion = () => {
+    if (usernameSuggestion) {
+      setUsername(usernameSuggestion);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,9 +95,21 @@ export default function Register() {
       setError("Passwords do not match");
       return;
     }
+    if (usernameStatus === "taken") {
+      setError("That username is already taken — choose another or accept the suggestion.");
+      return;
+    }
+    if (username && usernameStatus === "invalid") {
+      setError("Username must be 3–30 characters: letters, numbers, and underscores only.");
+      return;
+    }
     setLoading(true);
     try {
-      const result = await apiClient.auth.register({ email, password });
+      const result = await apiClient.auth.register({
+        email,
+        password,
+        username: username || undefined,
+      });
       const token = result?.token || result?.access_token;
       if (token) {
         apiClient.auth.setToken(token);
@@ -44,6 +128,13 @@ export default function Register() {
   const handleGoogle = () => {
     apiClient.auth.loginWithProvider("google", safeReturnTo());
   };
+
+  const usernameAdornment = (() => {
+    if (usernameStatus === "checking") return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
+    if (usernameStatus === "available") return <CheckCircle2 className="w-4 h-4 text-emerald-500" />;
+    if (usernameStatus === "taken" || usernameStatus === "invalid") return <XCircle className="w-4 h-4 text-destructive" />;
+    return null;
+  })();
 
   return (
     <AuthLayout
@@ -104,6 +195,52 @@ export default function Register() {
             />
           </div>
         </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="username">
+            Username <span className="text-muted-foreground text-xs font-normal">(optional)</span>
+          </Label>
+          <div className="relative">
+            <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Input
+              id="username"
+              type="text"
+              autoComplete="username"
+              placeholder="yourhandle"
+              value={username}
+              onChange={handleUsernameChange}
+              className="pl-10 pr-10 h-12"
+              maxLength={30}
+              spellCheck={false}
+            />
+            {usernameAdornment && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                {usernameAdornment}
+              </span>
+            )}
+          </div>
+          {usernameStatus === "available" && (
+            <p className="text-xs text-emerald-500">@{username} is available</p>
+          )}
+          {usernameStatus === "taken" && (
+            <p className="text-xs text-destructive">
+              @{username} is taken.{" "}
+              {usernameSuggestion && (
+                <button
+                  type="button"
+                  onClick={acceptSuggestion}
+                  className="underline text-primary hover:no-underline"
+                >
+                  Use @{usernameSuggestion} instead?
+                </button>
+              )}
+            </p>
+          )}
+          {usernameStatus === "invalid" && (
+            <p className="text-xs text-destructive">3–30 characters: letters, numbers, underscores only.</p>
+          )}
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <div className="relative">
@@ -136,7 +273,7 @@ export default function Register() {
             />
           </div>
         </div>
-        <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
+        <Button type="submit" className="w-full h-12 font-medium" disabled={loading || usernameStatus === "taken" || usernameStatus === "invalid"}>
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -150,3 +287,4 @@ export default function Register() {
     </AuthLayout>
   );
 }
+

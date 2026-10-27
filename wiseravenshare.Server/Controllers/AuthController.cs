@@ -105,6 +105,24 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Unable to register with the provided details." });
         }
 
+        // Validate and uniqueness-check the requested username when supplied.
+        string? sanitizedUsername = null;
+        if (!string.IsNullOrWhiteSpace(request.Username))
+        {
+            sanitizedUsername = new string(request.Username.Trim().ToLowerInvariant()
+                .Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+
+            if (sanitizedUsername.Length < 3 || sanitizedUsername.Length > 30)
+            {
+                return BadRequest(new { message = "Username must be between 3 and 30 characters (letters, numbers, underscores only)." });
+            }
+
+            if (_userStore.HandleExists(sanitizedUsername))
+            {
+                return BadRequest(new { message = "That username is already taken. Please choose a different one." });
+            }
+        }
+
         AppUserRecord user;
         try
         {
@@ -115,7 +133,8 @@ public class AuthController : ControllerBase
                 request.Bio,
                 request.Location,
                 request.Website,
-                request.Avatar);
+                request.Avatar,
+                sanitizedUsername);
         }
         catch (InvalidOperationException ex)
         {
@@ -166,6 +185,43 @@ public class AuthController : ControllerBase
             _logger.LogWarning(ex, "Profile badge award failed during registration for {Email}.", user.Email);
         }
         return Ok(new { token, refreshToken, adminPassToken, user = responseUser });
+    }
+
+    /// <summary>
+    /// Real-time username availability check. Safe to call unauthenticated.
+    /// GET /api/auth/check-username?handle=desired_handle
+    /// Returns: { available: bool, suggestion: string? }
+    /// </summary>
+    [HttpGet("check-username")]
+    [AllowAnonymous]
+    public IActionResult CheckUsername([FromQuery] string? handle)
+    {
+        if (string.IsNullOrWhiteSpace(handle))
+        {
+            return BadRequest(new { message = "handle query parameter is required." });
+        }
+
+        var sanitized = new string(handle.Trim().ToLowerInvariant()
+            .Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+
+        if (sanitized.Length < 3 || sanitized.Length > 30)
+        {
+            return Ok(new
+            {
+                available = false,
+                suggestion = (string?)null,
+                reason = "Username must be 3–30 characters (letters, numbers, underscores only)."
+            });
+        }
+
+        if (!_userStore.HandleExists(sanitized))
+        {
+            return Ok(new { available = true, suggestion = (string?)null });
+        }
+
+        // Offer a numeric-suffix suggestion when the requested handle is taken.
+        var suggestion = _userStore.GenerateUniqueHandle(sanitized, sanitized + "@placeholder.invalid", sanitized);
+        return Ok(new { available = false, suggestion });
     }
 
     [HttpPost("login")]
@@ -3929,6 +3985,9 @@ public sealed class RegisterRequest
     public string Website { get; set; } = string.Empty;
     public string Avatar { get; set; } = string.Empty;
     public string ReferralCode { get; set; } = string.Empty;
+    /// <summary>Optional preferred username/handle. Must be 3–30 chars, alphanumeric and underscores only.
+    /// If omitted or unavailable a unique handle is auto-generated from Name/Email.</summary>
+    public string? Username { get; set; }
 }
 
 public sealed class VerifyRequest
