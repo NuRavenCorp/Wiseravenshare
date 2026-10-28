@@ -6,12 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
 
+function readAccessToken() {
+  if (typeof window === "undefined" || !window.localStorage) return "";
+  return window.localStorage.getItem("wiseravenshare_access_token")
+    || window.localStorage.getItem("token")
+    || "";
+}
+
 async function transcribeFile(file) {
+  const token = readAccessToken();
   const endpoints = [
-    "/api/functions/words-karaoke",
-    "/api/functions/transcribe-local-file",
+    // Prefer the dedicated karaoke endpoint first.
     "/api/karaoke/speech/transcribe",
-    "/api/assistant/audio/transcribe",
+    // Legacy compat fallbacks.
+    "/api/functions/transcribe-local-file",
+    "/api/functions/words-karaoke",
+    // Assistant endpoint requires auth and feature gate; keep as last resort.
+    ...(token ? ["/api/assistant/audio/transcribe"] : []),
   ];
 
   let lastError = null;
@@ -75,16 +86,23 @@ async function transcribeUrl(url, fileName) {
   };
 
   let credentials = "include";
+  const headers = {};
+  const token = readAccessToken();
   try {
     const resolved = new URL(url, window.location.origin);
     if (resolved.origin !== window.location.origin && /^https?:$/i.test(resolved.protocol)) {
       credentials = "omit";
+    } else if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
   } catch {
     credentials = "include";
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
   }
 
-  const response = await fetch(url, { credentials });
+  const response = await fetch(url, { credentials, headers });
   if (!response.ok) {
     throw new Error(`Failed to load media (${response.status})`);
   }
