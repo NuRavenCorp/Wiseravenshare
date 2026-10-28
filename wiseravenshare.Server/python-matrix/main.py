@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import math
@@ -14,6 +15,7 @@ from urllib import request as urllib_request
 
 import psycopg
 import redis
+import redis.asyncio as aredis
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -21,6 +23,8 @@ from pydantic import BaseModel, Field, field_validator
 from live_ranker import rank_live_feed
 from feed_ranker import rank_post_feed
 from job_queue import enqueue_job
+from predict.feedback import FeedbackCollector
+from predict.predictor import Predictor
 
 
 logger = logging.getLogger("python-matrix")
@@ -40,6 +44,8 @@ MEDIA_RENDERER_TIMEOUT_SECONDS = float(os.environ.get("MEDIA_RENDERER_TIMEOUT_SE
 MEDIA_RENDERER_MAX_BYTES = int(os.environ.get("MEDIA_RENDERER_MAX_BYTES", str(200 * 1024 * 1024)))
 MEDIA_RENDERER_ORIGIN = os.environ.get("MEDIA_RENDERER_ORIGIN", "http://127.0.0.1:5242").strip().rstrip("/")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0").strip()
+PREDICTOR_ENABLED = os.environ.get("PREDICTOR_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+PREDICTOR_MODELS_DIR = os.environ.get("PREDICTOR_MODELS_DIR", "/var/lib/posting/models").strip()
 QUEUE_TOPICS_ENABLED = os.environ.get("QUEUE_TOPICS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 POST_FEED_TOPIC = os.environ.get("POST_FEED_TOPIC", "post.feed.ranked").strip()
 LIVE_FEED_TOPIC = os.environ.get("LIVE_FEED_TOPIC", "live.feed.ranked").strip()
@@ -75,6 +81,10 @@ FEED_WEIGHTS = {
 HASHTAG_WINDOW_SECONDS = 3600
 HASHTAG_RECENCY_HALF_LIFE_MINUTES = 120
 _redis_client: redis.Redis | None = None
+_predictor_redis_client: aredis.Redis | None = None
+_predictor: Predictor | None = None
+_feedback_collector: FeedbackCollector | None = None
+_feedback_sweeper_task: asyncio.Task | None = None
 
 
 def get_connection() -> psycopg.Connection:
@@ -482,6 +492,7 @@ class EngagementActionRequest(BaseModel):
     user_id: str
     action: str
     target_id: str | None = None
+    target_author_id: str | None = None
     hashtags: list[str] = Field(default_factory=list)
     text: str | None = None
     timestamp: float | None = None
@@ -513,18 +524,104 @@ class QueueJobRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class PredictEngagementRequest(BaseModel):
+    user_id: str
+    post_author_id: str
+    post_tags: list[str] = Field(default_factory=list)
+
+
+class LearnEngagementRequest(BaseModel):
+    user_id: str
+    post_author_id: str
+    post_tags: list[str] = Field(default_factory=list)
+    interacted: bool
+    sample_weight: float = 1.0
+
+
+class LearnChurnRequest(BaseModel):
+    user_id: str
+    churned: bool
+    sample_weight: float = 1.0
+
+
+class PredictModerationRiskRequest(BaseModel):
+    user_id: str
+    content: str
+
+
+class LearnModerationRequest(BaseModel):
+    user_id: str
+    content: str
+    violated: bool
+    sample_weight: float = 1.0
+
+
+class RecordImpressionRequest(BaseModel):
+    user_id: str
+    post_id: str
+    post_author_id: str
+    post_tags: list[str] = Field(default_factory=list)
+    predicted_probability: float
+
+
+class MarkEngagedRequest(BaseModel):
+    user_id: str
+    post_id: str
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _predictor_redis_client
+    global _predictor
+    global _feedback_collector
+    global _feedback_sweeper_task
     try:
         ensure_history_table()
         ensure_live_rank_impressions_table()
         logger.info("matrix_history table is ready.")
     except psycopg.Error as error:
         logger.warning("Database not ready during startup: %s", error)
+    if PREDICTOR_ENABLED:
+        try:
+            _predictor_redis_client = aredis.Redis.from_url(REDIS_URL, decode_responses=True)
+            _predictor = Predictor(_predictor_redis_client, PREDICTOR_MODELS_DIR)
+            _feedback_collector = FeedbackCollector(_predictor, _predictor_redis_client)
+            _feedback_sweeper_task = asyncio.create_task(_feedback_collector.sweep_loop())
+            logger.info("Predictor initialized.")
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Predictor startup failed: %s", error)
+            _predictor_redis_client = None
+            _predictor = None
+            _feedback_collector = None
+            _feedback_sweeper_task = None
     yield
+    if _feedback_collector is not None:
+        _feedback_collector.stop()
+    if _feedback_sweeper_task is not None:
+        _feedback_sweeper_task.cancel()
+        try:
+            await _feedback_sweeper_task
+        except asyncio.CancelledError:
+            pass
+    if _predictor is not None:
+        _predictor.save_models()
+    if _predictor_redis_client is not None:
+        await _predictor_redis_client.close()
+    _feedback_sweeper_task = None
+    _feedback_collector = None
+    _predictor = None
+    _predictor_redis_client = None
 
 
 app = FastAPI(title="Python Matrix Service", lifespan=lifespan)
+
+
+def _get_predictor() -> Predictor | None:
+    return _predictor if PREDICTOR_ENABLED else None
+
+
+def _get_feedback_collector() -> FeedbackCollector | None:
+    return _feedback_collector if PREDICTOR_ENABLED else None
 
 
 @app.exception_handler(RequestValidationError)
@@ -727,7 +824,7 @@ def multiply(payload: MultiplyRequest) -> dict[str, list[list[float]]]:
 
 
 @app.post("/engagement/action")
-def engagement_action(payload: EngagementActionRequest) -> dict[str, Any]:
+async def engagement_action(payload: EngagementActionRequest) -> dict[str, Any]:
     if QUEUE_TOPICS_ENABLED:
         try:
             return _dispatch_topic_job(ENGAGEMENT_ACTION_TOPIC, payload.model_dump())
@@ -763,6 +860,21 @@ def engagement_action(payload: EngagementActionRequest) -> dict[str, Any]:
         for hashtag in hashtags:
             if hashtag:
                 record_hashtag_event(hashtag, user_id, payload.timestamp)
+
+        predictor = _get_predictor()
+        if predictor is not None:
+            try:
+                if action == "post":
+                    await predictor.features.update_on_post(user_id)
+                elif action in {"like", "comment", "repost", "affirm"}:
+                    await predictor.features.update_on_interaction(
+                        user_id=user_id,
+                        interaction_type=action,
+                        target_author=(payload.target_author_id or "").strip() or None,
+                        target_tags=sorted(hashtags),
+                    )
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Predictor feature update skipped for user %s action %s: %s", user_id, action, error)
     except redis.RedisError as error:
         return JSONResponse(
             status_code=503,
@@ -920,6 +1032,124 @@ def engagement_partials_track(payload: PartialEngagementRequest) -> dict[str, An
 def engagement_post_score(payload: PostScoreRequest) -> dict[str, Any]:
     score = score_post_for_user(payload.post_metrics, payload.user_affinity)
     return {"score": score, "user_affinity": payload.user_affinity}
+
+
+@app.get("/predict/health")
+def predict_health() -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return {"enabled": False}
+    return {"enabled": True, **predictor.model_status()}
+
+
+@app.post("/predict/engagement/probability")
+async def predict_engagement_probability(payload: PredictEngagementRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    probability = await predictor.engagement_probability(payload.user_id, payload.post_author_id, payload.post_tags)
+    return {"probability": probability}
+
+
+@app.post("/predict/engagement/learn")
+async def predict_learn_engagement(payload: LearnEngagementRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    loss = await predictor.learn_engagement(
+        user_id=payload.user_id,
+        post_author=payload.post_author_id,
+        post_tags=payload.post_tags,
+        interacted=payload.interacted,
+        sample_weight=payload.sample_weight,
+    )
+    return {"status": "ok", "loss": loss}
+
+
+@app.get("/predict/churn/{user_id}")
+async def predict_churn_probability(user_id: str) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    return {"churn_probability": await predictor.churn_probability(user_id)}
+
+
+@app.post("/predict/churn/learn")
+async def predict_learn_churn(payload: LearnChurnRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    loss = await predictor.learn_churn(payload.user_id, payload.churned, sample_weight=payload.sample_weight)
+    return {"status": "ok", "loss": loss}
+
+
+@app.post("/predict/moderation/risk")
+async def predict_moderation_risk(payload: PredictModerationRiskRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    risk = await predictor.moderation_risk(payload.user_id, payload.content)
+    return {"moderation_risk": risk}
+
+
+@app.post("/predict/moderation/learn")
+async def predict_learn_moderation(payload: LearnModerationRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    loss = await predictor.learn_moderation(
+        user_id=payload.user_id,
+        content=payload.content,
+        violated=payload.violated,
+        sample_weight=payload.sample_weight,
+    )
+    return {"status": "ok", "loss": loss}
+
+
+@app.post("/predict/impressions/record")
+async def predict_record_impression(payload: RecordImpressionRequest) -> dict[str, Any]:
+    collector = _get_feedback_collector()
+    if collector is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    await collector.record_impression(
+        user_id=payload.user_id,
+        post_id=payload.post_id,
+        post_author=payload.post_author_id,
+        post_tags=payload.post_tags,
+        predicted_probability=payload.predicted_probability,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/predict/impressions/engaged")
+async def predict_mark_impression_engaged(payload: MarkEngagedRequest) -> dict[str, Any]:
+    collector = _get_feedback_collector()
+    if collector is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    await collector.mark_engaged(payload.user_id, payload.post_id)
+    learned = await collector.flush_positive(payload.user_id, payload.post_id)
+    return {"status": "ok", "learned": learned}
+
+
+@app.post("/predict/impressions/{user_id}/flush-negatives")
+async def predict_flush_negative_impressions(user_id: str) -> dict[str, Any]:
+    collector = _get_feedback_collector()
+    if collector is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    flushed = await collector.flush_negatives_for_user(user_id)
+    return {"status": "ok", "flushed": flushed}
+
+
+@app.post("/predict/explain/engagement")
+async def predict_explain_engagement(payload: PredictEngagementRequest) -> dict[str, Any]:
+    predictor = _get_predictor()
+    if predictor is None:
+        return JSONResponse(status_code=409, content={"message": "Predictor is disabled."})
+    return await predictor.explain_engagement(
+        user_id=payload.user_id,
+        post_author=payload.post_author_id,
+        post_tags=payload.post_tags,
+    )
 
 
 @app.get("/post/feed/ranked")
