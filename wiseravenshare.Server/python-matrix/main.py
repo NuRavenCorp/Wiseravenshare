@@ -569,12 +569,29 @@ class MarkEngagedRequest(BaseModel):
     post_id: str
 
 
+import asyncpg
+from chat.store import ChatStore, ensure_chat_schema
+from chat.ws import ConnectionManager as ChatConnectionManager
+from chat.notifications import ChatNotificationService
+from chat.engine import ChatEngine
+from chat.bridge import PostChatBridge
+from chat.router import router as chat_router
+from chat.state import _chat_state
+
+CHAT_ENABLED = os.environ.get("CHAT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+_asyncpg_pool: asyncpg.Pool | None = None
+_chat_ws: ChatConnectionManager | None = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global _predictor_redis_client
     global _predictor
     global _feedback_collector
     global _feedback_sweeper_task
+    global _asyncpg_pool
+    global _chat_ws
     try:
         ensure_history_table()
         ensure_live_rank_impressions_table()
@@ -594,7 +611,37 @@ async def lifespan(_: FastAPI):
             _predictor = None
             _feedback_collector = None
             _feedback_sweeper_task = None
+
+    # ── Chat layer startup ────────────────────────────────────────────────
+    if CHAT_ENABLED:
+        try:
+            _asyncpg_pool = await asyncpg.create_pool(
+                dsn=DATABASE_URL,
+                min_size=2,
+                max_size=10,
+                command_timeout=10,
+            )
+            await ensure_chat_schema(_asyncpg_pool)
+            _chat_redis = aredis.Redis.from_url(REDIS_URL, decode_responses=True)
+            _chat_ws = ChatConnectionManager(_chat_redis)
+            await _chat_ws.start()
+            _chat_store = ChatStore(_asyncpg_pool)
+            _chat_notifier = ChatNotificationService(_chat_redis)
+            _chat_engine = ChatEngine(_chat_store, _chat_ws, _chat_notifier, _chat_redis)
+            _chat_bridge = PostChatBridge(_chat_engine, _chat_redis)
+            _chat_state.update({
+                "chat": _chat_engine,
+                "bridge": _chat_bridge,
+                "notifier": _chat_notifier,
+                "ws": _chat_ws,
+            })
+            logger.info("Chat layer initialized.")
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Chat startup failed (service will run without chat): %s", error)
+
     yield
+
+    # ── shutdown ──────────────────────────────────────────────────────────
     if _feedback_collector is not None:
         _feedback_collector.stop()
     if _feedback_sweeper_task is not None:
@@ -612,8 +659,17 @@ async def lifespan(_: FastAPI):
     _predictor = None
     _predictor_redis_client = None
 
+    if _chat_ws is not None:
+        await _chat_ws.stop()
+    if _asyncpg_pool is not None:
+        await _asyncpg_pool.close()
+    _chat_state.clear()
+
 
 app = FastAPI(title="Python Matrix Service", lifespan=lifespan)
+
+if CHAT_ENABLED:
+    app.include_router(chat_router)
 
 
 def _get_predictor() -> Predictor | None:

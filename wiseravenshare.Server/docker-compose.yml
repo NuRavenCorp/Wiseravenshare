@@ -100,6 +100,7 @@ services:
       AUDIO_TOPIC: ${AUDIO_TOPIC:-worker.audio}
       PREDICTOR_ENABLED: ${PREDICTOR_ENABLED:-false}
       PREDICTOR_MODELS_DIR: /var/lib/posting/models
+      CHAT_ENABLED: ${CHAT_ENABLED:-true}
     volumes:
       - predictor-models:/var/lib/posting/models
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
