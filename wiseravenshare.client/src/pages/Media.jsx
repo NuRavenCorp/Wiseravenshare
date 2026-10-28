@@ -199,7 +199,9 @@ export default function Media() {
             </section>
           </div>
         )}
-        {tab === "radio" && <FMRadioPage />}
+        <div className={tab === "radio" ? "" : "hidden"} aria-hidden={tab !== "radio"}>
+          <FMRadioPage />
+        </div>
         {tab === "karaoke" && <KaraokeExtractor />}
         {tab === "live" && <LiveStreamPanel initialStreamId={streamIdFromQuery} />}
         {tab === "rights" && <RightsManager />}
