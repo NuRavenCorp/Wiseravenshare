@@ -39,9 +39,7 @@ export default function Navbar() {
       <nav className="mx-auto max-w-7xl px-6 h-20 flex items-center justify-between">
         <a href="#top" className="flex items-center gap-2.5 group">
           <Image src={logoUrl} alt="WiseRavenShare" className="w-10 h-10 rounded-full group-hover:scale-110 transition-transform duration-500" fittingType="fill" />
-          <span className="font-display text-lg tracking-[0.2em] text-foreground">
-            WISE<span className="text-accent">RAVEN</span>SHARE
-          </span>
+          <span className="font-display text-lg tracking-[0.2em] text-foreground">WRS</span>
         </a>
 
         <div className="hidden md:flex items-center gap-9">
