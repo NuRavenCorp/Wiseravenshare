@@ -4,6 +4,7 @@ using Wiseravenshare.Server.Entities.Collaboration;
 using Wiseravenshare.Server.Entities.Access;
 using Wiseravenshare.Server.Entities.Currency;
 using Wiseravenshare.Server.Entities.FM;
+using Wiseravenshare.Server.Entities.Karaoke;
 using Wiseravenshare.Server.Entities.Personalization;
 using Wiseravenshare.Server.Entities.Roles;
 using Wiseravenshare.Server.Entities.CrossPlatform;
@@ -100,6 +101,10 @@ public class AppDbContext : DbContext
     public DbSet<RadioStationRequest> RadioStationRequests => Set<RadioStationRequest>();
     public DbSet<RadioStationShoutout> RadioStationShoutouts => Set<RadioStationShoutout>();
     public DbSet<RadioStationFrequencyClaim> RadioStationFrequencyClaims => Set<RadioStationFrequencyClaim>();
+
+    // Karaoke
+    public DbSet<KaraokeTrack> KaraokeTracks => Set<KaraokeTrack>();
+    public DbSet<KaraokeTrackPlay> KaraokeTrackPlays => Set<KaraokeTrackPlay>();
 
     // Personalization
     public DbSet<UserLearningEvent> UserLearningEvents => Set<UserLearningEvent>();
