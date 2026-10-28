@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,6 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { apiClient } from "@/api/client";
+
+const AUTOSAVE_DELAY_MS = 2000;
 
 const LINEUP_STYLES = {
   approved: "bg-green-500/15 text-green-500",
@@ -27,15 +29,54 @@ export default function PodcastItinerary({ podcast, onUpdate, permissions }) {
   const [newDuration, setNewDuration] = useState("");
   const [newNotes, setNewNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [autoSaveLabel, setAutoSaveLabel] = useState("");
+
+  const autosaveTimerRef = useRef(null);
+  const savedRef = useRef(JSON.stringify(podcast.itinerary || []));
 
   useEffect(() => {
     setSegments(podcast.itinerary || []);
     setLineupStatus(podcast.lineup_status || "pending");
+    savedRef.current = JSON.stringify(podcast.itinerary || []);
   }, [podcast.id, podcast.itinerary, podcast.lineup_status]);
+
+  useEffect(() => () => clearTimeout(autosaveTimerRef.current), []);
+
+  const saveItinerary = useCallback(async (nextSegs, newLineupStatus, quiet = false) => {
+    const segs = nextSegs ?? segments;
+    const lstatus = newLineupStatus ?? lineupStatus;
+    if (!quiet) setSaving(true);
+    else setAutoSaveLabel("Saving…");
+    try {
+      await apiClient.entities.Podcast.update(podcast.id, {
+        itinerary: segs,
+        lineup_status: lstatus,
+      });
+      savedRef.current = JSON.stringify(segs);
+      setLineupStatus(lstatus);
+      if (quiet) setAutoSaveLabel("Saved");
+      onUpdate();
+    } catch {
+      if (quiet) setAutoSaveLabel("Save failed");
+    } finally {
+      if (!quiet) setSaving(false);
+      if (quiet) setTimeout(() => setAutoSaveLabel(""), 2000);
+    }
+  }, [podcast.id, segments, lineupStatus, onUpdate]);
+
+  const scheduleAutosave = useCallback((nextSegs) => {
+    clearTimeout(autosaveTimerRef.current);
+    if (JSON.stringify(nextSegs) !== savedRef.current) {
+      autosaveTimerRef.current = setTimeout(
+        () => saveItinerary(nextSegs, undefined, true),
+        AUTOSAVE_DELAY_MS
+      );
+    }
+  }, [saveItinerary]);
 
   const addSegment = () => {
     if (!newTitle) return;
-    setSegments([
+    const next = [
       ...segments,
       {
         segment_title: newTitle,
@@ -43,36 +84,26 @@ export default function PodcastItinerary({ podcast, onUpdate, permissions }) {
         notes: newNotes,
         approved: false,
       },
-    ]);
+    ];
+    setSegments(next);
     setNewTitle("");
     setNewDuration("");
     setNewNotes("");
+    scheduleAutosave(next);
   };
 
   const toggleApproved = (idx) => {
-    setSegments(
-      segments.map((s, i) =>
-        i === idx ? { ...s, approved: !s.approved } : s
-      )
+    const next = segments.map((s, i) =>
+      i === idx ? { ...s, approved: !s.approved } : s
     );
+    setSegments(next);
+    scheduleAutosave(next);
   };
 
   const removeSegment = (idx) => {
-    setSegments(segments.filter((_, i) => i !== idx));
-  };
-
-  const saveItinerary = async (newLineupStatus) => {
-    setSaving(true);
-    try {
-      await apiClient.entities.Podcast.update(podcast.id, {
-        itinerary: segments,
-        lineup_status: newLineupStatus || lineupStatus,
-      });
-      setLineupStatus(newLineupStatus || lineupStatus);
-      onUpdate();
-    } finally {
-      setSaving(false);
-    }
+    const next = segments.filter((_, i) => i !== idx);
+    setSegments(next);
+    scheduleAutosave(next);
   };
 
   const allApproved =
@@ -95,6 +126,9 @@ export default function PodcastItinerary({ podcast, onUpdate, permissions }) {
           >
             {lineupStatus}
           </span>
+          {autoSaveLabel && (
+            <span className="text-xs text-muted-foreground">{autoSaveLabel}</span>
+          )}
         </div>
         {segments.length > 0 && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -200,7 +234,7 @@ export default function PodcastItinerary({ podcast, onUpdate, permissions }) {
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
-            onClick={() => saveItinerary("pending")}
+            onClick={() => saveItinerary(undefined, "pending")}
             disabled={saving}
           >
             {saving ? (
@@ -212,7 +246,7 @@ export default function PodcastItinerary({ podcast, onUpdate, permissions }) {
           </Button>
           {permissions?.canApproveLineup && (
             <Button
-              onClick={() => saveItinerary("approved")}
+              onClick={() => saveItinerary(undefined, "approved")}
               disabled={saving || !allApproved}
               className={!allApproved ? "opacity-50 cursor-not-allowed" : ""}
             >

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, CheckCircle, FileText, Send, Eye } from "lucide-react";
+import { Loader2, CheckCircle, FileText, Send, Eye, CloudOff } from "lucide-react";
 import { apiClient } from "@/api/client";
+
+const AUTOSAVE_DELAY_MS = 2500;
 
 const STATUS_STYLES = {
   approved: "bg-green-500/15 text-green-500",
@@ -15,24 +17,47 @@ export default function PodcastScriptEditor({ podcast, onUpdate, permissions }) 
   const [script, setScript] = useState(podcast.script || "");
   const [status, setStatus] = useState(podcast.script_status || "draft");
   const [saving, setSaving] = useState(false);
+  const [autoSaveLabel, setAutoSaveLabel] = useState(""); // "Saving…" | "Saved" | ""
   const [viewMode, setViewMode] = useState(false);
+
+  const autosaveTimerRef = useRef(null);
+  const savedScriptRef = useRef(podcast.script || "");
 
   useEffect(() => {
     setScript(podcast.script || "");
     setStatus(podcast.script_status || "draft");
+    savedScriptRef.current = podcast.script || "";
   }, [podcast.id, podcast.script, podcast.script_status]);
 
-  const saveScript = async (newStatus) => {
-    setSaving(true);
+  // Cleanup autosave timer on unmount
+  useEffect(() => () => clearTimeout(autosaveTimerRef.current), []);
+
+  const saveScript = useCallback(async (newStatus, quiet = false) => {
+    if (!quiet) setSaving(true);
+    else setAutoSaveLabel("Saving…");
     try {
       await apiClient.entities.Podcast.update(podcast.id, {
         script,
         script_status: newStatus || status,
       });
+      savedScriptRef.current = script;
       setStatus(newStatus || status);
+      if (quiet) setAutoSaveLabel("Saved");
       onUpdate();
+    } catch {
+      if (quiet) setAutoSaveLabel("Save failed");
     } finally {
-      setSaving(false);
+      if (!quiet) setSaving(false);
+      if (quiet) setTimeout(() => setAutoSaveLabel(""), 2000);
+    }
+  }, [podcast.id, script, status, onUpdate]);
+
+  const handleScriptChange = (value) => {
+    setScript(value);
+    // Schedule autosave only when there are unsaved changes
+    clearTimeout(autosaveTimerRef.current);
+    if (value !== savedScriptRef.current) {
+      autosaveTimerRef.current = setTimeout(() => saveScript(undefined, true), AUTOSAVE_DELAY_MS);
     }
   };
 
@@ -49,6 +74,12 @@ export default function PodcastScriptEditor({ podcast, onUpdate, permissions }) 
           >
             {status}
           </span>
+          {autoSaveLabel && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              {autoSaveLabel === "Save failed" ? <CloudOff className="w-3 h-3 text-destructive" /> : null}
+              {autoSaveLabel}
+            </span>
+          )}
         </div>
         {canEdit && (
           <button
@@ -76,7 +107,7 @@ export default function PodcastScriptEditor({ podcast, onUpdate, permissions }) 
       ) : (
         <Textarea
           value={script}
-          onChange={(e) => setScript(e.target.value)}
+          onChange={(e) => handleScriptChange(e.target.value)}
           placeholder="Write your podcast script here..."
           className="min-h-[300px] font-mono text-sm leading-relaxed"
         />
