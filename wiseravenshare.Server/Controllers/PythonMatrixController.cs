@@ -295,6 +295,146 @@ public sealed class PythonMatrixController : ControllerBase
         }
     }
 
+    // ── Chat gateway — proxies /api/chat/* → python-matrix /chat/* ──────────
+
+    [HttpPost("chat/dm")]
+    public async Task<IActionResult> ChatCreateDm([FromBody] JsonElement payload, CancellationToken ct)
+        => await ProxyChatPostAsync("chat/dm", payload, ct);
+
+    [HttpPost("chat/groups")]
+    public async Task<IActionResult> ChatCreateGroup([FromBody] JsonElement payload, CancellationToken ct)
+        => await ProxyChatPostAsync("chat/groups", payload, ct);
+
+    [HttpGet("chat/conversations")]
+    public async Task<IActionResult> ChatListConversations([FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatGetAsync($"chat/conversations?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
+
+    [HttpPost("chat/conversations/{convId}/messages")]
+    public async Task<IActionResult> ChatSendMessage(string convId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/messages?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpGet("chat/conversations/{convId}/messages")]
+    public async Task<IActionResult> ChatListMessages(
+        string convId,
+        [FromQuery(Name = "user_id")] string userId,
+        [FromQuery] string? before = null,
+        [FromQuery] int limit = 50,
+        CancellationToken ct = default)
+    {
+        var qs = $"user_id={Uri.EscapeDataString(userId ?? "")}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(before)) qs += $"&before={Uri.EscapeDataString(before)}";
+        return await ProxyChatGetAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/messages?{qs}", ct);
+    }
+
+    [HttpPatch("chat/messages/{msgId}")]
+    public async Task<IActionResult> ChatEditMessage(string msgId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPatchAsync($"chat/messages/{Uri.EscapeDataString(msgId)}?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpDelete("chat/messages/{msgId}")]
+    public async Task<IActionResult> ChatDeleteMessage(string msgId, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatDeleteAsync($"chat/messages/{Uri.EscapeDataString(msgId)}?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
+
+    [HttpPost("chat/messages/{msgId}/react")]
+    public async Task<IActionResult> ChatReact(string msgId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/messages/{Uri.EscapeDataString(msgId)}/react?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpDelete("chat/messages/{msgId}/react")]
+    public async Task<IActionResult> ChatRemoveReaction(string msgId, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatDeleteAsync($"chat/messages/{Uri.EscapeDataString(msgId)}/react?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
+
+    [HttpPost("chat/conversations/{convId}/read")]
+    public async Task<IActionResult> ChatMarkRead(string convId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/read?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpPost("chat/conversations/{convId}/typing")]
+    public async Task<IActionResult> ChatTyping(string convId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/typing?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpPost("chat/conversations/{convId}/share-post")]
+    public async Task<IActionResult> ChatSharePost(string convId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/share-post?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpPost("chat/private-reply")]
+    public async Task<IActionResult> ChatPrivateReply([FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/private-reply?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpGet("chat/notifications")]
+    public async Task<IActionResult> ChatNotifications([FromQuery(Name = "user_id")] string userId, [FromQuery(Name = "unread_only")] bool unreadOnly = false, CancellationToken ct = default)
+        => await ProxyChatGetAsync($"chat/notifications?user_id={Uri.EscapeDataString(userId ?? "")}&unread_only={unreadOnly}", ct);
+
+    [HttpPost("chat/conversations/{convId}/mute")]
+    public async Task<IActionResult> ChatMute(string convId, [FromBody] JsonElement payload, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatPostAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/mute?user_id={Uri.EscapeDataString(userId ?? "")}", payload, ct);
+
+    [HttpDelete("chat/conversations/{convId}/mute")]
+    public async Task<IActionResult> ChatUnmute(string convId, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
+        => await ProxyChatDeleteAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/mute?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
+
+    private async Task<IActionResult> ProxyChatGetAsync(string relativeUrl, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            var response = await client.GetAsync(relativeUrl, ct);
+            return await ProxyJsonResponse(response, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chat proxy GET failed for {RelativeUrl}.", relativeUrl);
+            return StatusCode(503, new { message = "Chat service is unavailable." });
+        }
+    }
+
+    private async Task<IActionResult> ProxyChatPostAsync(string relativeUrl, JsonElement payload, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var content = new StringContent(payload.GetRawText(), Encoding.UTF8, "application/json");
+            var response = await client.PostAsync(relativeUrl, content, ct);
+            return await ProxyJsonResponse(response, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chat proxy POST failed for {RelativeUrl}.", relativeUrl);
+            return StatusCode(503, new { message = "Chat service is unavailable." });
+        }
+    }
+
+    private async Task<IActionResult> ProxyChatPatchAsync(string relativeUrl, JsonElement payload, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var content = new StringContent(payload.GetRawText(), Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(HttpMethod.Patch, relativeUrl) { Content = content };
+            var response = await client.SendAsync(request, ct);
+            return await ProxyJsonResponse(response, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chat proxy PATCH failed for {RelativeUrl}.", relativeUrl);
+            return StatusCode(503, new { message = "Chat service is unavailable." });
+        }
+    }
+
+    private async Task<IActionResult> ProxyChatDeleteAsync(string relativeUrl, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            var response = await client.DeleteAsync(relativeUrl, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+                return NoContent();
+            return await ProxyJsonResponse(response, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chat proxy DELETE failed for {RelativeUrl}.", relativeUrl);
+            return StatusCode(503, new { message = "Chat service is unavailable." });
+        }
+    }
+
     private async Task<IActionResult> ProxyPostAsync(string relativeUrl, JsonElement payload, CancellationToken cancellationToken)
     {
         try
