@@ -16,7 +16,9 @@ function readAccessToken() {
 async function transcribeFile(file) {
   const token = readAccessToken();
   const endpoints = [
-    // Prefer the dedicated karaoke endpoint first.
+    // Primary: vocal isolation + Whisper word timestamps (best quality for music)
+    "/api/karaoke/speech/transcribe/words",
+    // Secondary: generic karaoke transcribe
     "/api/karaoke/speech/transcribe",
     // Legacy compat fallbacks.
     "/api/functions/transcribe-local-file",
@@ -115,12 +117,27 @@ async function transcribeUrl(url, fileName) {
   return transcribeFile(file);
 }
 
+/** Extract displayable text from any transcription result shape. */
+function extractTranscriptText(result) {
+  if (!result) return "";
+  // New structured format from /transcribe/words
+  if (result.lrc) return result.lrc;
+  if (result.words?.length) {
+    return result.words.map((w) => w.word).join(" ").trim();
+  }
+  // Legacy plain text
+  return (result.lyrics || result.text || result.transcript || "").toString().trim();
+}
+
 export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [lyrics, setLyrics] = useState("");
+  const [lrc, setLrc] = useState("");
+  const [wordCount, setWordCount] = useState(null);
+  const [vocalsIsolated, setVocalsIsolated] = useState(false);
   const [error, setError] = useState("");
   const [libraryUploadFile, setLibraryUploadFile] = useState(null);
   const [localFile, setLocalFile] = useState(null);
@@ -197,7 +214,10 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
         throw new Error("This item does not have a playable media URL.");
       }
       const result = await transcribeUrl(playableUrl, selectedSource.title);
-      setLyrics(result?.lyrics || result?.text || result?.transcript || JSON.stringify(result, null, 2));
+      setLyrics(extractTranscriptText(result));
+      setLrc(result?.lrc || "");
+      setWordCount(result?.word_count ?? null);
+      setVocalsIsolated(result?.vocals_isolated ?? false);
     } catch (extractError) {
       setError(extractError?.message || "Word extraction failed.");
     } finally {
@@ -212,7 +232,10 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
     setLyrics("");
     try {
       const result = await transcribeFile(localFile);
-      setLyrics(result?.lyrics || result?.text || result?.transcript || JSON.stringify(result, null, 2));
+      setLyrics(extractTranscriptText(result));
+      setLrc(result?.lrc || "");
+      setWordCount(result?.word_count ?? null);
+      setVocalsIsolated(result?.vocals_isolated ?? false);
     } catch (extractError) {
       setError(extractError?.message || "Word extraction failed.");
     } finally {
@@ -312,9 +335,31 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
         )}
 
         {lyrics && (
-          <div className="rounded-lg border border-accent/40 bg-accent/5 p-4">
-            <p className="text-xs font-medium text-accent mb-2">Extracted words</p>
-            <div className="max-h-96 overflow-y-auto">
+          <div className="rounded-lg border border-accent/40 bg-accent/5 p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-xs font-medium text-accent">Extracted words</p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {vocalsIsolated && (
+                  <span className="flex items-center gap-1 text-green-500">
+                    <Mic className="w-3 h-3" /> Vocals isolated
+                  </span>
+                )}
+                {wordCount !== null && (
+                  <span>{wordCount} words</span>
+                )}
+              </div>
+            </div>
+            {lrc && (
+              <details className="group">
+                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                  LRC timed lyrics
+                </summary>
+                <div className="max-h-48 overflow-y-auto mt-2">
+                  <pre className="text-xs text-foreground font-mono whitespace-pre-wrap">{lrc}</pre>
+                </div>
+              </details>
+            )}
+            <div className="max-h-64 overflow-y-auto">
               <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{lyrics}</p>
             </div>
           </div>

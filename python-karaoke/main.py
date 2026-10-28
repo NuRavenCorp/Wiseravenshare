@@ -41,6 +41,10 @@ SEPARATOR_MODEL = os.getenv(
 )
 DEMUCS_FALLBACK_MODEL = os.getenv("DEMUCS_FALLBACK_MODEL", "htdemucs_ft")
 
+# Whisper word-extraction config
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")   # tiny/base/small/medium/large
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "")  # empty = auto-detect
+
 # Lyric providers
 LRCLIB_BASE = "https://lrclib.net/api"
 GENIUS_TOKEN = os.getenv("GENIUS_TOKEN", "")
@@ -215,6 +219,103 @@ async def purchase():
 
 
 # ---------------------------------------------------------------------------
+# /transcribe/words — vocal isolation + Whisper word-level extraction
+# ---------------------------------------------------------------------------
+
+@app.post("/transcribe/words")
+async def transcribe_words(
+    file: UploadFile = File(...),
+    language: str = Form(""),
+    isolate_vocals: bool = Form(True),
+):
+    """
+    Extract words with timestamps from an audio/video file.
+
+    Pipeline:
+      1. If isolate_vocals=True (default): run demucs --two-stems=vocals
+         to strip background music — the single biggest quality improvement.
+      2. Run Whisper on the clean vocals track with word_timestamps=True.
+      3. Return word list + LRC-format timed lyrics + plain transcript.
+
+    Falls back to processing the raw file if vocal isolation fails so the
+    endpoint always returns a result.
+    """
+    job_id = str(uuid.uuid4())
+    job_dir = OUTPUT_BASE_DIR / f"words-{job_id}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(file.filename or "audio.mp3").suffix or ".mp3"
+    audio_path = str(job_dir / f"input{suffix}")
+    async with aiofiles.open(audio_path, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+
+    def _run_extraction() -> dict:
+        target = audio_path
+
+        # ── Step 1: Isolate vocals ────────────────────────────────────────
+        if isolate_vocals:
+            try:
+                _, vocals_path = _separate_stems(audio_path, str(job_dir), SEPARATOR_MODEL)
+                if vocals_path and Path(vocals_path).exists():
+                    target = vocals_path
+                    log.info("[words] Vocal isolation succeeded → %s", vocals_path)
+                else:
+                    log.warning("[words] No vocals stem produced; using raw audio")
+            except Exception as sep_err:
+                log.warning("[words] Vocal isolation failed (%s); using raw audio", sep_err)
+
+        # ── Step 2: Whisper with word timestamps ──────────────────────────
+        import whisper  # openai-whisper
+
+        override_lang = language.strip() or WHISPER_LANGUAGE or None
+        model = whisper.load_model(WHISPER_MODEL)
+        kwargs: dict = {"verbose": False, "word_timestamps": True}
+        if override_lang:
+            kwargs["language"] = override_lang
+
+        result = model.transcribe(target, **kwargs)
+
+        # ── Step 3: Build structured word list ────────────────────────────
+        words: list[dict] = []
+        for seg in result.get("segments", []):
+            for w in seg.get("words", []):
+                words.append({
+                    "word":  w.get("word", "").strip(),
+                    "start": round(w.get("start", 0), 3),
+                    "end":   round(w.get("end",   0), 3),
+                    "prob":  round(w.get("probability", 0), 3),
+                })
+
+        # ── Step 4: Generate LRC ──────────────────────────────────────────
+        lrc_path = _words_to_lrc(result, job_dir)
+        lrc_content = ""
+        if lrc_path:
+            with open(lrc_path, "r", encoding="utf-8") as lf:
+                lrc_content = lf.read()
+
+        return {
+            "text":       result.get("text", "").strip(),
+            "language":   result.get("language", ""),
+            "words":      words,
+            "lrc":        lrc_content,
+            "vocals_isolated": target != audio_path,
+            "word_count": len(words),
+        }
+
+    try:
+        extraction = await asyncio.get_event_loop().run_in_executor(None, _run_extraction)
+    except Exception as err:
+        log.exception("[words] Extraction failed for %s", file.filename)
+        raise HTTPException(500, f"Word extraction failed: {err}") from err
+    finally:
+        # Clean up temp job dir after response (non-blocking)
+        asyncio.create_task(_delayed_cleanup(str(job_dir), delay_seconds=120))
+
+    return JSONResponse(extraction)
+
+
+# ---------------------------------------------------------------------------
 # Core processing pipeline
 # ---------------------------------------------------------------------------
 
@@ -226,27 +327,46 @@ async def _process_job(job_id: str) -> None:
     audio_path = job["audio_path"]
 
     try:
-        # ── Step 1: Vocal separation ──────────────────────────────────────
-        instrumental_path = await asyncio.get_event_loop().run_in_executor(
-            None, _separate_vocals, audio_path, str(job_dir), job["model"]
+        # ── Step 1: Stem separation ───────────────────────────────────────
+        # Returns (instrumental_path, vocals_path). Vocals are used for
+        # LRC alignment so background music doesn't corrupt word boundaries.
+        instrumental_path, vocals_path = await asyncio.get_event_loop().run_in_executor(
+            None, _separate_stems, audio_path, str(job_dir), job["model"]
         )
         job["instrumental_path"] = instrumental_path
+        job["vocals_path"] = vocals_path
 
         # ── Step 2: Lyrics acquisition ────────────────────────────────────
         lyrics_text = job.get("lyrics_text", "").strip()
         if not lyrics_text and job.get("fetch_lyrics"):
             lyrics_text = await _fetch_lyrics(job.get("song_title", ""))
 
-        # ── Step 3: LRC alignment (only if lyrics available) ──────────────
+        # ── Step 3: LRC alignment against CLEAN VOCALS (not mixed audio) ──
+        # Using the isolated vocal track dramatically improves word boundary
+        # accuracy because the model doesn't have to compete with instruments.
         lrc_path: str | None = None
         if lyrics_text:
             lyrics_file = job_dir / "lyrics.txt"
             async with aiofiles.open(lyrics_file, "w") as f:
                 await f.write(lyrics_text)
+            alignment_source = vocals_path if vocals_path and Path(vocals_path).exists() else audio_path
             lrc_path = await asyncio.get_event_loop().run_in_executor(
-                None, _align_lyrics, audio_path, str(lyrics_file), str(job_dir)
+                None, _align_lyrics, alignment_source, str(lyrics_file), str(job_dir)
             )
             job["lrc_path"] = lrc_path
+
+        # ── Step 3b: If no reference lyrics, use Whisper on isolated vocals ─
+        if not lrc_path and vocals_path and Path(vocals_path).exists():
+            try:
+                whisper_result = await asyncio.get_event_loop().run_in_executor(
+                    None, _whisper_transcribe_with_timestamps, vocals_path
+                )
+                if whisper_result:
+                    lrc_path = _words_to_lrc(whisper_result, job_dir)
+                    job["lrc_path"] = lrc_path
+                    job["transcript"] = whisper_result.get("text", "")
+            except Exception as wex:  # noqa: BLE001
+                log.warning("Whisper fallback transcription failed: %s", wex)
 
         # ── Step 4: Upload to Spaces (optional) ───────────────────────────
         if S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY:
@@ -271,19 +391,24 @@ async def _process_job(job_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Vocal separation — primary (audio-separator) with demucs-onnx fallback
+# Stem separation — returns (instrumental_path, vocals_path)
 # ---------------------------------------------------------------------------
 
-def _separate_vocals(audio_path: str, output_dir: str, model: str) -> str:
-    """Returns path to instrumental WAV. Tries audio-separator first."""
+def _separate_stems(audio_path: str, output_dir: str, model: str) -> tuple[str, str]:
+    """
+    Separate audio into (instrumental, vocals).
+    Primary: audio-separator (Mel-Band RoFormer, SOTA SDR)
+    Fallback: demucs full two-stem split via subprocess
+    Returns (instrumental_path, vocals_path).
+    """
     try:
         return _separate_with_audio_separator(audio_path, output_dir, model)
     except Exception as primary_err:
-        log.warning("audio-separator failed (%s), falling back to demucs-onnx", primary_err)
+        log.warning("audio-separator failed (%s), falling back to demucs", primary_err)
         return _separate_with_demucs(audio_path, output_dir)
 
 
-def _separate_with_audio_separator(audio_path: str, output_dir: str, model: str) -> str:
+def _separate_with_audio_separator(audio_path: str, output_dir: str, model: str) -> tuple[str, str]:
     from audio_separator.separator import Separator
 
     sep = Separator(
@@ -294,40 +419,178 @@ def _separate_with_audio_separator(audio_path: str, output_dir: str, model: str)
     sep.load_model(model_filename=model)
     stems = sep.separate(audio_path)
 
-    # audio-separator returns [vocals_file, instrumental_file] for karaoke models
     instrumental = next(
         (s for s in stems if "instrumental" in s.lower() or "no_vocals" in s.lower()),
-        stems[-1] if stems else None,
+        None,
+    )
+    vocals = next(
+        (s for s in stems if "vocal" in s.lower() and "no_vocal" not in s.lower()),
+        None,
     )
     if not instrumental or not Path(instrumental).exists():
-        raise RuntimeError(f"audio-separator did not produce an instrumental file. Got: {stems}")
-    return instrumental
+        raise RuntimeError(f"audio-separator did not produce an instrumental. Got: {stems}")
+    # Vocals may not always be produced by karaoke-specific models — fall back to None
+    return instrumental, (vocals if vocals and Path(vocals).exists() else "")
 
 
-def _separate_with_demucs(audio_path: str, output_dir: str) -> str:
-    from demucs_onnx import separate
+def _separate_with_demucs(audio_path: str, output_dir: str) -> tuple[str, str]:
+    """Use demucs CLI with --two-stems=vocals for clean vocal/instrumental split."""
+    import subprocess
 
-    result = separate(
-        audio_path,
-        output_dir=output_dir,
-        model=DEMUCS_FALLBACK_MODEL,
-        mix_stems=("drums", "bass", "other"),  # karaoke: all non-vocal stems mixed
+    result = subprocess.run(
+        [
+            "demucs",
+            "--two-stems", "vocals",
+            "--out", output_dir,
+            "-n", DEMUCS_FALLBACK_MODEL,
+            audio_path,
+        ],
+        capture_output=True, text=True, timeout=900,
     )
-    # demucs-onnx places output at {output_dir}/{stem_name}.wav
-    candidates = list(Path(output_dir).glob("*karaoke*.wav")) + list(Path(output_dir).glob("*mixed*.wav"))
-    if candidates:
-        return str(candidates[0])
-    # Generic fallback: any wav that isn't the input
-    input_name = Path(audio_path).stem
-    wavs = [p for p in Path(output_dir).glob("*.wav") if input_name not in p.name]
-    if wavs:
-        return str(wavs[0])
-    raise RuntimeError("demucs-onnx fallback did not produce a usable instrumental file.")
+    if result.returncode != 0:
+        log.warning("demucs two-stem failed: %s", result.stderr[:400])
+        # Try demucs-onnx as last resort (instrumental only, no vocals stem)
+        try:
+            from demucs_onnx import separate as onnx_separate
+            onnx_separate(
+                audio_path,
+                output_dir=output_dir,
+                model=DEMUCS_FALLBACK_MODEL,
+                mix_stems=("drums", "bass", "other"),
+            )
+        except Exception as onnx_err:
+            raise RuntimeError(f"demucs-onnx also failed: {onnx_err}") from onnx_err
+        # demucs-onnx only gives instrumental
+        candidates = (
+            list(Path(output_dir).glob("*karaoke*.wav"))
+            + list(Path(output_dir).glob("*mixed*.wav"))
+        )
+        if not candidates:
+            input_name = Path(audio_path).stem
+            candidates = [p for p in Path(output_dir).glob("*.wav") if input_name not in p.name]
+        if not candidates:
+            raise RuntimeError("demucs fallback produced no usable file")
+        return str(candidates[0]), ""
+
+    # demucs CLI writes to {output_dir}/{model}/{track_name}/vocals.wav etc.
+    track_stem = Path(audio_path).stem
+    search_root = Path(output_dir)
+    vocals_candidates = list(search_root.rglob(f"{track_stem}*/vocals.wav"))
+    no_vocals_candidates = list(search_root.rglob(f"{track_stem}*/no_vocals.wav"))
+
+    if not no_vocals_candidates:
+        # Fallback: build instrumental by mixing non-vocal stems
+        bass = list(search_root.rglob(f"{track_stem}*/bass.wav"))
+        drums = list(search_root.rglob(f"{track_stem}*/drums.wav"))
+        other = list(search_root.rglob(f"{track_stem}*/other.wav"))
+        instrumental_path = _mix_stems_to_wav(
+            [str(p) for p in bass + drums + other], output_dir
+        )
+    else:
+        instrumental_path = str(no_vocals_candidates[0])
+
+    vocals_path = str(vocals_candidates[0]) if vocals_candidates else ""
+    return instrumental_path, vocals_path
+
+
+def _mix_stems_to_wav(stem_paths: list[str], output_dir: str) -> str:
+    """Mix multiple WAV stems together using ffmpeg amix."""
+    import subprocess
+    if not stem_paths:
+        raise RuntimeError("No stems to mix")
+    if len(stem_paths) == 1:
+        return stem_paths[0]
+    out_path = str(Path(output_dir) / "instrumental_mixed.wav")
+    inputs = []
+    for p in stem_paths:
+        inputs += ["-i", p]
+    amix = f"amix=inputs={len(stem_paths)}:duration=longest:normalize=0"
+    subprocess.run(
+        ["ffmpeg", "-y"] + inputs + ["-filter_complex", amix, out_path],
+        capture_output=True, check=True, timeout=300,
+    )
+    return out_path
 
 
 # ---------------------------------------------------------------------------
-# Lyric alignment — autolrc primary, wispr-lrc fallback
+# Whisper word-level transcription (vocals-only input)
 # ---------------------------------------------------------------------------
+
+def _whisper_transcribe_with_timestamps(vocals_path: str) -> dict:
+    """
+    Run OpenAI Whisper on the isolated vocals track.
+    Returns the full result dict including word-level timestamps when available.
+    word_timestamps=True is supported in whisper >= 20230306.
+    """
+    import whisper  # openai-whisper package
+
+    model = whisper.load_model(WHISPER_MODEL)
+    kwargs: dict = {
+        "verbose": False,
+        "word_timestamps": True,
+    }
+    if WHISPER_LANGUAGE:
+        kwargs["language"] = WHISPER_LANGUAGE
+
+    result = model.transcribe(vocals_path, **kwargs)
+    return result
+
+
+def _words_to_lrc(whisper_result: dict, job_dir: Path) -> str | None:
+    """
+    Convert Whisper result with word_timestamps into an LRC file.
+    Each word becomes an LRC timestamp marker [mm:ss.xx] word.
+    Groups words into lines by natural pauses (gap > 1.5 s or 8 words per line).
+    """
+    segments = whisper_result.get("segments", [])
+    if not segments:
+        return None
+
+    lines = []
+    for seg in segments:
+        words = seg.get("words", [])
+        if not words:
+            # Segment-level fallback (no per-word timestamps)
+            ts = seg.get("start", 0)
+            text = seg.get("text", "").strip()
+            if text:
+                lines.append(_fmt_lrc_ts(ts) + text)
+            continue
+
+        # Group words within the segment into LRC lines
+        current_words: list[str] = []
+        current_start: float = words[0]["start"] if words else 0
+        for i, w in enumerate(words):
+            word_text = w.get("word", "").strip()
+            if not word_text:
+                continue
+            current_words.append(word_text)
+            # Flush line on long pause or line length
+            next_start = words[i + 1]["start"] if i + 1 < len(words) else None
+            gap = (next_start - w["end"]) if next_start is not None else 99
+            if len(current_words) >= 8 or gap > 1.5:
+                lines.append(_fmt_lrc_ts(current_start) + " ".join(current_words))
+                current_words = []
+                if next_start is not None:
+                    current_start = next_start
+        if current_words:
+            lines.append(_fmt_lrc_ts(current_start) + " ".join(current_words))
+
+    if not lines:
+        return None
+
+    lrc_path = str(job_dir / "whisper.lrc")
+    with open(lrc_path, "w", encoding="utf-8") as f:
+        f.write("[ti:Auto-generated by WiseRavenShare]\n")
+        f.write("[ar:Unknown]\n\n")
+        f.write("\n".join(lines) + "\n")
+    return lrc_path
+
+
+def _fmt_lrc_ts(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"[{minutes:02d}:{secs:05.2f}]"
 
 def _align_lyrics(audio_path: str, lyrics_txt: str, output_dir: str) -> str:
     """Returns path to .lrc file. autolrc primary, wispr-lrc fallback."""
@@ -469,6 +732,7 @@ def _job_response(job: dict[str, Any]) -> dict[str, Any]:
         "instrumental_url": job.get("instrumental_url"),
         "lrc_url": job.get("lrc_url"),
         "has_lrc": bool(job.get("lrc_path")),
+        "transcript": job.get("transcript", ""),
         "error": job.get("error"),
     }
 
@@ -489,3 +753,12 @@ async def _reap_old_jobs_loop() -> None:
             del _jobs[jid]
         if to_delete:
             log.info("Reaped %d expired jobs", len(to_delete))
+
+
+async def _delayed_cleanup(path: str, delay_seconds: int = 120) -> None:
+    """Delete a temp directory after a short delay so the response can be delivered."""
+    await asyncio.sleep(delay_seconds)
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        pass

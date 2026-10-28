@@ -373,6 +373,91 @@ public sealed class KaraokeSpeechController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    // ----------------------------------------------------------------
+    // WORD-LEVEL EXTRACTION — vocal isolation → Whisper word timestamps
+    // ----------------------------------------------------------------
+
+    /// <summary>
+    /// POST /api/karaoke/speech/transcribe/words
+    /// Proxies to the python-karaoke /transcribe/words endpoint.
+    /// That endpoint:
+    ///   1. Runs demucs --two-stems=vocals to strip background music
+    ///   2. Runs Whisper with word_timestamps=True on the clean vocals
+    ///   3. Returns {text, language, words:[{word,start,end,prob}], lrc, word_count, vocals_isolated}
+    /// </summary>
+    [HttpPost("transcribe/words")]
+    [AllowAnonymous]
+    [RequestSizeLimit(100_000_000)] // 100 MB — music files are larger than voice memos
+    public async Task<IActionResult> TranscribeWords(CancellationToken cancellationToken)
+    {
+        if (!Request.HasFormContentType)
+            return BadRequest(new { message = "multipart/form-data is required." });
+
+        var form = await Request.ReadFormAsync(cancellationToken);
+        var audio = form.Files.GetFile("audio")
+            ?? form.Files.GetFile("file")
+            ?? form.Files.FirstOrDefault();
+
+        if (audio is null || audio.Length == 0)
+            return BadRequest(new { message = "Audio file required." });
+
+        var isolate = form["isolate_vocals"].ToString() is not ("false" or "0");
+        var language = form["language"].ToString() ?? "";
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("KaraokeService");
+            using var multipart = new System.Net.Http.MultipartFormDataContent();
+
+            await using var stream = audio.OpenReadStream();
+            var fileContent = new System.Net.Http.StreamContent(stream);
+            fileContent.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    audio.ContentType ?? "application/octet-stream");
+            multipart.Add(fileContent, "file", audio.FileName ?? "audio.mp3");
+            multipart.Add(new System.Net.Http.StringContent(isolate ? "true" : "false"), "isolate_vocals");
+            if (!string.IsNullOrWhiteSpace(language))
+                multipart.Add(new System.Net.Http.StringContent(language), "language");
+
+            var response = await client.PostAsync("/transcribe/words", multipart, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("python-karaoke /transcribe/words returned {Status}: {Err}",
+                    (int)response.StatusCode, err);
+                // Fall back to basic Whisper transcription when the python service is unavailable
+                var fallbackStream = audio.OpenReadStream();
+                try
+                {
+                    var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
+                        ? "application/octet-stream" : audio.ContentType;
+                    var sttResult = await _speechToTextService.TranscribeAsync(
+                        fallbackStream, contentType, audio.FileName, cancellationToken);
+                    return Ok(new
+                    {
+                        text       = sttResult.Text,
+                        language   = sttResult.Language,
+                        words      = Array.Empty<object>(),
+                        lrc        = "",
+                        word_count = 0,
+                        vocals_isolated = false,
+                        fallback   = true,
+                    });
+                }
+                finally { await fallbackStream.DisposeAsync(); }
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            return Content(json, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Word-level transcription failed for {FileName}.", audio.FileName);
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
 
 public sealed class ScorePerformanceRequest
