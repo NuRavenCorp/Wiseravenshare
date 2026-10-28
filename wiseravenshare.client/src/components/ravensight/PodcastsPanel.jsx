@@ -25,6 +25,7 @@ import PodcastTeamPanel from "@/components/podcasts/PodcastTeamPanel";
 import ProductionTimeline from "@/components/podcasts/ProductionTimeline";
 import PodcastMediaTab from "@/components/podcasts/PodcastMediaTab";
 import RecordingSession from "@/components/ravensight/RecordingSession";
+import PodcastCrewJoinBanner from "@/components/podcasts/PodcastCrewJoinBanner";
 import { resolvePermissions } from "@/lib/podcastPermissions";
 
 const LAST_PODCAST_KEY = "wrs_podcast_last_selected";
@@ -373,6 +374,11 @@ export default function PodcastsPanel() {
             <div className="p-5 rounded-xl border border-border bg-card">
               <PodcastForm onCreate={handleCreate} />
             </div>
+          )}
+
+          {/* Crew join banner — shows cards for episodes this user is invited to as crew */}
+          {user && !launching && !showForm && (
+            <PodcastCrewJoinBanner userId={user.id} onUpdate={load} />
           )}
 
           {podcasts.length === 0 && !showForm ? (

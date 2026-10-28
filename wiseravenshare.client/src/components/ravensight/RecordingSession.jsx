@@ -1045,6 +1045,63 @@ export default function RecordingSession({ podcast, onUpdate }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Crew member: show join card when the user has a non-creator role ── */}
+      {userRole && userRole !== "creator" && (
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            {(() => {
+              const RoleIcon = (TEAM_ROLES.find((r) => r.id === userRole)?.icon) || Users;
+              return <RoleIcon className="w-4 h-4 text-primary shrink-0" />;
+            })()}
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                You're on the crew — {TEAM_ROLES.find((r) => r.id === userRole)?.label || userRole}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {liveSessionCode
+                  ? "The live crew room is open. Use your join link below to share your camera."
+                  : "Your join link will appear once the host opens the live crew room."}
+              </p>
+            </div>
+          </div>
+          {liveSessionCode && (() => {
+            const me = sortedRoster.find(
+              (m) => m.role === userRole || m.isConnected,
+            ) || sortedRoster[0];
+            const joinLink = buildJoinLink(me);
+            return joinLink ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(joinLink);
+                      setCopiedValue("crew-join");
+                      setTimeout(() => setCopiedValue(""), 2000);
+                    } catch {}
+                  }}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedValue === "crew-join" ? "Copied!" : "Copy my join link"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.open(joinLink, "_blank", "noopener,noreferrer")}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open join page
+                </Button>
+                <span className="text-xs text-muted-foreground self-center">
+                  Session code: <span className="font-mono">{liveSessionCode}</span>
+                </span>
+              </div>
+            ) : null;
+          })()}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="rounded-lg border border-border bg-card p-4 space-y-1.5">
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">

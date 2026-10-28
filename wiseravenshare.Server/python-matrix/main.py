@@ -569,8 +569,12 @@ class MarkEngagedRequest(BaseModel):
     post_id: str
 
 
-import asyncpg
-from chat.store import ChatStore, ensure_chat_schema
+from ravensight.store import RavensightStore, ensure_ravensight_schema
+from ravensight.engine import RavensightEngine
+from ravensight.router import router as ravensight_router
+from ravensight.state import _rv_state
+
+RAVENSIGHT_ENABLED = os.environ.get("RAVENSIGHT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 from chat.ws import ConnectionManager as ChatConnectionManager
 from chat.notifications import ChatNotificationService
 from chat.engine import ChatEngine
@@ -639,6 +643,29 @@ async def lifespan(_: FastAPI):
         except Exception as error:  # noqa: BLE001
             logger.warning("Chat startup failed (service will run without chat): %s", error)
 
+    # ── Ravensight production session engine ──────────────────────────────
+    if RAVENSIGHT_ENABLED:
+        try:
+            # Reuse the asyncpg pool (created by chat layer if chat enabled)
+            if _asyncpg_pool is None:
+                _asyncpg_pool = await asyncpg.create_pool(
+                    dsn=DATABASE_URL, min_size=2, max_size=10, command_timeout=10,
+                )
+            await ensure_ravensight_schema(_asyncpg_pool)
+            _rv_redis = aredis.Redis.from_url(REDIS_URL, decode_responses=True)
+            # Reuse the chat WS manager when available; otherwise create one
+            _rv_ws = _chat_ws if CHAT_ENABLED and _chat_ws else None
+            if _rv_ws is None:
+                from chat.ws import ConnectionManager as _CM
+                _rv_ws = _CM(_rv_redis)
+                await _rv_ws.start()
+            _rv_store  = RavensightStore(_asyncpg_pool)
+            _rv_engine = RavensightEngine(_rv_store, _rv_ws, _rv_redis)
+            _rv_state.update({"engine": _rv_engine, "ws": _rv_ws})
+            logger.info("Ravensight session engine initialized.")
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Ravensight startup failed (running without it): %s", error)
+
     yield
 
     # ── shutdown ──────────────────────────────────────────────────────────
@@ -664,12 +691,16 @@ async def lifespan(_: FastAPI):
     if _asyncpg_pool is not None:
         await _asyncpg_pool.close()
     _chat_state.clear()
+    _rv_state.clear()
 
 
 app = FastAPI(title="Python Matrix Service", lifespan=lifespan)
 
 if CHAT_ENABLED:
     app.include_router(chat_router)
+
+if RAVENSIGHT_ENABLED:
+    app.include_router(ravensight_router)
 
 
 def _get_predictor() -> Predictor | None:
