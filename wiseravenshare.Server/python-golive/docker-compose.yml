@@ -1,4 +1,24 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wiseraven-golive-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-wiseravenshare_golive}
+      - POSTGRES_USER=${POSTGRES_USER:-wiseraven}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-wiseraven_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - wiseraven-golive-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wiseraven} -d ${POSTGRES_DB:-wiseravenshare_golive}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - wiseraven-net
+
   mediamtx:
     image: bluenviron/mediamtx:1.17.0
     container_name: wiseraven-mediamtx
@@ -32,11 +52,23 @@ services:
       - TOXIC_AT=${TOXIC_AT:-0.7}
       - SPOILER_AT=${SPOILER_AT:-0.7}
       - LIVE_INFO_RETENTION_DAYS=${LIVE_INFO_RETENTION_DAYS:-7}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://wiseraven:wiseraven_dev_password@postgres:5432/wiseravenshare_golive}
+      - SPACES_REGION=${SPACES_REGION:-}
+      - SPACES_BUCKET=${SPACES_BUCKET:-}
+      - SPACES_KEY=${SPACES_KEY:-}
+      - SPACES_SECRET=${SPACES_SECRET:-}
+      - PUBLIC_MEDIA_BASE_URL=${PUBLIC_MEDIA_BASE_URL:-}
+      - MEDIA_UPLOAD_MAX_BYTES=${MEDIA_UPLOAD_MAX_BYTES:-10485760}
+      - AWS_EC2_METADATA_DISABLED=true
     depends_on:
       - mediamtx
+      - postgres
     networks:
       - wiseraven-net
 
 networks:
   wiseraven-net:
     driver: bridge
+
+volumes:
+  wiseraven-golive-postgres-data:
