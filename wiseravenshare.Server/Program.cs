@@ -2615,6 +2615,30 @@ if (app.Environment.IsProduction() && !app.Configuration.GetValue("Authenticatio
     app.Logger.LogWarning("Authentication:AllowSelfRegistration is disabled in production. New user sign-ups will return 403.");
 }
 
+// ── Bootstrap ASP.NET Identity schema ────────────────────────────────────────
+// WrIdentityDbContext has no EF migrations — EnsureCreatedAsync() creates the
+// identity.* tables on a fresh DB and is a no-op when they already exist.
+// Must run before role seeding below; roles query identity.Roles directly.
+using (var identityBootstrapScope = app.Services.CreateScope())
+{
+    try
+    {
+        var identityDb = identityBootstrapScope.ServiceProvider
+            .GetRequiredService<Wiseravenshare.Server.Infrastructure.Data.WrIdentityDbContext>();
+
+        // Ensure the "identity" schema exists (Postgres won't create it automatically).
+        await identityDb.Database.ExecuteSqlRawAsync(
+            "CREATE SCHEMA IF NOT EXISTS identity");
+
+        await identityDb.Database.EnsureCreatedAsync();
+        app.Logger.LogInformation("Identity schema bootstrapped (identity.* tables ready).");
+    }
+    catch (Exception identityBootstrapEx)
+    {
+        app.Logger.LogWarning(identityBootstrapEx, "Identity schema bootstrap failed — role seeding will also fail. Check DB connectivity.");
+    }
+}
+
 // ── Seed Identity roles at startup ──────────────────────────────────────────
 // Runs idempotently: skips roles that already exist.
 using (var seedScope = app.Services.CreateScope())
