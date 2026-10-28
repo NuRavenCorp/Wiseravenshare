@@ -8,6 +8,7 @@ Lyrics:   LRCLIB (free) → Genius (fallback)    →  source-of-truth text
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -21,7 +22,7 @@ from typing import Any
 
 import aiofiles
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,17 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="WiseRavenShare Karaoke Engine", version="1.0.0", lifespan=lifespan)
+
+@app.middleware("http")
+async def require_internal_token(request: Request, call_next):
+    if request.url.path == "/health" or not INTERNAL_TOKEN:
+        return await call_next(request)
+
+    supplied = request.headers.get("X-Internal-Token", "")
+    if not supplied or not hmac.compare_digest(supplied, INTERNAL_TOKEN):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------

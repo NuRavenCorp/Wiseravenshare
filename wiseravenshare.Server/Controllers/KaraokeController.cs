@@ -21,14 +21,17 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class KaraokeController : ControllerBase
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<KaraokeController> _logger;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public KaraokeController(
         IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
         ILogger<KaraokeController> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -39,6 +42,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var response = await client.GetAsync("/health");
             var body = await response.Content.ReadAsStringAsync();
             return response.IsSuccessStatusCode
@@ -68,6 +72,7 @@ public sealed class KaraokeController : ControllerBase
 
         // Use the upload-specific client which has an infinite operation timeout.
         using var client = _httpClientFactory.CreateClient("KaraokeServiceUpload");
+        ConfigureInternalToken(client);
         using var multipart = new MultipartFormDataContent();
         await using var stream = audioFile.OpenReadStream();
 
@@ -110,6 +115,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var response = await client.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
             return await ProxyJsonResponse(response, cancellationToken);
@@ -131,6 +137,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var response = await client.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}/instrumental?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
 
@@ -159,6 +166,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = User.Identity?.IsAuthenticated == true ? ResolveUserId() : "anonymous";
             var response = await client.GetAsync($"/catalogue?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
             return await ProxyJsonResponse(response, cancellationToken);
@@ -177,6 +185,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var response = await client.GetAsync($"/workspace?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
             return await ProxyJsonResponse(response, cancellationToken);
@@ -195,6 +204,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var response = await client.GetAsync($"/library?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
             return await ProxyJsonResponse(response, cancellationToken);
@@ -216,6 +226,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var response = await client.GetAsync($"/library/{Uri.EscapeDataString(trackId)}/instrumental?user_id={Uri.EscapeDataString(userId)}", cancellationToken);
 
@@ -246,6 +257,7 @@ public sealed class KaraokeController : ControllerBase
         try
         {
             using var client = _httpClientFactory.CreateClient("KaraokeService");
+            ConfigureInternalToken(client);
             var userId = ResolveUserId();
             var payload = JsonSerializer.Serialize(new
             {
@@ -267,6 +279,19 @@ public sealed class KaraokeController : ControllerBase
     {
         var userId = User.GetUserId();
         return userId == Guid.Empty ? "anonymous" : userId.ToString("N");
+    }
+
+    private void ConfigureInternalToken(HttpClient client)
+    {
+        var token = _configuration["KaraokeService:InternalToken"]
+            ?? _configuration["KaraokeService__InternalToken"];
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        client.DefaultRequestHeaders.Remove("X-Internal-Token");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Internal-Token", token);
     }
 
     private static async Task<IActionResult> ProxyJsonResponse(HttpResponseMessage response, CancellationToken cancellationToken)
