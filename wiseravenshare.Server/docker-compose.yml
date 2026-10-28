@@ -98,6 +98,10 @@ services:
       ENGAGEMENT_ACTION_TOPIC: ${ENGAGEMENT_ACTION_TOPIC:-engagement.action}
       TAGS_TOPIC: ${TAGS_TOPIC:-worker.tags}
       AUDIO_TOPIC: ${AUDIO_TOPIC:-worker.audio}
+      PREDICTOR_ENABLED: ${PREDICTOR_ENABLED:-false}
+      PREDICTOR_MODELS_DIR: /var/lib/posting/models
+    volumes:
+      - predictor-models:/var/lib/posting/models
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
     ports:
       - "${PYTHON_MATRIX_PORT:-8005}:8005"
@@ -420,6 +424,7 @@ volumes:
   ollama-models:
   minio-data:
   karaoke-models:
+  predictor-models:
 
 networks:
   wiseravenshare-net:
