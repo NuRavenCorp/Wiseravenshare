@@ -48,6 +48,10 @@ public class PostService : IPostService
 {
     private static readonly Regex HashtagRegex = new(@"#([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
     private static readonly Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", RegexOptions.Compiled);
+    private const int MaxHashtagsPerPost = 10;
+    private const int MaxHashtagLength = 30;
+    private const int MaxPostLength = 1000;
+    private const int MaxCommentLength = 500;
     private readonly IPostRepository _postRepository;
     private readonly IUserRepository _userRepository;
     private readonly ITruthService _truthService;
@@ -116,6 +120,15 @@ public class PostService : IPostService
 
     public async Task<PostDto> CreatePostAsync(Guid userId, CreatePostDto dto)
     {
+        if (dto is null)
+        {
+            throw new BadRequestException("Post payload is required.");
+        }
+
+        dto.Content = (dto.Content ?? string.Empty).Trim();
+        var mediaUrls = NormalizeMediaUrls(dto);
+        ValidateCreatePostInput(dto, mediaUrls);
+
         User? user = null;
         try
         {
@@ -145,7 +158,6 @@ public class PostService : IPostService
         user.Id = userId;
 
         // Create post
-        var mediaUrls = NormalizeMediaUrls(dto);
         if (!Enum.TryParse<PostType>(dto.Type, true, out var parsedPostType))
         {
             _logger.LogWarning("Unknown post type '{PostType}' received during post creation for user {UserId}; defaulting to Text.", dto.Type, userId);
@@ -1111,6 +1123,10 @@ public class PostService : IPostService
         {
             throw new BadRequestException("Comment text is required.");
         }
+        if (content.Length > MaxCommentLength)
+        {
+            throw new BadRequestException($"Comment cannot exceed {MaxCommentLength} characters.");
+        }
 
         var created = await _postRepository.AddCommentAsync(postId, userId, content, dto.ParentCommentId);
 
@@ -1612,24 +1628,60 @@ public class PostService : IPostService
 
     private static List<string> ExtractHashtags(string content)
     {
-        var hashtags = new List<string>();
-        if (string.IsNullOrWhiteSpace(content)) return hashtags;
-
-        // Find all words starting with # or patterns like #trending
-        var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var word in words)
+        if (string.IsNullOrWhiteSpace(content))
         {
-            if (word.StartsWith('#') && word.Length > 1)
-            {
-                // Remove trailing punctuation
-                var tag = word.Trim('#', '.', ',', '!', '?', ':', ';', '"', '\'');
-                if (!string.IsNullOrWhiteSpace(tag) && tag.Length > 2)
-                {
-                    hashtags.Add(tag);
-                }
-            }
+            return new List<string>();
         }
 
-        return hashtags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return HashtagRegex
+            .Matches(content)
+            .Select(match => NormalizeMetadataValue(match.Groups[1].Value)?.ToLowerInvariant())
+            .Where(tag => !string.IsNullOrWhiteSpace(tag) && tag!.Length <= MaxHashtagLength)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxHashtagsPerPost)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static void ValidateCreatePostInput(CreatePostDto dto, string[]? mediaUrls)
+    {
+        var content = dto.Content ?? string.Empty;
+        var hasContent = !string.IsNullOrWhiteSpace(content);
+        var hasMedia = mediaUrls is { Length: > 0 }
+            || !string.IsNullOrWhiteSpace(dto.MediaUrl)
+            || !string.IsNullOrWhiteSpace(dto.YoutubeUrl)
+            || !string.IsNullOrWhiteSpace(dto.TikTokUrl)
+            || !string.IsNullOrWhiteSpace(dto.FacebookUrl);
+        var isReferencePost = dto.RepostOfId.HasValue || dto.QuoteOfId.HasValue;
+
+        if (!hasContent && !hasMedia && !isReferencePost)
+        {
+            throw new BadRequestException("Post content is required unless media or a repost/quote reference is provided.");
+        }
+
+        if (content.Length > MaxPostLength)
+        {
+            throw new BadRequestException($"Post cannot exceed {MaxPostLength} characters.");
+        }
+
+        var hashtagMatches = HashtagRegex.Matches(content);
+        if (content.Contains('#', StringComparison.Ordinal) && hashtagMatches.Count == 0)
+        {
+            throw new BadRequestException("Post contains malformed hashtags.");
+        }
+
+        if (hashtagMatches.Count > MaxHashtagsPerPost)
+        {
+            throw new BadRequestException($"Post cannot contain more than {MaxHashtagsPerPost} hashtags.");
+        }
+
+        foreach (Match match in hashtagMatches)
+        {
+            var tag = match.Groups[1].Value;
+            if (tag.Length > MaxHashtagLength)
+            {
+                throw new BadRequestException($"Hashtag #{tag} exceeds the {MaxHashtagLength} character limit.");
+            }
+        }
     }
 }
