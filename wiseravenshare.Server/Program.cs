@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.AiAssistant;
@@ -2631,7 +2632,32 @@ using (var identityBootstrapScope = app.Services.CreateScope())
             "CREATE SCHEMA IF NOT EXISTS identity");
 
         await identityDb.Database.EnsureCreatedAsync();
-        app.Logger.LogInformation("Identity schema bootstrapped (identity.* tables ready).");
+
+        var hasRolesTable = await identityDb.Database
+            .SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'identity' AND table_name = 'Roles' LIMIT 1")
+            .AnyAsync();
+
+        // EnsureCreatedAsync can no-op when a non-empty database already exists.
+        // If identity tables were never created in that environment, apply the
+        // current Identity model create script explicitly.
+        if (!hasRolesTable)
+        {
+            var identityCreateScript = identityDb.Database.GenerateCreateScript();
+            await identityDb.Database.ExecuteSqlRawAsync(identityCreateScript);
+
+            hasRolesTable = await identityDb.Database
+                .SqlQueryRaw<int>("SELECT 1 FROM information_schema.tables WHERE table_schema = 'identity' AND table_name = 'Roles' LIMIT 1")
+                .AnyAsync();
+        }
+
+        if (hasRolesTable)
+        {
+            app.Logger.LogInformation("Identity schema bootstrapped (identity.* tables ready).");
+        }
+        else
+        {
+            app.Logger.LogWarning("Identity schema bootstrap ran but identity.Roles is still missing.");
+        }
     }
     catch (Exception identityBootstrapEx)
     {
