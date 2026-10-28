@@ -2411,15 +2411,14 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
         </div>
       </div>
 
-      {tab === 'radio' && (
-        <div className="mod-fm"><StationFinder /></div>
-      )}
+      <div className={`mod-fm${tab === 'radio' ? '' : ' hidden'}`} aria-hidden={tab !== 'radio'}>
+        <StationFinder />
+      </div>
       {tab === 'live' && (
         <div className="mod-fm"><LiveStreamPanel /></div>
       )}
 
-      {tab === 'cassette' && (
-        <div className="mod-library">
+      <div className={`mod-library${tab === 'cassette' ? '' : ' hidden'}`} aria-hidden={tab !== 'cassette'}>
           {/* ── Track Info Edit Modal ── */}
           {editTrack && (
             <div
@@ -2558,7 +2557,6 @@ const FMRadioPage = ({ onNavigate, initialTab = 'radio' }) => {
           </button>
           {libraryUploadError && <div role="alert" className="mod-upload-error">{libraryUploadError}</div>}
         </div>
-      )}
 
       {tab === 'caption' && (
         <div className="mod-caption-wrap">
