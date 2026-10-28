@@ -83,6 +83,10 @@ namespace Wiseravenshare.Server.Controllers
                 _logger.LogWarning(ex, "Post creation failed due to persistence constraints.");
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = ex.Message });
             }
+            catch (BadRequestException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error creating post.");
