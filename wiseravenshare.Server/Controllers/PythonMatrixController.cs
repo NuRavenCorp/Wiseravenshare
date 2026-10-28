@@ -139,6 +139,114 @@ public sealed class PythonMatrixController : ControllerBase
         return await ProxyPostAsync("engagement/posts/score", payload, cancellationToken);
     }
 
+    // ── Predictor endpoints ───────────────────────────────────────────────────
+
+    [HttpGet("predict/health")]
+    public async Task<IActionResult> PredictHealth(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            var response = await client.GetAsync("predict/health", cancellationToken);
+            return await ProxyJsonResponse(response, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Predict health check failed.");
+            return StatusCode(503, new { upstream = "unreachable", message = ex.Message });
+        }
+    }
+
+    [HttpPost("predict/engagement/probability")]
+    public async Task<IActionResult> PredictEngagementProbability([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/engagement/probability", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/engagement/learn")]
+    [Authorize]
+    public async Task<IActionResult> PredictLearnEngagement([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/engagement/learn", payload, cancellationToken);
+    }
+
+    [HttpGet("predict/churn/{userId}")]
+    [Authorize]
+    public async Task<IActionResult> PredictChurn(string userId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest(new { message = "userId is required." });
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            var response = await client.GetAsync($"predict/churn/{Uri.EscapeDataString(userId.Trim())}", cancellationToken);
+            return await ProxyJsonResponse(response, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Predict churn check failed.");
+            return StatusCode(503, new { message = "Python matrix service is unavailable." });
+        }
+    }
+
+    [HttpPost("predict/churn/learn")]
+    [Authorize]
+    public async Task<IActionResult> PredictLearnChurn([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/churn/learn", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/moderation/risk")]
+    public async Task<IActionResult> PredictModerationRisk([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/moderation/risk", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/moderation/learn")]
+    [Authorize]
+    public async Task<IActionResult> PredictLearnModeration([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/moderation/learn", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/impressions/record")]
+    public async Task<IActionResult> PredictRecordImpression([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/impressions/record", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/impressions/engaged")]
+    public async Task<IActionResult> PredictMarkImpressionEngaged([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/impressions/engaged", payload, cancellationToken);
+    }
+
+    [HttpPost("predict/impressions/{userId}/flush-negatives")]
+    [Authorize]
+    public async Task<IActionResult> PredictFlushNegativeImpressions(string userId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest(new { message = "userId is required." });
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("PythonMatrixService");
+            using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync($"predict/impressions/{Uri.EscapeDataString(userId.Trim())}/flush-negatives", content, cancellationToken);
+            return await ProxyJsonResponse(response, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Predict flush negatives failed.");
+            return StatusCode(503, new { message = "Python matrix service is unavailable." });
+        }
+    }
+
+    [HttpPost("predict/explain/engagement")]
+    public async Task<IActionResult> PredictExplainEngagement([FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        return await ProxyPostAsync("predict/explain/engagement", payload, cancellationToken);
+    }
+
     [HttpGet("media/render")]
     public async Task<IActionResult> RenderMedia([FromQuery] string source, CancellationToken cancellationToken)
     {
