@@ -123,6 +123,28 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
     setMembers(members.filter((_, i) => i !== idx));
   };
 
+  const handleNextToVideo = () => {
+    const normalizedTitle = title.trim();
+    const normalizedSubject = subjectMatter.trim();
+    const episodeNo = Number(episodeNumber);
+
+    if (!normalizedTitle) {
+      setError("Episode title is required.");
+      return;
+    }
+    if (!Number.isFinite(episodeNo) || episodeNo < 1) {
+      setError("Episode number must be 1 or greater.");
+      return;
+    }
+    if (!normalizedSubject) {
+      setError("Subject matter is required.");
+      return;
+    }
+
+    setError("");
+    setStep(2);
+  };
+
   const handleFinish = async () => {
     setSaving(true);
     setError("");
@@ -166,7 +188,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   };
 
   const canNextTeam = teamName.trim() && members.length > 0;
-  const canNextBasics = title && episodeNumber && subjectMatter;
+  const canNextBasics = title.trim() && episodeNumber && subjectMatter.trim();
   return (
     <div className="space-y-6">
       <PodcastTeamPickerDialog
@@ -340,7 +362,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
             <Button variant="ghost" onClick={() => setStep(0)}>
               <ChevronLeft className="w-4 h-4" /> Back
             </Button>
-            <Button onClick={() => setStep(2)} disabled={!canNextBasics}>
+            <Button onClick={handleNextToVideo}>
               Next: Upload Video <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
