@@ -27,6 +27,22 @@ import PodcastMediaTab from "@/components/podcasts/PodcastMediaTab";
 import RecordingSession from "@/components/ravensight/RecordingSession";
 import { resolvePermissions } from "@/lib/podcastPermissions";
 
+const LAST_PODCAST_KEY = "wrs_podcast_last_selected";
+const LAST_TAB_KEY = "wrs_podcast_last_tab";
+
+function readLastSelected() {
+  try { return localStorage.getItem(LAST_PODCAST_KEY) || null; } catch { return null; }
+}
+function writeLastSelected(id) {
+  try { id ? localStorage.setItem(LAST_PODCAST_KEY, id) : localStorage.removeItem(LAST_PODCAST_KEY); } catch {}
+}
+function readLastTab() {
+  try { return localStorage.getItem(LAST_TAB_KEY) || "script"; } catch { return "script"; }
+}
+function writeLastTab(tab) {
+  try { localStorage.setItem(LAST_TAB_KEY, tab); } catch {}
+}
+
 export default function PodcastsPanel() {
   const [podcasts, setPodcasts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,13 +56,38 @@ export default function PodcastsPanel() {
   const [paymentMsg, setPaymentMsg] = useState("");
   const viewedRef = useRef(null);
 
+  // Persist navigation state so it survives login/logout
+  const selectEpisode = (id, tabName) => {
+    const nextTab = tabName || "script";
+    setSelectedId(id);
+    setTab(nextTab);
+    writeLastSelected(id);
+    writeLastTab(nextTab);
+  };
+  const changeTab = (tabName) => {
+    setTab(tabName);
+    writeLastTab(tabName);
+  };
+  const clearSelection = () => {
+    setSelectedId(null);
+    writeLastSelected(null);
+  };
+
   const load = async () => {
     try {
       const page = await apiClient.entities.Podcast.filter(
         {},
         { sort: "-episode_number", limit: 50 }
       );
-      setPodcasts(page.items || []);
+      const items = page.items || [];
+      setPodcasts(items);
+
+      // Restore last-viewed episode if it still exists in the list
+      const lastId = readLastSelected();
+      if (lastId && items.some((p) => p.id === lastId)) {
+        setSelectedId(lastId);
+        setTab(readLastTab());
+      }
     } finally {
       setLoading(false);
     }
@@ -99,8 +140,7 @@ export default function PodcastsPanel() {
     setLaunching(false);
     setShowForm(false);
     load();
-    setSelectedId(pod.id);
-    setTab("script");
+    selectEpisode(pod.id, "script");
   };
 
   const selected = podcasts.find((p) => p.id === selectedId);
@@ -153,7 +193,7 @@ export default function PodcastsPanel() {
       {selected ? (
         <div className="space-y-6">
           <button
-            onClick={() => setSelectedId(null)}
+            onClick={() => clearSelection()}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronLeft className="w-4 h-4" /> All Episodes
@@ -179,7 +219,7 @@ export default function PodcastsPanel() {
             </div>
             {hasAccess(selected) && (
               <button
-                onClick={() => setTab("record")}
+                onClick={() => changeTab("record")}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
               >
                 <Radio className="w-4 h-4" /> Start Episode
@@ -197,7 +237,7 @@ export default function PodcastsPanel() {
             <>
               <div className="flex gap-1 border-b border-border">
                 <button
-                  onClick={() => setTab("script")}
+                  onClick={() => changeTab("script")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "script"
                       ? "border-primary text-foreground"
@@ -207,7 +247,7 @@ export default function PodcastsPanel() {
                   <FileText className="w-4 h-4" /> Script
                 </button>
                 <button
-                  onClick={() => setTab("itinerary")}
+                  onClick={() => changeTab("itinerary")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "itinerary"
                       ? "border-primary text-foreground"
@@ -217,7 +257,7 @@ export default function PodcastsPanel() {
                   <ListChecks className="w-4 h-4" /> Line-up
                   </button>
                   <button
-                  onClick={() => setTab("timeline")}
+                  onClick={() => changeTab("timeline")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "timeline"
                       ? "border-primary text-foreground"
@@ -227,7 +267,7 @@ export default function PodcastsPanel() {
                   <GitBranch className="w-4 h-4" /> Timeline
                   </button>
                   <button
-                  onClick={() => setTab("record")}
+                  onClick={() => changeTab("record")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "record"
                       ? "border-primary text-foreground"
@@ -237,7 +277,7 @@ export default function PodcastsPanel() {
                   <Radio className="w-4 h-4" /> Record
                   </button>
                   <button
-                  onClick={() => setTab("media")}
+                  onClick={() => changeTab("media")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                     tab === "media"
                       ? "border-primary text-foreground"
@@ -248,7 +288,7 @@ export default function PodcastsPanel() {
                   </button>
                 {isOwner && (
                   <button
-                    onClick={() => setTab("monetization")}
+                    onClick={() => changeTab("monetization")}
                     className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                       tab === "monetization"
                         ? "border-primary text-foreground"
@@ -260,7 +300,7 @@ export default function PodcastsPanel() {
                 )}
                 {(isOwner || isTeamMember(selected)) && (
                   <button
-                    onClick={() => setTab("team")}
+                    onClick={() => changeTab("team")}
                     className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-colors ${
                       tab === "team"
                         ? "border-primary text-foreground"
@@ -349,10 +389,7 @@ export default function PodcastsPanel() {
                 return (
                   <button
                     key={p.id}
-                    onClick={() => {
-                      setSelectedId(p.id);
-                      setTab("script");
-                    }}
+                    onClick={() => selectEpisode(p.id, "script")}
                     className="text-left p-5 rounded-xl border border-border bg-card hover:border-primary/40 transition-colors group"
                   >
                     <div className="flex items-start justify-between mb-2">

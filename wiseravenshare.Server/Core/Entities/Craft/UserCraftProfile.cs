@@ -20,10 +20,14 @@ public class UserCraftProfile : BaseEntity
     public DateTime? LastAnalyzedAt { get; set; }
     public DateTime? LastCoachedAt { get; set; }
 
+// Remove the DraftReviews collection from UserCraftProfile — there is no direct FK from
+// CraftDraftReview to UserCraftProfile. Both share a UserId pointing to the same User, so
+// queries should use context.CraftDraftReviews.Where(r => r.UserId == profile.UserId).
+// Keeping this nav caused EF to generate a shadow FK (UserId on CraftDraftReview → UserCraftProfile.Id)
+// and a second shadow property (UserId1) for the actual User navigation.
     // Navigation
     public virtual User User { get; set; } = null!;
     public virtual ICollection<UserCraftSkillScore> SkillScores { get; set; } = new List<UserCraftSkillScore>();
-    public virtual ICollection<CraftDraftReview> DraftReviews { get; set; } = new List<CraftDraftReview>();
 }
 
 public class UserCraftSkillScore : BaseEntity

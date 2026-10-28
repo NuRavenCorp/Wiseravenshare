@@ -148,7 +148,10 @@ export default function RecordingSession({ podcast, onUpdate }) {
   const [directorTarget, setDirectorTarget] = useState("all");
   const [directorNotes, setDirectorNotes] = useState([]);
   const [broadcastCue, setBroadcastCue] = useState(null);
-  const [liveScriptDraft, setLiveScriptDraft] = useState("");
+  const DRAFT_STORAGE_KEY = `wrs_podcast_draft_${podcast.id}`;
+  const [liveScriptDraft, setLiveScriptDraft] = useState(() => {
+    try { return localStorage.getItem(`wrs_podcast_draft_${podcast.id}`) || ""; } catch { return ""; }
+  });
   const [scriptSyncing, setScriptSyncing] = useState(false);
   const [snapshotVersion, setSnapshotVersion] = useState("");
   const [selectionVersion, setSelectionVersion] = useState("");
@@ -877,6 +880,7 @@ export default function RecordingSession({ podcast, onUpdate }) {
 
     setStudioScript(nextScript);
     setLiveScriptDraft("");
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
     setScriptSyncing(true);
     setError(null);
 
@@ -1642,7 +1646,10 @@ export default function RecordingSession({ podcast, onUpdate }) {
           </div>
           <Textarea
             value={liveScriptDraft}
-            onChange={(e) => setLiveScriptDraft(e.target.value)}
+            onChange={(e) => {
+              setLiveScriptDraft(e.target.value);
+              try { localStorage.setItem(DRAFT_STORAGE_KEY, e.target.value); } catch {}
+            }}
             placeholder="Paste new lines from the script writer here..."
             className="min-h-[132px]"
             disabled={!canEditStudioScript}

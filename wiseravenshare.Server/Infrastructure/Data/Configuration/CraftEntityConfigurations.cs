@@ -89,18 +89,25 @@ public class UserCraftProfileConfiguration : IEntityTypeConfiguration<UserCraftP
     {
         builder.HasKey(x => x.Id);
 
+        // One profile per user; UserId is the natural unique FK.
         builder.HasIndex(x => x.UserId)
             .IsUnique();
 
-        builder.HasOne<Wiseravenshare.Server.Entities.User>()
+        // Explicit navigation avoids the shadow UserId1 duplicate that occurs when
+        // HasOne<User>() (without nav property) is used alongside the User property.
+        builder.HasOne(x => x.User)
             .WithOne()
             .HasForeignKey<UserCraftProfile>(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasMany(x => x.DraftReviews)
+        // SkillScores are collected via UserCraftProfile.SkillScores ↔ UserCraftSkillScore.
+        // The shadow UserCraftProfileId column that EF generated previously is preserved
+        // for compatibility; new rows should use UserId instead.
+        builder.HasMany(x => x.SkillScores)
             .WithOne()
-            .HasForeignKey("UserId")
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasForeignKey("UserCraftProfileId")
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }
 
@@ -118,6 +125,12 @@ public class UserCraftSkillScoreConfiguration : IEntityTypeConfiguration<UserCra
 
         builder.Property(x => x.Confidence)
             .HasPrecision(3, 2);
+
+        // Explicit FK to User prevents EF from creating a shadow navigation.
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -131,6 +144,11 @@ public class CraftObservationConfiguration : IEntityTypeConfiguration<CraftObser
 
         // Embedding managed via raw SQL (pgvector); excluded from EF model
         builder.Ignore(x => x.Embedding);
+
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -141,6 +159,18 @@ public class CraftDraftReviewConfiguration : IEntityTypeConfiguration<CraftDraft
         builder.HasKey(x => x.Id);
 
         builder.HasIndex(x => new { x.UserId, x.CraftDomainId, x.ReviewedAt });
+
+        // Without these explicit mappings EF generated a shadow UserId1 column (FK to Users)
+        // while using UserId as FK to UserCraftProfiles (wrong). Both must be declared here.
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.Domain)
+            .WithMany()
+            .HasForeignKey(x => x.CraftDomainId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(x => x.Feedback)
             .WithOne(x => x.Review)
@@ -178,6 +208,8 @@ public class CraftLessonConfiguration : IEntityTypeConfiguration<CraftLesson>
         // Embedding managed via raw SQL (pgvector); excluded from EF model
         builder.Ignore(x => x.Embedding);
 
+        // Completions are configured fully in CraftLessonCompletionConfiguration;
+        // only declare the inverse here to register the collection nav.
         builder.HasMany(x => x.Completions)
             .WithOne(x => x.Lesson)
             .HasForeignKey(x => x.LessonId)
@@ -193,6 +225,17 @@ public class CraftLessonCompletionConfiguration : IEntityTypeConfiguration<Craft
 
         builder.HasIndex(x => new { x.UserId, x.LessonId })
             .IsUnique();
+
+        builder.HasOne(x => x.Lesson)
+            .WithMany(x => x.Completions)
+            .HasForeignKey(x => x.LessonId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Explicit User FK so EF does not shadow-name it UserId1.
+        builder.HasOne<Wiseravenshare.Server.Entities.User>()
+            .WithMany()
+            .HasForeignKey(nameof(CraftLessonCompletion.UserId))
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -209,6 +252,16 @@ public class CraftPerformanceMetricConfiguration : IEntityTypeConfiguration<Craf
 
         builder.Property(x => x.CompletionRate)
             .HasPrecision(5, 2);
+
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.Domain)
+            .WithMany()
+            .HasForeignKey(x => x.CraftDomainId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
