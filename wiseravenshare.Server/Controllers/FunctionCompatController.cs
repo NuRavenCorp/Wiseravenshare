@@ -216,6 +216,9 @@ public sealed class FunctionCompatController : ControllerBase
 
     [HttpPost("transcribe-local-file")]
     [HttpPost("TranscribeLocalFile")]
+    [HttpPost("words-karaoke")]
+    [HttpPost("WordsKaraoke")]
+    [AllowAnonymous]
     [RequestSizeLimit(25_000_000)]
     public async Task<IActionResult> TranscribeLocalFile(CancellationToken cancellationToken)
     {

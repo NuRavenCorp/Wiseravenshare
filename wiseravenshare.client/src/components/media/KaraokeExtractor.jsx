@@ -8,7 +8,9 @@ import KaraokePaywall from "@/components/media/KaraokePaywall";
 
 async function transcribeFile(file) {
   const endpoints = [
+    "/api/functions/words-karaoke",
     "/api/functions/transcribe-local-file",
+    "/api/karaoke/speech/transcribe",
     "/api/assistant/audio/transcribe",
   ];
 
@@ -29,7 +31,7 @@ async function transcribeFile(file) {
       lastError = new Error("Transcription returned empty output.");
     } catch (error) {
       lastError = error;
-      if (![400, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
+      if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
         throw error;
       }
     }

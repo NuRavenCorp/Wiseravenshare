@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using WiseRavenShare.Server.Application.Services.Assistant;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -22,15 +23,18 @@ public sealed class KaraokeSpeechController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<KaraokeSpeechController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly ISpeechToTextService _speechToTextService;
 
     public KaraokeSpeechController(
         IHttpClientFactory httpClientFactory,
         ILogger<KaraokeSpeechController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ISpeechToTextService speechToTextService)
     {
         _httpClientFactory  = httpClientFactory;
         _logger             = logger;
         _configuration      = configuration;
+        _speechToTextService = speechToTextService;
     }
 
     // ----------------------------------------------------------------
@@ -328,6 +332,46 @@ public sealed class KaraokeSpeechController : ControllerBase
                     ? dp[i - 1, j - 1]
                     : 1 + Math.Min(dp[i - 1, j - 1], Math.Min(dp[i - 1, j], dp[i, j - 1]));
         return dp[m, n];
+    }
+
+    // ----------------------------------------------------------------
+    // DIRECT FILE TRANSCRIBE
+    // ----------------------------------------------------------------
+
+    [HttpPost("transcribe")]
+    [AllowAnonymous]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> Transcribe(CancellationToken cancellationToken)
+    {
+        if (!Request.HasFormContentType)
+        {
+            return BadRequest(new { message = "multipart/form-data is required." });
+        }
+
+        var form = await Request.ReadFormAsync(cancellationToken);
+        var audio = form.Files.GetFile("audio")
+            ?? form.Files.GetFile("file")
+            ?? form.Files.FirstOrDefault();
+
+        if (audio is null || audio.Length == 0)
+        {
+            return BadRequest(new { message = "Audio file required." });
+        }
+
+        await using var stream = audio.OpenReadStream();
+        try
+        {
+            var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
+                ? "application/octet-stream"
+                : audio.ContentType;
+            var result = await _speechToTextService.TranscribeAsync(stream, contentType, audio.FileName, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Karaoke speech transcribe failed for {FileName}.", audio.FileName);
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
 
