@@ -1433,6 +1433,165 @@ static async Task EnsureColumnPatchesAsync(string connectionString, Cancellation
     const string sql = @"
 CREATE SCHEMA IF NOT EXISTS app_data;
 
+-- Core post feed tables for environments where baseline migrations were not applied.
+CREATE TABLE IF NOT EXISTS app_data.""Posts"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""UserId"" UUID NOT NULL,
+    ""Content"" TEXT NOT NULL DEFAULT '',
+    ""Type"" INTEGER NOT NULL DEFAULT 0,
+    ""MediaUrls"" TEXT[] NULL,
+    ""MediaMetadata"" JSONB NULL,
+    ""TruthScore"" NUMERIC NULL,
+    ""TruthCorrection"" TEXT NULL,
+    ""TruthSources"" JSONB NULL,
+    ""LocationName"" TEXT NULL,
+    ""IsTruthDispatch"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""TruthDeclarationAccepted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""Latitude"" DOUBLE PRECISION NULL,
+    ""Longitude"" DOUBLE PRECISION NULL,
+    ""IsSensitive"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""IsPinned"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""ReplyToId"" UUID NULL,
+    ""RepostOfId"" UUID NULL,
+    ""QuoteOfId"" UUID NULL,
+    ""LikesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RepostsCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CommentsCount"" INTEGER NOT NULL DEFAULT 0,
+    ""SharesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""BookmarksCount"" INTEGER NOT NULL DEFAULT 0,
+    ""ViewsCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_Posts_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_Posts_Posts_ReplyToId"" FOREIGN KEY (""ReplyToId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE RESTRICT,
+    CONSTRAINT ""FK_Posts_Posts_RepostOfId"" FOREIGN KEY (""RepostOfId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE RESTRICT,
+    CONSTRAINT ""FK_Posts_Posts_QuoteOfId"" FOREIGN KEY (""QuoteOfId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS ""IX_Posts_UserId_CreatedAt""
+    ON app_data.""Posts""(""UserId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Posts_IsDeleted_CreatedAt""
+    ON app_data.""Posts""(""IsDeleted"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Posts_ReplyToId""
+    ON app_data.""Posts""(""ReplyToId"");
+CREATE INDEX IF NOT EXISTS ""IX_Posts_RepostOfId""
+    ON app_data.""Posts""(""RepostOfId"");
+CREATE INDEX IF NOT EXISTS ""IX_Posts_QuoteOfId""
+    ON app_data.""Posts""(""QuoteOfId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""Comments"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PostId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""ParentCommentId"" UUID NULL,
+    ""Content"" CHARACTER VARYING(500) NOT NULL DEFAULT '',
+    ""LikesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""RepliesCount"" INTEGER NOT NULL DEFAULT 0,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_Comments_Posts_PostId"" FOREIGN KEY (""PostId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_Comments_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_Comments_Comments_ParentCommentId"" FOREIGN KEY (""ParentCommentId"")
+        REFERENCES app_data.""Comments""(""Id"") ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS ""IX_Comments_PostId_CreatedAt""
+    ON app_data.""Comments""(""PostId"", ""CreatedAt"" DESC);
+CREATE INDEX IF NOT EXISTS ""IX_Comments_UserId""
+    ON app_data.""Comments""(""UserId"");
+CREATE INDEX IF NOT EXISTS ""IX_Comments_ParentCommentId""
+    ON app_data.""Comments""(""ParentCommentId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""CommentLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""CommentId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_CommentLikes_Comments_CommentId"" FOREIGN KEY (""CommentId"")
+        REFERENCES app_data.""Comments""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_CommentLikes_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CommentLikes_CommentId_UserId""
+    ON app_data.""CommentLikes""(""CommentId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""PostLikes"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PostId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_PostLikes_Posts_PostId"" FOREIGN KEY (""PostId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_PostLikes_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostLikes_PostId_UserId""
+    ON app_data.""PostLikes""(""PostId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""PostReposts"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PostId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_PostReposts_Posts_PostId"" FOREIGN KEY (""PostId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_PostReposts_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostReposts_PostId_UserId""
+    ON app_data.""PostReposts""(""PostId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""PostBookmarks"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""PostId"" UUID NOT NULL,
+    ""UserId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_PostBookmarks_Posts_PostId"" FOREIGN KEY (""PostId"")
+        REFERENCES app_data.""Posts""(""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_PostBookmarks_Users_UserId"" FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PostBookmarks_PostId_UserId""
+    ON app_data.""PostBookmarks""(""PostId"", ""UserId"");
+
+CREATE TABLE IF NOT EXISTS app_data.""UserFollows"" (
+    ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ""FollowerId"" UUID NOT NULL,
+    ""FollowingId"" UUID NOT NULL,
+    ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ""IsDeleted"" BOOLEAN NOT NULL DEFAULT FALSE,
+    ""DeletedAt"" TIMESTAMPTZ NULL,
+    CONSTRAINT ""FK_UserFollows_Users_FollowerId"" FOREIGN KEY (""FollowerId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE RESTRICT,
+    CONSTRAINT ""FK_UserFollows_Users_FollowingId"" FOREIGN KEY (""FollowingId"")
+        REFERENCES app_data.""Users""(""Id"") ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserFollows_FollowerId_FollowingId""
+    ON app_data.""UserFollows""(""FollowerId"", ""FollowingId"");
+CREATE INDEX IF NOT EXISTS ""IX_UserFollows_FollowingId""
+    ON app_data.""UserFollows""(""FollowingId"");
+
 -- Users table: columns added in later migrations
 ALTER TABLE IF EXISTS app_data.""Users""
     ADD COLUMN IF NOT EXISTS ""PasswordResetToken"" TEXT NULL,

@@ -4847,6 +4847,10 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Property<int?>("Duration")
                         .HasColumnType("integer");
 
+                    b.Property<string>("FileHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -4931,6 +4935,10 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.HasIndex("MediaType", "Status");
+
+                    b.HasIndex("UserId", "FileHash")
+                        .IsUnique()
+                        .HasFilter("\"FileHash\" IS NOT NULL AND \"IsDeleted\" = false");
 
                     b.ToTable("MediaItems", "app_data");
                 });
@@ -5100,6 +5108,10 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Name")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false");
 
                     b.ToTable("MediaPlaylists", "app_data");
                 });
