@@ -1153,7 +1153,7 @@ async def predict_explain_engagement(payload: PredictEngagementRequest) -> dict[
 
 
 @app.get("/post/feed/ranked")
-def post_feed_ranked(
+async def post_feed_ranked(
     viewer_id: str = Query(..., min_length=1),
     page_size: int = Query(40, ge=1, le=100),
     window_days: int = Query(30, ge=1, le=90),
@@ -1199,7 +1199,31 @@ def post_feed_ranked(
             content={"message": "Post feed ranking failed.", "error": str(error)},
         )
 
-    return {"posts": posts, "count": len(posts), "viewer_id": viewer_id}
+    # Optional FTRL engagement blend — only when predictor is enabled AND has
+    # seen enough examples to be meaningful (avoids flat 0.5 contamination).
+    predictor = _get_predictor()
+    ftrl_blended = False
+    if predictor is not None and posts and predictor.example_counts.get("engagement", 0) >= predictor.MIN_EXAMPLES_FOR_CONFIDENCE:
+        try:
+            # Normalise resurfacing scores to [0, 1]
+            max_score = max((p["resurfacing_score"] for p in posts), default=1.0) or 1.0
+            blended: list[dict[str, Any]] = []
+            for post in posts:
+                p_engage = await predictor.engagement_probability(
+                    user_id=viewer_id,
+                    post_author=str(post.get("user_id", "")),
+                    post_tags=list(post.get("features", {}).get("hashtags", [])),
+                )
+                norm_resurface = post["resurfacing_score"] / max_score
+                final_score = round(0.7 * p_engage + 0.3 * norm_resurface, 6)
+                blended.append({**post, "final_score": final_score, "ftrl_engagement": p_engage})
+            blended.sort(key=lambda p: p["final_score"], reverse=True)
+            posts = blended
+            ftrl_blended = True
+        except Exception as error:  # noqa: BLE001
+            logger.warning("FTRL blend failed for viewer %s, using base ranking: %s", viewer_id, error)
+
+    return {"posts": posts, "count": len(posts), "viewer_id": viewer_id, "ftrl_blended": ftrl_blended}
 
 
 @app.get("/live/feed")
