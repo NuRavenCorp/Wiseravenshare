@@ -7,6 +7,8 @@ import ShareMenu from "./ShareMenu";
 import { useToast } from "@/components/ui/use-toast";
 import { useMediaExperience } from "@/components/media/MediaExperience";
 
+const INLINE_HASHTAG_PATTERN = /#([\p{L}\p{N}_-]+)/gu;
+
 const TRUTH_STYLES = {
   verified: { label: "Verified", class: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
   unverified: { label: "Unverified", class: "text-muted-foreground bg-muted/30 border-border" },
@@ -46,6 +48,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     setReposted(Boolean(post.is_reposted));
     setRepostCount(post.repost_count || 0);
     setCommentCount(post.comment_count || 0);
+    setShareCount(post.share_count || 0);
     if (currentUser) {
       apiClient.social.followStatus(post.created_by_id)
         .then((res) => { if (mounted) setFollowing(Boolean(res.isFollowing)); }).catch(() => {});
@@ -184,6 +187,31 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     return `${name} ${verb}`;
   });
 
+  const renderContentWithHashtagHighlight = (content) => {
+    if (!content) return null;
+
+    const parts = [];
+    let lastIndex = 0;
+    const regex = new RegExp(INLINE_HASHTAG_PATTERN);
+    for (const match of content.matchAll(regex)) {
+      const start = match.index ?? 0;
+      const fullMatch = match[0];
+      if (start > lastIndex) {
+        parts.push(content.slice(lastIndex, start));
+      }
+      parts.push(
+        <span key={`tag-${start}-${fullMatch}`} className="text-purple-400">
+          {fullMatch}
+        </span>,
+      );
+      lastIndex = start + fullMatch.length;
+    }
+    if (lastIndex < content.length) {
+      parts.push(content.slice(lastIndex));
+    }
+    return parts;
+  };
+
   if (dismissed) {
     return null;
   }
@@ -274,7 +302,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       </div>
 
       <div className="px-4 pb-3">
-        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{renderContentWithHashtagHighlight(post.content)}</p>
         {post.repostOf && (
           <div className="mt-2 rounded-xl border border-border bg-secondary/20 p-3 space-y-1.5">
             <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -282,7 +310,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
               Repost from {post.repostOf?.user?.displayName || post.repostOf?.user?.username || "Creator"}
             </p>
             {post.repostOf.content && (
-              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.repostOf.content}</p>
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{renderContentWithHashtagHighlight(post.repostOf.content)}</p>
             )}
           </div>
         )}

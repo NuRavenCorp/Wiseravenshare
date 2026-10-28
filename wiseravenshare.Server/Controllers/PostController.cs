@@ -467,6 +467,7 @@ namespace Wiseravenshare.Server.Controllers
                     var userId = await ResolveEffectiveUserIdAsync();
                     await TryTrackPostInteractionAsync(userId, id, "Share");
                 }
+                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
             catch (Exception ex)
